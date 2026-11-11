@@ -90,7 +90,13 @@ function byDate<T extends { at: string | null }>(items: T[]): T[] {
 function formatDeadline(value: string | null | undefined): string | null {
   const d = validDate(value);
   if (!d) return null;
-  return new Date(d).toLocaleString('es-CO', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' });
+  return new Date(d).toLocaleString('es-CO', {
+    timeZone: 'America/Bogota',
+    day: 'numeric',
+    month: 'short',
+    hour: 'numeric',
+    minute: '2-digit',
+  });
 }
 
 function makeNamer(names: Record<string, string> = {}) {

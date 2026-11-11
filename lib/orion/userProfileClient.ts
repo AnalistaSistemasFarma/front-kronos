@@ -1,6 +1,9 @@
 /**
  * Caché + prefetch del perfil Orion del firmante (rúbrica, cédula, consentimientos).
  * Evita el spinner «Consultando su perfil…» al reabrir Confirmar firma.
+ *
+ * sessionStorage solo guarda booleanos (sin cédula, nombre, cargo ni rúbrica).
+ * El perfil completo vive en memoria de la pestaña.
  */
 
 export type SignerTurnPreview = {
@@ -20,6 +23,13 @@ export type SignerTurnPreview = {
   fingerprintProfileUrl: string | null;
 };
 
+type SessionFlags = {
+  hasSignature: boolean;
+  hasFingerprint: boolean;
+  hasSigningLegalConsent: boolean;
+  hasBiometricConsent: boolean;
+};
+
 const TTL_MS = 10 * 60_000;
 
 type Entry = {
@@ -35,30 +45,37 @@ function keyOf(email: string, withFingerprint: boolean): string {
 }
 
 function storageKey(key: string): string {
-  return `orion-user-profile:${key}`;
+  return `orion-user-profile-flags:${key}`;
 }
 
-function fresh(entry: Entry | undefined): entry is Entry {
-  return Boolean(entry && Date.now() - entry.at < TTL_MS);
+/** La entrada si todavía está vigente; si no, null (así `fresh(e)?.preview` sí lee el caché). */
+function fresh(entry: Entry | undefined): Entry | null {
+  return entry && Date.now() - entry.at < TTL_MS ? entry : null;
 }
 
-function readSession(key: string): SignerTurnPreview | null {
+function readSessionFlags(key: string): SessionFlags | null {
   if (typeof sessionStorage === 'undefined') return null;
   try {
     const raw = sessionStorage.getItem(storageKey(key));
     if (!raw) return null;
-    const parsed = JSON.parse(raw) as { ts?: number; preview?: SignerTurnPreview };
-    if (!parsed.ts || Date.now() - parsed.ts >= TTL_MS || !parsed.preview) return null;
-    return parsed.preview;
+    const parsed = JSON.parse(raw) as { ts?: number; flags?: SessionFlags };
+    if (!parsed.ts || Date.now() - parsed.ts >= TTL_MS || !parsed.flags) return null;
+    return parsed.flags;
   } catch {
     return null;
   }
 }
 
-function writeSession(key: string, preview: SignerTurnPreview): void {
+function writeSessionFlags(key: string, preview: SignerTurnPreview): void {
   if (typeof sessionStorage === 'undefined') return;
   try {
-    sessionStorage.setItem(storageKey(key), JSON.stringify({ ts: Date.now(), preview }));
+    const flags: SessionFlags = {
+      hasSignature: preview.hasSignature,
+      hasFingerprint: preview.hasFingerprint,
+      hasSigningLegalConsent: preview.hasSigningLegalConsent,
+      hasBiometricConsent: preview.hasBiometricConsent,
+    };
+    sessionStorage.setItem(storageKey(key), JSON.stringify({ ts: Date.now(), flags }));
   } catch {
     /* ignore quota */
   }
@@ -105,14 +122,29 @@ export function peekUserProfile(
   withFingerprint = true
 ): SignerTurnPreview | null {
   const key = keyOf(email, withFingerprint);
-  const mem = memory.get(key);
-  if (fresh(mem)?.preview) return mem.preview;
-  const stored = readSession(key);
-  if (stored) {
-    memory.set(key, { at: Date.now(), preview: stored });
-    return stored;
-  }
+  const mem = fresh(memory.get(key));
+  if (mem?.preview) return mem.preview;
+  // sessionStorage solo tiene flags: no reconstruir perfil con PII.
+  void readSessionFlags(key);
   return null;
+}
+
+/** Flags ligeros (sin PII) para UI; el perfil completo sigue en memoria/red. */
+export function peekUserProfileFlags(
+  email: string,
+  withFingerprint = true
+): SessionFlags | null {
+  const key = keyOf(email, withFingerprint);
+  const mem = fresh(memory.get(key));
+  if (mem?.preview) {
+    return {
+      hasSignature: mem.preview.hasSignature,
+      hasFingerprint: mem.preview.hasFingerprint,
+      hasSigningLegalConsent: mem.preview.hasSigningLegalConsent,
+      hasBiometricConsent: mem.preview.hasBiometricConsent,
+    };
+  }
+  return readSessionFlags(key);
 }
 
 /** Arranca la carga en segundo plano (al abrir a firmar / montar panel). */
@@ -120,14 +152,14 @@ export function prefetchUserProfile(email: string, withFingerprint = true): void
   const normalized = email.trim().toLowerCase();
   if (!normalized) return;
   const key = keyOf(normalized, withFingerprint);
-  const existing = memory.get(key);
-  if (fresh(existing) && (existing.preview || existing.promise)) return;
+  const existing = fresh(memory.get(key));
+  if (existing && (existing.preview || existing.promise)) return;
 
   const promise = fetchProfile(withFingerprint)
     .then((preview) => {
       if (preview) {
         memory.set(key, { at: Date.now(), preview });
-        writeSession(key, preview);
+        writeSessionFlags(key, preview);
       }
       return preview;
     })
@@ -147,13 +179,14 @@ export async function loadUserProfile(
   if (cached) return cached;
 
   const existing = memory.get(key);
-  if (fresh(existing)?.promise) return existing.promise!;
+  const pending = fresh(existing)?.promise;
+  if (pending) return pending;
 
   const promise = fetchProfile(withFingerprint)
     .then((preview) => {
       if (preview) {
         memory.set(key, { at: Date.now(), preview });
-        writeSession(key, preview);
+        writeSessionFlags(key, preview);
       }
       return preview;
     })
@@ -166,17 +199,21 @@ export async function loadUserProfile(
 /** Invalida caché tras dibujar/guardar rúbrica o aceptar consentimiento. */
 export function invalidateUserProfileCache(email?: string | null): void {
   const normalized = String(email || '').trim().toLowerCase();
+  const clearKey = (key: string) => {
+    memory.delete(key);
+    try {
+      sessionStorage.removeItem(storageKey(key));
+      // Limpia clave antigua que guardaba PII (migración).
+      sessionStorage.removeItem(`orion-user-profile:${key}`);
+    } catch {
+      /* ignore */
+    }
+  };
   if (!normalized) {
     memory.clear();
     return;
   }
   for (const withFp of [true, false]) {
-    const key = keyOf(normalized, withFp);
-    memory.delete(key);
-    try {
-      sessionStorage.removeItem(storageKey(key));
-    } catch {
-      /* ignore */
-    }
+    clearKey(keyOf(normalized, withFp));
   }
 }

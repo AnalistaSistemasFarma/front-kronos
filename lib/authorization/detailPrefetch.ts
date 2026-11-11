@@ -17,14 +17,14 @@ export type PrefetchedAuthDetail = {
 type Entry = {
   at: number;
   data?: PrefetchedAuthDetail;
-  error?: string;
   promise?: Promise<PrefetchedAuthDetail>;
 };
 
 const cache = new Map<string, Entry>();
 
-function keyOf(requestId: number, withNotes: boolean): string {
-  return `${requestId}:${withNotes ? 'notes' : 'firma'}`;
+function keyOf(requestId: number, withNotes: boolean, userKey?: string | null): string {
+  const user = String(userKey || '').trim().toLowerCase() || 'anon';
+  return `${user}:${requestId}:${withNotes ? 'notes' : 'firma'}`;
 }
 
 /** La entrada si todavía está vigente; si no, null (así `fresh(e)?.data` sí lee el caché). */
@@ -59,21 +59,31 @@ async function fetchDetail(requestId: number, withNotes: boolean): Promise<Prefe
   };
 }
 
+function rememberOk(key: string, data: PrefetchedAuthDetail): PrefetchedAuthDetail {
+  // No cachear errores: al reabrir se reintenta.
+  if (!data.detailOk) {
+    cache.delete(key);
+    return data;
+  }
+  cache.set(key, { at: Date.now(), data });
+  return data;
+}
+
 /** Arranca la carga al hover/focus de Acciones (Ver detalle / ojo). */
-export function prefetchAuthorizationDetail(requestId: number, withNotes: boolean): void {
+export function prefetchAuthorizationDetail(
+  requestId: number,
+  withNotes: boolean,
+  userKey?: string | null
+): void {
   if (!Number.isInteger(requestId) || requestId <= 0) return;
-  const key = keyOf(requestId, withNotes);
+  const key = keyOf(requestId, withNotes, userKey);
   const existing = fresh(cache.get(key));
   if (existing && (existing.data || existing.promise)) return;
 
   const promise = fetchDetail(requestId, withNotes)
-    .then((data) => {
-      cache.set(key, { at: Date.now(), data });
-      return data;
-    })
+    .then((data) => rememberOk(key, data))
     .catch((err: unknown) => {
-      const message = err instanceof Error ? err.message : 'No se pudo cargar el detalle de la solicitud.';
-      cache.set(key, { at: Date.now(), error: message });
+      cache.delete(key);
       throw err;
     });
 
@@ -84,22 +94,23 @@ export function prefetchAuthorizationDetail(requestId: number, withNotes: boolea
 
 export function peekAuthorizationDetail(
   requestId: number,
-  withNotes: boolean
+  withNotes: boolean,
+  userKey?: string | null
 ): PrefetchedAuthDetail | null {
-  const entry = cache.get(keyOf(requestId, withNotes));
+  const entry = cache.get(keyOf(requestId, withNotes, userKey));
   return fresh(entry)?.data ?? null;
 }
 
 export async function loadAuthorizationDetail(
   requestId: number,
   withNotes: boolean,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  userKey?: string | null
 ): Promise<PrefetchedAuthDetail> {
-  const key = keyOf(requestId, withNotes);
+  const key = keyOf(requestId, withNotes, userKey);
   const existing = fresh(cache.get(key));
 
   if (existing?.data) return existing.data;
-  // Un error anterior no se reutiliza: al volver a abrir se intenta de nuevo.
   const pending = existing?.promise;
   if (pending) {
     if (!signal) return pending;
@@ -124,17 +135,31 @@ export async function loadAuthorizationDetail(
   }
 
   const promise = fetchDetail(requestId, withNotes)
-    .then((data) => {
-      cache.set(key, { at: Date.now(), data });
-      return data;
-    })
+    .then((data) => rememberOk(key, data))
     .catch((err: unknown) => {
+      cache.delete(key);
       if (signal?.aborted || (err instanceof DOMException && err.name === 'AbortError')) throw err;
-      const message = err instanceof Error ? err.message : 'No se pudo cargar el detalle de la solicitud.';
-      cache.set(key, { at: Date.now(), error: message });
       throw err;
     });
 
   cache.set(key, { at: Date.now(), promise });
   return promise;
+}
+
+/** Tras aprobar/firmar: no reutilizar un detalle viejo. */
+export function invalidateAuthorizationDetailCache(
+  requestId?: number,
+  userKey?: string | null
+): void {
+  if (!requestId) {
+    cache.clear();
+    return;
+  }
+  const user = String(userKey || '').trim().toLowerCase() || 'anon';
+  const prefix = `${user}:${requestId}:`;
+  for (const key of [...cache.keys()]) {
+    if (key.startsWith(prefix) || key.includes(`:${requestId}:`)) {
+      cache.delete(key);
+    }
+  }
 }

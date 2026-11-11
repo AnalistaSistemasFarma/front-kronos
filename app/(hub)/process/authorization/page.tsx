@@ -259,7 +259,7 @@ function AuthorizationBoard() {
         if (prefetchTimerRef.current) clearTimeout(prefetchTimerRef.current);
         prefetchTimerRef.current = setTimeout(() => {
           const withNotes = !(isFirmaAuthorizationRow(req) || isReviewRow(req));
-          prefetchAuthorizationDetail(requestId, withNotes);
+          prefetchAuthorizationDetail(requestId, withNotes, session?.user?.email);
           const flow = flowTargetOf(req);
           if (flow) prefetchDocumentFlow(flow.requestId, flow.fileId);
         }, 180);

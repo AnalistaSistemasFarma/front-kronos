@@ -85,7 +85,9 @@ function probeOrionPrimary(force: boolean): Promise<boolean> {
   if (!force && Date.now() - (fallbackState.__orionProbeAt ?? 0) < PROBE_EVERY_MS) return Promise.resolve(false);
   fallbackState.__orionProbeAt = Date.now();
   fallbackState.__orionProbe = fetch(primary, { method: 'HEAD', cache: 'no-store', signal: AbortSignal.timeout(PROBE_TIMEOUT_MS) })
-    .then(() => {
+    .then((res) => {
+      // 5xx del proxy ≠ Orion vivo (antes un 502 marcaba el primario como sano).
+      if (res.status >= 500) return false;
       if ((fallbackState.__orionFallbackUntil ?? 0) > Date.now()) {
         console.info(`[orion] ${primary} volvió a responder; se deja el respaldo`);
       }

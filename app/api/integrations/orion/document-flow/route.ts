@@ -5,7 +5,12 @@ import { sql, withMssqlPool } from '@/lib/mssqlPool';
 import { buildDocumentFlow, emailsInFlow } from '@/lib/orion/documentFlow';
 import { ORION_SIGNATURE_FIELD_TYPE } from '@/lib/orion/fieldType';
 import { parseOrionSignatureBagBag } from '@/lib/orion/formValue';
-import { resolveOrionActorUserId, userCanManageOrionRequest } from '@/lib/orion/service';
+import { userHasOrionTaskOnRequest } from '@/lib/orion/signerAuthorizations';
+import {
+  resolveOrionActorUserId,
+  userCanManageOrionRequest,
+  userIsOrionFlowSignatureResponsible,
+} from '@/lib/orion/service';
 import type { OrionSignatureBagBag } from '@/lib/orion/types';
 
 export const dynamic = 'force-dynamic';
@@ -32,11 +37,19 @@ function isInFlow(bag: OrionSignatureBagBag, fileId: string, email: string): boo
   return false;
 }
 
+function fileExistsInBag(bag: OrionSignatureBagBag, fileId: string): boolean {
+  if (bag.documents?.[fileId]) return true;
+  return Object.values(bag.drafts ?? {}).some(
+    (d) => d.fileId === fileId || d.pdfFileId === fileId
+  );
+}
+
 /**
- * GET /api/integrations/orion/document-flow?requestId=123&fileId=abc  (2026-11-11)
- * Flujo completo del documento para «Ver detalle» de Autorizaciones: solo nombres, estado y fecha
- * (lib/orion/documentFlow.ts). Lo ve quien es parte del flujo o puede gestionar la firma de la solicitud.
- * Solo base de datos (sin Orion). Bag + solicitud en una query; nombres en otra.
+ * GET /api/integrations/orion/document-flow?requestId=123&fileId=abc
+ * Flujo del documento para «Ver detalle»: solo nombres, estado y fecha.
+ * Acceso: parte del flujo, tarea Orion en la solicitud, o preparador
+ * asignado al flujo (permiso Preparar + lista Preparadores documento).
+ * Solo base de datos (sin Orion).
  */
 export async function GET(req: Request) {
   try {
@@ -52,7 +65,12 @@ export async function GET(req: Request) {
     }
 
     const result = await withMssqlPool(async (pool) => {
-      // Una sola ida: campo Orion + fecha/nombre del solicitante.
+      const actorId = await resolveOrionActorUserId(pool, {
+        userId: session?.user?.id ? String(session.user.id) : null,
+        email,
+      });
+
+      // Bag + meta de solicitud (puede no existir campo Orion).
       const bagRow = await pool
         .request()
         .input('id', sql.Int, requestId)
@@ -76,20 +94,26 @@ export async function GET(req: Request) {
       const row = bagRow.recordset[0] as
         | { value_text: string | null; created_at: Date | null; requester_name: string | null }
         | undefined;
-      if (!row) return { status: 404 as const };
+      const bag = parseOrionSignatureBagBag(row?.value_text ?? null);
 
-      const bag = parseOrionSignatureBagBag(row.value_text);
-      if (!isInFlow(bag, fileId, email)) {
-        const actorId = await resolveOrionActorUserId(pool, {
-          userId: session?.user?.id ? String(session.user.id) : null,
-          email,
-        });
-        const role = session?.user?.role;
-        const canManage = actorId
-          ? await userCanManageOrionRequest(pool, requestId, actorId, role === 'admin' || role === 'superadmin')
-          : false;
-        if (!canManage) return { status: 403 as const };
+      // Autorizar ANTES de revelar si hay documentos de firma (evita enumeración).
+      let allowed = isInFlow(bag, fileId, email);
+      if (!allowed && actorId) {
+        const [hasTask, isFlowResponsible, canManage] = await Promise.all([
+          userHasOrionTaskOnRequest(pool, { requestId, userId: actorId, fileId }),
+          userIsOrionFlowSignatureResponsible(pool, requestId, actorId),
+          userCanManageOrionRequest(
+            pool,
+            requestId,
+            actorId,
+            session?.user?.role === 'admin' || session?.user?.role === 'superadmin'
+          ),
+        ]);
+        allowed = hasTask || (canManage && isFlowResponsible);
       }
+      if (!allowed) return { status: 403 as const };
+
+      if (!row || !fileExistsInBag(bag, fileId)) return { status: 404 as const };
 
       const emails = emailsInFlow(bag, fileId);
       const namesReq = pool.request().input('id', sql.Int, requestId);
@@ -120,11 +144,11 @@ export async function GET(req: Request) {
       };
     });
 
-    if (result.status === 404) {
-      return NextResponse.json({ error: 'Esta solicitud no tiene documentos de firma' }, { status: 404, headers: NO_STORE });
-    }
     if (result.status === 403) {
       return NextResponse.json({ error: 'No hace parte del flujo de este documento' }, { status: 403, headers: NO_STORE });
+    }
+    if (result.status === 404) {
+      return NextResponse.json({ error: 'Esta solicitud no tiene documentos de firma' }, { status: 404, headers: NO_STORE });
     }
     return NextResponse.json({ flow: result.flow }, { headers: NO_STORE });
   } catch (error) {

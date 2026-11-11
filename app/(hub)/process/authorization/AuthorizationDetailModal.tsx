@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useSession } from 'next-auth/react';
 import {
   Modal,
   Stack,
@@ -203,6 +204,8 @@ function isFirmaAuthorizationRequest(request: RequestSummary | null): boolean {
 
 export default function AuthorizationDetailModal({ opened, onClose, request }: Props) {
   const isMobile = useMediaQuery('(max-width: 768px)');
+  const { data: session } = useSession();
+  const userKey = session?.user?.email ?? null;
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -228,7 +231,7 @@ export default function AuthorizationDetailModal({ opened, onClose, request }: P
     if (!opened || !idReqGen) return;
     let active = true;
     const withNotes = !hideSensitiveFirmaContext;
-    const cached = peekAuthorizationDetail(idReqGen, withNotes);
+    const cached = peekAuthorizationDetail(idReqGen, withNotes, userKey);
 
     setError(null);
     setFiles([]);
@@ -256,7 +259,7 @@ export default function AuthorizationDetailModal({ opened, onClose, request }: P
 
     const loadData = async () => {
       try {
-        const data = await loadAuthorizationDetail(idReqGen, withNotes);
+        const data = await loadAuthorizationDetail(idReqGen, withNotes, undefined, userKey);
         if (!active) return;
         if (!data.detailOk) {
           setError(data.detailError || 'No se pudo cargar el detalle de la solicitud.');
@@ -306,7 +309,7 @@ export default function AuthorizationDetailModal({ opened, onClose, request }: P
     return () => {
       active = false;
     };
-  }, [opened, idReqGen, hideSensitiveFirmaContext]);
+  }, [opened, idReqGen, hideSensitiveFirmaContext, userKey]);
 
   const subject = detail?.subject_request || request?.subject || '';
   const firmaDocName = isFirmaAuth
