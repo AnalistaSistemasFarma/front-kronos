@@ -13,7 +13,7 @@ import {
 } from '../../../../../lib/proyectos/permisos-agentes';
 import type { PermisosProyectoDto } from '../../../../../lib/proyectos/permisos-agentes-tipos';
 import { agentesDelProyecto } from '../../../../../lib/proyectos/agentes-desarrollo';
-import { agentesDeNegocio, codigoPermitido, mensajeSoloDesarrollo, pideCodigo } from '../../../../../lib/proyectos/agentes-desarrollo-rules';
+import { agentesDeNegocio, avisoSinCodigo, pideCodigo } from '../../../../../lib/proyectos/agentes-desarrollo-rules';
 
 export const dynamic = 'force-dynamic';
 
@@ -26,8 +26,9 @@ export const dynamic = 'force-dynamic';
  *   PATCH { codeLevel, repos[], deployApprovers[], reason } — SOLO la
  *        administración o quien tenga el subproceso /process/proyectos/permisos-agentes
  *        en la empresa del proyecto. Ser dueño NO alcanza. Queda en el registro.
- *        Código o repos con algún agente que NO es de desarrollo: 400 (regla del
- *        2026-10-27, lib/proyectos/agentes-desarrollo-rules.ts). «Ninguno» sí pasa.
+ *        Con agentes de negocio en el proyecto SÍ se guarda código o repos
+ *        (2026-11-11): solo los agentes de desarrollo los reciben; los de negocio
+ *        siguen en «ninguno» en el puente. La respuesta trae `avisos` informativos.
  *
  * La puerta del proyecto va primero: quien no es miembro recibe 404 aunque sea
  * administrador (no se confirma que el proyecto exista).
@@ -45,13 +46,14 @@ export async function GET(_request: NextRequest, { params }: Ctx) {
       registroPolitica(guard.project.idProject),
       agentesDelProyecto(guard.project.idProject),
     ]);
-    const codeAllowed = codigoPermitido(agentes);
-    // Sin agentes de desarrollo no se ofrece el catálogo: no hay repos que escoger.
-    const catalog = canEdit && codeAllowed ? await catalogoActivo() : [];
+    // Desde el 2026-11-11 el código se puede dar con agentes mixtos: solo los de desarrollo lo
+    // reciben (el puente entrega «ninguno» a los de negocio). `codeAllowed` queda siempre en true
+    // por compatibilidad con clientes viejos.
+    const catalog = canEdit ? await catalogoActivo() : [];
     const dto: PermisosProyectoDto = {
       policy,
       canEdit,
-      codeAllowed,
+      codeAllowed: true,
       nonDevAgents: agentesDeNegocio(agentes).map((a) => a.displayName),
       catalog,
       operators: cargarOperadoresPases(),
@@ -77,16 +79,14 @@ export async function PATCH(request: NextRequest, { params }: Ctx) {
     if (!payload) return badRequest('El cuerpo debe ser un objeto JSON.');
     const motivo = normalizarMotivo(payload.reason);
     if (!motivo.ok) return badRequest(motivo.error);
-    if (pideCodigo(payload)) {
-      const agentes = await agentesDelProyecto(guard.project.idProject);
-      if (!codigoPermitido(agentes)) return badRequest(mensajeSoloDesarrollo(agentesDeNegocio(agentes).map((a) => a.displayName)));
-    }
     const catalogo = await catalogoActivo();
     const politica = normalizarPolitica(payload, { catalogoActivo: catalogo.map((r) => r.slug), operadores: cargarOperadoresPases() });
     if (!politica.ok) return badRequest(politica.error);
 
     const r = await guardarPolitica({ idProject: guard.project.idProject, actor: guard.user, entrada: politica.value, motivo: motivo.value });
-    return jsonNoStore({ updated: r.cambio });
+    // Con código y agentes de negocio: se guarda igual; esos agentes siguen sin código (aviso, no bloqueo).
+    const negocio = pideCodigo(politica.value) ? agentesDeNegocio(await agentesDelProyecto(guard.project.idProject)).map((a) => a.displayName) : [];
+    return jsonNoStore({ updated: r.cambio, avisos: negocio.length > 0 ? [avisoSinCodigo(negocio)] : [] });
   } catch (error) {
     if (error instanceof ErrorPermisos) return jsonNoStore({ error: error.message }, { status: error.status });
     if (tablaNoExiste(error)) return jsonNoStore({ error: 'Los permisos de los agentes todavía no están habilitados en este servidor.' }, { status: 503 });

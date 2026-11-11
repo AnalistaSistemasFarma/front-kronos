@@ -17,7 +17,7 @@ import { pedirSugerencia } from '../../../lib/proyectos/equipo';
 import { estadosTrabajandoVisibles } from '../../../lib/proyectos/estado-agente-servidor';
 import { cargarOperadoresPases, normalizarMotivo, normalizarPolitica, type PoliticaEntrada } from '../../../lib/proyectos/permisos-agentes-rules';
 import { catalogoActivo, ErrorPermisos, guardarPolitica, puedeGestionarPermisos, tablaNoExiste } from '../../../lib/proyectos/permisos-agentes';
-import { agentesDeNegocio, codigoPermitido, mensajeSoloDesarrollo, pideCodigo } from '../../../lib/proyectos/agentes-desarrollo-rules';
+import { agentesDeNegocio, avisoSinCodigo, pideCodigo } from '../../../lib/proyectos/agentes-desarrollo-rules';
 
 export const dynamic = 'force-dynamic';
 
@@ -35,8 +35,10 @@ export const dynamic = 'force-dynamic';
  *        cambiarlos en esa empresa (administración o el subproceso
  *        /process/proyectos/permisos-agentes); si no puede y pide algo distinto
  *        de «ninguno», 403. Sin agentPolicy, el proyecto queda en «ninguno».
- *        Código o repos con algún asistente que NO es de desarrollo: 400 y no se
- *        crea nada (regla del 2026-10-27, lib/proyectos/agentes-desarrollo-rules.ts).
+ *        Agentes mixtos (2026-11-11, Nicolás Rivera): código o repos con algún
+ *        asistente que NO es de desarrollo SÍ se guarda; ese asistente participa
+ *        sin acceso al código (el puente le entrega «ninguno»). La respuesta trae
+ *        `avisos` informativos (lib/proyectos/agentes-desarrollo-rules.ts).
  *        SIN ASISTENTES (2026-11-10, Nicolás Rivera: «que existan los 2 caminos»):
  *        agentCodes vacío u omitido crea un proyecto solo de personas (miembros,
  *        tareas, archivos, vínculos), con perfil «sin-conectores» y sin
@@ -150,10 +152,6 @@ export async function POST(request: NextRequest) {
           { status: 403 }
         );
       }
-      // Código o repos solo con agentes de desarrollo (2026-10-27): TODOS los escogidos.
-      if (puede && pideCodigo(pedida) && !codigoPermitido(agentes)) {
-        return badRequest(mensajeSoloDesarrollo(agentesDeNegocio(agentes).map((a) => a.displayName)));
-      }
       if (puede) {
         const catalogo = await catalogoActivo();
         const v = normalizarPolitica(pedida, { catalogoActivo: catalogo.map((r) => r.slug), operadores: cargarOperadoresPases() });
@@ -214,7 +212,10 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    return jsonNoStore({ idProject: creado.id_project, teamRequested }, { status: 201 });
+    // Agentes de negocio en un proyecto con código: entran, sin acceso al código (aviso, no bloqueo).
+    const negocio = pol && pideCodigo(pol.entrada) ? agentesDeNegocio(agentes).map((a) => a.displayName) : [];
+    const avisos = negocio.length > 0 ? [avisoSinCodigo(negocio)] : [];
+    return jsonNoStore({ idProject: creado.id_project, teamRequested, avisos }, { status: 201 });
   } catch (error) {
     return serverError('POST /api/proyectos', error);
   }
