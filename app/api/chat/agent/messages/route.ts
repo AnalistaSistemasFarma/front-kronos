@@ -352,7 +352,14 @@ export async function POST(request: NextRequest) {
     let mesaSinPush = false;
     if (conversation.kind === 'project') {
       try {
-        const r = await alPublicarAgenteEnMesa({ idConversation: conversation.id, idAgent: agent.idAgent, idMessage: message.id, body });
+        const r = await alPublicarAgenteEnMesa({
+          idConversation: conversation.id,
+          idAgent: agent.idAgent,
+          idMessage: message.id,
+          body,
+          // Archivos que el agente comparte con la mesa (2026-11-11).
+          adjuntos: uploaded.map((u) => u.file_name),
+        });
         mesaSinPush = r.esMesa && !r.esSintesis;
       } catch (error) {
         console.error('[mesas] al publicar', error);

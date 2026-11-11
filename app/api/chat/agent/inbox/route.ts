@@ -15,7 +15,7 @@ import type { ChatAgentIdentity } from '../../../../../lib/chat/agent-auth';
 import { cargarConfigProyectos } from '../../../../../lib/proyectos/config-agentes';
 import { whereProyectoDelAgente } from '../../../../../lib/chat/projects';
 import { mensajesConEntregaPendiente } from '../../../../../lib/chat/entregas-pendientes';
-import { cuerpoParaAgente, EVENT_TYPE_TURNO, tickMesas } from '../../../../../lib/proyectos/mesas';
+import { EVENT_TYPE_TURNO, tickMesas, turnoParaAgente } from '../../../../../lib/proyectos/mesas';
 
 // El long-poll obliga a que la ruta sea dinámica: nada de esto se cachea.
 export const dynamic = 'force-dynamic';
@@ -371,10 +371,14 @@ async function bandejaDeProyectos(opciones: {
   }
 
   // Aviso de turno de una mesa: el agente recibe además las instrucciones de
-  // la mesa (no quedan guardadas en el hilo; ver mesas-rules.ts).
-  const cuerpos = new Map<number, string>();
+  // la mesa (no quedan guardadas en el hilo; ver mesas-rules.ts) y, como
+  // adjuntos del aviso, los archivos que compartieron los agentes de ESA mesa
+  // (2026-11-11): el puente los baja a ./adjuntos como cualquier adjunto.
+  const turnos = new Map<number, NonNullable<Awaited<ReturnType<typeof turnoParaAgente>>>>();
   for (const m of pending) {
-    if (m.event_type === EVENT_TYPE_TURNO) cuerpos.set(m.id, await cuerpoParaAgente(m));
+    if (m.event_type !== EVENT_TYPE_TURNO) continue;
+    const t = await turnoParaAgente(m, agent.idAgent);
+    if (t) turnos.set(m.id, t);
   }
 
   return jsonNoStore({
@@ -386,7 +390,7 @@ async function bandejaDeProyectos(opciones: {
       id: m.id,
       idConversation: m.id_conversation,
       role: m.role,
-      body: cuerpos.get(m.id) ?? m.body,
+      body: turnos.get(m.id)?.body ?? m.body,
       createdAt: m.created_at.toISOString(),
       author: m.userAuthor
         ? { kind: 'user' as const, id: m.userAuthor.id, name: m.userAuthor.name, email: m.userAuthor.email }
@@ -415,7 +419,7 @@ async function bandejaDeProyectos(opciones: {
       project: m.conversation.project
         ? { idProject: m.conversation.project.id_project, name: m.conversation.project.name }
         : null,
-      attachments: m.attachments.map(serializeAttachment),
+      attachments: turnos.get(m.id)?.adjuntos ?? m.attachments.map(serializeAttachment),
     })),
   });
 }
