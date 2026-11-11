@@ -45,15 +45,21 @@ import {
   IconCalendarEvent,
   IconUser,
   IconShieldCheck,
-  IconClock,
   IconThumbUp,
   IconThumbDown,
   IconFileText,
   IconEye,
   IconNotes,
+  IconRoute,
+  IconListDetails,
+  IconProgress,
 } from '@tabler/icons-react';
 import toast from 'react-hot-toast';
 import AuthorizationDetailModal from './AuthorizationDetailModal';
+import DocumentFlowModal, { type DocumentFlowTarget } from '../../../../components/orion/DocumentFlowModal';
+import { StatFilterTile } from '../../../../components/request-general/list/RequestListUi';
+import { panelStyles as ps } from '../../../../components/ui/panel/Panel';
+import requestListStyles from '../../../../components/request-general/list/requestList.module.css';
 import {
   isFirmaAuthorizationItem,
   isOrionReviewResolution,
@@ -62,6 +68,8 @@ import {
   parseOrionReviewFileId,
   parseOrionReviewFileName,
 } from '../../../../lib/orion/signerAuthMarkers';
+import { prefetchDocumentFlow } from '../../../../lib/orion/documentFlowClient';
+import { prefetchAuthorizationDetail } from '../../../../lib/authorization/detailPrefetch';
 import { formatDbDateTime } from '../../../../lib/dbDate';
 
 interface AuthorizationRequest {
@@ -223,9 +231,10 @@ function AuthorizationBoard() {
     const [requests, setRequests] = useState<AuthorizationRequest[]>([]);
     const [companyOptions, setCompanyOptions] = useState<{ value: string; label: string }[]>([]);
 
+    // Por defecto Pendiente: «Todos» carga el historial completo y se siente muy lento.
     const [filters, setFilters] = useState({
         id: '',
-        status: '0',
+        status: '4',
         company: '',
         date_from: '',
         date_to: '',
@@ -242,17 +251,45 @@ function AuthorizationBoard() {
 
     const [detailModalOpened, setDetailModalOpened] = useState(false);
     const [detailRequest, setDetailRequest] = useState<AuthorizationRequest | null>(null);
+    const prefetchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const prefetchAcciones = (req: AuthorizationRequest) => {
+        const requestId = Number(req.id_request_general);
+        if (!Number.isInteger(requestId) || requestId <= 0) return;
+        // Debounce: al pasar el mouse por muchas filas no disparamos 4 peticiones por fila.
+        if (prefetchTimerRef.current) clearTimeout(prefetchTimerRef.current);
+        prefetchTimerRef.current = setTimeout(() => {
+          const withNotes = !(isFirmaAuthorizationRow(req) || isReviewRow(req));
+          prefetchAuthorizationDetail(requestId, withNotes, session?.user?.email);
+          const flow = flowTargetOf(req);
+          if (flow) prefetchDocumentFlow(flow.requestId, flow.fileId);
+        }, 180);
+    };
+
     const openDetailModal = (req: AuthorizationRequest) => {
+        prefetchAcciones(req);
         setDetailRequest(req);
         setDetailModalOpened(true);
     };
 
-    const [departmentUser, setDepartmentUser] = useState<{
-    departments: Array<{
-        departments: number;
-    }>;
-    
-    }>({ departments: []});
+    // «Ver flujo» (2026-11-11): recorrido del documento de una autorización de firma o validación.
+    const [flowTarget, setFlowTarget] = useState<DocumentFlowTarget | null>(null);
+    const flowTargetOf = (req: AuthorizationRequest): DocumentFlowTarget | null => {
+        const isReview = isOrionReviewResolution(req.resolution);
+        const fileId = isReview ? parseOrionReviewFileId(req.resolution) : parseOrionFileIdFromAuthResolution(req.resolution);
+        if (!fileId || !req.id_request_general) return null;
+        return {
+            requestId: Number(req.id_request_general),
+            fileId,
+            fileName: isReview ? parseOrionReviewFileName(req.resolution) : parseOrionFileNameFromResolution(req.resolution),
+        };
+    };
+
+    const [stats, setStats] = useState({
+      total: 0,
+      pendientes: 0,
+      autorizadas: 0,
+      rechazadas: 0,
+    });
 
     useEffect(() => {
         if (status === 'loading') return;
@@ -267,8 +304,8 @@ function AuthorizationBoard() {
               if (id) {
                 setUserId(id);
                 setUserIdInitialized(true);
-                fetchDepartments(id);
                 fetchActivities(id, filters);
+                void fetchStats(id, filters);
               } else {
                 setUserIdInitialized(true);
               }
@@ -284,16 +321,6 @@ function AuthorizationBoard() {
     const selectableRequests = useMemo(
         () => filteredRequests.filter((r) => r.status === 'pendiente'),
         [filteredRequests]
-    );
-
-    const stats = useMemo(
-        () => ({
-        total: requests.length,
-        pendientes: requests.filter((r) => r.status === 'pendiente').length,
-        autorizadas: requests.filter((r) => r.status === 'autorizado').length,
-        rechazadas: requests.filter((r) => r.status === 'rechazado').length,
-        }),
-        [requests]
     );
 
     const allSelectableSelected =
@@ -341,13 +368,33 @@ function AuthorizationBoard() {
         }
     };
 
+    const fetchStats = async (id: string, f = filters) => {
+        void id;
+        try {
+          const params = new URLSearchParams({ counts: '1' });
+          if (f.id) params.set('id', f.id);
+          if (f.company) params.set('company', f.company);
+          const response = await fetch(
+            `/api/authorization/authorization-activities?${params.toString()}`,
+            { cache: 'no-store' }
+          );
+          if (!response.ok) return;
+          const body = (await response.json().catch(() => null)) as {
+            counts?: { total: number; pendientes: number; autorizadas: number; rechazadas: number };
+          } | null;
+          if (body?.counts) setStats(body.counts);
+        } catch (error) {
+          console.error('Error fetching authorization counts:', error);
+        }
+    };
+
     const fetchActivities = async (id: string, f = filters) => {
         setLoading(true);
         setError(null);
         try {
             // El servidor toma el usuario de la sesión; `id` solo indica que ya se resolvió.
             const params = new URLSearchParams();
-            params.set('status', f.status || '0');
+            params.set('status', f.status || '4');
             if (f.id) params.set('id', f.id);
             if (f.company) params.set('company', f.company);
             if (f.date_from) params.set('date_from', f.date_from);
@@ -402,19 +449,14 @@ function AuthorizationBoard() {
         }
     };
 
-    const fetchDepartments = async (_userIdParam?: string) => {
-        try {
-        // El servidor toma el usuario de la sesión; no se envía ningún id.
-        const url = `/api/authorization/authorization-departments`;
-
-        const response = await fetch(url);
-        const data = await response.json();
-
-        setDepartmentUser(data);
-
-        } catch (error) {
-        console.error('Error fetching workflow data:', error);
-        } 
+    const applyStatusFilter = (statusValue: string) => {
+        const next = { ...filters, status: statusValue };
+        setFilters(next);
+        setSelectedIds(new Set());
+        if (userId) {
+          fetchActivities(userId, next);
+          void fetchStats(userId, next);
+        }
     };
 
     const handleFilterChange = (field: string, value: string) => {
@@ -423,14 +465,20 @@ function AuthorizationBoard() {
 
     const applyFilters = () => {
         setSelectedIds(new Set());
-        if (userId) fetchActivities(userId, filters);
+        if (userId) {
+          fetchActivities(userId, filters);
+          void fetchStats(userId, filters);
+        }
     };
 
     const clearFilters = () => {
-        const empty = { id: '', status: '0', company: '', date_from: '', date_to: '' };
+        const empty = { id: '', status: '4', company: '', date_from: '', date_to: '' };
         setFilters(empty);
         setSelectedIds(new Set());
-        if (userId) fetchActivities(userId, empty);
+        if (userId) {
+          fetchActivities(userId, empty);
+          void fetchStats(userId, empty);
+        }
     };
 
     const toggleSelect = (id: number) => {
@@ -633,8 +681,14 @@ function AuthorizationBoard() {
         router.push(`/process/request-general/view-request?${qs.toString()}`);
     };
 
+    /**
+     * ¿El 👁 solo abriría la misma ventana de «Ver detalle»? (firma pendiente o validación de PDF).
+     * En ese caso el botón 👁 de Acciones no se muestra: quedan «Ver detalle» y «Ver flujo» (2026-11-11).
+     * El enlace «#número» de la solicitud sí se mantiene.
+     */
     const opensPreview = (req: AuthorizationRequest) =>
-        isReviewRow(req) || (isFirmaAuthorizationRow(req) && req.status === 'pendiente');
+        (isReviewRow(req) && !isDraftReviewRow(req)) ||
+        (isFirmaAuthorizationRow(req) && req.status === 'pendiente');
 
     const relatedLinkLabel = (req: AuthorizationRequest) =>
         isDraftReviewRow(req)
@@ -763,9 +817,30 @@ function AuthorizationBoard() {
                 Boolean(singleOk?.row.id_request_general) &&
                 isFirmaAuthorizationRow(singleOk!.row);
 
+            const okIds = new Set(okResults.map((r) => r.row.id));
+            if (okIds.size > 0) {
+              // Actualización inmediata: no esperar el listado completo (~20s).
+              setRequests((prev) =>
+                filters.status === '4'
+                  ? prev.filter((r) => !okIds.has(r.id))
+                  : prev.map((r) =>
+                      okIds.has(r.id)
+                        ? { ...r, status: 'autorizado' as const, resolved_at: new Date().toISOString() }
+                        : r
+                    )
+              );
+              setStats((prev) => ({
+                ...prev,
+                pendientes: Math.max(0, prev.pendientes - okIds.size),
+                autorizadas: prev.autorizadas + okIds.size,
+              }));
+            }
+
             if (shouldOpenSignFlow && singleOk) {
                 toast.success('Autorizado. Puede firmar el documento en la solicitud.');
+                setLoading(false);
                 void fetchActivities(userId, filters);
+                void fetchStats(userId, filters);
                 redirectToSignDocument({
                     requestId: singleOk.row.id_request_general!,
                     fileId: singleOk.fileId,
@@ -781,9 +856,10 @@ function AuthorizationBoard() {
                         : 'Solicitud autorizada'
                 );
             }
-            await fetchActivities(userId, filters);
             setLoading(false);
             setOpeningSignDocument(false);
+            void fetchActivities(userId, filters);
+            void fetchStats(userId, filters);
         } catch {
             setLoading(false);
             setOpeningSignDocument(false);
@@ -822,7 +898,28 @@ function AuthorizationBoard() {
         if (fail > 0) {
             toast.error(`${fail} solicitud(es) no se pudieron rechazar`);
         }
-        await fetchActivities(userId, filters);
+        const rejectedIds = new Set(
+          ids.filter((_, i) => results[i]?.ok)
+        );
+        if (rejectedIds.size > 0) {
+          setRequests((prev) =>
+            filters.status === '4'
+              ? prev.filter((r) => !rejectedIds.has(r.id))
+              : prev.map((r) =>
+                  rejectedIds.has(r.id)
+                    ? { ...r, status: 'rechazado' as const, resolved_at: new Date().toISOString() }
+                    : r
+                )
+          );
+          setStats((prev) => ({
+            ...prev,
+            pendientes: Math.max(0, prev.pendientes - rejectedIds.size),
+            rechazadas: prev.rechazadas + rejectedIds.size,
+          }));
+        }
+        setLoading(false);
+        void fetchActivities(userId, filters);
+        void fetchStats(userId, filters);
     };
 
     const actionCount = actionTarget !== null ? 1 : selectedIds.size;
@@ -962,9 +1059,13 @@ function AuthorizationBoard() {
                     {getStatusLabel(req.status)}
                 </Badge>
             </Table.Td>
-            <Table.Td style={STICKY_ACTIONS_STYLE}>
+            <Table.Td
+              style={STICKY_ACTIONS_STYLE}
+              onMouseEnter={() => prefetchAcciones(req)}
+              onFocusCapture={() => prefetchAcciones(req)}
+            >
             <Group gap='xs' wrap='nowrap'>
-                {isLinked ? (
+                {isLinked && !opensPreview(req) ? (
                 <Tooltip label={relatedLinkLabel(req)}>
                 <ActionIcon
                     variant='light'
@@ -986,6 +1087,22 @@ function AuthorizationBoard() {
                     <IconNotes size={16} />
                 </ActionIcon>
                 </Tooltip>
+                {flowTargetOf(req) ? (
+                <Tooltip label='Ver flujo del documento'>
+                <ActionIcon
+                    variant='light'
+                    color='violet'
+                    onClick={() => {
+                      const t = flowTargetOf(req);
+                      if (t) prefetchDocumentFlow(t.requestId, t.fileId);
+                      setFlowTarget(t);
+                    }}
+                    aria-label='Ver flujo del documento'
+                >
+                    <IconRoute size={16} />
+                </ActionIcon>
+                </Tooltip>
+                ) : null}
                 {isPending && (
                 <>
                     <Tooltip label='Autorizar'>
@@ -1106,7 +1223,7 @@ function AuthorizationBoard() {
                 </Text>
             </Group>
 
-            {isLinked ? (
+            {isLinked && !opensPreview(req) ? (
             <Button
                 size='xs'
                 variant='light'
@@ -1126,10 +1243,31 @@ function AuthorizationBoard() {
                 color='gray'
                 fullWidth
                 leftSection={<IconNotes size={14} />}
+                onMouseEnter={() => prefetchAcciones(req)}
+                onFocus={() => prefetchAcciones(req)}
                 onClick={() => openDetailModal(req)}
             >
                 Ver detalle
             </Button>
+            {flowTargetOf(req) ? (
+            <Button
+                size='xs'
+                variant='light'
+                color='violet'
+                fullWidth
+                mt={6}
+                leftSection={<IconRoute size={14} />}
+                onMouseEnter={() => prefetchAcciones(req)}
+                onFocus={() => prefetchAcciones(req)}
+                onClick={() => {
+                  const t = flowTargetOf(req);
+                  if (t) prefetchDocumentFlow(t.requestId, t.fileId);
+                  setFlowTarget(t);
+                }}
+            >
+                Ver flujo
+            </Button>
+            ) : null}
 
             {isPending && (
                 <Group grow mt='xs'>
@@ -1179,88 +1317,47 @@ function AuthorizationBoard() {
                 </div>
             </Flex>
 
-            <Grid>
-                <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
-                <Card
-                    p='md'
-                    radius='md'
-                    withBorder
-                    style={{ backgroundColor: 'var(--mantine-color-blue-light)' }}
-                >
-                    <Group>
-                    <IconFileText size={24} color='var(--mantine-color-blue-light-color)' />
-                    <div>
-                        <Text size='xs' c='var(--mantine-color-blue-light-color)'>
-                        Total
-                        </Text>
-                        <Text size='lg' fw={600}>
-                        {stats.total}
-                        </Text>
-                    </div>
-                    </Group>
-                </Card>
-                </Grid.Col>
-                <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
-                <Card
-                    p='md'
-                    radius='md'
-                    withBorder
-                    style={{ backgroundColor: 'var(--mantine-color-yellow-light)' }}
-                >
-                    <Group>
-                    <IconClock size={24} color='var(--mantine-color-yellow-light-color)' />
-                    <div>
-                        <Text size='xs' c='var(--mantine-color-yellow-light-color)'>
-                        Pendientes
-                        </Text>
-                        <Text size='lg' fw={600}>
-                        {stats.pendientes}
-                        </Text>
-                    </div>
-                    </Group>
-                </Card>
-                </Grid.Col>
-                <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
-                <Card
-                    p='md'
-                    radius='md'
-                    withBorder
-                    style={{ backgroundColor: 'var(--mantine-color-green-light)' }}
-                >
-                    <Group>
-                    <IconCheck size={24} color='var(--mantine-color-green-light-color)' />
-                    <div>
-                        <Text size='xs' c='var(--mantine-color-green-light-color)'>
-                        Autorizadas
-                        </Text>
-                        <Text size='lg' fw={600}>
-                        {stats.autorizadas}
-                        </Text>
-                    </div>
-                    </Group>
-                </Card>
-                </Grid.Col>
-                <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
-                <Card
-                    p='md'
-                    radius='md'
-                    withBorder
-                    style={{ backgroundColor: 'var(--mantine-color-red-light)' }}
-                >
-                    <Group>
-                    <IconX size={24} color='var(--mantine-color-red-light-color)' />
-                    <div>
-                        <Text size='xs' c='var(--mantine-color-red-light-color)'>
-                        Rechazadas
-                        </Text>
-                        <Text size='lg' fw={600}>
-                        {stats.rechazadas}
-                        </Text>
-                    </div>
-                    </Group>
-                </Card>
-                </Grid.Col>
-            </Grid>
+            {/* Mismo diseño de indicadores que Solicitudes Generales (filtran el listado). */}
+            <div className={ps.root} style={{ background: 'transparent', minHeight: 0 }}>
+              <div className={requestListStyles.statGrid}>
+                <StatFilterTile
+                  icon={<IconListDetails size={20} />}
+                  label='Total'
+                  value={stats.total}
+                  tone='info'
+                  active={filters.status === '0'}
+                  onClick={() => applyStatusFilter('0')}
+                  ariaLabel='Mostrar todas las autorizaciones'
+                />
+                <StatFilterTile
+                  icon={<IconProgress size={20} />}
+                  label='Pendientes'
+                  value={stats.pendientes}
+                  tone='warning'
+                  active={filters.status === '4'}
+                  onClick={() => applyStatusFilter('4')}
+                  ariaLabel='Mostrar pendientes'
+                />
+                <StatFilterTile
+                  icon={<IconCheck size={20} />}
+                  label='Autorizadas'
+                  value={stats.autorizadas}
+                  tone='ok'
+                  active={filters.status === '2'}
+                  onClick={() => applyStatusFilter('2')}
+                  ariaLabel='Mostrar autorizadas'
+                />
+                <StatFilterTile
+                  icon={<IconX size={20} />}
+                  label='Rechazadas'
+                  value={stats.rechazadas}
+                  tone='critical'
+                  active={filters.status === '3'}
+                  onClick={() => applyStatusFilter('3')}
+                  ariaLabel='Mostrar rechazadas'
+                />
+              </div>
+            </div>
             </Card>
 
             {authorizeBlock && (
@@ -1611,6 +1708,7 @@ function AuthorizationBoard() {
             onClose={() => setDetailModalOpened(false)}
             request={detailRequest}
         />
+        <DocumentFlowModal target={flowTarget} onClose={() => setFlowTarget(null)} />
         </div>
     );
     }

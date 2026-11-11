@@ -22,6 +22,8 @@ import {
   IconChevronRight,
   IconClipboardList,
   IconListCheck,
+  IconShieldCheck,
+  IconSignature,
   IconTicket,
 } from '@tabler/icons-react';
 import { useSession } from 'next-auth/react';
@@ -34,6 +36,7 @@ import {
   inferNotificationPath,
   isExternalNotificationPath,
 } from '../lib/notifications/resolveNotificationTarget';
+import { notificationKind, type NotificationKind } from '../lib/notifications/notificationKind';
 
 interface Notification {
   id: number;
@@ -74,16 +77,14 @@ async function apiFetch(input: string, init?: RequestInit): Promise<Response> {
   });
 }
 
-function pickNotificationIcon(path: string | null, title: string) {
-  const text = `${path ?? ''} ${title}`.toLowerCase();
-  if (text.includes('ticket') || text.includes('view-ticket') || text.includes('mesa de ayuda')) {
-    return IconTicket;
-  }
-  if (text.includes('actividad') || text.includes('view-activities')) {
-    return IconListCheck;
-  }
-  return IconClipboardList;
-}
+/** Ícono por tipo (2026-11-11): firma y validación con distintivo propio (lib/notifications/notificationKind.ts). */
+const KIND_ICON: Record<NotificationKind, typeof IconClipboardList> = {
+  validacion: IconShieldCheck,
+  firma: IconSignature,
+  ticket: IconTicket,
+  actividad: IconListCheck,
+  general: IconClipboardList,
+};
 
 export default function NotificationBell() {
   const { data: session, status } = useSession();
@@ -491,8 +492,11 @@ function NotificationRow({
 }) {
   const detailPath = inferNotificationPath(n);
   const actionLabel = getNotificationActionLabel(detailPath, n.title);
-  const Icon = pickNotificationIcon(detailPath, n.title);
+  const kind = notificationKind(n.title, detailPath);
+  const Icon = KIND_ICON[kind.kind];
   const isUnread = !n.read_at;
+  // Firma y validación conservan su color aunque estén leídas; las demás, gris al leerlas (como antes).
+  const hasOwnColor = kind.label !== null;
   const hasLink = Boolean(detailPath);
 
   return (
@@ -534,8 +538,9 @@ function NotificationRow({
           <ThemeIcon
             size={36}
             radius='md'
-            variant={isUnread ? 'light' : 'default'}
-            color={isUnread ? 'blue' : 'gray'}
+            variant={isUnread || hasOwnColor ? 'light' : 'default'}
+            color={isUnread || hasOwnColor ? kind.color : 'gray'}
+            aria-hidden
             style={{ flexShrink: 0 }}
           >
             <Icon size={18} />
@@ -562,6 +567,11 @@ function NotificationRow({
               {n.body}
             </Text>
             <Group gap={6} mt={6} wrap='nowrap'>
+              {kind.label ? (
+                <Badge size='xs' variant='light' color={kind.color} radius='xl' style={{ flexShrink: 0 }}>
+                  {kind.label}
+                </Badge>
+              ) : null}
               <Text size='xs' className='notification-bell-text-muted'>
                 {formatRelative(n.created_at)}
               </Text>

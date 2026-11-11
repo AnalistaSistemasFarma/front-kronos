@@ -2385,60 +2385,70 @@ export async function finalizeSignerTurn(
     (value) => ({ value, error: null as unknown }),
     (error: unknown) => ({ value: null, error })
   );
-  const live = await getOrionDocument(current.orionDocumentId);
-  mark('consultaOrion');
-  if (!live.ok || !live.data) {
-    throw Object.assign(new Error(live.error || 'No se pudo consultar Orion'), {
-      status: live.status >= 500 ? 503 : 502,
-    });
-  }
-
   const externalRef =
     current.externalRef ||
     buildOrionExternalRef(params.requestId, fileId === ORION_LEGACY_FILE_ID ? null : fileId);
-  let liveState = mergeOrionSignatureState(
-    current,
-    mapOrionResponseToState(externalRef, live.data, fileId, current.fileName)
+
+  // Si el bag local ya dice que es mi turno, no esperar GET a Orion (~1–2 s): accept-sign
+  // valida de nuevo. Solo consultamos Orion si el turno local no está claro.
+  const localPendingEarly = getCurrentPendingSigner(current.signers);
+  const localIsMyTurnEarly = Boolean(
+    localPendingEarly && normalizeSignerEmail(localPendingEarly.email) === me
   );
-  // No reponer huella legacy desde Orion; migrar docs actuales antes de validar.
-  liveState = preserveOrionFingerprintPrefs(current, liveState);
-  const beforeFp = liveState;
-  liveState = normalizeOrionFingerprintRequirements(liveState);
-  if (liveState !== beforeFp) {
-    bag = setOrionDocumentInBag(bag, fileId, liveState);
-    await upsertOrionFormBag(pool, params.requestId, loaded.field.id_form_field, bag);
-    if (liveState.orionDocumentId) {
-      try {
-        const signerRequireFingerprint: Record<string, boolean> = {};
-        const signerRequireFingerprintByOrder: Record<string, boolean> = {};
-        const emailCounts = new Map<string, number>();
-        for (const s of liveState.signers ?? []) {
-          const email = String(s.email || '').trim().toLowerCase();
-          if (!email) continue;
-          emailCounts.set(email, (emailCounts.get(email) ?? 0) + 1);
-        }
-        for (const s of liveState.signers ?? []) {
-          const order = Number(s.order);
-          if (Number.isFinite(order) && order > 0) {
-            signerRequireFingerprintByOrder[String(order)] =
-              s.requireFingerprint === true;
+  let liveState = current;
+  if (!localIsMyTurnEarly) {
+    const live = await getOrionDocument(current.orionDocumentId);
+    mark('consultaOrion');
+    if (!live.ok || !live.data) {
+      throw Object.assign(new Error(live.error || 'No se pudo consultar Orion'), {
+        status: live.status >= 500 ? 503 : 502,
+      });
+    }
+    liveState = mergeOrionSignatureState(
+      current,
+      mapOrionResponseToState(externalRef, live.data, fileId, current.fileName)
+    );
+    // No reponer huella legacy desde Orion; migrar docs actuales antes de validar.
+    liveState = preserveOrionFingerprintPrefs(current, liveState);
+    const beforeFp = liveState;
+    liveState = normalizeOrionFingerprintRequirements(liveState);
+    if (liveState !== beforeFp) {
+      bag = setOrionDocumentInBag(bag, fileId, liveState);
+      await upsertOrionFormBag(pool, params.requestId, loaded.field.id_form_field, bag);
+      if (liveState.orionDocumentId) {
+        try {
+          const signerRequireFingerprint: Record<string, boolean> = {};
+          const signerRequireFingerprintByOrder: Record<string, boolean> = {};
+          const emailCounts = new Map<string, number>();
+          for (const s of liveState.signers ?? []) {
+            const email = String(s.email || '').trim().toLowerCase();
+            if (!email) continue;
+            emailCounts.set(email, (emailCounts.get(email) ?? 0) + 1);
           }
-          const email = String(s.email || '').trim().toLowerCase();
-          if (!email) continue;
-          if ((emailCounts.get(email) ?? 0) === 1) {
-            signerRequireFingerprint[email] = s.requireFingerprint === true;
+          for (const s of liveState.signers ?? []) {
+            const order = Number(s.order);
+            if (Number.isFinite(order) && order > 0) {
+              signerRequireFingerprintByOrder[String(order)] = s.requireFingerprint === true;
+            }
+            const email = String(s.email || '').trim().toLowerCase();
+            if (!email) continue;
+            if ((emailCounts.get(email) ?? 0) === 1) {
+              signerRequireFingerprint[email] = s.requireFingerprint === true;
+            }
           }
+          await saveOrionSignatureFields({
+            orionDocumentId: String(liveState.orionDocumentId),
+            signatureFields: toOrionSignatureFields(liveState.signatureFields ?? []),
+            signerRequireFingerprint,
+            signerRequireFingerprintByOrder,
+          });
+        } catch (err) {
+          console.warn('[orion/complete-sign] normalize fingerprint → Orion:', err);
         }
-        await saveOrionSignatureFields({
-          orionDocumentId: String(liveState.orionDocumentId),
-          signatureFields: toOrionSignatureFields(liveState.signatureFields ?? []),
-          signerRequireFingerprint,
-          signerRequireFingerprintByOrder,
-        });
-      } catch (err) {
-        console.warn('[orion/complete-sign] normalize fingerprint → Orion:', err);
       }
     }
+  } else {
+    mark('consultaOrion');
   }
 
   const mySlots = liveState.signers?.filter(
@@ -2515,6 +2525,7 @@ export async function finalizeSignerTurn(
     // Consentimiento a nivel persona (Orion users.*): no exigir checkbox por documento.
     const personConsent = await params.personConsent;
     mark('consentimiento');
+    // Si el route ya resolvió consentimiento (o el cliente lo afirmó), no volver a Orion.
     let personHasSigning = Boolean(personConsent?.hasSigningLegalConsent);
     let personHasBiometric = Boolean(personConsent?.hasBiometricConsent);
     if (!personConsent) {
@@ -2749,8 +2760,11 @@ export async function finalizeSignerTurn(
 
   const completed = newlyCompletedSigners(previousSigners, outcome.state.signers);
   // PDF canónico en Orion: liberar copia SynerLink solo al cerrar el documento.
+  // No bloquea la respuesta al firmante (puede ir a OneDrive varios segundos).
   if (allSignersCompleted(outcome.state.signers)) {
-    await releaseSynerlinkOneDriveCopyAfterOrionPrepare(fileId);
+    void releaseSynerlinkOneDriveCopyAfterOrionPrepare(fileId).catch((err) => {
+      console.warn('[orion/complete-sign] release SynerLink copy failed:', err);
+    });
   }
   const turnOrder = Number(turnSigner.order);
   const justCompletedThisTurn = completed.some((s) => {

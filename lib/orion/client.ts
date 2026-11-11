@@ -1,8 +1,10 @@
 import {
   activateOrionFallback,
+  ensureOrionRoute,
   getOrionConfig,
   getOrionFallbackUrl,
   isOrionFallbackActive,
+  markOrionPrimaryOk,
 } from './config';
 import type {
   OrionAssignSignersPayload,
@@ -130,7 +132,22 @@ function orionTimeoutSignal(init?: RequestInit): AbortSignal {
   return init?.signal ? AbortSignal.any([init.signal, timeout]) : timeout;
 }
 
+/**
+ * Rendimiento de la firma (2026-11-11): deja en la consola del servidor cada llamada a Orion que
+ * tarde más de 1,5 s, con la ruta (sin datos) y si fue por el Orion local o por el respaldo.
+ */
+const SLOW_ORION_CALL_MS = 1_500;
+function logSlowOrionCall(method: string | undefined, path: string, startedAt: number, baseUrl: string): void {
+  const ms = Date.now() - startedAt;
+  if (ms < SLOW_ORION_CALL_MS) return;
+  const route = path.split('?')[0];
+  const via = isOrionFallbackActive() ? 'respaldo' : 'local';
+  console.info(`[orion/lento] ${String(method || 'GET').toUpperCase()} ${route} ${ms} ms (${via}: ${baseUrl})`);
+}
+
 async function orionFetch<T>(path: string, init?: RequestInit): Promise<OrionResult<T>> {
+  // Elige ruta (local o respaldo) sin dejar a la pantalla esperando un Orion local que no contesta.
+  await ensureOrionRoute();
   const cfg = getOrionConfig();
   if (!cfg.apiBaseUrl || !cfg.integrationApiKey) {
     return {
@@ -154,8 +171,11 @@ async function orionFetch<T>(path: string, init?: RequestInit): Promise<OrionRes
     });
 
   let res: Response;
+  const startedAt = Date.now();
   try {
     res = await request(cfg.apiBaseUrl);
+    if (!isOrionFallbackActive()) markOrionPrimaryOk();
+    logSlowOrionCall(init?.method, path, startedAt, cfg.apiBaseUrl);
   } catch (err) {
     const fallback = isOrionFallbackActive() ? null : getOrionFallbackUrl();
     if (fallback) {
@@ -732,6 +752,7 @@ export async function fetchOrionProtectedFile(url: string): Promise<{
   contentType: string | null;
   error?: string;
 }> {
+  await ensureOrionRoute();
   const cfg = getOrionConfig();
   if (!cfg.integrationApiKey) {
     return {

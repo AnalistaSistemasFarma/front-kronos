@@ -70,5 +70,8 @@ CLAUDE.md
 # Graphify (mapa del código generado en local)
 /graphify-out/
 
+# Respaldos locales de bags Orion (no versionar)
+scripts/_backup-*
+
 # Despliegue azul/verde de PRUEBAS (.230): sello de build por carpeta
 .bluegreen-build.json
