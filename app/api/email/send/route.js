@@ -1,26 +1,15 @@
 import { getServerSession } from 'next-auth';
 import { authOptions } from '../../auth/[...nextauth]/route';
+import {
+  buildEmailTargetUrl,
+  postToEmailService,
+  DEFAULT_EMAIL_LOGO,
+} from '../../../../lib/email/sendServerMessage';
 
 /**
  * Proxy server-side para el servicio de correo (API_EMAIL).
  * El cliente llama a /api/email/send (mismo origen); el servidor reenvía a sapsend.
  */
-function buildEmailTargetUrl(apiEmailBase) {
-  const base = String(apiEmailBase).trim().replace(/\/+$/, '');
-  return `${base}/sapsend/sendMessage`;
-}
-
-async function postToEmailService(targetUrl, payload) {
-  const res = await fetch(targetUrl, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-    signal: AbortSignal.timeout(20000),
-  });
-
-  const body = await res.text();
-  return { status: res.status, body };
-}
 
 export async function POST(req) {
   try {
@@ -53,7 +42,7 @@ export async function POST(req) {
       title,
       table,
       outro,
-      logoUrl: logoUrl || 'https://farmalogica.com.co/imagenes/logos/logo20.png',
+      logoUrl: logoUrl || DEFAULT_EMAIL_LOGO,
     };
 
     const { status, body } = await postToEmailService(targetUrl, payload);
