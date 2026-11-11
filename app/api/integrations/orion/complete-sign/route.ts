@@ -27,6 +27,12 @@ import {
  * Consentimiento legal/biométrico: a nivel PERSONA (no por documento).
  * Si el usuario ya aceptó en Orion (user-consent), no se exige checkbox otra vez.
  */
+
+/** Calienta el bundle de la ruta (evita 40–60 s de compile en el primer Firmar en dev). */
+export async function GET() {
+  return new NextResponse(null, { status: 204 });
+}
+
 export async function POST(req: Request) {
   try {
     const session = await getServerSession(authOptions);
@@ -57,63 +63,66 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'requestId inválido' }, { status: 400 });
     }
 
-    // Consentimiento guardado en el perfil Orion (abarca a la persona). La consulta corre
-    // mientras se carga el documento; la firma la espera antes de aplicarse y, si falta el
-    // consentimiento, no se firma (422).
-    const consentCheck = (async () => {
-      let personHasSigning = false;
-      let personHasBiometric = false;
-      try {
-        const consentRes = await getOrionPersonConsent(email);
-        if (consentRes.ok && consentRes.data) {
-          personHasSigning = Boolean(consentRes.data.hasSigningLegalConsent);
-          personHasBiometric = Boolean(consentRes.data.hasBiometricConsent);
-        }
-      } catch {
-        /* si falla la consulta, exigir checkbox de esta sesión */
-      }
+    // Si el panel ya mandó acceptedTerms (perfil precargado), no esperar otra ida a Orion.
+    const clientAssertedConsent =
+      body.acceptedTerms === true && (!providesFingerprint || body.acceptedBiometric === true);
+    const consentCheck = clientAssertedConsent
+      ? Promise.resolve({
+          hasSigningLegalConsent: true,
+          hasBiometricConsent: providesFingerprint ? body.acceptedBiometric === true : false,
+        })
+      : (async () => {
+          let personHasSigning = false;
+          let personHasBiometric = false;
+          try {
+            const consentRes = await getOrionPersonConsent(email);
+            if (consentRes.ok && consentRes.data) {
+              personHasSigning = Boolean(consentRes.data.hasSigningLegalConsent);
+              personHasBiometric = Boolean(consentRes.data.hasBiometricConsent);
+            }
+          } catch {
+            /* si falla la consulta, exigir checkbox de esta sesión */
+          }
 
-      const acceptedTerms = body.acceptedTerms === true || personHasSigning;
-      const acceptedBiometric = body.acceptedBiometric === true || personHasBiometric;
-      if (!acceptedTerms) {
-        throw Object.assign(new Error(SIGNING_LEGAL_CONSENT_REQUIRED_MESSAGE), { status: 422 });
-      }
-      if (providesFingerprint && !acceptedBiometric) {
-        throw Object.assign(new Error(BIOMETRIC_CONSENT_REQUIRED_MESSAGE), { status: 422 });
-      }
+          const acceptedTerms = body.acceptedTerms === true || personHasSigning;
+          const acceptedBiometric = body.acceptedBiometric === true || personHasBiometric;
+          if (!acceptedTerms) {
+            throw Object.assign(new Error(SIGNING_LEGAL_CONSENT_REQUIRED_MESSAGE), { status: 422 });
+          }
+          if (providesFingerprint && !acceptedBiometric) {
+            throw Object.assign(new Error(BIOMETRIC_CONSENT_REQUIRED_MESSAGE), { status: 422 });
+          }
 
-      // Primera aceptación: persistir en perfil sin bloquear accept-sign.
-      if (
-        (!personHasSigning && body.acceptedTerms === true) ||
-        (!personHasBiometric && body.acceptedBiometric === true && providesFingerprint)
-      ) {
-        const now = new Date().toISOString();
-        void saveOrionPersonConsent(email, {
-          ...(!personHasSigning && body.acceptedTerms === true
-            ? {
-                legalConsentAccepted: true,
-                legalConsentKind: 'ELECTRONIC' as const,
-                legalConsentVersion: SIGNING_LEGAL_CONSENT_VERSION,
-                legalConsentAcceptedAt: now,
-              }
-            : {}),
-          ...(!personHasBiometric && body.acceptedBiometric === true && providesFingerprint
-            ? {
-                biometricConsentAccepted: true,
-                biometricConsentVersion: BIOMETRIC_CONSENT_VERSION,
-                biometricConsentAcceptedAt: now,
-              }
-            : {}),
-        }).catch(() => {
-          /* no bloquear firma; el panel también intenta persistir */
-        });
-      }
-      return {
-        hasSigningLegalConsent: personHasSigning || acceptedTerms,
-        hasBiometricConsent: personHasBiometric || acceptedBiometric,
-      };
-    })();
-    // Si la firma falla antes de esperar el consentimiento, que su error no quede suelto.
+          if (
+            (!personHasSigning && body.acceptedTerms === true) ||
+            (!personHasBiometric && body.acceptedBiometric === true && providesFingerprint)
+          ) {
+            const now = new Date().toISOString();
+            void saveOrionPersonConsent(email, {
+              ...(!personHasSigning && body.acceptedTerms === true
+                ? {
+                    legalConsentAccepted: true,
+                    legalConsentKind: 'ELECTRONIC' as const,
+                    legalConsentVersion: SIGNING_LEGAL_CONSENT_VERSION,
+                    legalConsentAcceptedAt: now,
+                  }
+                : {}),
+              ...(!personHasBiometric && body.acceptedBiometric === true && providesFingerprint
+                ? {
+                    biometricConsentAccepted: true,
+                    biometricConsentVersion: BIOMETRIC_CONSENT_VERSION,
+                    biometricConsentAcceptedAt: now,
+                  }
+                : {}),
+            }).catch(() => {
+              /* no bloquear firma; el panel también intenta persistir */
+            });
+          }
+          return {
+            hasSigningLegalConsent: personHasSigning || acceptedTerms,
+            hasBiometricConsent: personHasBiometric || acceptedBiometric,
+          };
+        })();
     consentCheck.catch(() => {});
 
     // Identidad del turno: cédula y cargo vienen del modal (editables).

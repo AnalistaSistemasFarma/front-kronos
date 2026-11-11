@@ -33,10 +33,26 @@ function trimUrl(raw: string | undefined): string | null {
   return raw?.trim().replace(/\/$/, '') || null;
 }
 
-/** Tiempo que se usa ORION_FALLBACK_URL antes de volver a intentar ORION_API_BASE_URL. */
-const FALLBACK_TTL_MS = 60_000;
+/**
+ * Respaldo de Orion (2026-11-11, rendimiento de la firma). Antes el respaldo duraba 60 s y la
+ * siguiente llamada REAL (a veces la firma) volvía a probar el Orion local: si no contestaba, la
+ * pantalla esperaba hasta 15 s (lecturas) o 60 s (escrituras). Ahora:
+ *   - Con el respaldo activo, una sonda rápida (HEAD, 2 s) revisa el local EN SEGUNDO PLANO cada
+ *     30 s y, si contesta, se vuelve a él. Ninguna petición del usuario espera esa prueba.
+ *   - Sin respaldo activo, si el local no se confirmó en el último minuto, se hace la sonda antes
+ *     de usarlo (máx. 2 s; si falla, se va directo al respaldo).
+ */
+const FALLBACK_TTL_MS = 30 * 60_000;
+const PROBE_EVERY_MS = 30_000;
+const PROBE_TIMEOUT_MS = 2_000;
+const PRIMARY_FRESH_MS = 60_000;
 
-const fallbackState = globalThis as typeof globalThis & { __orionFallbackUntil?: number };
+const fallbackState = globalThis as typeof globalThis & {
+  __orionFallbackUntil?: number;
+  __orionProbeAt?: number;
+  __orionProbe?: Promise<boolean> | null;
+  __orionPrimaryOkAt?: number;
+};
 
 export function getOrionFallbackUrl(): string | null {
   const fallback = trimUrl(process.env.ORION_FALLBACK_URL);
@@ -44,11 +60,59 @@ export function getOrionFallbackUrl(): string | null {
 }
 
 export function isOrionFallbackActive(): boolean {
-  return Boolean(getOrionFallbackUrl()) && (fallbackState.__orionFallbackUntil ?? 0) > Date.now();
+  const active = Boolean(getOrionFallbackUrl()) && (fallbackState.__orionFallbackUntil ?? 0) > Date.now();
+  if (active) void probeOrionPrimary(false);
+  return active;
 }
 
 export function activateOrionFallback(): void {
   fallbackState.__orionFallbackUntil = Date.now() + FALLBACK_TTL_MS;
+}
+
+/** El Orion local acaba de contestar: no hace falta sondearlo por un rato. */
+export function markOrionPrimaryOk(): void {
+  fallbackState.__orionPrimaryOkAt = Date.now();
+}
+
+/**
+ * Sonda del Orion local: cualquier respuesta HTTP (incluso 401/404) = está vivo. Una sola en vuelo.
+ * Con `force` no respeta el intervalo (la usa ensureOrionRoute antes de una llamada).
+ */
+function probeOrionPrimary(force: boolean): Promise<boolean> {
+  const primary = trimUrl(process.env.ORION_API_BASE_URL);
+  if (!primary) return Promise.resolve(false);
+  if (fallbackState.__orionProbe) return fallbackState.__orionProbe;
+  if (!force && Date.now() - (fallbackState.__orionProbeAt ?? 0) < PROBE_EVERY_MS) return Promise.resolve(false);
+  fallbackState.__orionProbeAt = Date.now();
+  fallbackState.__orionProbe = fetch(primary, { method: 'HEAD', cache: 'no-store', signal: AbortSignal.timeout(PROBE_TIMEOUT_MS) })
+    .then(() => {
+      if ((fallbackState.__orionFallbackUntil ?? 0) > Date.now()) {
+        console.info(`[orion] ${primary} volvió a responder; se deja el respaldo`);
+      }
+      fallbackState.__orionFallbackUntil = 0;
+      markOrionPrimaryOk();
+      return true;
+    })
+    .catch(() => false)
+    .finally(() => {
+      fallbackState.__orionProbe = null;
+    });
+  return fallbackState.__orionProbe;
+}
+
+/**
+ * Antes de llamar a Orion: si se va a usar el local y no se confirmó hace poco, sondearlo (máx. 2 s).
+ * Si no contesta y hay respaldo, se activa el respaldo para esta y las siguientes llamadas.
+ */
+export async function ensureOrionRoute(): Promise<void> {
+  const fallback = getOrionFallbackUrl();
+  if (!fallback || isOrionFallbackActive()) return;
+  if (Date.now() - (fallbackState.__orionPrimaryOkAt ?? 0) < PRIMARY_FRESH_MS) return;
+  const alive = await probeOrionPrimary(true);
+  if (!alive) {
+    console.warn(`[orion] ${trimUrl(process.env.ORION_API_BASE_URL)} no responde; usando ${fallback}`);
+    activateOrionFallback();
+  }
 }
 
 export function getOrionConfig(): OrionConfig {

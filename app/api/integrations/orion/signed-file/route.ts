@@ -89,13 +89,12 @@ export async function GET(req: Request) {
 
       let canViewVersions = false;
       try {
-        const ctx = await getRequestOrionContext(pool, requestId);
         const isSigner = isOrionDocumentSigner(state, me);
-        const actorId =
-          (await resolveOrionActorUserId(pool, {
-            userId,
-            email: me,
-          })) || userId;
+        const [ctx, actorIdRaw] = await Promise.all([
+          getRequestOrionContext(pool, requestId),
+          resolveOrionActorUserId(pool, { userId, email: me }),
+        ]);
+        const actorId = actorIdRaw || userId;
         const isFlowResponsible = actorId
           ? await userIsOrionFlowSignatureResponsible(pool, requestId, actorId)
           : false;
