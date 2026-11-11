@@ -53,9 +53,9 @@ export const rutaLineasVenta = (desde: string, hasta: string) =>
   `view.svc/${VISTA_LINEAS}?$filter=Fecha ge '${desde}' and Fecha le '${hasta}'`;
 
 const esNota = (l: LineaVenta) => String(l.NDocumento ?? '').trim().toLowerCase().startsWith('nota');
-const textoDe = (v: unknown, fallback = '') => {
+const textoDe = (v: unknown, fallback: string | undefined = '') => {
   const t = String(v ?? '').trim();
-  return t || fallback;
+  return t || (fallback ?? '');
 };
 const num = (v: unknown) => {
   const n = Number(v ?? 0);
