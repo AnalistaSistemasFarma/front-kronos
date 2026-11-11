@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   Alert,
   Badge,
@@ -9,6 +9,7 @@ import {
   Group,
   Modal,
   Stack,
+  Switch,
   Text,
 } from '@mantine/core';
 import { IconAlertTriangle, IconCamera, IconCheck } from '@tabler/icons-react';
@@ -55,6 +56,57 @@ export default function AgentDetailModal({
   const [subiendo, setSubiendo] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [listo, setListo] = useState(false);
+
+  // Marca «Agente de desarrollo» (agent.es_desarrollo). Solo se consulta si
+  // quien mira es administrador; el endpoint vuelve a validarlo.
+  const codigo = agent?.code ?? null;
+  const [esDesarrollo, setEsDesarrollo] = useState<boolean | null>(null);
+  const [guardandoDev, setGuardandoDev] = useState(false);
+  const [avisoDev, setAvisoDev] = useState<{ ok: boolean; texto: string } | null>(null);
+
+  useEffect(() => {
+    setEsDesarrollo(null);
+    setAvisoDev(null);
+    if (!puedeEditar || !abierto || !codigo) return;
+    let vigente = true;
+    void fetch(`/api/chat/agents/${encodeURIComponent(codigo)}/desarrollo`, { cache: 'no-store' })
+      .then(async (res) => {
+        const data = await res.json().catch(() => null);
+        if (!vigente) return;
+        if (!res.ok) throw new Error(data?.error ?? `No se pudo leer la marca (${res.status}).`);
+        setEsDesarrollo(data?.esDesarrollo === true);
+      })
+      .catch((e: Error) => {
+        if (vigente) setAvisoDev({ ok: false, texto: e.message });
+      });
+    return () => {
+      vigente = false;
+    };
+  }, [puedeEditar, abierto, codigo]);
+
+  const cambiarDesarrollo = async (valor: boolean) => {
+    if (!codigo) return;
+    setGuardandoDev(true);
+    setAvisoDev(null);
+    try {
+      const res = await fetch(`/api/chat/agents/${encodeURIComponent(codigo)}/desarrollo`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ esDesarrollo: valor }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) throw new Error(data?.error ?? `No se pudo guardar (${res.status}).`);
+      setEsDesarrollo(data?.esDesarrollo === true);
+      setAvisoDev({
+        ok: true,
+        texto: valor ? 'Quedó marcado como agente de desarrollo.' : 'Ya no es agente de desarrollo.',
+      });
+    } catch (e) {
+      setAvisoDev({ ok: false, texto: (e as Error).message });
+    } finally {
+      setGuardandoDev(false);
+    }
+  };
 
   if (!agent) return null;
   const view = describeAgentStatus(status);
@@ -193,6 +245,29 @@ export default function AgentDetailModal({
             ))}
           </Group>
         </Box>
+
+        {puedeEditar && (
+          <Box>
+            {avisoDev && (
+              <Alert
+                mb='xs'
+                color={avisoDev.ok ? 'green' : 'red'}
+                radius='md'
+                icon={avisoDev.ok ? <IconCheck size={16} /> : <IconAlertTriangle size={16} />}
+                p='xs'
+              >
+                <Text size='xs'>{avisoDev.texto}</Text>
+              </Alert>
+            )}
+            <Switch
+              label='Agente de desarrollo'
+              description='Puede trabajar código en proyectos con política de desarrollo.'
+              checked={esDesarrollo === true}
+              disabled={esDesarrollo === null || guardandoDev}
+              onChange={(event) => void cambiarDesarrollo(event.currentTarget.checked)}
+            />
+          </Box>
+        )}
 
         {puedeEditar && (
           <Box>
