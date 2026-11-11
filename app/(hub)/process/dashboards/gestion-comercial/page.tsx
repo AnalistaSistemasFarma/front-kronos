@@ -35,7 +35,11 @@ import DashboardPageShell from '../../../../../components/dashboard/DashboardPag
 import { KpiStatCard, RankedListCard } from '../../../../../components/dashboard/actividades/ActividadesUi';
 import { useDashboardChartPalette } from '../../../../../components/dashboard/useDashboardChartPalette';
 import { hoyBogota, type GestionComercialResultado } from '../../../../../lib/dashboards/gestion-comercial/calculo';
+import type { LineasResultado } from '../../../../../lib/dashboards/gestion-comercial/lineas';
 import type { EmpresaGestionComercial } from '../../../../../lib/dashboards/gestion-comercial/access';
+
+/** Resultado de la API: base (etapa 1) + bloque de líneas (etapa 2, puede venir null). */
+type GestionComercialApi = GestionComercialResultado & { lineas: LineasResultado | null };
 
 /**
  * Dashboard de gestión comercial (etapa 1): estructura visual y funcional,
@@ -44,9 +48,10 @@ import type { EmpresaGestionComercial } from '../../../../../lib/dashboards/gest
  * datos agregados en vivo desde SAP. Consume /api/dashboards/gestion-comercial.
  * Solo lectura. Acceso: subproceso «Dashboard de gestión comercial» por empresa.
  *
- * Las secciones de productos, pedidos y detalle quedan como estructura; su
- * contenido con desglose por línea de documento se completa en la etapa 2 de
- * validación de datos.
+ * Etapa 2: las secciones de productos, pedidos y detalle se alimentan del
+ * desglose por línea de la vista OLP_IND_VentasB1SLQuery (líneas de facturas y
+ * notas crédito del mes del corte), con venta neta, unidades y margen. Lo que
+ * aún queda fuera (presupuesto, fletes) depende de maestros externos a SAP.
  */
 
 const money = (v: number | null | undefined) => (v == null ? '—' : `$ ${Math.round(v).toLocaleString('es-CO')}`);
@@ -68,7 +73,7 @@ export default function DashboardGestionComercialPage() {
   const [sinAcceso, setSinAcceso] = useState(false);
   const [companyId, setCompanyId] = useState<string | null>(null);
   const [corte, setCorte] = useState(hoyBogota());
-  const [data, setData] = useState<GestionComercialResultado | null>(null);
+  const [data, setData] = useState<GestionComercialApi | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -98,7 +103,7 @@ export default function DashboardGestionComercialPage() {
       const r = await fetch(`/api/dashboards/gestion-comercial?${params}`, { cache: 'no-store' });
       const d = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(d.error || 'No se pudo cargar el dashboard');
-      setData(d as GestionComercialResultado);
+      setData(d as GestionComercialApi);
     } catch (e) {
       setError((e as Error).message);
       setData(null);
@@ -178,7 +183,7 @@ export default function DashboardGestionComercialPage() {
   return (
     <DashboardPageShell
       title='Dashboard de gestión comercial'
-      description='Seguimiento diario, resumen, cierre, clientes y vendedores de la operación comercial, en vivo desde SAP. Replica la estructura del tablero comercial de BI.'
+      description='Seguimiento diario, resumen, cierre, clientes, vendedores, productos, pedidos y detalle de la operación comercial, en vivo desde SAP. Replica la estructura del tablero comercial de BI.'
       toolbar={empresas && empresas.length > 0 ? toolbar : undefined}
     >
       {empresas === null && <Group justify='center' py='xl'><Loader /></Group>}
@@ -393,29 +398,152 @@ export default function DashboardGestionComercialPage() {
             </Card>
           </Tabs.Panel>
 
-          {/* ---------- PRODUCTOS (estructura, etapa 2) ---------- */}
+          {/* ---------- PRODUCTOS (etapa 2: vista OLP_IND_VentasB1SLQuery) ---------- */}
           <Tabs.Panel value='productos' pt='md'>
-            <Alert color='blue' variant='light' title='Sección en construcción (etapa 2)'>
-              El desglose por producto, línea terapéutica, unidades y precio promedio requiere el detalle de líneas de
-              cada documento de SAP (DocumentLines). Se incorpora en la etapa 2, sobre esta misma estructura, una vez
-              validados los datos.
-            </Alert>
+            {!data.lineas ? (
+              <Alert color='yellow' variant='light' title='Detalle de líneas no disponible'>
+                No se pudo leer la vista de líneas de venta de SAP en este momento. Los indicadores por cabecera
+                (seguimiento diario, clientes y vendedores) sí están disponibles.
+              </Alert>
+            ) : (
+              <>
+                <SimpleGrid cols={{ base: 1, sm: 2, lg: 4 }} mb='md'>
+                  <KpiStatCard label='Venta neta (líneas)' value={moneyShort(data.lineas.kpis.ventaNetaLineas)} hint={money(data.lineas.kpis.ventaNetaLineas)} color={colorActual} icon={IconCash} refreshing={loading} />
+                  <KpiStatCard label='Unidades' value={num(Math.round(data.lineas.kpis.unidades))} hint='Cantidad neta del periodo' color={colorActual} icon={IconReceipt2} refreshing={loading} />
+                  <KpiStatCard label='Margen' value={moneyShort(data.lineas.kpis.margen)} hint={`Margen ${pct(data.lineas.kpis.margenPct)}`} color={colorAnterior} icon={IconTrendingUp} refreshing={loading} />
+                  <KpiStatCard label='Productos distintos' value={num(data.lineas.kpis.productosDistintos)} hint={`${num(data.lineas.kpis.lineasTerapeuticas)} líneas terapéuticas`} color={colorActual} icon={IconChartBar} refreshing={loading} />
+                </SimpleGrid>
+
+                <SimpleGrid cols={{ base: 1, lg: 2 }} mb='md'>
+                  <RankedListCard title='Líneas terapéuticas con mayor venta' description='Venta neta por U_IT_LineaTerapeutica.' items={data.lineas.lineasTerapeuticas.map((t) => ({ name: t.nombre, value: t.venta }))} formatValue={money} emptyMessage='Sin líneas terapéuticas en el periodo.' />
+                  <RankedListCard title='Productos con mayor venta' description='Venta neta por producto.' items={data.lineas.topProductos.slice(0, 10).map((p) => ({ name: p.nombre, value: p.venta }))} formatValue={money} emptyMessage='Sin productos en el periodo.' />
+                </SimpleGrid>
+
+                <Card shadow='sm' radius='md' withBorder p={0}>
+                  <Table.ScrollContainer minWidth={760} mah={520}>
+                    <Table striped highlightOnHover stickyHeader>
+                      <Table.Thead>
+                        <Table.Tr>
+                          <Table.Th>#</Table.Th>
+                          <Table.Th>Producto</Table.Th>
+                          <Table.Th>Código</Table.Th>
+                          <Table.Th ta='right'>Venta neta</Table.Th>
+                          <Table.Th ta='right'>Unidades</Table.Th>
+                          <Table.Th ta='right'>Margen</Table.Th>
+                          <Table.Th ta='right'>Margen %</Table.Th>
+                          <Table.Th ta='right'>Part.</Table.Th>
+                        </Table.Tr>
+                      </Table.Thead>
+                      <Table.Tbody>
+                        {data.lineas.topProductos.map((p, i) => (
+                          <Table.Tr key={p.codigo}>
+                            <Table.Td>{i + 1}</Table.Td>
+                            <Table.Td fw={500}>{p.nombre}</Table.Td>
+                            <Table.Td c='dimmed'>{p.codigo}</Table.Td>
+                            <Table.Td ta='right'>{money(p.venta)}</Table.Td>
+                            <Table.Td ta='right'>{num(Math.round(p.unidades))}</Table.Td>
+                            <Table.Td ta='right'>{money(p.margen)}</Table.Td>
+                            <Table.Td ta='right'>{pct(p.margenPct)}</Table.Td>
+                            <Table.Td ta='right'>{pct(p.participacion)}</Table.Td>
+                          </Table.Tr>
+                        ))}
+                      </Table.Tbody>
+                    </Table>
+                  </Table.ScrollContainer>
+                </Card>
+              </>
+            )}
           </Tabs.Panel>
 
-          {/* ---------- PEDIDOS (estructura, etapa 2) ---------- */}
+          {/* ---------- PEDIDOS (etapa 2) ---------- */}
           <Tabs.Panel value='pedidos' pt='md'>
-            <Alert color='blue' variant='light' title='Sección en construcción (etapa 2)'>
-              La trazabilidad de pedidos facturados (composición de cada pedido: productos, unidades y valores) se
-              construye en la etapa 2 con el detalle de líneas y la relación pedido-factura de SAP.
-            </Alert>
+            {!data.lineas ? (
+              <Alert color='yellow' variant='light' title='Detalle de líneas no disponible'>
+                No se pudo leer la vista de líneas de venta de SAP en este momento.
+              </Alert>
+            ) : (
+              <Card shadow='sm' radius='md' withBorder p={0}>
+                <Group justify='space-between' p='md' pb='xs'>
+                  <Title order={3} fz={16}>Pedidos facturados (por orden de compra)</Title>
+                  <Badge variant='light'>{num(data.lineas.kpis.pedidos)}</Badge>
+                </Group>
+                <Table.ScrollContainer minWidth={640} mah={520}>
+                  <Table striped highlightOnHover stickyHeader>
+                    <Table.Thead>
+                      <Table.Tr>
+                        <Table.Th>Orden de compra</Table.Th>
+                        <Table.Th>Cliente</Table.Th>
+                        <Table.Th ta='right'>Venta neta</Table.Th>
+                        <Table.Th ta='right'>Líneas</Table.Th>
+                        <Table.Th ta='right'>Fecha</Table.Th>
+                      </Table.Tr>
+                    </Table.Thead>
+                    <Table.Tbody>
+                      {data.lineas.pedidos.map((p) => (
+                        <Table.Tr key={p.ordenCompra}>
+                          <Table.Td fw={500}>{p.ordenCompra}</Table.Td>
+                          <Table.Td>{p.cliente}</Table.Td>
+                          <Table.Td ta='right'>{money(p.venta)}</Table.Td>
+                          <Table.Td ta='right'>{num(p.lineas)}</Table.Td>
+                          <Table.Td ta='right'>{p.fecha ?? '—'}</Table.Td>
+                        </Table.Tr>
+                      ))}
+                      {data.lineas.pedidos.length === 0 && (
+                        <Table.Tr><Table.Td colSpan={5}><Text size='sm' c='dimmed' ta='center' py='md'>Sin pedidos con orden de compra en el periodo.</Text></Table.Td></Table.Tr>
+                      )}
+                    </Table.Tbody>
+                  </Table>
+                </Table.ScrollContainer>
+              </Card>
+            )}
           </Tabs.Panel>
 
-          {/* ---------- DETALLE DE VENTAS (estructura, etapa 2) ---------- */}
+          {/* ---------- DETALLE DE VENTAS (etapa 2) ---------- */}
           <Tabs.Panel value='detalle' pt='md'>
-            <Alert color='blue' variant='light' title='Sección en construcción (etapa 2)'>
-              La consulta línea a línea (fecha, factura, pedido, producto, cliente, vendedor, unidades y valor) se
-              habilita en la etapa 2, paginada en el servidor y respetando los filtros de la barra superior.
-            </Alert>
+            {!data.lineas ? (
+              <Alert color='yellow' variant='light' title='Detalle de líneas no disponible'>
+                No se pudo leer la vista de líneas de venta de SAP en este momento.
+              </Alert>
+            ) : (
+              <Card shadow='sm' radius='md' withBorder p={0}>
+                <Group justify='space-between' p='md' pb='xs'>
+                  <Title order={3} fz={16}>Detalle de líneas</Title>
+                  <Text size='xs' c='dimmed'>{num(data.lineas.kpis.totalLineas)} líneas · muestra {num(data.lineas.detalle.length)}</Text>
+                </Group>
+                <Table.ScrollContainer minWidth={900} mah={560}>
+                  <Table striped highlightOnHover stickyHeader fz='xs'>
+                    <Table.Thead>
+                      <Table.Tr>
+                        <Table.Th>Fecha</Table.Th>
+                        <Table.Th>Tipo</Table.Th>
+                        <Table.Th>Doc.</Table.Th>
+                        <Table.Th>Cliente</Table.Th>
+                        <Table.Th>Producto</Table.Th>
+                        <Table.Th>Línea terapéutica</Table.Th>
+                        <Table.Th ta='right'>Cant.</Table.Th>
+                        <Table.Th ta='right'>Valor</Table.Th>
+                        <Table.Th>Vendedor</Table.Th>
+                      </Table.Tr>
+                    </Table.Thead>
+                    <Table.Tbody>
+                      {data.lineas.detalle.map((d, i) => (
+                        <Table.Tr key={`${d.documento}-${i}`}>
+                          <Table.Td>{d.fecha}</Table.Td>
+                          <Table.Td>{d.tipo}</Table.Td>
+                          <Table.Td>{d.documento ?? '—'}</Table.Td>
+                          <Table.Td>{d.cliente}</Table.Td>
+                          <Table.Td>{d.producto}</Table.Td>
+                          <Table.Td>{d.lineaTerapeutica}</Table.Td>
+                          <Table.Td ta='right'>{num(Math.round(d.cantidad))}</Table.Td>
+                          <Table.Td ta='right'>{money(d.valor)}</Table.Td>
+                          <Table.Td>{d.vendedor}</Table.Td>
+                        </Table.Tr>
+                      ))}
+                    </Table.Tbody>
+                  </Table>
+                </Table.ScrollContainer>
+              </Card>
+            )}
           </Tabs.Panel>
         </Tabs>
       )}
