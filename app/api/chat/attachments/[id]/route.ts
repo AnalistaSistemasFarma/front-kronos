@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '../../../../../lib/prisma';
 import { assertConversationOwnership } from '../../../../../lib/chat/access';
 import { authenticateAgent } from '../../../../../lib/chat/agent-auth';
+import { agentePuedeBajarAdjuntoDeMesa } from '../../../../../lib/proyectos/mesas';
 import {
   buildContentDisposition,
   canAccessChatAttachment,
@@ -133,13 +134,19 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       const guard = await guardConversation(String(conversation.id));
       if ('response' in guard) return notFound();
     } else {
-      const allowed = canAccessChatAttachment(
+      let allowed = canAccessChatAttachment(
         {
           conversationUserId: conversation.id_user,
           conversationAgentId: conversation.id_agent,
         },
         requester
       );
+      // MESA DE DISCUSIÓN (2026-11-11): los agentes de la mesa se pasan
+      // archivos. Con la llave del puente, un participante de ESA mesa (que no
+      // es el moderador, dueño del hilo) puede bajar sus adjuntos; nadie más.
+      if (!allowed && requester.kind === 'agent' && agentScope === 'projects' && conversation.kind === 'project') {
+        allowed = await agentePuedeBajarAdjuntoDeMesa(requester.idAgent, conversation.id);
+      }
       if (!allowed) return notFound();
 
       // Segunda vuelta para el usuario: propiedad del hilo + permiso VIGENTE
