@@ -19,6 +19,8 @@ interface Props {
 }
 interface BulkReport {
   dryRun?: boolean;
+  notified?: boolean;
+  notifyWarning?: string;
   summary: { total: number; creados: number; duplicados: number; fallidos: number; advertencias?: number };
   ok: { row: number; registro: string; docNum: number }[];
   duplicated: { row: number; registro: string; reason: string }[];
@@ -168,7 +170,19 @@ export default function BulkModal({ opened, onClose, companies, onLoaded }: Prop
                 {report.summary.advertencias ? <> · Advertencias: <b>{report.summary.advertencias}</b></> : null}{' '}
                 (de {report.summary.total})
               </Text>
+              {!report.dryRun && report.summary.creados > 0 && (
+                <Text size="sm" mt={4}>
+                  Notificación por correo:{' '}
+                  <b>{report.notified ? 'enviada' : 'no enviada'}</b>
+                </Text>
+              )}
             </Alert>
+
+            {report.notifyWarning && (
+              <Alert color="yellow" icon={<IconAlertTriangle size={18} />} title="Registros creados, pero sin notificación">
+                {report.notifyWarning}
+              </Alert>
+            )}
 
             {report.failed.length > 0 && (
               <div>
