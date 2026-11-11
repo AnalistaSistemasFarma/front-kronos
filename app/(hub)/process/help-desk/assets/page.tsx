@@ -31,7 +31,6 @@ import {
   Box,
   Flex,
   Loader,
-  ScrollArea,
   SimpleGrid,
   Tooltip,
 } from '@mantine/core';
@@ -1426,13 +1425,19 @@ function AssetsBoard() {
         >
           <LoadingOverlay visible={createLoading || listsLoading} />
 
-          <ScrollArea
-            type='auto'
-            offsetScrollbars
-            style={{ flex: 1, minHeight: 0 }}
-            // Alto disponible = viewport - márgenes (4rem) - encabezado y botones (~11rem),
-            // para que el pie con "Crear Activo" nunca tape los últimos campos.
-            mah={isMobile ? undefined : 'calc(100dvh - 15rem)'}
+          {/* Desplazamiento nativo: el ScrollArea de Mantine necesita un alto FIJO; con solo
+              `mah` cortaba el formulario en pantallas bajas (se veía la mitad de los campos y
+              no aparecía barra). Aquí el cuerpo del modal ya limita el alto (flex), y este
+              bloque se desplaza; el pie con "Crear Activo" queda siempre visible. */}
+          <Box
+            data-testid='asset-form-scroll'
+            style={{
+              flex: 1,
+              minHeight: 0,
+              overflowY: 'auto',
+              overscrollBehavior: 'contain',
+              paddingRight: 6,
+            }}
           >
             <Stack gap='md' pb='sm'>
               <Text fw={600} c='blue.7' tt='uppercase' size='xs'>
@@ -1696,7 +1701,7 @@ function AssetsBoard() {
                 )}
               </div>
             </Stack>
-          </ScrollArea>
+          </Box>
 
           <Box
             pt='md'
