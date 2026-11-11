@@ -7,12 +7,12 @@ import {
   registroExiste,
   sanitizeRecord,
 } from '../../../../lib/health-records/records';
+import { notifyCreated, toNotifyWarning } from '../../../../lib/health-records/notifications';
 import { sapLogin, sapLogout, SapError } from '../../../../lib/sap/serviceLayer';
 
 /**
  * Crea un registro sanitario en la base SAP de la empresa indicada.
  * El usuario debe tener permiso de ESCRITURA en esa empresa. El Login y la
- * creacion ocurren solo en el servidor.
  */
 export async function POST(request: NextRequest) {
   try {
@@ -62,15 +62,21 @@ export async function POST(request: NextRequest) {
         );
       }
 
-      const docNum = await crearRegistro(
-        sap,
-        company.endpoint,
-        record,
-        userName,
-        String(body.comentario ?? '').trim()
+      const comentario = String(body.comentario ?? '').trim();
+      const docNum = await crearRegistro(sap, company.endpoint, record, userName, comentario);
+
+      const notified = await notifyCreated(
+        { companyId, companyName: company.companyName },
+        [{ ...record, DocNum: docNum }],
+        comentario
       );
 
-      return NextResponse.json({ ok: true, docNum, companyId });
+      return NextResponse.json({
+        ok: true,
+        docNum,
+        companyId,
+        notifyWarning: toNotifyWarning(notified),
+      });
     } finally {
       await sapLogout(sap);
     }
