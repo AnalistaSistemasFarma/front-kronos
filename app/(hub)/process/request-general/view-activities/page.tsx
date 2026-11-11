@@ -121,6 +121,8 @@ import { nestDraftPdfRows } from '../../../../../lib/orion/attachmentNesting';
 import { isWordDraftFileName } from '../../../../../lib/orion/draftState';
 import DeleteAttachmentModal from '../../../../../components/request-general/DeleteAttachmentModal';
 import { RequestFlowHeader } from '../../../../../components/request-general/RequestFlow';
+import { RequestListNavigator } from '../../../../../components/request-general/RequestListNavigator';
+import { listHref, loadRequestListNav, type RequestListOrigin } from '../../../../../lib/requests-general/requestListNav';
 import OrionDocumentVersionsButton from '../../../../../components/orion/OrionDocumentVersionsButton';
 import { isOrionDocumentInteractionNote } from '../../../../../lib/orion/interactionNotes';
 import { partitionTasksForDisplay } from '@/lib/orion/taskProgress';
@@ -315,7 +317,13 @@ function ViewRequestPage() {
   const lastOrionFormFetchKeyRef = useRef('');
   const [orionDocuments, setOrionDocuments] = useState<Record<string, OrionSignatureState>>({});
 
+  const [listOrigin, setListOrigin] = useState<RequestListOrigin | null>(null);
   useEffect(() => {
+    setListOrigin(loadRequestListNav()?.origin ?? null);
+  }, []);
+
+  useEffect(() => {
+    let cachedTask = false;
     try {
       const storedRequest = sessionStorage.getItem('selectedRequest');
       if (storedRequest) {
@@ -326,6 +334,7 @@ function ViewRequestPage() {
           requestData.id_request_general != null &&
           (id == null || String(requestData.id) === String(id));
         if (looksLikeTask) {
+          cachedTask = true;
           setRequest(requestData);
           setOriginalRequest(requestData);
           setLoading(false);
@@ -342,6 +351,9 @@ function ViewRequestPage() {
     }
 
     if (!id && !requestIdParam) return;
+
+    // Al pasar a otra tarea (Anterior / Siguiente) no dejar la anterior en pantalla.
+    if (!cachedTask) setLoading(true);
 
     const loadTask = async () => {
       try {
@@ -1405,6 +1417,8 @@ function ViewRequestPage() {
   };
 
   const getBreadcrumbHref = (from: string) => {
+    // Abierta desde una lista (Asignadas): volver a ESA lista, que recuerda filtros y pestaña.
+    if (listOrigin) return listHref(listOrigin);
     switch (from) {
       case 'assigned-activities':
       default:
@@ -1610,6 +1624,9 @@ function ViewRequestPage() {
 
           {/* En qué va la solicitud completa y dónde está esta tarea (sin las tareas de firma). */}
           <RequestFlowHeader requestId={request.id_request_general} highlightTask={request.task} />
+
+          {/* Anterior / Siguiente por la lista de origen (como en Tickets). */}
+          <RequestListNavigator kind='task' id={Number(request.id)} />
         </Card>
 
         <div className='flex flex-col lg:flex-row gap-6'>
