@@ -54,6 +54,7 @@ import {
   IconShield,
   IconUsersGroup,
   IconLogin2,
+  IconApi,
 } from '@tabler/icons-react';
 import toast from 'react-hot-toast';
 import { notifySubprocessAssignmentsChanged } from '@/lib/process/subprocessAssignmentsEvents';
@@ -77,7 +78,7 @@ import {
   isLoginAuditMarkerSubprocess,
 } from '@/lib/auth/login-audit/constants';
 import LoginAuditPanel from '@/components/users/LoginAuditPanel';
-import { isPermisosAgentesMarkerSubprocess, PERMISOS_AGENTES_MARKER_DESCRIPTION } from '@/lib/proyectos/permisos-agentes-rules';
+import ApiPermissionsPanel from '@/components/administration/api-permissions/ApiPermissionsPanel';import { isPermisosAgentesMarkerSubprocess, PERMISOS_AGENTES_MARKER_DESCRIPTION } from '@/lib/proyectos/permisos-agentes-rules';
 import { sendMessage } from '../../../../../components/email/utils/sendMessage';
 
 const AVATAR_COLORS = ['blue', 'teal', 'violet', 'indigo', 'cyan', 'grape', 'orange'] as const;
@@ -148,10 +149,13 @@ function UserManagement() {
 
   // Pestaña «Inicios de sesión» (auditoría de seguridad, 2026-10-16): solo se muestra si
   // el servidor confirma el permiso (lib/auth/login-audit/access.ts). ?vista=inicios-sesion abre directo.
-  const [view, setView] = useState<'usuarios' | 'inicios-sesion'>(
-    searchParams.get('vista') === 'inicios-sesion' ? 'inicios-sesion' : 'usuarios'
-  );
+  // Pestaña «Permisos API» (2026-11-09): misma idea, reja en lib/api-permissions/access.ts. ?vista=permisos-api.
+  const [view, setView] = useState<'usuarios' | 'inicios-sesion' | 'permisos-api'>(() => {
+    const vista = searchParams.get('vista');
+    return vista === 'inicios-sesion' || vista === 'permisos-api' ? vista : 'usuarios';
+  });
   const [canViewLoginAudit, setCanViewLoginAudit] = useState(false);
+  const [canManageApiClients, setCanManageApiClients] = useState(false);
 
   const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
@@ -343,10 +347,20 @@ function UserManagement() {
       .then((body: { allowed?: boolean }) => {
         if (cancelled) return;
         setCanViewLoginAudit(Boolean(body?.allowed));
-        if (!body?.allowed) setView('usuarios');
+        if (!body?.allowed) setView((v) => (v === 'inicios-sesion' ? 'usuarios' : v));
       })
       .catch(() => {
         if (!cancelled) setCanViewLoginAudit(false);
+      });
+    fetch('/api/administration/api-clients/access', { cache: 'no-store' })
+      .then((r) => (r.ok ? r.json() : { allowed: false }))
+      .then((body: { allowed?: boolean }) => {
+        if (cancelled) return;
+        setCanManageApiClients(Boolean(body?.allowed));
+        if (!body?.allowed) setView((v) => (v === 'permisos-api' ? 'usuarios' : v));
+      })
+      .catch(() => {
+        if (!cancelled) setCanManageApiClients(false);
       });
     return () => {
       cancelled = true;
@@ -354,6 +368,8 @@ function UserManagement() {
   }, [session, status]);
 
   const showLoginAudit = canViewLoginAudit && view === 'inicios-sesion';
+  const showApiPermissions = canManageApiClients && view === 'permisos-api';
+  const showUsers = !showLoginAudit && !showApiPermissions;
 
   // Load department catalog for the MultiSelect (used in create/edit modals)
   useEffect(() => {
@@ -1258,13 +1274,15 @@ function UserManagement() {
                   <Text size='xs' c='dimmed'>
                     {showLoginAudit
                       ? 'Auditoría de seguridad · intentos de inicio de sesión, IP y país'
-                      : `Gestiona accesos, roles y subprocesos · ${pagination.total} usuarios`}
+                      : showApiPermissions
+                        ? 'Clientes de API · permisos, empresas y llaves de agentes e integraciones'
+                        : `Gestiona accesos, roles y subprocesos · ${pagination.total} usuarios`}
                   </Text>
                 </div>
               </Group>
             </div>
 
-            {!showLoginAudit && (
+            {showUsers && (
             <Group gap='xs' grow={!!isMobile}>
               <Button
                 size='sm'
@@ -1297,19 +1315,28 @@ function UserManagement() {
             )}
           </Flex>
 
-          {canViewLoginAudit && (
+          {(canViewLoginAudit || canManageApiClients) && (
             <Tabs
               value={view}
-              onChange={(value) => setView(value === 'inicios-sesion' ? 'inicios-sesion' : 'usuarios')}
+              onChange={(value) =>
+                setView(value === 'inicios-sesion' || value === 'permisos-api' ? value : 'usuarios')
+              }
               mt='sm'
             >
               <Tabs.List>
                 <Tabs.Tab value='usuarios' leftSection={<IconUsers size={14} />}>
                   Usuarios
                 </Tabs.Tab>
-                <Tabs.Tab value='inicios-sesion' leftSection={<IconLogin2 size={14} />}>
-                  Inicios de sesión
-                </Tabs.Tab>
+                {canViewLoginAudit && (
+                  <Tabs.Tab value='inicios-sesion' leftSection={<IconLogin2 size={14} />}>
+                    Inicios de sesión
+                  </Tabs.Tab>
+                )}
+                {canManageApiClients && (
+                  <Tabs.Tab value='permisos-api' leftSection={<IconApi size={14} />}>
+                    Permisos API
+                  </Tabs.Tab>
+                )}
               </Tabs.List>
             </Tabs>
           )}
@@ -1317,6 +1344,8 @@ function UserManagement() {
 
         {showLoginAudit ? (
           <LoginAuditPanel />
+        ) : showApiPermissions ? (
+          <ApiPermissionsPanel />
         ) : (
         <>
 

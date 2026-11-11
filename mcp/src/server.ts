@@ -13,7 +13,8 @@ import { pathToFileURL } from 'node:url';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { loadConfig } from './config.js';
-import { extractBearer, resolveScope, type AuthScope } from './auth.js';
+import { extractBearer, resolveScopeCombined, type AuthScope } from './auth.js';
+import { createDbKeyStore, type DbKeyStore } from './dbKeys.js';
 import { createFileAuditLogger, type AuditLogger } from './audit.js';
 import { registerTools, TOOL_CAPABILITIES } from './tools/index.js';
 
@@ -69,7 +70,9 @@ export function buildMcpServer(
 
 export function createApp(
   config = loadConfig(),
-  audit: AuditLogger = createFileAuditLogger(config.auditLogFile)
+  audit: AuditLogger = createFileAuditLogger(config.auditLogFile),
+  // Llaves de la base (Permisos API): caché de 60 s; las del archivo siguen como respaldo.
+  dbKeyStore: DbKeyStore | null = config.dbKeysEnabled ? createDbKeyStore() : null
 ) {
   // Una lista blanca con nombres desconocidos es un error de configuración:
   // mejor no arrancar que dejar una key con herramientas que no existen.
@@ -92,7 +95,9 @@ export function createApp(
   // Endpoint MCP. En modo stateless: una transport+server por petición.
   const handleMcp = async (req: Request, res: Response) => {
     const token = extractBearer(req.header('authorization'));
-    const scope = resolveScope(token, config.apiKeys);
+    const dbEntries = token && dbKeyStore ? await dbKeyStore.getEntries() : [];
+    const resolved = resolveScopeCombined(token, config.apiKeys, dbEntries);
+    const scope = resolved?.scope ?? null;
 
     if (!scope) {
       // 401 sin pistas sobre por qué (token ausente vs inválido).
@@ -111,6 +116,8 @@ export function createApp(
         .json({ jsonrpc: '2.0', error: { code: -32001, message: 'Unauthorized' }, id: null });
       return;
     }
+
+    if (resolved?.dbKeyId !== undefined) dbKeyStore?.touch(resolved.dbKeyId);
 
     // Lista blanca: además de no registrar las demás herramientas, se rechaza
     // en HTTP cualquier tools/call fuera de la lista (defensa en profundidad).

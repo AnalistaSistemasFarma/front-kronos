@@ -72,3 +72,6 @@ CLAUDE.md
 
 # Despliegue azul/verde de PRUEBAS (.230): sello de build por carpeta
 .bluegreen-build.json
+
+# Respaldos locales de scripts (traen datos personales: Habeas Data). Nunca al repositorio.
+scripts/_backup-*
