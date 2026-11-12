@@ -1230,10 +1230,10 @@ button.ios-process-card__head {
   animation-fill-mode: forwards;
 }
 
-/* ─── Campana de notificaciones: se mueve solo si hay sin leer (2026-11-12) ───
-   Repique rápido y notorio (ciclo de 2 s: ~1 s sonando, ~1 s de pausa), con un leve
-   crecimiento al empezar. Solo transform (fluido); se detiene con la lista abierta
-   y con «reducir movimiento». */
+/* ─── Campana de notificaciones: repica si hay sin leer (2026-11-12) ───
+   Repique rápido y notorio, 3 veces (~6 s) y luego quieta con el número rojo (WCAG 2.2.2:
+   nada se mueve más de 5 s sin parar). Vuelve a sonar solo cuando llega una nueva
+   (NotificationBell cambia el key). Solo transform/opacity; sin will-change permanente. */
 @keyframes notificationBellRing {
   0% { transform: rotate(0deg) scale(1); }
   5% { transform: rotate(26deg) scale(1.18); }
@@ -1249,8 +1249,7 @@ button.ios-process-card__head {
 
 .notification-bell-icon--ringing {
   transform-origin: 50% 10%;
-  animation: notificationBellRing 2s ease-in-out 0.3s infinite;
-  will-change: transform;
+  animation: notificationBellRing 2s ease-in-out 0.3s 3;
 }
 
 /* Ondas pequeñas alrededor del botón (dos anillos desfasados), al ritmo del repique. */
@@ -1259,32 +1258,28 @@ button.ios-process-card__head {
   70%, 100% { transform: scale(1.45); opacity: 0; }
 }
 
-.notification-bell-button--ringing {
+.notification-bell-wrap {
   position: relative;
-  overflow: visible;
+  display: inline-flex;
 }
 
-.notification-bell-button--ringing::before,
-.notification-bell-button--ringing::after {
-  content: '';
+.notification-bell-wave {
   position: absolute;
   inset: 0;
   border-radius: 999px;
   border: 2px solid var(--mantine-color-red-filled);
   opacity: 0;
   pointer-events: none;
-  animation: notificationBellWave 2s ease-out 0.3s infinite;
-  will-change: transform, opacity;
+  animation: notificationBellWave 2s ease-out 0.3s 3;
 }
 
-.notification-bell-button--ringing::after {
+.notification-bell-wave--late {
   animation-delay: 0.7s;
 }
 
 @media (prefers-reduced-motion: reduce) {
   .notification-bell-icon--ringing,
-  .notification-bell-button--ringing::before,
-  .notification-bell-button--ringing::after {
+  .notification-bell-wave {
     animation: none;
   }
 }

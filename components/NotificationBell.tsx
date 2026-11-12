@@ -98,6 +98,13 @@ export default function NotificationBell() {
   // Lista de NO leídas: es la que alimenta el polling recurrente y el badge.
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
+  // Sube cuando aumentan las no leídas: la campana vuelve a repicar (key del contenedor).
+  const [ringKey, setRingKey] = useState(0);
+  const prevUnreadRef = useRef(0);
+  useEffect(() => {
+    if (unreadCount > prevUnreadRef.current) setRingKey((k) => k + 1);
+    prevUnreadRef.current = unreadCount;
+  }, [unreadCount]);
   const [fetching, setFetching] = useState(false);
   const [mounted, setMounted] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
@@ -370,22 +377,31 @@ export default function NotificationBell() {
           color='red'
           offset={4}
         >
-          <Tooltip label='Notificaciones' withArrow>
-            <ActionIcon
-              variant='subtle'
-              color='gray'
-              className={unreadCount > 0 && !opened ? 'notification-bell-button--ringing' : undefined}
-              onClick={() => setOpened((o) => !o)}
-              aria-label={unreadCount > 0 ? `Notificaciones: ${unreadCount} sin leer` : 'Notificaciones'}
-            >
-              {/* Se mueve solo con notificaciones sin leer y con la lista cerrada (globals.css). */}
-              {unreadCount > 0 ? (
-                <IconBellRinging size={18} className={opened ? undefined : 'notification-bell-icon--ringing'} />
-              ) : (
-                <IconBell size={18} />
-              )}
-            </ActionIcon>
-          </Tooltip>
+          {/* Repica 3 veces al cargar y cada vez que llega una nueva (ringKey reinicia la animación);
+              luego queda quieta con el número rojo. Ondas en spans propios, fuera del botón
+              (ActionIcon recorta con overflow:hidden y usa ::before). Estilos en globals.css. */}
+          <span key={ringKey} className='notification-bell-wrap'>
+            {unreadCount > 0 ? (
+              <>
+                <span className='notification-bell-wave' aria-hidden />
+                <span className='notification-bell-wave notification-bell-wave--late' aria-hidden />
+              </>
+            ) : null}
+            <Tooltip label='Notificaciones' withArrow>
+              <ActionIcon
+                variant='subtle'
+                color='gray'
+                onClick={() => setOpened((o) => !o)}
+                aria-label={unreadCount > 0 ? `Notificaciones: ${unreadCount} sin leer` : 'Notificaciones'}
+              >
+                {unreadCount > 0 ? (
+                  <IconBellRinging size={18} className='notification-bell-icon--ringing' />
+                ) : (
+                  <IconBell size={18} />
+                )}
+              </ActionIcon>
+            </Tooltip>
+          </span>
         </Indicator>
       </Popover.Target>
       <Popover.Dropdown p={0} className='notification-bell-dropdown'>
