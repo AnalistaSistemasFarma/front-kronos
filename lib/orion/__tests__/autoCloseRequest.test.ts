@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { allSentOrionDocumentsSigned } from '../formValue';
+import { allPreparedOrionDocumentsSigned } from '../formValue';
 import type { OrionDraftState, OrionSignatureBagBag, OrionSignatureState } from '../types';
 
 const h = vi.hoisted(() => ({
@@ -35,31 +35,35 @@ const doc = (status: string, withSigners = true): OrionSignatureState =>
 const bag = (documents: Record<string, OrionSignatureState>, drafts: Record<string, Partial<OrionDraftState>> = {}) =>
   ({ documents, drafts }) as unknown as OrionSignatureBagBag;
 
-describe('¿quedó firmado todo lo enviado a firmar?', () => {
-  it('sí, cuando todos los enviados están firmados', () => {
-    expect(allSentOrionDocumentsSigned(bag({ a: doc('FIRMADO'), b: doc('FIRMADO') }))).toBe(true);
+describe('¿quedó firmado todo lo preparado para firma?', () => {
+  it('sí, cuando todos los documentos preparados están firmados', () => {
+    expect(allPreparedOrionDocumentsSigned(bag({ a: doc('FIRMADO'), b: doc('FIRMADO') }))).toBe(true);
   });
 
-  it('los documentos en borrador o sin firmantes no importan', () => {
-    expect(allSentOrionDocumentsSigned(bag({ a: doc('FIRMADO'), b: doc('BORRADOR'), c: doc('PENDIENTE_FIRMA', false) }))).toBe(true);
+  it('caso de Juan: el 1 firmado y el 2 en borrador (se envía mañana) → NO se cierra', () => {
+    expect(allPreparedOrionDocumentsSigned(bag({ a: doc('FIRMADO'), b: doc('BORRADOR', false) }))).toBe(false);
   });
 
-  it('no, si alguno enviado sigue en firma, devuelto o rechazado', () => {
+  it('los adjuntos sin preparar no están en el proceso, así que no impiden el cierre', () => {
+    // Solo el documento preparado está en el bag; el adjunto sin preparar nunca entró.
+    expect(allPreparedOrionDocumentsSigned(bag({ a: doc('FIRMADO') }))).toBe(true);
+  });
+
+  it('no, si alguno sigue en firma, devuelto o rechazado', () => {
     for (const status of ['EN_PROCESO', 'PENDIENTE_FIRMA', 'DEVUELTO', 'RECHAZADO']) {
-      expect(allSentOrionDocumentsSigned(bag({ a: doc('FIRMADO'), b: doc(status) }))).toBe(false);
+      expect(allPreparedOrionDocumentsSigned(bag({ a: doc('FIRMADO'), b: doc(status) }))).toBe(false);
     }
   });
 
-  it('no, si no se envió nada a firmar', () => {
-    expect(allSentOrionDocumentsSigned(bag({}))).toBe(false);
-    expect(allSentOrionDocumentsSigned(bag({ a: doc('BORRADOR') }))).toBe(false);
+  it('no, si no hay nada preparado', () => {
+    expect(allPreparedOrionDocumentsSigned(bag({}))).toBe(false);
   });
 
-  it('un Word en camino a firma lo impide; uno en elaboración o ya en PDF no', () => {
-    expect(allSentOrionDocumentsSigned(bag({ a: doc('FIRMADO') }, { w: { status: 'EN_VALIDACION_INTERNA' } }))).toBe(false);
-    expect(allSentOrionDocumentsSigned(bag({ a: doc('FIRMADO') }, { w: { status: 'EN_REVISION_CLIENTE' } }))).toBe(false);
-    expect(allSentOrionDocumentsSigned(bag({ a: doc('FIRMADO') }, { w: { status: 'EN_ELABORACION' } }))).toBe(true);
-    expect(allSentOrionDocumentsSigned(bag({ a: doc('FIRMADO') }, { w: { status: 'CONVERTIDO_PDF' } }))).toBe(true);
+  it('un Word iniciado que no ha pasado a PDF lo impide (también en elaboración)', () => {
+    for (const status of ['EN_ELABORACION', 'EN_VALIDACION_INTERNA', 'EN_REVISION_CLIENTE', 'APROBADO_CLIENTE'] as const) {
+      expect(allPreparedOrionDocumentsSigned(bag({ a: doc('FIRMADO') }, { w: { status } }))).toBe(false);
+    }
+    expect(allPreparedOrionDocumentsSigned(bag({ a: doc('FIRMADO') }, { w: { status: 'CONVERTIDO_PDF' } }))).toBe(true);
   });
 });
 

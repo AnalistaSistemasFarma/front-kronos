@@ -2,7 +2,7 @@ import sql from 'mssql';
 import { ORION_SIGNATURE_FIELD_TYPE } from './fieldType';
 import {
   adoptLegacyOrionDocument,
-  allSentOrionDocumentsSigned,
+  allPreparedOrionDocumentsSigned,
   anyOrionDocumentRejected,
   emptyOrionFormBag,
   findOrionDocumentByExternalRef,
@@ -1060,8 +1060,9 @@ export async function applyOrionWebhookToRequest(
           : 'Actualización de firma digital (Orion).');
 
   const allRejected = anyOrionDocumentRejected(bag) && statusUpper === 'RECHAZADO';
-  // Solo cuentan los documentos enviados a firmar (los de borrador no importan; 2026-11-12).
-  const allSigned = allSentOrionDocumentsSigned(bag) && allSignersCompleted(state.signers);
+  // Cuentan todos los documentos preparados, también en borrador; solo se omiten los adjuntos
+  // que nunca se prepararon para firma (2026-11-12).
+  const allSigned = allPreparedOrionDocumentsSigned(bag) && allSignersCompleted(state.signers);
 
   if (allRejected || (statusUpper === 'RECHAZADO' && Object.keys(bag.documents).length <= 1)) {
     // Rechazo: cierra turnos de firma de ese flujo; NO finaliza la solicitud.

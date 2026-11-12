@@ -88,6 +88,6 @@ export async function closeRequestWhenAllSigned(
   return closeRequestGeneral(pool, {
     requestId: params.requestId,
     closedByUserId: params.closedByUserId,
-    resolution: 'Solicitud cerrada automáticamente: todos los documentos enviados a firmar quedaron firmados.',
+    resolution: 'Solicitud cerrada automáticamente: todos los documentos preparados para firma quedaron firmados.',
   });
 }
