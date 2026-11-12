@@ -26,6 +26,7 @@ import {
   IconClock,
   IconMessages,
   IconMessageCircle,
+  IconPaperclip,
   IconPlayerPause,
   IconPlayerPlay,
   IconPlayerSkipForward,
@@ -98,9 +99,21 @@ interface EventoDto {
   createdAt: string;
 }
 
+interface ArchivoDto {
+  idAttachment: number;
+  nombre: string;
+  idAgent: number;
+  agente: string;
+  ronda: number | null;
+  downloadUrl: string;
+  createdAt: string;
+}
+
 interface DetalleDto extends MesaDto {
   estadosAgentes: { idAgent: number; state: string; label: string | null; updatedAt: string }[];
   eventos: EventoDto[];
+  /** Archivos que se pasaron los agentes (lo más reciente primero). */
+  archivos?: ArchivoDto[];
 }
 
 const REFRESCO_MS = 10_000;
@@ -158,6 +171,7 @@ const ICONO_EVENTO: Record<string, React.ReactNode> = {
   reanudada: <IconPlayerPlay size={14} />,
   cerrada: <IconPlayerStop size={14} />,
   ronda_ahora: <IconPlayerSkipForward size={14} />,
+  archivo_compartido: <IconPaperclip size={14} />,
 };
 
 function textoEvento(e: EventoDto, mesa: MesaDto): { titulo: string; texto: string | null } {
@@ -173,6 +187,8 @@ function textoEvento(e: EventoDto, mesa: MesaDto): { titulo: string; texto: stri
       return { titulo: `${nombre} no respondió a tiempo`, texto: 'La mesa siguió con el turno siguiente.' };
     case 'tope':
       return { titulo: 'Se llegó al máximo de turnos del día', texto: 'La mesa sigue mañana.' };
+    case 'archivo_compartido':
+      return { titulo: e.detalle ?? `${nombre} compartió un archivo`, texto: null };
     default:
       return { titulo: e.detalle ?? e.tipo, texto: null };
   }
@@ -359,6 +375,30 @@ export default function SeccionMesas({
                 </Button>
               )}
             </Group>
+
+            {detalle && (detalle.archivos?.length ?? 0) > 0 && (
+              <>
+                <Text fw={600} size='sm' mt='xs'>
+                  Archivos compartidos
+                </Text>
+                <Stack gap={4} data-testid='mesa-archivos'>
+                  {detalle.archivos!.map((a) => (
+                    <Group key={a.idAttachment} gap={6} wrap='nowrap'>
+                      <IconPaperclip size={14} style={{ flexShrink: 0 }} />
+                      <Text size='sm' style={{ minWidth: 0, overflowWrap: 'anywhere' }}>
+                        <a href={a.downloadUrl} target='_blank' rel='noopener noreferrer'>
+                          {a.nombre}
+                        </a>{' '}
+                        <Text span size='xs' c='dimmed'>
+                          · lo compartió {a.agente}
+                          {a.ronda ? ` en la ronda ${a.ronda}` : ''} · {hora(a.createdAt)}
+                        </Text>
+                      </Text>
+                    </Group>
+                  ))}
+                </Stack>
+              </>
+            )}
 
             <Text fw={600} size='sm' mt='xs'>
               Lo que ha pasado

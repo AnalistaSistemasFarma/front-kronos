@@ -25,23 +25,8 @@ import {
   SIGNING_LEGAL_COPY,
 } from '../../lib/orion/signingLegalConsent';
 
-/** Respuesta de GET /api/integrations/orion/user-profile. */
-export type SignerTurnPreview = {
-  fullName: string | null;
-  idDocumentType: string | null;
-  idNumber: string | null;
-  jobTitle: string | null;
-  companyName: string | null;
-  hasSignature: boolean;
-  signatureDataUrl: string | null;
-  hasFingerprint: boolean;
-  hasSigningLegalConsent: boolean;
-  hasBiometricConsent: boolean;
-  missingInOrion: Array<'fullName' | 'idNumber' | 'jobTitle'>;
-  suggested: { fullName: string | null; idNumber: string | null };
-  signatureProfileUrl: string | null;
-  fingerprintProfileUrl: string | null;
-};
+import type { SignerTurnPreview } from '@/lib/orion/userProfileClient';
+export type { SignerTurnPreview };
 
 export type SignerTurnConfirmation = {
   acceptedTerms: boolean;
