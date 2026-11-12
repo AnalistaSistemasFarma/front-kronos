@@ -15,6 +15,8 @@
  * reales de OLP (2026-11, facturas y notas crédito).
  */
 
+import { SELECT_NUEVO } from './esquema';
+
 /** Una línea de venta tal como la devuelve la vista OLP_IND_VentasB1SLQuery. */
 export interface LineaVenta {
   NDocumento?: string; // 'Facturas ' | 'Notas Credito'
@@ -47,10 +49,11 @@ export const VISTA_LINEAS = 'OLP_IND_VentasB1SLQuery';
 /**
  * Ruta OData de solo lectura de la vista de líneas de venta entre dos fechas.
  * El campo de fecha de la vista se llama `Fecha` (no `DocDate`). El conector
- * exige SIEMPRE un rango de fechas acotado en el $filter.
+ * exige SIEMPRE un rango de fechas acotado en el $filter, y la vista se consulta
+ * SIEMPRE con $select explícito (ver ./esquema).
  */
 export const rutaLineasVenta = (desde: string, hasta: string) =>
-  `view.svc/${VISTA_LINEAS}?$filter=Fecha ge '${desde}' and Fecha le '${hasta}'`;
+  `view.svc/${VISTA_LINEAS}?$select=${SELECT_NUEVO.join(',')}&$filter=Fecha ge '${desde}' and Fecha le '${hasta}'`;
 
 const esNota = (l: LineaVenta) => String(l.NDocumento ?? '').trim().toLowerCase().startsWith('nota');
 const textoDe = (v: unknown, fallback: string | undefined = '') => {

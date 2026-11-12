@@ -6,7 +6,14 @@ import {
   getGestionComercialEmpresas,
 } from '../../../../lib/dashboards/gestion-comercial/access';
 import { parseCorte, iso } from '../../../../lib/dashboards/gestion-comercial/calculo';
-import type { LineaVenta } from '../../../../lib/dashboards/gestion-comercial/lineas';
+import {
+  esErrorEsquemaViejo,
+  esquemaEnCache,
+  guardarEsquema,
+  llaveEsquema,
+  normalizarLinea,
+  type EsquemaVentas,
+} from '../../../../lib/dashboards/gestion-comercial/esquema';
 import {
   aFila,
   habilesDelMes,
@@ -26,6 +33,8 @@ import { sapGet, sapLogin, sapLogout, SapError, type SapSession } from '../../..
  *        (1) el mes del corte hasta el corte, (2) el mismo lapso del mes anterior
  *        y (3) el mismo lapso del año anterior. Tres consultas acotadas por fecha,
  *        sin recorrer documentos. La agregación por filtros se hace en la página.
+ *        Siempre con $select explícito y detección del esquema de la vista por
+ *        empresa y ambiente (lib/dashboards/gestion-comercial/esquema.ts).
  *
  * Acceso: subproceso «Dashboard de gestión comercial»
  * (/process/dashboards/gestion-comercial) asignado al usuario en la empresa.
@@ -53,6 +62,8 @@ async function paginaConReintento<T>(sap: SapSession, path: string): Promise<T> 
     } catch (e) {
       ultimo = e;
       if (e instanceof SapError && (e.status === 401 || e.status === 403)) throw e;
+      // Esquema viejo de la vista: no es intermitente, se resuelve con el otro $select.
+      if (e instanceof SapError && esErrorEsquemaViejo(e.status, e.friendly)) throw e;
       await espera(400 * (intento + 1));
     }
   }
@@ -60,19 +71,42 @@ async function paginaConReintento<T>(sap: SapSession, path: string): Promise<T> 
 }
 
 /** Lee todas las páginas de la vista para un rango (siguiendo nextLink), con reintento por página. */
-async function leer(sap: SapSession, desde: string, hasta: string): Promise<Fila[]> {
+async function leer(sap: SapSession, desde: string, hasta: string, esquema: EsquemaVentas): Promise<Fila[]> {
   const out: Fila[] = [];
-  let next: string | null = rutaVistaVentas(desde, hasta);
+  let next: string | null = rutaVistaVentas(desde, hasta, esquema);
   while (next && out.length < CAP) {
-    const page: { value?: LineaVenta[]; 'odata.nextLink'?: string; '@odata.nextLink'?: string } =
+    const page: { value?: Record<string, unknown>[]; 'odata.nextLink'?: string; '@odata.nextLink'?: string } =
       await paginaConReintento(sap, next);
-    for (const l of page.value ?? []) out.push(aFila(l));
+    for (const l of page.value ?? []) out.push(aFila(normalizarLinea(l), esquema));
     const link = page['@odata.nextLink'] ?? page['odata.nextLink'] ?? null;
     next = link ? link.replace(/^\/+/, '') : null;
     // nextLink de view.svc puede venir relativo a view.svc/ o a /b1s/v1/.
     if (next && !next.startsWith('view.svc/') && next.startsWith(VISTA_PREFIJO)) next = `view.svc/${next}`;
   }
   return out.slice(0, CAP);
+}
+
+/**
+ * Primera lectura con detección del esquema: usa el de la caché (por empresa y
+ * ambiente) o prueba el nuevo; si la vista no tiene `NDocumento`, pasa al viejo.
+ */
+async function leerDetectando(
+  sap: SapSession,
+  llave: string,
+  desde: string,
+  hasta: string
+): Promise<{ filas: Fila[]; esquema: EsquemaVentas }> {
+  const inicial = esquemaEnCache(llave) ?? 'nuevo';
+  try {
+    const filas = await leer(sap, desde, hasta, inicial);
+    guardarEsquema(llave, inicial);
+    return { filas, esquema: inicial };
+  } catch (e) {
+    if (!(e instanceof SapError) || !esErrorEsquemaViejo(e.status, e.friendly) || inicial === 'viejo') throw e;
+    const filas = await leer(sap, desde, hasta, 'viejo');
+    guardarEsquema(llave, 'viejo');
+    return { filas, esquema: 'viejo' };
+  }
 }
 
 export async function GET(request: NextRequest) {
@@ -112,24 +146,34 @@ export async function GET(request: NextRequest) {
     const avisos: string[] = [];
     const sap = await sapLogin(acceso.endpoint);
     let filas: Fila[];
+    let esquema: EsquemaVentas;
     let filasAnterior: Fila[] = [];
     let filasAnio: Fila[] = [];
     try {
-      filas = await leer(sap, r.actual.desde, r.actual.hasta);
+      ({ filas, esquema } = await leerDetectando(
+        sap,
+        llaveEsquema(acceso.endpoint.baseUrl, acceso.endpoint.companyDB),
+        r.actual.desde,
+        r.actual.hasta
+      ));
       try {
-        filasAnterior = await leer(sap, r.anterior.desde, r.anterior.hasta);
+        filasAnterior = await leer(sap, r.anterior.desde, r.anterior.hasta, esquema);
       } catch (e) {
         console.error('Tablero comercial: mes anterior no disponible', e);
         avisos.push('No se pudo leer el mes anterior; los comparativos mensuales quedan vacíos.');
       }
       try {
-        filasAnio = await leer(sap, r.anioAnterior.desde, r.anioAnterior.hasta);
+        filasAnio = await leer(sap, r.anioAnterior.desde, r.anioAnterior.hasta, esquema);
       } catch (e) {
         console.error('Tablero comercial: año anterior no disponible', e);
         avisos.push('No se pudo leer el año anterior; los comparativos anuales quedan vacíos.');
       }
     } finally {
       await sapLogout(sap);
+    }
+    avisos.push('El número de documento que se muestra es el del asiento contable: la vista de SAP no entrega hoy el número de factura de forma confiable.');
+    if (esquema === 'viejo') {
+      avisos.push('La vista de ventas de esta empresa está en su versión anterior: línea terapéutica, ciudad y pedidos quedan «No disponible».');
     }
     if (filas.length >= CAP) avisos.push(`Se alcanzó el tope de ${CAP.toLocaleString('es-CO')} líneas; el mes puede estar incompleto.`);
 
@@ -146,10 +190,18 @@ export async function GET(request: NextRequest) {
       filasAnterior,
       filasAnio,
       avisos,
+      esquema,
     };
     return NextResponse.json(datos, { headers: { 'Cache-Control': 'no-store' } });
   } catch (error) {
-    if (error instanceof SapError) return NextResponse.json({ error: error.friendly }, { status: error.status });
+    if (error instanceof SapError) {
+      console.error('Tablero comercial: error de SAP', error.status, error.friendly);
+      const msg =
+        error.status >= 500
+          ? 'La vista de ventas de SAP (OLP_IND_VentasB1SLQuery) no responde en este ambiente. Intente de nuevo en unos minutos; si persiste, hay que refrescar la vista en el Service Layer.'
+          : error.friendly;
+      return NextResponse.json({ error: msg }, { status: error.status });
+    }
     console.error('Error en tablero comercial:', error);
     return NextResponse.json({ error: 'Error interno' }, { status: 500 });
   }
