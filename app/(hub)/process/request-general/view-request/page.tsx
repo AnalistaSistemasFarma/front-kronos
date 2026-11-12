@@ -122,6 +122,7 @@ import { nestDraftPdfRows } from '../../../../../lib/orion/attachmentNesting';
 import { isWordDraftFileName } from '../../../../../lib/orion/draftState';
 import DeleteAttachmentModal from '../../../../../components/request-general/DeleteAttachmentModal';
 import { RequestFlowHeader } from '../../../../../components/request-general/RequestFlow';
+import { RequestListNavigator } from '../../../../../components/request-general/RequestListNavigator';
 import OrionDocumentVersionsButton from '../../../../../components/orion/OrionDocumentVersionsButton';
 import TableFieldInput from '../create-request/TableFieldInput';
 import { isOrionDocumentInteractionNote } from '../../../../../lib/orion/interactionNotes';
@@ -414,6 +415,9 @@ function ViewRequestPage() {
       if (!storedRequest) setLoading(false);
       return;
     }
+
+    // Al pasar a otra solicitud (Anterior / Siguiente) no dejar la anterior en pantalla.
+    setLoading(true);
 
     // Al cambiar de solicitud, limpiar estado que no debe cruzarse.
     // NO vaciar adjuntos a []: hidratar desde caché para que un refresh no
@@ -2231,6 +2235,9 @@ function ViewRequestPage() {
 
           {/* Avance del flujo arriba: en qué paso va y qué falta (sin las tareas de firma). */}
           <RequestFlowHeader requestId={request.id} />
+
+          {/* Anterior / Siguiente por la lista de origen (como en Tickets). */}
+          <RequestListNavigator kind='request' id={Number(request.id)} />
         </Card>
 
         {/* Ventas: oferta en SAP (datos, cupo y cartera, mapa de relaciones y líneas), encima de la información de la solicitud. */}

@@ -2,17 +2,21 @@ import { getServerSession } from 'next-auth';
 import { NextRequest, NextResponse } from 'next/server';
 import { authOptions } from '../../auth/[...nextauth]/route';
 import { getCompanyEndpointForUser } from '../../../../lib/health-records/access';
-import { agregarLog, sanitizeRecord } from '../../../../lib/health-records/records';
+import {
+  agregarLog,
+  changeLogLines,
+  describeChanges,
+  getRegistro,
+  sanitizeRecord,
+} from '../../../../lib/health-records/records';
+import {
+  notifyChanges,
+  notifyObsolete,
+  toNotifyWarning,
+  type NotifyResult,
+} from '../../../../lib/health-records/notifications';
 import { sapLogin, sapLogout, sapPatch, SapError } from '../../../../lib/sap/serviceLayer';
 
-/**
- * Edita un registro sanitario existente (PATCH por DocNum) y, si se envia
- * comentario, agrega una linea de bitacora. Requiere permiso de escritura.
- *
- * Se hace el PATCH de los campos editados SIN B1S-ReplaceCollectionsOnPatch
- * (no toca la coleccion de logs) y luego un append del log, evitando la
- * condicion de carrera del modulo original de SAPSEND.
- */
 export async function POST(request: NextRequest) {
   try {
     const session = await getServerSession(authOptions);
@@ -50,21 +54,44 @@ export async function POST(request: NextRequest) {
     });
 
     try {
+      const before = await getRegistro(sap, entity, docNum);
+      const realChanges = describeChanges(before, changes);
+      if (realChanges.length === 0) {
+        return NextResponse.json({ error: 'No hay cambios para guardar' }, { status: 400 });
+      }
+
       await sapPatch(sap, `${entity}(${docNum})`, changes);
 
       const comentario = String(body.comentario ?? '').trim();
-      if (comentario && company.endpoint.healthRecordsLogCollection) {
+      if (company.endpoint.healthRecordsLogCollection) {
         await agregarLog(
           sap,
           entity,
           company.endpoint.healthRecordsLogCollection,
           docNum,
           userName,
-          comentario
+          [...changeLogLines(realChanges), comentario]
         );
       }
 
-      return NextResponse.json({ ok: true, docNum, companyId });
+      const after = { ...before, ...changes };
+      const ctx = { companyId, companyName: company.companyName };
+      const results: NotifyResult[] = [await notifyChanges(ctx, after, realChanges)];
+
+      const becameObsolete = realChanges.some(
+        (c) =>
+          c.field === 'U_Obsoleto' &&
+          c.oldValue.toUpperCase() !== 'SI' &&
+          c.newValue.toUpperCase() === 'SI'
+      );
+      if (becameObsolete) results.push(await notifyObsolete(ctx, after));
+
+      return NextResponse.json({
+        ok: true,
+        docNum,
+        companyId,
+        notifyWarning: toNotifyWarning(...results),
+      });
     } finally {
       await sapLogout(sap);
     }

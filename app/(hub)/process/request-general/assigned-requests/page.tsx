@@ -78,6 +78,13 @@ import { RequestFlowBar, useRequestFlows } from '../../../../../components/reque
 import AutoRefreshNote from '../../../../../components/ui/AutoRefreshNote';
 import IosSearchField from '../../../../../components/ui/IosSearchField';
 import { useAutoRefresh } from '../../../../../components/ui/useAutoRefresh';
+import { useRequestListPersistence } from '../../../../../components/request-general/list/useRequestListPersistence';
+import {
+  loadLastViewed,
+  pageOfItem,
+  saveRequestListNav,
+  type NavItem,
+} from '../../../../../lib/requests-general/requestListNav';
 import { filterByText, requestSearchParts } from '../../../../../lib/requests-general/textSearch';
 import { RequestListFilters } from '../../../../../components/request-general/list/RequestListFilters';
 import {
@@ -164,6 +171,11 @@ type TypeFilter = 'all' | 'requests' | 'tasks';
 
 /** Fila de la lista con lo que necesitan los filtros y el buscador. */
 type AssignedEntry = { item: AssignedItem; row: ListRow; parts: unknown[] };
+
+const navItemOf = (item: AssignedItem): NavItem => ({
+  kind: item.kind,
+  id: Number(item.kind === 'task' ? (item.data as AssignedTask).id : (item.data as Ticket).id),
+});
 
 const entryOfType = (entry: AssignedEntry, type: TypeFilter) =>
   type === 'all' || (type === 'requests' ? entry.item.kind === 'request' : entry.item.kind === 'task');
@@ -326,7 +338,7 @@ function RequestBoard() {
   const statusHints = useMemo(() => {
     if (typeFilter !== 'all') return undefined;
     const hints: Partial<Record<StatusGroup, string>> = {};
-    for (const group of ['all', 'pending', 'done', 'cancelled'] as StatusGroup[]) {
+    for (const group of ['all', 'pending', 'returned', 'done', 'cancelled'] as StatusGroup[]) {
       const inGroup = typedEntries.filter((e) => group === 'all' || e.row.group === group);
       const requests = inGroup.filter((e) => e.item.kind === 'request').length;
       hints[group] = `${requests} solicitudes · ${inGroup.length - requests} tareas`;
@@ -343,6 +355,9 @@ function RequestBoard() {
     const requests = withStatus.filter((e) => e.item.kind === 'request').length;
     return { all: withStatus.length, requests, tasks: withStatus.length - requests };
   }, [matchingEntries, filters]);
+
+  // Orden exacto en pantalla (todas las páginas) para «Anterior / Siguiente» del detalle.
+  const visibleNavItems = useMemo(() => visibleEntries.map((e) => navItemOf(e.item)), [visibleEntries]);
 
   const totalPages = Math.max(1, Math.ceil(visibleEntries.length / ITEMS_PER_PAGE));
   const safePage = Math.min(currentPage, totalPages);
@@ -388,6 +403,38 @@ function RequestBoard() {
     setFilters(EMPTY_LIST_FILTERS);
     setSearchInput('');
     setTypeFilter('all');
+  };
+
+  // Filtros, pestaña, «Todo lo abierto», búsqueda y página se conservan al volver del detalle.
+  // Un ?type= en la URL (p. ej. el menú «Tareas asignadas») manda sobre la pestaña guardada.
+  const pendingPageRef = useRef<number | null>(null);
+  const { hydrated: listHydrated } = useRequestListPersistence(
+    'assigned-requests',
+    { filters, search: searchInput, type: typeFilter, openAll, page: safePage },
+    (saved) => {
+      setFilters(saved.filters);
+      setSearchInput(saved.search);
+      if (saved.type && !initialType) setTypeFilter(saved.type);
+      if (saved.openAll) {
+        setOpenAll(true);
+        void fetchOpenScopeTasks();
+      }
+      pendingPageRef.current = saved.page ?? null;
+    },
+    !loading && userIdInitialized
+  );
+  // Ya cargada la lista: la página del último elemento abierto (o la que estaba guardada).
+  useEffect(() => {
+    if (!listHydrated || loading || !userIdInitialized || pendingPageRef.current === null) return;
+    const last = loadLastViewed('assigned-requests');
+    const page = pageOfItem(visibleNavItems, last, ITEMS_PER_PAGE) ?? pendingPageRef.current;
+    pendingPageRef.current = null;
+    setCurrentPage(page);
+  }, [listHydrated, loading, userIdInitialized, visibleNavItems]);
+  const openFromList = (item: AssignedItem, href: string) => {
+    sessionStorage.setItem('selectedRequest', JSON.stringify(item.data));
+    saveRequestListNav('assigned-requests', visibleNavItems, navItemOf(item));
+    window.open(href);
   };
   // Flujo completo (en qué paso va) de las solicitudes de la página, también las de cada tarea.
   const { flows: requestFlows } = useRequestFlows(
@@ -1157,12 +1204,12 @@ function RequestBoard() {
     <Table.Tr
       key={key}
       className='cursor-pointer transition-colors'
-      onClick={() => {
-        sessionStorage.setItem('selectedRequest', JSON.stringify(task));
-        window.open(
+      onClick={() =>
+        openFromList(
+          { kind: 'task', key, data: task, createdAt: task.created_at },
           `/process/request-general/view-activities?id=${task.id}&from=assigned-activities`
-        );
-      }}
+        )
+      }
     >
       <Table.Td style={{ whiteSpace: 'nowrap' }}>
         <Stack gap={4} align='flex-start'>
@@ -1243,6 +1290,7 @@ function RequestBoard() {
         onChange={setFilters}
         onClear={clearListFilters}
         counts={statusCounts}
+        showReturned
         hints={statusHints}
         options={listOptions}
         progress={globalProgress}
@@ -1339,14 +1387,13 @@ function RequestBoard() {
                 const isTask = item.kind === 'task';
                 const t = isTask ? (item.data as AssignedTask) : null;
                 const r = isTask ? null : (item.data as Ticket);
-                const open = () => {
-                  sessionStorage.setItem('selectedRequest', JSON.stringify(item.data));
-                  window.open(
+                const open = () =>
+                  openFromList(
+                    item,
                     isTask
                       ? `/process/request-general/view-activities?id=${t!.id}&from=assigned-activities`
                       : `/process/request-general/view-request?id=${r!.id}&from=assigned-requests`
                   );
-                };
                 const flow = requestFlows[isTask ? Number(t!.id_request_general) : Number(r!.id)];
                 const progress =
                   !flow && r && tasksByRequest[r.id]?.length ? getTasksProgress(tasksByRequest[r.id]) : null;
@@ -1445,12 +1492,12 @@ function RequestBoard() {
                     <Table.Tr
                       key={item.key}
                       className='cursor-pointer transition-colors'
-                      onClick={() => {
-                        sessionStorage.setItem('selectedRequest', JSON.stringify(ticket));
-                        window.open(
+                      onClick={() =>
+                        openFromList(
+                          item,
                           `/process/request-general/view-request?id=${ticket.id}&from=assigned-requests`
-                        );
-                      }}
+                        )
+                      }
                     >
                       <Table.Td style={{ whiteSpace: 'nowrap' }}>
                         <Stack gap={4} align='flex-start'>

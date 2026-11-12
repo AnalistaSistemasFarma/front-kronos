@@ -15,11 +15,15 @@
 import { prisma } from '../prisma';
 import { MAX_TITLE_CHARS } from '../chat/constants';
 import { capabilitiesFor, MAX_PROJECT_CONVERSATIONS } from '../chat/projects-rules';
-import { designableAgents, type ProjectAccess, type ProjectUser } from '../chat/projects';
+import { assertAgentProjectConversation, designableAgents, type ProjectAccess, type ProjectUser } from '../chat/projects';
+import { serializeAttachment, type ChatAttachmentPayload } from '../chat/conversations';
 import { politicaGuardadaConCodigo } from './permisos-agentes';
 import { avisoSinCodigo } from './agentes-desarrollo-rules';
 import { ProyectoError } from './acciones';
 import {
+  archivosParaAgente,
+  detalleArchivoCompartido,
+  esParticipanteMesa,
   decidirTick,
   decidirTrasRespuesta,
   diaCOT,
@@ -34,6 +38,7 @@ import {
   type EstadoMotor,
   type EstadoMesa,
   type MotivoPausa,
+  type ArchivoMesa,
 } from './mesas-rules';
 
 export const EVENT_TYPE_TURNO = 'mesa_turno';
@@ -238,11 +243,14 @@ export async function alPublicarAgenteEnMesa(opciones: {
   idAgent: number;
   idMessage: number;
   body: string;
+  /** Nombres de los archivos que el agente adjuntó a su intervención. */
+  adjuntos?: string[];
   ahora?: Date;
 }): Promise<{ esMesa: boolean; esSintesis: boolean }> {
   const ahora = opciones.ahora ?? new Date();
   const m = await cargarMesa({ id_conversation: opciones.idConversation });
   if (!m) return { esMesa: false, esSintesis: false };
+  await registrarArchivosCompartidos(m, opciones.idAgent, opciones.idMessage, opciones.adjuntos ?? [], ahora);
   const estado = aEstadoMotor(m);
   const esSintesis = m.turno_idx === m.agentes.length && opciones.idAgent === m.id_agent_moderador;
   const d = decidirTrasRespuesta(estado, opciones.idAgent, !esSinAporte(opciones.body), ahora);
@@ -275,14 +283,122 @@ export async function alPublicarAgenteEnMesa(opciones: {
   return { esMesa: true, esSintesis };
 }
 
+/* ───────────────────────── Archivos compartidos ───────────────────────── */
+
+function idsDeLaMesa(m: MesaFila): { participantes: number[]; idAgentModerador: number } {
+  return { participantes: m.agentes.map((a) => a.id_agent), idAgentModerador: m.id_agent_moderador };
+}
+
 /**
- * Para la BANDEJA: si el mensaje es un aviso de turno, el texto que recibe el
- * agente = aviso + instrucciones (que no quedan guardadas en el hilo).
+ * «El moderador informa qué archivos se están pasando» (2026-11-11): un evento
+ * INMUTABLE `archivo_compartido` por archivo, con nombre, agente y ronda. Solo
+ * de agentes de la mesa. Nunca tumba la publicación (si la base todavía no
+ * admite el tipo, queda en el log y el archivo igual está en el hilo).
  */
-export async function cuerpoParaAgente(m: { id: number; id_conversation: number; event_type: string | null; body: string }): Promise<string> {
-  if (m.event_type !== EVENT_TYPE_TURNO) return m.body;
+async function registrarArchivosCompartidos(m: MesaFila, idAgent: number, idMessage: number, nombres: string[], ahora: Date) {
+  if (nombres.length === 0 || !esParticipanteMesa(idsDeLaMesa(m), idAgent)) return;
+  const agente = nombreAgente(m, idAgent).nombre;
+  const ronda = m.ronda > 0 ? m.ronda : null;
+  try {
+    await prisma.chatProjectMesaEvento.createMany({
+      data: nombres.map((nombre) => ({
+        id_mesa: m.id_mesa,
+        tipo: EVENTO_ARCHIVO_COMPARTIDO,
+        ronda,
+        id_agent: idAgent,
+        id_message: idMessage,
+        detalle: detalleArchivoCompartido(nombre, agente, ronda),
+        created_at: ahora,
+      })),
+    });
+  } catch (error) {
+    console.error('[mesas] no se pudo registrar el archivo compartido', m.id_mesa, error);
+  }
+}
+
+export const EVENTO_ARCHIVO_COMPARTIDO = 'archivo_compartido';
+
+/**
+ * Los archivos que compartieron los agentes de la mesa, en orden de llegada.
+ * Salen de los ADJUNTOS de la conversación de ESTA mesa (nunca de otra), de
+ * mensajes de agentes de la mesa; la ronda, del evento `archivo_compartido`.
+ */
+async function archivosDeMesa(m: MesaFila): Promise<(ArchivoMesa & { adjunto: ChatAttachmentPayload; createdAt: string })[]> {
+  const ids = idsDeLaMesa(m);
+  const [adjuntos, eventos] = await Promise.all([
+    prisma.chatAttachment.findMany({
+      where: {
+        message: {
+          id_conversation: m.id_conversation,
+          role: 'agent',
+          id_agent_author: { in: [...ids.participantes, ids.idAgentModerador] },
+        },
+      },
+      orderBy: { id: 'desc' },
+      take: 100,
+      select: {
+        id: true,
+        file_name: true,
+        content_type: true,
+        size_bytes: true,
+        created_at: true,
+        message: { select: { id: true, id_agent_author: true } },
+      },
+    }),
+    prisma.chatProjectMesaEvento.findMany({
+      where: { id_mesa: m.id_mesa, tipo: EVENTO_ARCHIVO_COMPARTIDO },
+      select: { id_message: true, ronda: true },
+    }),
+  ]);
+  const rondaDe = new Map(eventos.filter((e) => e.id_message !== null).map((e) => [e.id_message as number, e.ronda]));
+  return adjuntos.reverse().map((a) => {
+    const idAgent = a.message.id_agent_author ?? 0;
+    return {
+      idAttachment: a.id,
+      nombre: a.file_name,
+      idAgent,
+      agente: nombreAgente(m, idAgent).nombre,
+      ronda: rondaDe.get(a.message.id) ?? null,
+      adjunto: serializeAttachment(a),
+      createdAt: a.created_at.toISOString(),
+    };
+  });
+}
+
+/**
+ * Para la DESCARGA de un adjunto (/api/chat/attachments/<id>) con la llave del
+ * puente: un agente que NO es el principal del hilo puede bajar los adjuntos de
+ * una MESA solo si es participante de esa mesa y sigue designado en el proyecto
+ * activo (la misma puerta de su contexto). Fuera de las mesas, nada cambia.
+ */
+export async function agentePuedeBajarAdjuntoDeMesa(idAgent: number, idConversation: number): Promise<boolean> {
+  const m = await cargarMesa({ id_conversation: idConversation });
+  if (!m || !esParticipanteMesa(idsDeLaMesa(m), idAgent)) return false;
+  return (await assertAgentProjectConversation(idAgent, idConversation)) !== null;
+}
+
+/**
+ * Para la BANDEJA: si el mensaje es un aviso de turno, lo que recibe el agente
+ * = aviso + instrucciones (que no quedan guardadas en el hilo) y, como
+ * adjuntos, los archivos que compartieron los agentes de la mesa.
+ */
+export async function turnoParaAgente(
+  m: { id: number; id_conversation: number; event_type: string | null; body: string },
+  idAgent: number
+): Promise<{ body: string; adjuntos: ChatAttachmentPayload[] } | null> {
+  if (m.event_type !== EVENT_TYPE_TURNO) return null;
   const mesa = await cargarMesa({ id_conversation: m.id_conversation });
-  if (!mesa) return m.body;
+  if (!mesa) return null;
+  const todos = await archivosDeMesa(mesa);
+  const visibles = archivosParaAgente({ archivos: todos, ...idsDeLaMesa(mesa), idAgent });
+  const porId = new Map(todos.map((a) => [a.idAttachment, a.adjunto]));
+  return {
+    body: cuerpoTurno(mesa, m, visibles),
+    adjuntos: visibles.map((a) => porId.get(a.idAttachment)!).filter(Boolean),
+  };
+}
+
+function cuerpoTurno(mesa: MesaFila, m: { id: number; body: string }, archivos: ArchivoMesa[]): string {
   const esSintesis = mesa.id_message_turno === m.id && mesa.turno_idx === mesa.agentes.length;
   const idx = mesa.id_message_turno === m.id ? mesa.turno_idx : 0;
   const p = mesa.agentes[idx];
@@ -296,6 +412,8 @@ export async function cuerpoParaAgente(m: { id: number; id_conversation: number;
       rol: esSintesis ? 'moderador: síntesis' : p?.rol ?? 'participa',
     },
     participantes: mesa.agentes.map((a) => ({ nombre: a.agent.display_name, rol: a.rol })),
+    archivos: archivos.map(({ idAttachment, nombre, idAgent, agente, ronda }) => ({ idAttachment, nombre, idAgent, agente, ronda })),
+    sintesisCada: mesa.sintesis_cada,
   })}`;
 }
 
@@ -576,8 +694,19 @@ export async function detalleMesa(project: ProjectAccess, idMesa: number) {
     where: { id_conversation: m.id_conversation },
     select: { id_agent: true, state: true, label: true, updated_at: true },
   });
+  const archivos = await archivosDeMesa(m);
   return {
     ...serializarMesa(m),
+    // «Archivos compartidos» del panel: lo más reciente primero.
+    archivos: archivos.reverse().map((a) => ({
+      idAttachment: a.idAttachment,
+      nombre: a.nombre,
+      idAgent: a.idAgent,
+      agente: a.agente,
+      ronda: a.ronda,
+      downloadUrl: a.adjunto.downloadUrl,
+      createdAt: a.createdAt,
+    })),
     estadosAgentes: estados.map((e) => ({ idAgent: e.id_agent, state: e.state, label: e.label, updatedAt: e.updated_at.toISOString() })),
     eventos: eventos.map((e) => ({
       id: e.id_evento,
