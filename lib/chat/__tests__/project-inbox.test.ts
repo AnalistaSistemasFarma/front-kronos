@@ -90,6 +90,23 @@ describe('GET /api/chat/agent/inbox', () => {
     expect(updateMessages.mock.calls[0][0].where).toMatchObject({ conversation: { kind: 'project', id_agent: 21 } });
   });
 
+  it("llave 'projects': la mención de OTRO ASISTENTE llega con autor 'agent' y sin correo (2026-11-12)", async () => {
+    auth.mockResolvedValue({ idAgent: 21, code: 'play', displayName: 'Play', scope: 'projects' });
+    const m = {
+      id: 12, id_conversation: 41, role: 'agent', body: '@play ¿me confirma el dato?', created_at: new Date(), attachments: [],
+      userAuthor: null,
+      agentAuthor: { id_agent: 30, code: 'galileo', display_name: 'Galileo' },
+      conversation: { id: 41, title: 't', kind: 'project', project: { id_project: 7, name: 'Comex' } },
+    };
+    findDeliveries.mockResolvedValueOnce([{ id_message: 12 }]);
+    findMessages.mockImplementation(async (args) => (args.where.id ? [m] : []));
+    const res = await GET(pedir('wait=0'));
+    const data = await res.json();
+    const consulta = findMessages.mock.calls.find((c) => c[0].where.id)?.[0];
+    expect(consulta.where.OR).toContainEqual({ role: 'agent' });
+    expect(data.messages[0].author).toEqual({ kind: 'agent', id: null, name: 'Galileo (asistente)', email: null, code: 'galileo' });
+  });
+
   it("llave 'projects' de un agente sin interruptor: 404 y ni consulta la base", async () => {
     auth.mockResolvedValue({ idAgent: 5, code: 'horus', displayName: 'Orus', scope: 'projects' });
     const res = await GET(pedir());
