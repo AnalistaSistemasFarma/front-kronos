@@ -21,8 +21,9 @@
  *   - Menciona SOLO a otros → responden los mencionados; el principal NO (no
  *     se duplican respuestas ni consumo). Lo ve en el historial en su próximo turno.
  *   - Menciona al principal y a otros → responden todos los mencionados.
- *   - Los agentes NO se invocan entre ellos dentro de un proyecto (sin cadenas
- *     ni bucles de consumo): solo una persona despierta a otro agente.
+ *   - Un ASISTENTE también puede mencionar a otro (2026-11-12), con frenos de
+ *     profundidad, ritmo e ida y vuelta: ver lib/proyectos/menciones-agentes.ts.
+ *     En las mesas de discusión no (los turnos los reparte el motor).
  *
  * -------------------------------------------------------------------------
  * RENOMBRAR Y ELIMINAR
