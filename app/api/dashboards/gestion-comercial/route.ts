@@ -15,7 +15,7 @@ import {
   type Fila,
   type TableroDatos,
 } from '../../../../lib/dashboards/gestion-comercial/tablero';
-import { sapGetAll, sapLogin, sapLogout, SapError, type SapSession } from '../../../../lib/sap/serviceLayer';
+import { sapGet, sapLogin, sapLogout, SapError, type SapSession } from '../../../../lib/sap/serviceLayer';
 
 /**
  * Tablero comercial — datos en vivo de SAP, SOLO LECTURA (GET).
@@ -33,10 +33,46 @@ import { sapGetAll, sapLogin, sapLogout, SapError, type SapSession } from '../..
  */
 
 const CAP = 60000;
+const VISTA_PREFIJO = 'OLP_IND_VentasB1SLQuery';
+const PAGE_SIZE = 1000;
+const REINTENTOS = 5;
+const espera = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+/**
+ * GET de una página con reintentos. La vista OLP_IND_VentasB1SLQuery responde de
+ * forma intermitente con error 400/500 («'N° Documento' no es válido» o
+ * «Internal server error») y, segundos después, la MISMA consulta responde bien
+ * (verificado en OLP el 2026-11-12). Se reintenta la página, no toda la lectura.
+ * Errores 401/403 no se reintentan.
+ */
+async function paginaConReintento<T>(sap: SapSession, path: string): Promise<T> {
+  let ultimo: unknown;
+  for (let intento = 0; intento < REINTENTOS; intento++) {
+    try {
+      return await sapGet<T>(sap, path, { Prefer: `odata.maxpagesize=${PAGE_SIZE}` });
+    } catch (e) {
+      ultimo = e;
+      if (e instanceof SapError && (e.status === 401 || e.status === 403)) throw e;
+      await espera(400 * (intento + 1));
+    }
+  }
+  throw ultimo;
+}
+
+/** Lee todas las páginas de la vista para un rango (siguiendo nextLink), con reintento por página. */
 async function leer(sap: SapSession, desde: string, hasta: string): Promise<Fila[]> {
-  const lineas = await sapGetAll<LineaVenta>(sap, rutaVistaVentas(desde, hasta), { cap: CAP, pageSize: 1000 });
-  return lineas.map(aFila);
+  const out: Fila[] = [];
+  let next: string | null = rutaVistaVentas(desde, hasta);
+  while (next && out.length < CAP) {
+    const page: { value?: LineaVenta[]; 'odata.nextLink'?: string; '@odata.nextLink'?: string } =
+      await paginaConReintento(sap, next);
+    for (const l of page.value ?? []) out.push(aFila(l));
+    const link = page['@odata.nextLink'] ?? page['odata.nextLink'] ?? null;
+    next = link ? link.replace(/^\/+/, '') : null;
+    // nextLink de view.svc puede venir relativo a view.svc/ o a /b1s/v1/.
+    if (next && !next.startsWith('view.svc/') && next.startsWith(VISTA_PREFIJO)) next = `view.svc/${next}`;
+  }
+  return out.slice(0, CAP);
 }
 
 export async function GET(request: NextRequest) {
