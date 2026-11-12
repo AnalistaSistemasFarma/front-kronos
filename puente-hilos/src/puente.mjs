@@ -165,7 +165,7 @@ export function prepararCodigoTurno({ cfg, idProject, idConversation, rutas, lot
   }
   const worktrees = preparar({ repos: aMontar, rutas, idProject, idConversation, envGit }).map((w) => ({ ...w, dependencias: w.dependencias ?? estadoDependencias(w.worktree) }));
   const cacheNpm = rutaCacheNpm(cfg.hilosDir); // la crea prepararHomeCodigo
-  const permisos = terminal ? permisosTerminalCompleta({ repos: worktrees, pases: proyecto.pases, cwd: rutas.cwd }) : permisosCodigo({ repos: worktrees, autorizado, pases: proyecto.pases, cwd: rutas.cwd });
+  const permisos = terminal ? permisosTerminalCompleta({ repos: worktrees, pases: proyecto.pases, cwd: rutas.cwd }) : permisosCodigo({ repos: worktrees, autorizado, pases: proyecto.pases, cwd: rutas.cwd, estricta: cfg.guardiaEstricta === true || process.env.HILOS_GUARDIA_ESTRICTA === 'si' });
   return {
     ...permisos,
     autorizado,
@@ -173,7 +173,7 @@ export function prepararCodigoTurno({ cfg, idProject, idConversation, rutas, lot
     worktrees,
     token,
     // Terminal completa: sin sandbox y con la casa real (llaves SSH), como el Orus principal.
-    sandbox: terminal ? { enabled: false } : sandboxCodigo({ worktrees, homeReal: cfg.home, homeCodigo, hilosDir: cfg.hilosDir, secretos: [cfg.githubTokenArchivo, ...secretosConectores(cfg), ...secretosPruebas(cfg), ...secretosConectoresAgente(cfg)], cacheNpm }),
+    sandbox: terminal ? { enabled: false } : sandboxCodigo({ worktrees, homeReal: cfg.home, homeCodigo, hilosDir: cfg.hilosDir, secretos: [cfg.githubTokenArchivo, ...secretosConectores(cfg), ...secretosPruebas(cfg), ...secretosConectoresAgente(cfg), ...(process.env.HILOS_GUARDIA_ESTRICTA === 'si' && cfg.conectoresAgente?.configDir ? [path.dirname(cfg.conectoresAgente.configDir)] : [])], cacheNpm }),
     entorno: terminal ? { ...entornoCodigo({ token, homeCodigo, cacheNpm }), HOME: cfg.home } : entornoCodigo({ token, homeCodigo, cacheNpm }),
     hooks: hooksCodigo(),
     disponibles,

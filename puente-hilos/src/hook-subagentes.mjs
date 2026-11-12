@@ -33,6 +33,16 @@ export function esGitLectura(comando) {
 /** Decisión del hook para una entrada. null = no opina (sigue el flujo normal). */
 export function decidir(entrada) {
   if (!entrada?.agent_id) return null; // agente principal
+  // 2026-11-11 (revisores del proyecto 24): un subagente NUNCA escribe en el código
+  // (./codigo/<repo>); solo en ./trabajo. El principal hereda Edit(./codigo/**) y el
+  // subagente lo heredaba también: aquí se niega.
+  if (['Edit', 'Write', 'MultiEdit', 'NotebookEdit'].includes(entrada.tool_name)) {
+    const ruta = String(entrada.tool_input?.file_path ?? entrada.tool_input?.notebook_path ?? '');
+    if (/(^|\/)codigo(\/|$)/.test(ruta) || ruta.includes('..')) {
+      return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: `Subagente ${entrada.agent_type ?? ''}: el código es de SOLO lectura para los subagentes; escriba sus hallazgos en ./trabajo.` } };
+    }
+    return null;
+  }
   if (entrada.tool_name !== 'Bash') return null;
   if (esGitLectura(entrada.tool_input?.command)) return null;
   return {

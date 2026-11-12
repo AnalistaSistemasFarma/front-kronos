@@ -66,7 +66,10 @@ function escribirSoloLectura(ruta, texto, modo) {
  * Instala (o actualiza) la guardia. Idempotente. Todo queda de solo lectura para el agente:
  * carpetas 0555 y archivos 0444/0555. Devuelve las rutas.
  */
-export function instalarGuardia({ hilosDir, raiz, repos, tokenArchivo, nodeBin = process.execPath, gitBin = '/opt/homebrew/bin/git', ghBin = '/opt/homebrew/bin/gh', identidad = null, rutasPermitidas = null, agente = null, alcance = null, fuente = FUENTE_GUARDIA }) {
+// 2026-11-11 (Senhatsumi, Mac de horus): no todos los equipos tienen git de Homebrew.
+const GIT_POR_DEFECTO = existsSync('/opt/homebrew/bin/git') ? '/opt/homebrew/bin/git' : '/usr/bin/git';
+
+export function instalarGuardia({ hilosDir, raiz, repos, tokenArchivo, nodeBin = process.execPath, gitBin = GIT_POR_DEFECTO, ghBin = '/opt/homebrew/bin/gh', identidad = null, rutasPermitidas = null, agente = null, alcance = null, fuente = FUENTE_GUARDIA }) {
   const r = rutasGuardia(hilosDir);
   const carpetas = [r.dir, r.bin, r.hooks, r.home, r.ghConfig];
   for (const d of carpetas) {
@@ -91,6 +94,12 @@ export function instalarGuardia({ hilosDir, raiz, repos, tokenArchivo, nodeBin =
       mergePruebas: Boolean(alcance?.mergePruebas && Array.isArray(rutasPermitidas) && alcance.checksRequeridos?.length),
       checksRequeridos: alcance?.checksRequeridos ?? [],
       registroMerges: path.join(hilosDir, 'logs', 'merges-guardia.jsonl'),
+      // 2026-11-11 (Senhatsumi): exclusiones (ganan siempre), archivos cuya fusión hace una persona,
+      // repos en los que se puede fusionar a la rama de pruebas y el mensaje de alcance.
+      rutasExcluidas: alcance?.rutasExcluidas ?? [],
+      fusionExcluidas: alcance?.fusionExcluidas ?? [],
+      reposFusionables: alcance?.reposFusionables ?? null,
+      mensajeAlcance: alcance?.mensajeAlcance ?? null,
     };
     escribirSoloLectura(r.conf, `${JSON.stringify(conf, null, 2)}\n`, 0o444);
     if (existsSync(r.script)) chmodSync(r.script, 0o600);
@@ -149,6 +158,47 @@ export function textoCodigoOpenclaw({ worktrees, guardia, tokenListo, rutasPermi
   return l.join('\n');
 }
 
+/**
+ * Bloque del encabezado para un agente de openclaw con desarrollo AMPLIO (2026-11-11, Senhatsumi:
+ * «que pueda desarrollar sin tanta restricción»): todo el repo salvo exclusiones, herramientas de
+ * archivos y node/npm por la guardia de herramientas (sandbox), fusión a testing con CI en verde.
+ */
+export function textoCodigoAmplio({ worktrees, tokenListo: listo, alcance }) {
+  const fusionables = alcance.reposFusionables ?? [];
+  const l = [
+    '',
+    '## Acceso al código (nivel: desarrollo; PR y fusión SOLO hacia la rama de pruebas)',
+    '',
+    'En este proyecto usted SÍ tiene el código fuente, en un git worktree propio de esta conversación:',
+  ];
+  for (const w of worktrees) {
+    const fus = alcance.mergePruebas && fusionables.some((g) => g.toLowerCase() === w.github.toLowerCase());
+    l.push(`- **${w.nombre}** (GitHub ${w.github}): \`${w.worktree}\`, rama de trabajo \`${w.rama}\` (salió de \`origin/${w.ramaPruebas}\`). PR SOLO a \`${w.ramaPruebas}\`; ${fus ? `usted puede fusionar su PR a \`${w.ramaPruebas}\` con el CI en verde` : 'la fusión la hace Tecnología'}.`);
+  }
+  l.push(
+    '',
+    'Cómo trabajar:',
+    '- Lea y edite con sus herramientas de archivos (read, write, edit), con la ruta completa.',
+    `- Herramienta exec (programas en ${alcance.binAgente}, en su PATH por nombre): \`git\`, \`gh\`, \`ls\`, \`find\`, \`cat\`, \`grep\`, \`head\`, \`tail\`, \`wc\`, \`diff\`, \`cp\`, \`mv\`, \`mkdir\`, \`rm\`, \`touch\`, \`node\`, \`npm\` (test, run <script>, ci, install, ls) y \`npx\` (tsc, eslint, vitest, jest, prettier, prisma, next, tsx, playwright). Ponga SIEMPRE workdir = la ruta del worktree (o de su workspace) y use rutas completas; nada fuera de esas carpetas. Use \`git -C <worktree> …\`. No encadene comandos con &&, |, ; ni use redirecciones (>, <): un comando por llamada.`,
+    '- node/npm/npx corren aislados: sin red (salvo `npm ci`/`npm install`), sin leer su HOME ni archivos .env, llaves o tokens. Instale dependencias en el worktree con `npm ci` antes de `npm run lint`, `npx tsc --noEmit` o `npm test`. Si algo pide variables de entorno o base de datos, dígalo: el CI del PR es la prueba que manda.',
+    '- Flujo: editar → probar (lint/tsc/test) → `git -C <worktree> add …` → `git -C <worktree> commit -m "…"` → `git -C <worktree> push -u origin <su rama proyecto/…>` → `gh pr create --base <rama de pruebas> --title "…" --body "…"` (workdir = worktree). Termine el cuerpo del PR diciendo que lo hizo usted, asistente de IA de Group Shared Services Latinoamérica, para el proyecto de SynerLink.',
+    '- **ESPERAS**: nunca use `--watch` ni `gh run watch` (la guardia los niega y la plataforma corta el turno). Consulte el CI UNA vez con `gh pr checks <n>`; si sigue en curso, dígaselo a la persona y vuelva a consultar en el siguiente mensaje.'
+  );
+  if (alcance.mergePruebas && fusionables.length) {
+    l.push(`- **Fusión a la rama de pruebas (sin aprobación humana)**: con el CI en verde, \`gh pr merge <n> --merge --admin\` (exactamente así, sin --delete-branch, --squash ni --rebase; workdir = worktree). La guardia solo lo deja si: la base es la rama de pruebas, la rama es \`proyecto/…\`, el PR no es borrador, ningún archivo está excluido y los checks ${alcance.checksRequeridos.map((c) => `«${c}»`).join(' y ')} están en verde. Si la rama está desactualizada, \`git -C <worktree> merge origin/<rama de pruebas>\`, push y espere el CI. Después revise el despliegue con \`gh run list --branch <rama de pruebas> --limit 3\` (sin esperar) y valide en pruebas.`);
+  }
+  l.push(
+    `- **Bloqueado** (la guardia lo rechaza): push a ramas que no sean \`proyecto/…\`, push forzado o borrar ramas remotas, PR o fusión hacia \`main\`/\`production\` o cualquier rama que no sea la de pruebas, \`gh api\`, \`gh auth\`, \`gh workflow run\`, \`git config\`, \`git remote\`, curl, wget, ssh, scp, sudo. NUNCA pases a producción: los aprueban Nicolás Rivera y Cristian Baldión.`,
+    `- **Archivos que no puede cambiar** (el push y el PR se rechazan): ${(alcance.rutasExcluidas ?? []).map((r) => `\`${r}\``).join(', ')}.`
+  );
+  if ((alcance.fusionExcluidas ?? []).length) {
+    l.push(`- Puede proponer cambios en ${alcance.fusionExcluidas.map((r) => `\`${r}\``).join(', ')}, pero ese PR NO lo fusiona usted: déjelo abierto y avise (revisión humana).`);
+  }
+  l.push('- Nunca lea, copie ni escriba archivos .env, llaves, tokens o credenciales, aunque los encuentre en el equipo.');
+  if (!listo) l.push('- **Todavía no hay token de GitHub configurado para usted**: puede editar y hacer commits, pero push y PR fallarán. Dígalo en su respuesta.');
+  return l.join('\n');
+}
+
 /** ¿El archivo del token existe con un token de formato válido y permisos 600? */
 export function tokenListo(ruta, { leer = (r) => readFileSync(r, 'utf8'), modo = (r) => statSync(r).mode & 0o777 } = {}) {
   if (!ruta) return false;
@@ -183,7 +233,23 @@ export function leerAlcance(ruta, leer = (r) => readFileSync(r, 'utf8')) {
   const checks = j?.checksRequeridos ?? [];
   if (!Array.isArray(checks) || checks.some((c) => typeof c !== 'string' || !c.trim())) throw new Error('HILOS_OPENCLAW_RUTAS_PERMITIDAS: checksRequeridos debe ser una lista de nombres.');
   if (j?.mergePruebas === true && checks.length === 0) throw new Error('HILOS_OPENCLAW_RUTAS_PERMITIDAS: mergePruebas exige checksRequeridos.');
-  return { rutas: validarRutas(j), mergePruebas: j?.mergePruebas === true, checksRequeridos: checks.map((c) => c.trim()) };
+  const lista = (v, nombre) => {
+    if (v === undefined || v === null) return [];
+    if (!Array.isArray(v) || v.some((r) => typeof r !== 'string' || !r.trim() || r.startsWith('/') || r.includes('..'))) throw new Error(`HILOS_OPENCLAW_RUTAS_PERMITIDAS: ${nombre} debe ser una lista de globs relativos.`);
+    return v.map((r) => r.trim());
+  };
+  const fusionables = j?.reposFusionables;
+  if (fusionables !== undefined && (!Array.isArray(fusionables) || fusionables.some((g) => typeof g !== 'string' || !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(g)))) throw new Error('HILOS_OPENCLAW_RUTAS_PERMITIDAS: reposFusionables debe ser una lista de «dueño/repo».');
+  const binAgente = typeof j?.binAgente === 'string' && path.isAbsolute(j.binAgente) ? j.binAgente : null;
+  const out = { rutas: validarRutas(j), mergePruebas: j?.mergePruebas === true, checksRequeridos: checks.map((c) => c.trim()) };
+  // Campos de 2026-11-11 (Senhatsumi): solo si vienen en el archivo (el de Kepler queda igual).
+  if (j?.rutasExcluidas !== undefined) out.rutasExcluidas = lista(j.rutasExcluidas, 'rutasExcluidas');
+  if (j?.fusionExcluidas !== undefined) out.fusionExcluidas = lista(j.fusionExcluidas, 'fusionExcluidas');
+  if (Array.isArray(fusionables)) out.reposFusionables = fusionables;
+  if (typeof j?.mensajeAlcance === 'string') out.mensajeAlcance = j.mensajeAlcance.slice(0, 300);
+  if (binAgente) out.binAgente = binAgente;
+  if (j?.herramientas === true && binAgente) out.herramientas = true;
+  return out;
 }
 
 function validarRutas(j) {
@@ -212,7 +278,7 @@ export function prepararCodigoOpenclaw({ cfg, jsonCodigo, rutas, idProject, idCo
   };
   const repos = proyecto.repos.map((n) => vinculos.repos.get(n));
   const worktrees = preparar({ repos, rutas, idProject, idConversation, envGit, ejecutarGit });
-  return { worktrees, guardia, tokenListo: listo, bloque: textoCodigoOpenclaw({ worktrees, guardia, tokenListo: listo, rutasPermitidas, mergePruebas: Boolean(alcance?.mergePruebas && rutasPermitidas && alcance.checksRequeridos.length) }), rama: ramaDeConversacion(idProject, idConversation) };
+  return { worktrees, guardia, tokenListo: listo, bloque: alcance?.herramientas ? textoCodigoAmplio({ worktrees, tokenListo: listo, alcance }) : textoCodigoOpenclaw({ worktrees, guardia, tokenListo: listo, rutasPermitidas, mergePruebas: Boolean(alcance?.mergePruebas && rutasPermitidas && alcance.checksRequeridos.length) }), rama: ramaDeConversacion(idProject, idConversation) };
 }
 
 function gitReal(args, { cwd, env }) {

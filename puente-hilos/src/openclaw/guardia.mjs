@@ -215,7 +215,7 @@ function valorOpcion(args, largos, cortos = []) {
  * Valida una llamada a gh. `repoCwd` es el repo («dueño/repo») del worktree en el que corre.
  * Devuelve { ok, motivo, args, repo, archivos } (archivos = --body-file a revisar).
  */
-export function validarGh(argv, { repos, repoCwd = null, mergePruebas = false }) {
+export function validarGh(argv, { repos, repoCwd = null, mergePruebas = false, reposFusionables = null }) {
   const args = [...argv];
   if (args.length < 2) return { ok: false, motivo: 'uso: gh <grupo> <acción> …' };
   const clave = `${args[0]} ${args[1]}`;
@@ -232,6 +232,9 @@ export function validarGh(argv, { repos, repoCwd = null, mergePruebas = false })
     const repoM = repoCwd;
     const confM = repoM && Object.entries(repos).find(([g]) => g.toLowerCase() === repoM.toLowerCase());
     if (!confM) return { ok: false, motivo: 'gh pr merge se corre dentro del worktree (workdir = la ruta del worktree).' };
+    if (Array.isArray(reposFusionables) && !reposFusionables.some((g) => g.toLowerCase() === confM[0].toLowerCase())) {
+      return { ok: false, motivo: `en ${confM[0]} la fusión a la rama de pruebas no es automática (deje el PR abierto; la hace Tecnología).` };
+    }
     return { ok: true, args: ['pr', 'merge', n[0], '--merge', '--admin', '--repo', confM[0]], repo: confM[0], archivos: [], merge: { numero: Number(n[0]), base: confM[1].base } };
   }
   if (!GH_PERMITIDOS.has(clave)) return { ok: false, motivo: `gh ${clave} no está permitido.` };
@@ -267,9 +270,12 @@ export function globARegex(glob) {
   for (let i = 0; i < glob.length; i++) {
     const c = glob[i];
     if (c === '*' && glob[i + 1] === '*') {
-      r += '.*';
       i++;
-      if (glob[i + 1] === '/') i++;
+      // 2026-11-11 (Senhatsumi): «**/» = cero o más carpetas (así «**/.env» también es la raíz).
+      if (glob[i + 1] === '/') {
+        r += '(?:.*/)?';
+        i++;
+      } else r += '.*';
     } else if (c === '*') r += '[^/]*';
     else r += c.replace(/[.+?^${}()|[\]\\]/g, '\\$&');
   }
@@ -278,10 +284,12 @@ export function globARegex(glob) {
 }
 
 /** Archivos fuera del alcance permitido (lista vacía = todo bien). Sin lista = sin restricción. */
-export function fueraDeAlcance(archivos, rutasPermitidas) {
-  if (!Array.isArray(rutasPermitidas)) return [];
-  const res = rutasPermitidas.map(globARegex);
-  return archivos.filter((f) => f && !res.some((re) => re.test(f)));
+export function fueraDeAlcance(archivos, rutasPermitidas, rutasExcluidas = []) {
+  const exc = (Array.isArray(rutasExcluidas) ? rutasExcluidas : []).map(globARegex);
+  if (!Array.isArray(rutasPermitidas) && exc.length === 0) return [];
+  const res = Array.isArray(rutasPermitidas) ? rutasPermitidas.map(globARegex) : null;
+  // 2026-11-11 (Senhatsumi): las exclusiones ganan siempre (CI/CD, .env, llaves…).
+  return archivos.filter((f) => f && (exc.some((re) => re.test(f)) || (res && !res.some((re) => re.test(f)))));
 }
 
 export const MENSAJE_ALCANCE = 'solo puede modificar dashboards; pida a Nicolás Rivera cualquier cambio fuera de ese alcance';
@@ -291,7 +299,7 @@ export const MENSAJE_ALCANCE = 'solo puede modificar dashboards; pida a Nicolás
  * `gh pr view <n> --json baseRefName,headRefName,isDraft,state,files,statusCheckRollup`.
  * Devuelve el motivo del rechazo o null.
  */
-export function motivoNoFusionar(pr, { base, rutasPermitidas, checksRequeridos = [] }) {
+export function motivoNoFusionar(pr, { base, rutasPermitidas, checksRequeridos = [], rutasExcluidas = [], fusionExcluidas = [], mensajeAlcance = MENSAJE_ALCANCE }) {
   if (!pr || typeof pr !== 'object') return 'no pude leer el PR.';
   if (pr.state !== 'OPEN') return `el PR no está abierto (${pr.state}).`;
   if (pr.baseRefName !== base) return `la base del PR es ${pr.baseRefName}: solo se fusiona a ${base}.`;
@@ -300,8 +308,11 @@ export function motivoNoFusionar(pr, { base, rutasPermitidas, checksRequeridos =
   const archivos = (pr.files ?? []).map((f) => f.path);
   if (archivos.length === 0 || archivos.length >= 100) return 'no pude verificar la lista completa de archivos del PR.';
   if (!Array.isArray(rutasPermitidas)) return 'no hay rutas permitidas configuradas: no se fusiona.';
-  const fuera = fueraDeAlcance(archivos, rutasPermitidas);
-  if (fuera.length) return `el PR toca archivos fuera de alcance: ${fuera.slice(0, 15).join(', ')}. ${MENSAJE_ALCANCE}.`;
+  const fuera = fueraDeAlcance(archivos, rutasPermitidas, rutasExcluidas);
+  if (fuera.length) return `el PR toca archivos fuera de alcance: ${fuera.slice(0, 15).join(', ')}. ${mensajeAlcance}.`;
+  // 2026-11-11 (Senhatsumi): archivos que sí se pueden proponer en un PR pero cuya fusión la hace una persona.
+  const humanos = fueraDeAlcance(archivos, null, fusionExcluidas);
+  if (humanos.length) return `el PR toca archivos que exigen revisión humana antes de fusionar (${humanos.slice(0, 10).join(', ')}): deje el PR abierto y avísele a Nicolás Rivera o a Cristian Baldión.`;
   const checks = pr.statusCheckRollup ?? [];
   for (const nombre of checksRequeridos) {
     const c = checks.filter((x) => (x.name ?? x.context) === nombre);
@@ -392,15 +403,15 @@ function principal() {
   // Alcance por rutas (2026-11-06, Kepler: «no se puede pasar de eso»): lo que se empuja o se
   // propone en un PR, comparado contra origin/<rama de pruebas>, solo puede tocar rutasPermitidas.
   const revisarAlcance = (dir, ref, base) => {
-    if (!Array.isArray(conf.rutasPermitidas)) return;
+    if (!Array.isArray(conf.rutasPermitidas) && !(conf.rutasExcluidas ?? []).length) return;
     let salida = '';
     try {
       salida = execFileSync(conf.git, ['-C', dir, 'diff', '--name-only', `origin/${base}...${ref}`], { env, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 60_000 });
     } catch (e) {
       fallar(`no pude comparar ${ref} con origin/${base}: ${String(e.stderr ?? e.message).trim().slice(0, 300)}`);
     }
-    const fuera = fueraDeAlcance(salida.split('\n').map((x) => x.trim()), conf.rutasPermitidas);
-    if (fuera.length) fallar(`${conf.agente ?? 'este agente'} ${MENSAJE_ALCANCE}. Archivos fuera de alcance: ${fuera.slice(0, 15).join(', ')}${fuera.length > 15 ? '…' : ''}`);
+    const fuera = fueraDeAlcance(salida.split('\n').map((x) => x.trim()), conf.rutasPermitidas, conf.rutasExcluidas ?? []);
+    if (fuera.length) fallar(`${conf.agente ?? 'este agente'} ${conf.mensajeAlcance ?? MENSAJE_ALCANCE}. Archivos fuera de alcance: ${fuera.slice(0, 15).join(', ')}${fuera.length > 15 ? '…' : ''}`);
   };
   const baseDe = (dir) => {
     try {
@@ -415,7 +426,7 @@ function principal() {
     if (!v.ok) fallar(v.motivo);
     revisar(v.dir);
     if (['push', 'fetch', 'pull'].includes(v.args.find((a) => !a.startsWith('-'))) && !token) fallar('todavía no hay token de GitHub configurado para este agente: puede trabajar y hacer commits, pero no push, fetch ni PR. Avísele a Tecnología.');
-    if (v.args.find((a) => !a.startsWith('-')) === 'push' && Array.isArray(conf.rutasPermitidas)) {
+    if (v.args.find((a) => !a.startsWith('-')) === 'push' && (Array.isArray(conf.rutasPermitidas) || (conf.rutasExcluidas ?? []).length)) {
       const pos = v.args.slice(v.args.indexOf('push') + 1).filter((a) => !a.startsWith('-'));
       const fuentes = pos.slice(1).map((sp) => (sp.includes(':') ? sp.slice(0, sp.lastIndexOf(':')) : sp));
       const base = baseDe(v.dir);
@@ -433,7 +444,7 @@ function principal() {
         repoCwd = repoDeUrl(execFileSync(conf.git, ['-C', cwd, 'config', '--get', 'remote.origin.url'], { env, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 20_000 }));
       } catch {}
     }
-    const v = validarGh(argv, { repos: conf.repos ?? {}, repoCwd, mergePruebas: conf.mergePruebas === true });
+    const v = validarGh(argv, { repos: conf.repos ?? {}, repoCwd, mergePruebas: conf.mergePruebas === true, reposFusionables: Array.isArray(conf.reposFusionables) ? conf.reposFusionables : null });
     if (!v.ok) fallar(v.motivo);
     if (!token) fallar('todavía no hay token de GitHub configurado para este agente: no se puede usar gh. Avísele a Tecnología.');
     if (argv.some((a) => a.includes(token))) fallar('el comando contiene el token de GitHub.');
@@ -448,7 +459,7 @@ function principal() {
       }
       if (contenido.includes(token)) fallar(`${f} contiene el token de GitHub.`);
     }
-    if (argv[0] === 'pr' && argv[1] === 'create' && Array.isArray(conf.rutasPermitidas)) {
+    if (argv[0] === 'pr' && argv[1] === 'create' && (Array.isArray(conf.rutasPermitidas) || (conf.rutasExcluidas ?? []).length)) {
       if (!repoCwd) fallar('gh pr create se corre dentro del worktree (workdir = la ruta del worktree).');
       const head = valorOpcionPublica(argv.slice(2), ['--head'], ['-H'])[0];
       revisarAlcance(cwd, head ? `origin/${head.replace(/^[^:]+:/, '')}` : 'HEAD', baseDe(cwd));
@@ -461,7 +472,7 @@ function principal() {
       } catch (e) {
         fallar(`no pude leer el PR #${v.merge.numero}: ${String(e.stderr ?? e.message).trim().slice(0, 300)}`);
       }
-      const m = motivoNoFusionar(pr, { base: v.merge.base, rutasPermitidas: conf.rutasPermitidas, checksRequeridos: conf.checksRequeridos ?? [] });
+      const m = motivoNoFusionar(pr, { base: v.merge.base, rutasPermitidas: conf.rutasPermitidas, checksRequeridos: conf.checksRequeridos ?? [], rutasExcluidas: conf.rutasExcluidas ?? [], fusionExcluidas: conf.fusionExcluidas ?? [], mensajeAlcance: conf.mensajeAlcance ?? MENSAJE_ALCANCE });
       if (m) fallar(`no se fusiona el PR #${v.merge.numero}: ${m}`);
       registroMerge = { pr: pr.number, titulo: pr.title, head: pr.headRefName, base: pr.baseRefName, archivos: pr.files.map((f) => f.path) };
     }

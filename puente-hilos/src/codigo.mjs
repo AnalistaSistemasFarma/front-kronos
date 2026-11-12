@@ -40,7 +40,7 @@ import { ErrorConfig } from './config.mjs';
 /** Hook PreToolUse que deja a los SUBAGENTES solo git de lectura (hook-subagentes.mjs). */
 export function hooksCodigo(nodeBin = process.execPath) {
   const script = fileURLToPath(new URL('./hook-subagentes.mjs', import.meta.url));
-  return { PreToolUse: [{ matcher: 'Bash', hooks: [{ type: 'command', command: `"${nodeBin}" "${script}"`, timeout: 10 }] }] };
+  return { PreToolUse: [{ matcher: 'Bash|Edit|Write|MultiEdit|NotebookEdit', hooks: [{ type: 'command', command: `"${nodeBin}" "${script}"`, timeout: 10 }] }] };
 }
 
 /** Ramas que el modelo puede empujar: solo las suyas. */
@@ -432,7 +432,7 @@ export function reglasEscrituraAbsolutas(cwd) {
  * Herramientas y reglas del turno con código. `autorizado` agrega SOLO el merge
  * de PR y el despliegue por workflow de producción de los repos del proyecto.
  */
-export function permisosCodigo({ repos, autorizado, pases, cwd = null }) {
+export function permisosCodigo({ repos, autorizado, pases, cwd = null, estricta = false }) {
   // Claude Code 2.1.299 NIEGA `cd <dir> && git …` (protección contra repos
   // plantados), así que git va SIEMPRE con `git -C codigo/<repo> …`, y las reglas
   // se arman por repo con esa ruta exacta. Ojo con la sintaxis: un patrón que
@@ -479,6 +479,19 @@ export function permisosCodigo({ repos, autorizado, pases, cwd = null }) {
     for (const r of repos) for (const w of r.workflowsProduccion) permitidas.push(`Bash(gh workflow run ${w} --ref ${r.ramaProduccion}*)`, `Bash(cd codigo/* && gh workflow run ${w} --ref ${r.ramaProduccion}*)`);
   } else {
     prohibidas.push('Bash(gh pr merge *)', 'Bash(gh pr merge)', 'Bash(* gh pr merge *)', 'Bash(gh workflow run *)', 'Bash(gh workflow run)', 'Bash(* gh workflow run *)');
+  }
+  // GUARDIA ESTRICTA (2026-11-11, Zoe en el proyecto 24, HILOS_GUARDIA_ESTRICTA=si): en turnos SIN
+  // pases, el PR solo se abre contra la rama de PRUEBAS del repo (testing/Testing), no se puede
+  // cambiar la base de un PR y no hay esperas largas con --watch (misma regla que la guardia de Kepler).
+  if (estricta && !puedePasar) {
+    const bases = [...new Set(repos.map((r) => r.ramaPruebas))];
+    for (let i = permitidas.length - 1; i >= 0; i--) if (/gh pr create|gh run watch/.test(permitidas[i])) permitidas.splice(i, 1);
+    for (const b of bases) permitidas.push(`Bash(gh pr create --base ${b} *)`, `Bash(cd codigo/* && gh pr create --base ${b} *)`);
+    for (const pre of ['', '* ']) {
+      prohibidas.push(`Bash(${pre}gh pr create * --base *)`, `Bash(${pre}gh pr create *--base=*)`, `Bash(${pre}gh pr create * -B *)`, `Bash(${pre}gh pr create -B*)`, `Bash(${pre}gh pr create *--repo*)`, `Bash(${pre}gh pr create * -R *)`);
+      prohibidas.push(`Bash(${pre}gh pr edit * --base*)`, `Bash(${pre}gh pr edit * -B *)`, `Bash(${pre}gh run watch*)`);
+    }
+    prohibidas.push('Bash(*--watch*)');
   }
   // Se monta el WORKTREE (los archivos), nunca el .git del clon: con el .git
   // montado el modelo creyó que el código era solo el .pack (prueba real del
