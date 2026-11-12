@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import {
   aFila,
+  filasDesdeCabeceras,
+  rutaVistaPagina,
   agrupar,
   filtrar,
   finDeMes,
@@ -45,6 +47,30 @@ describe('rutaVistaVentas', () => {
     expect(r).toContain('view.svc/OLP_IND_VentasB1SLQuery');
     expect(r).not.toContain('$select');
     expect(r).toContain("Fecha ge '2026-11-01' and Fecha le '2026-11-10'");
+  });
+});
+
+describe('plan B y paginación', () => {
+  it('pagina con $top y $skip', () => {
+    const r = rutaVistaPagina('2026-11-01', '2026-11-12', 200, 400);
+    expect(r).toContain('$top=200');
+    expect(r).toContain('$skip=400');
+  });
+  it('arma filas desde cabeceras sin IVA y descarta canceladas', () => {
+    const v = new Map([[2, 'Lilian']]);
+    const f = filasDesdeCabeceras(
+      [
+        { DocNum: 1, DocDate: '2026-11-04', DocTotal: 119, VatSum: 19, CardCode: 'C1', CardName: 'X', SalesPersonCode: 2 },
+        { DocNum: 2, DocDate: '2026-11-04', DocTotal: 50, VatSum: 0, Cancelled: 'tYES' },
+      ],
+      [{ DocNum: 9, DocDate: '2026-11-05', DocTotal: 30, VatSum: 0, CardCode: 'C1' }],
+      v
+    );
+    expect(f).toHaveLength(2);
+    expect(f[0].val).toBe(100);
+    expect(f[0].v).toBe('Lilian');
+    expect(f[1].t).toBe('N');
+    expect(f[1].val).toBe(-30);
   });
 });
 
