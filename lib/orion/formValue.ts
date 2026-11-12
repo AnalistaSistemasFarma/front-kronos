@@ -615,6 +615,34 @@ export function allOrionDocumentsFullySigned(bag: OrionSignatureBagBag): boolean
   return entries.every((doc) => String(doc.status || '').toUpperCase() === 'FIRMADO');
 }
 
+/** Word que sigue en camino a firma (validación, cliente o esperando pasar a PDF). */
+const DRAFT_IN_PROGRESS_STATUSES = new Set([
+  'EN_VALIDACION_INTERNA',
+  'DEVUELTO_INTERNO',
+  'VALIDADO_INTERNO',
+  'EN_REVISION_CLIENTE',
+  'RECHAZADO_CLIENTE',
+  'APROBADO_CLIENTE',
+]);
+
+/**
+ * ¿Ya quedó firmado todo lo que se envió a firmar? (decisión de Juan, 2026-11-12)
+ * - Cuentan solo los documentos ENVIADOS a firmar (con firmantes y fuera de borrador).
+ *   Los que se quedaron en borrador o nunca se enviaron no importan.
+ * - Todos los enviados deben estar firmados; uno en firma, devuelto o rechazado lo impide.
+ * - Un Word que todavía va en camino a firma (validación, cliente, por pasar a PDF) también lo impide.
+ */
+export function allSentOrionDocumentsSigned(bag: OrionSignatureBagBag): boolean {
+  const sent = Object.values(bag.documents ?? {}).filter(
+    (doc) => (doc.signers?.length ?? 0) > 0 && String(doc.status || '').toUpperCase() !== 'BORRADOR'
+  );
+  if (sent.length === 0) return false;
+  if (!sent.every((doc) => String(doc.status || '').toUpperCase() === 'FIRMADO')) return false;
+  return !Object.values(bag.drafts ?? {}).some((draft) =>
+    DRAFT_IN_PROGRESS_STATUSES.has(String(draft.status || '').toUpperCase())
+  );
+}
+
 /** Lista signedFileUrl de todos los docs firmados (para chips de chat). */
 export function listSignedOrionDocuments(
   bag: OrionSignatureBagBag
