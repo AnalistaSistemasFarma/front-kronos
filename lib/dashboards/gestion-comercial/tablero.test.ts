@@ -40,10 +40,10 @@ const fila = (over: Partial<Fila>): Fila => ({
 });
 
 describe('rutaVistaVentas', () => {
-  it('consulta la vista con $select y rango por Fecha', () => {
+  it('consulta la vista sin $select y con rango por Fecha', () => {
     const r = rutaVistaVentas('2026-11-01', '2026-11-10');
     expect(r).toContain('view.svc/OLP_IND_VentasB1SLQuery');
-    expect(r).toContain('$select=');
+    expect(r).not.toContain('$select');
     expect(r).toContain("Fecha ge '2026-11-01' and Fecha le '2026-11-10'");
   });
 });
