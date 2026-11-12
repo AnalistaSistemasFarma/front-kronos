@@ -207,31 +207,45 @@ function TicketsBoard() {
     });
   }, [boardHydrated, filters, filtersExpanded]);
 
+  // Los casos solo se guardan cuando cambian (no al abrir/cerrar filtros): serializar el
+  // listado completo bloqueaba la pantalla.
+  const filtersExpandedRef = useRef(filtersExpanded);
+  useEffect(() => {
+    filtersExpandedRef.current = filtersExpanded;
+  }, [filtersExpanded]);
+
   useEffect(() => {
     if (!boardHydrated) return;
     saveTicketsBoardState({
       filters: filtersRef.current,
-      filtersExpanded,
+      filtersExpanded: filtersExpandedRef.current,
       scrollY: window.scrollY,
       tickets,
     });
-  }, [boardHydrated, tickets, filtersExpanded]);
+  }, [boardHydrated, tickets]);
 
   useEffect(() => {
     if (!boardHydrated) return;
 
+    // Solo la posición (sin casos) y cuando el scroll se detiene, no en cada evento.
+    let timer: number | undefined;
     const persistScroll = () => {
-      saveTicketsBoardState({
-        filters: filtersRef.current,
-        filtersExpanded,
-        scrollY: window.scrollY,
-        tickets,
-      });
+      window.clearTimeout(timer);
+      timer = window.setTimeout(() => {
+        saveTicketsBoardState({
+          filters: filtersRef.current,
+          filtersExpanded: filtersExpandedRef.current,
+          scrollY: window.scrollY,
+        });
+      }, 250);
     };
 
     window.addEventListener('scroll', persistScroll, { passive: true });
-    return () => window.removeEventListener('scroll', persistScroll);
-  }, [boardHydrated, filtersExpanded, tickets]);
+    return () => {
+      window.clearTimeout(timer);
+      window.removeEventListener('scroll', persistScroll);
+    };
+  }, [boardHydrated]);
 
   useEffect(() => {
     if (!boardHydrated || initialLoading || scrollRestoredRef.current) return;
@@ -396,8 +410,15 @@ function TicketsBoard() {
     }
   };
 
+  const fetchTicketsAbortRef = useRef<AbortController | null>(null);
+
   const fetchTickets = useCallback(async (opts?: { silent?: boolean }) => {
     const silent = opts?.silent ?? hasLoadedOnce.current;
+    // Si el usuario filtra mientras la carga inicial sigue en curso, la consulta vieja se
+    // cancela: así no ocupa conexión ni pisa el resultado del filtro al llegar tarde.
+    fetchTicketsAbortRef.current?.abort();
+    const controller = new AbortController();
+    fetchTicketsAbortRef.current = controller;
     try {
       if (silent) {
         setTableRefreshing(true);
@@ -423,7 +444,9 @@ function TicketsBoard() {
       if (activeFilters.company) params.append('company', activeFilters.company);
       if (activeSearch) params.append('search', activeSearch);
 
-      const response = await fetch(`/api/help-desk/tickets?${params.toString()}`);
+      const response = await fetch(`/api/help-desk/tickets?${params.toString()}`, {
+        signal: controller.signal,
+      });
 
       if (!response.ok) {
         let message = 'Error al cargar los casos';
@@ -437,29 +460,29 @@ function TicketsBoard() {
       }
 
       const data = await response.json();
+      if (controller.signal.aborted) return;
       const normalizedTickets = Array.isArray(data)
         ? data.map((ticket: Ticket) => normalizeCaseListItem(ticket))
         : data;
+      // El guardado en sesión lo hace el efecto de `tickets` (una sola vez por cambio).
       setTickets(normalizedTickets);
       setError(null);
       hasLoadedOnce.current = true;
-
-      if (boardHydrated) {
-        saveTicketsBoardState({
-          filters: activeFilters,
-          filtersExpanded,
-          scrollY: window.scrollY,
-          tickets: normalizedTickets,
-        });
-      }
     } catch (err) {
+      if (controller.signal.aborted) return;
       console.error('Error fetching tickets:', err);
       setError('No se pudieron cargar los casos. Por favor intente nuevamente.');
     } finally {
-      setInitialLoading(false);
-      setTableRefreshing(false);
+      // Solo la consulta vigente apaga los indicadores de carga.
+      if (fetchTicketsAbortRef.current === controller) {
+        fetchTicketsAbortRef.current = null;
+        setInitialLoading(false);
+        setTableRefreshing(false);
+      }
     }
-  }, [subprocessId, filtersExpanded, boardHydrated]);
+  }, [subprocessId]);
+
+  useEffect(() => () => fetchTicketsAbortRef.current?.abort(), []);
 
   useEffect(() => {
     if (!boardHydrated || !initialDataLoadedRef.current) return;

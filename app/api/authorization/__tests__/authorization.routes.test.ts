@@ -35,6 +35,7 @@ vi.mock('mssql', () => ({
 }));
 vi.mock('../../../../lib/mssqlPool', () => ({
   getPool,
+  withMssqlPool: async (fn: (pool: unknown) => unknown) => fn(await getPool()),
   sql: { NVarChar: () => 'NVarChar' },
 }));
 vi.mock('../../../../lib/orion/service', () => ({ loadOrionFormBag: vi.fn() }));

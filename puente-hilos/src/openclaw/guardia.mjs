@@ -17,7 +17,8 @@
  *        trabajo, push solo a `origin` y a ramas `proyecto/*` (sin forzar ni borrar), sin `-c`,
  *        `--git-dir`, `--exec-path`…; antes de cada llamada se revisa que la configuración del
  *        repo no traiga nada que ejecute programas (fsmonitor, alias, filtros, hooksPath…).
- *   gh   solo `pr create|view|list|diff|checks|status|comment|edit|ready`, `run list|view`,
+ *   gh   solo `pr create|view|list|diff|checks|status|comment|edit|ready`, `run list|view` (sin
+ *        esperas: `--watch` y `run watch` NO),
  *        `repo view`, `issue view|list`, `workflow list|view`; `pr create` EXIGE `--base` igual
  *        a la rama de pruebas del repo (testing); `pr merge`, `api`, `auth`, `workflow run`… NO.
  *
@@ -236,6 +237,11 @@ export function validarGh(argv, { repos, repoCwd = null, mergePruebas = false })
   if (!GH_PERMITIDOS.has(clave)) return { ok: false, motivo: `gh ${clave} no está permitido.` };
   const resto = args.slice(2);
   if (resto.some((a) => a === '--web' || a === '-w')) return { ok: false, motivo: 'gh --web no está permitido.' };
+  // Esperas bloqueantes (2026-11-10, Kepler: `gh pr checks 932 --watch` dejó el exec sin salida, openclaw
+  // abortó la corrida y la persona recibió «No pude completar…»). Se consulta una vez, sin esperar.
+  if (clave === 'run watch' || resto.some((a) => a === '--watch' || a.startsWith('--watch=') || a === '--interval' || a.startsWith('--interval=') || a === '-i')) {
+    return { ok: false, motivo: 'las esperas (--watch, gh run watch) no están permitidas: bloquean el turno y la plataforma lo aborta. Consulte UNA vez con `gh pr checks <n>` (sin --watch); si el CI sigue en curso, dígaselo a la persona y vuelva a consultar en el siguiente mensaje.' };
+  }
   const repoOpc = valorOpcion(resto, ['--repo'], ['-R']);
   const repo = repoOpc[0] ?? repoCwd;
   if (!repo) return { ok: false, motivo: 'no sé de qué repositorio es: use --repo dueño/repo o corra gh dentro del worktree.' };
@@ -300,7 +306,7 @@ export function motivoNoFusionar(pr, { base, rutasPermitidas, checksRequeridos =
   for (const nombre of checksRequeridos) {
     const c = checks.filter((x) => (x.name ?? x.context) === nombre);
     if (c.length === 0) return `falta el check «${nombre}».`;
-    if (!c.every((x) => (x.conclusion ?? x.state) === 'SUCCESS')) return `el check «${nombre}» no está en verde (${c.map((x) => x.conclusion ?? x.status ?? x.state).join(', ')}). Espere con gh pr checks <n> --watch.`;
+    if (!c.every((x) => (x.conclusion ?? x.state) === 'SUCCESS')) return `el check «${nombre}» no está en verde (${c.map((x) => x.conclusion ?? x.status ?? x.state).join(', ')}). Consulte con gh pr checks <n> (sin --watch); si sigue en curso, dígaselo a la persona y reintente la fusión en el siguiente mensaje.`;
   }
   return null;
 }

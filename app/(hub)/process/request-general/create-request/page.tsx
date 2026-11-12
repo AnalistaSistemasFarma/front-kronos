@@ -104,6 +104,8 @@ import IosSearchField from '../../../../../components/ui/IosSearchField';
 import { useAutoRefresh } from '../../../../../components/ui/useAutoRefresh';
 import { filterByText, requestSearchParts } from '../../../../../lib/requests-general/textSearch';
 import { RequestListFilters } from '../../../../../components/request-general/list/RequestListFilters';
+import { useRequestListPersistence } from '../../../../../components/request-general/list/useRequestListPersistence';
+import { saveRequestListNav } from '../../../../../lib/requests-general/requestListNav';
 import {
   EMPTY_LIST_FILTERS,
   REQUEST_STATE_OPTIONS,
@@ -340,6 +342,16 @@ function RequestBoard() {
     setFilters(EMPTY_LIST_FILTERS);
     setSearchInput('');
   };
+  // Filtros y búsqueda se conservan al volver del detalle (breadcrumb o atrás).
+  useRequestListPersistence(
+    'create-request',
+    { filters, search: searchInput },
+    (saved) => {
+      setFilters(saved.filters);
+      setSearchInput(saved.search);
+    },
+    !loading
+  );
   const [refreshing, setRefreshing] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
 
@@ -1599,6 +1611,11 @@ function RequestBoard() {
                       className='cursor-pointer transition-colors'
                       onClick={() => {
                         sessionStorage.setItem('selectedRequest', JSON.stringify(ticket));
+                        saveRequestListNav(
+                          'create-request',
+                          visibleTickets.map((t) => ({ kind: 'request' as const, id: Number(t.id) })),
+                          { kind: 'request', id: Number(ticket.id) }
+                        );
                         window.open(
                           `/process/request-general/view-request?id=${ticket.id}&from=create-request`
                         );
