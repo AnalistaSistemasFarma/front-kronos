@@ -15,6 +15,12 @@ import {
   type DocVenta,
   type Vendedor,
 } from '../../../../lib/dashboards/gestion-comercial/calculo';
+import {
+  calcularLineas,
+  rutaLineasVenta,
+  type LineaVenta,
+  type LineasResultado,
+} from '../../../../lib/dashboards/gestion-comercial/lineas';
 import { sapGetAll, sapLogin, sapLogout, SapError } from '../../../../lib/sap/serviceLayer';
 
 /**
@@ -72,20 +78,33 @@ export async function GET(request: NextRequest) {
     let notasActual: DocVenta[];
     let notasAnterior: DocVenta[];
     let vendedores: Vendedor[];
+    // Etapa 2: desglose por producto / línea terapéutica / pedido / detalle, desde
+    // la vista OLP_IND_VentasB1SLQuery (líneas del mes del corte). Es tolerante a
+    // fallos: si la vista no está disponible, el tablero responde igual sin ese bloque.
+    let lineas: LineasResultado | null = null;
     try {
       facturasActual = await sapGetAll<DocVenta>(sap, rutaFacturas(rangos.actual.desde, rangos.actual.hasta), { cap: 30000 });
       facturasAnterior = await sapGetAll<DocVenta>(sap, rutaFacturas(rangos.anterior.desde, rangos.anterior.hasta), { cap: 30000 });
       notasActual = await sapGetAll<DocVenta>(sap, rutaNotasCredito(rangos.actual.desde, rangos.actual.hasta), { cap: 30000 });
       notasAnterior = await sapGetAll<DocVenta>(sap, rutaNotasCredito(rangos.anterior.desde, rangos.anterior.hasta), { cap: 30000 });
       vendedores = await sapGetAll<Vendedor>(sap, rutaVendedores(), { cap: 5000 });
+      try {
+        const filasLineas = await sapGetAll<LineaVenta>(
+          sap,
+          rutaLineasVenta(rangos.actual.desde, rangos.actual.hasta),
+          { cap: 60000 }
+        );
+        lineas = calcularLineas(rangos.actual.desde, rangos.actual.hasta, filasLineas);
+      } catch (errLineas) {
+        console.error('Vista de líneas de venta no disponible (etapa 2):', errLineas);
+        lineas = null;
+      }
     } finally {
       await sapLogout(sap);
     }
 
-    return NextResponse.json(
-      calcularGestionComercial(corte, facturasActual, notasActual, facturasAnterior, notasAnterior, vendedores),
-      { headers: { 'Cache-Control': 'no-store' } }
-    );
+    const base = calcularGestionComercial(corte, facturasActual, notasActual, facturasAnterior, notasAnterior, vendedores);
+    return NextResponse.json({ ...base, lineas }, { headers: { 'Cache-Control': 'no-store' } });
   } catch (error) {
     if (error instanceof SapError) return NextResponse.json({ error: error.friendly }, { status: error.status });
     console.error('Error en dashboard de gestión comercial:', error);
