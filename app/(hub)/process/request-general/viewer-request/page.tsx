@@ -439,6 +439,7 @@ function ViewerRequestGeneralPage() {
         onChange={setFilters}
         onClear={clearListFilters}
         counts={statusCounts}
+        showReturned
         options={listOptions}
         progress={globalProgress}
         extraActiveCount={departmentFilter ? 1 : 0}

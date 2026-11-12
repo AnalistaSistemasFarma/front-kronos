@@ -1527,6 +1527,7 @@ function RequestBoard() {
         onChange={setFilters}
         onClear={clearListFilters}
         counts={statusCounts}
+        showReturned
         options={listOptions}
         progress={globalProgress}
       />
