@@ -5,39 +5,40 @@ import {
   accesoGestionComercial,
   getGestionComercialEmpresas,
 } from '../../../../lib/dashboards/gestion-comercial/access';
+import { parseCorte, iso } from '../../../../lib/dashboards/gestion-comercial/calculo';
+import type { LineaVenta } from '../../../../lib/dashboards/gestion-comercial/lineas';
 import {
-  calcularGestionComercial,
-  parseCorte,
-  rangosMes,
-  rutaFacturas,
-  rutaNotasCredito,
-  rutaVendedores,
-  type DocVenta,
-  type Vendedor,
-} from '../../../../lib/dashboards/gestion-comercial/calculo';
-import {
-  calcularLineas,
-  rutaLineasVenta,
-  type LineaVenta,
-  type LineasResultado,
-} from '../../../../lib/dashboards/gestion-comercial/lineas';
-import { sapGetAll, sapLogin, sapLogout, SapError } from '../../../../lib/sap/serviceLayer';
+  aFila,
+  habilesDelMes,
+  rangosTablero,
+  rutaVistaVentas,
+  type Fila,
+  type TableroDatos,
+} from '../../../../lib/dashboards/gestion-comercial/tablero';
+import { sapGetAll, sapLogin, sapLogout, SapError, type SapSession } from '../../../../lib/sap/serviceLayer';
 
 /**
- * Dashboard de gestión comercial (etapa 1: estructura + datos en vivo de SAP).
- * Lee facturas (Invoices) y notas crédito (CreditNotes) del mes del corte y del
- * mismo lapso del mes anterior, más el catálogo de vendedores, y agrega todo EN
- * EL SERVIDOR. SOLO LECTURA (GET).
+ * Tablero comercial — datos en vivo de SAP, SOLO LECTURA (GET).
  *
- *   GET                         -> { empresas:[{ id, nombre, lista }] }
+ *   GET                          -> { empresas:[{ id, nombre, lista }] }
  *   GET ?companyId[&corte=AAAA-MM-DD]
- *     -> GestionComercialResultado (KPIs, serie diaria, top clientes, vendedores…)
+ *     -> TableroDatos: líneas compactas de la vista OLP_IND_VentasB1SLQuery para
+ *        (1) el mes del corte hasta el corte, (2) el mismo lapso del mes anterior
+ *        y (3) el mismo lapso del año anterior. Tres consultas acotadas por fecha,
+ *        sin recorrer documentos. La agregación por filtros se hace en la página.
  *
  * Acceso: subproceso «Dashboard de gestión comercial»
  * (/process/dashboards/gestion-comercial) asignado al usuario en la empresa.
- * 401 sin sesión; 403 sin permiso; 409 sin Service Layer. Credenciales SAP solo
- * en el servidor.
+ * 401 sin sesión; 403 sin permiso; 409 sin Service Layer.
  */
+
+const CAP = 60000;
+
+async function leer(sap: SapSession, desde: string, hasta: string): Promise<Fila[]> {
+  const lineas = await sapGetAll<LineaVenta>(sap, rutaVistaVentas(desde, hasta), { cap: CAP, pageSize: 1000 });
+  return lineas.map(aFila);
+}
+
 export async function GET(request: NextRequest) {
   try {
     const session = await getServerSession(authOptions);
@@ -71,43 +72,49 @@ export async function GET(request: NextRequest) {
     const corte = parseCorte(sp.get('corte'));
     if (!corte) return NextResponse.json({ error: 'Corte inválido' }, { status: 400 });
 
-    const rangos = rangosMes(corte);
+    const r = rangosTablero(corte);
+    const avisos: string[] = [];
     const sap = await sapLogin(acceso.endpoint);
-    let facturasActual: DocVenta[];
-    let facturasAnterior: DocVenta[];
-    let notasActual: DocVenta[];
-    let notasAnterior: DocVenta[];
-    let vendedores: Vendedor[];
-    // Etapa 2: desglose por producto / línea terapéutica / pedido / detalle, desde
-    // la vista OLP_IND_VentasB1SLQuery (líneas del mes del corte). Es tolerante a
-    // fallos: si la vista no está disponible, el tablero responde igual sin ese bloque.
-    let lineas: LineasResultado | null = null;
+    let filas: Fila[];
+    let filasAnterior: Fila[] = [];
+    let filasAnio: Fila[] = [];
     try {
-      facturasActual = await sapGetAll<DocVenta>(sap, rutaFacturas(rangos.actual.desde, rangos.actual.hasta), { cap: 30000 });
-      facturasAnterior = await sapGetAll<DocVenta>(sap, rutaFacturas(rangos.anterior.desde, rangos.anterior.hasta), { cap: 30000 });
-      notasActual = await sapGetAll<DocVenta>(sap, rutaNotasCredito(rangos.actual.desde, rangos.actual.hasta), { cap: 30000 });
-      notasAnterior = await sapGetAll<DocVenta>(sap, rutaNotasCredito(rangos.anterior.desde, rangos.anterior.hasta), { cap: 30000 });
-      vendedores = await sapGetAll<Vendedor>(sap, rutaVendedores(), { cap: 5000 });
+      filas = await leer(sap, r.actual.desde, r.actual.hasta);
       try {
-        const filasLineas = await sapGetAll<LineaVenta>(
-          sap,
-          rutaLineasVenta(rangos.actual.desde, rangos.actual.hasta),
-          { cap: 60000 }
-        );
-        lineas = calcularLineas(rangos.actual.desde, rangos.actual.hasta, filasLineas);
-      } catch (errLineas) {
-        console.error('Vista de líneas de venta no disponible (etapa 2):', errLineas);
-        lineas = null;
+        filasAnterior = await leer(sap, r.anterior.desde, r.anterior.hasta);
+      } catch (e) {
+        console.error('Tablero comercial: mes anterior no disponible', e);
+        avisos.push('No se pudo leer el mes anterior; los comparativos mensuales quedan vacíos.');
+      }
+      try {
+        filasAnio = await leer(sap, r.anioAnterior.desde, r.anioAnterior.hasta);
+      } catch (e) {
+        console.error('Tablero comercial: año anterior no disponible', e);
+        avisos.push('No se pudo leer el año anterior; los comparativos anuales quedan vacíos.');
       }
     } finally {
       await sapLogout(sap);
     }
+    if (filas.length >= CAP) avisos.push(`Se alcanzó el tope de ${CAP.toLocaleString('es-CO')} líneas; el mes puede estar incompleto.`);
 
-    const base = calcularGestionComercial(corte, facturasActual, notasActual, facturasAnterior, notasAnterior, vendedores);
-    return NextResponse.json({ ...base, lineas }, { headers: { 'Cache-Control': 'no-store' } });
+    const habiles = habilesDelMes(corte);
+    const datos: TableroDatos = {
+      corte: iso(corte),
+      actual: r.actual,
+      anterior: r.anterior,
+      anioAnterior: r.anioAnterior,
+      diasHabilesMes: habiles.mes,
+      diasHabilesTranscurridos: habiles.transcurridos,
+      actualizado: new Date().toISOString(),
+      filas,
+      filasAnterior,
+      filasAnio,
+      avisos,
+    };
+    return NextResponse.json(datos, { headers: { 'Cache-Control': 'no-store' } });
   } catch (error) {
     if (error instanceof SapError) return NextResponse.json({ error: error.friendly }, { status: error.status });
-    console.error('Error en dashboard de gestión comercial:', error);
+    console.error('Error en tablero comercial:', error);
     return NextResponse.json({ error: 'Error interno' }, { status: 500 });
   }
 }
