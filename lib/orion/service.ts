@@ -2,7 +2,7 @@ import sql from 'mssql';
 import { ORION_SIGNATURE_FIELD_TYPE } from './fieldType';
 import {
   adoptLegacyOrionDocument,
-  allOrionDocumentsFullySigned,
+  allPreparedOrionDocumentsSigned,
   anyOrionDocumentRejected,
   emptyOrionFormBag,
   findOrionDocumentByExternalRef,
@@ -67,7 +67,11 @@ import {
   syncOrionSignerTasks,
 } from './signerTasks';
 import { openNextOrionSignerAuthorization } from './signerAuthorizations';
-import { isSignatureTaskName, resolveSignatureTasksOnSigned } from './autoCloseOnSigned';
+import {
+  closeRequestWhenAllSigned,
+  isSignatureTaskName,
+  resolveSignatureTasksOnSigned,
+} from './autoCloseOnSigned';
 import { useGetMicrosoftToken as getMicrosoftToken } from '../../components/microsoft-365/useGetMicrosoftToken.jsx';
 import type { SignerAcceptIdentity } from './signerIdentity';
 import { normalizeSignerIdentity } from './signerIdentity';
@@ -1002,7 +1006,7 @@ export async function applyOrionWebhookToRequest(
   });
 
   let tasksUpdated = 0;
-  const requestClosed = false;
+  let requestClosed = false;
 
   // Auth Kronos del siguiente firmante SOLO al avanzar de turno (alguien acaba de firmar).
   // Antes se abría en cada sync EN_PROCESO y, como findExisting ignoraba status=2,
@@ -1056,7 +1060,9 @@ export async function applyOrionWebhookToRequest(
           : 'Actualización de firma digital (Orion).');
 
   const allRejected = anyOrionDocumentRejected(bag) && statusUpper === 'RECHAZADO';
-  const allSigned = allOrionDocumentsFullySigned(bag) && allSignersCompleted(state.signers);
+  // Cuentan todos los documentos preparados, también en borrador; solo se omiten los adjuntos
+  // que nunca se prepararon para firma (2026-11-12).
+  const allSigned = allPreparedOrionDocumentsSigned(bag) && allSignersCompleted(state.signers);
 
   if (allRejected || (statusUpper === 'RECHAZADO' && Object.keys(bag.documents).length <= 1)) {
     // Rechazo: cierra turnos de firma de ese flujo; NO finaliza la solicitud.
@@ -1113,6 +1119,20 @@ export async function applyOrionWebhookToRequest(
       }
     } catch (err) {
       console.warn('[orion/applyWebhook] Watermark DOCUMENTO VALIDADO:', err);
+    }
+
+    // Todo lo enviado quedó firmado: si la solicitud ya no tiene otras tareas abiertas, se cierra
+    // como Resuelta (2026-11-12). Solo cuando cambió algo (un webhook repetido no reabre/recierra),
+    // y después de la marca de agua para que el aviso al solicitante llegue con el PDF final.
+    if (statusChanged || turnAdvanced) {
+      try {
+        requestClosed = await closeRequestWhenAllSigned(pool, {
+          requestId: params.requestId,
+          closedByUserId: ctx?.id_requester ?? null,
+        });
+      } catch (err) {
+        console.warn('[orion/applyWebhook] Cierre automático (solicitud):', err);
+      }
     }
   }
 
