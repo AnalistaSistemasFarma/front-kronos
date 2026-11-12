@@ -8,7 +8,7 @@ import { checkAdminPrivileges } from '../../../../../lib/access-control';
 import type { ChatSessionUser } from '../../../../../lib/chat/http';
 import type { ProjectAccess } from '../../../../../lib/chat/projects';
 import { politicaGuardadaConCodigo } from '../../../../../lib/proyectos/permisos-agentes';
-import { mensajeSoloDesarrollo } from '../../../../../lib/proyectos/agentes-desarrollo-rules';
+import { avisoSinCodigo } from '../../../../../lib/proyectos/agentes-desarrollo-rules';
 
 export const dynamic = 'force-dynamic';
 
@@ -20,11 +20,13 @@ export const dynamic = 'force-dynamic';
  *   GET    agentes que puede agregar: los que tiene asignados en la empresa del
  *          proyecto, con proyectos habilitados y con el perfil. Si el proyecto
  *          no tiene asistentes ni conversaciones (se creó SIN asistente,
- *          2026-11-10), se ofrecen todos y `eligePerfil` = true.
- *   POST   { agentCodes: [...], profile? }  designa. Si el proyecto tiene acceso a
- *          código, solo se agregan agentes de desarrollo (400; regla del
- *          2026-10-27). Con `eligePerfil`, `profile` es obligatorio, lo deben
- *          admitir todos los escogidos y queda fijo en el proyecto.
+ *          2026-11-10), se ofrecen todos y `eligePerfil` = true. `conCodigo`:
+ *          la política guardada da código (para el aviso de la interfaz).
+ *   POST   { agentCodes: [...], profile? }  designa. Con `eligePerfil`, `profile`
+ *          es obligatorio, lo deben admitir todos los escogidos y queda fijo en
+ *          el proyecto. Un agente de NEGOCIO sí entra a un proyecto con código
+ *          (2026-11-11, Nicolás Rivera): participa SIN acceso al código (el
+ *          puente le entrega «ninguno»); la respuesta trae `avisos` informativos.
  *   DELETE ?code=<agente>  retira (sus conversaciones quedan de solo lectura).
  *          Desde el 2026-11-10 se puede retirar el último: el proyecto sigue
  *          siendo de las personas.
@@ -57,8 +59,11 @@ export async function GET(_request: NextRequest, { params }: Ctx) {
     const guard = await guardProject(id);
     if ('response' in guard) return guard.response;
     if (!(await puedeGestionar(guard.user, guard.project))) return forbidden('Solo el dueño del proyecto puede agregar asistentes.');
-    const { lista, eligePerfil } = await candidatos(guard.user.email, guard.project.idProject, guard.project.idCompany, guard.project.profile);
-    return jsonNoStore({ agents: lista, eligePerfil, profiles: eligePerfil ? [...PROJECT_PROFILES] : [] });
+    const [{ lista, eligePerfil }, conCodigo] = await Promise.all([
+      candidatos(guard.user.email, guard.project.idProject, guard.project.idCompany, guard.project.profile),
+      politicaGuardadaConCodigo(guard.project.idProject).catch(() => false),
+    ]);
+    return jsonNoStore({ agents: lista, eligePerfil, profiles: eligePerfil ? [...PROJECT_PROFILES] : [], conCodigo });
   } catch (error) {
     return serverError('GET /api/proyectos/[id]/agentes', error);
   }
@@ -93,16 +98,17 @@ export async function POST(request: NextRequest, { params }: Ctx) {
     if (actuales + codigos.value.length > MAX_PROJECT_AGENTS) {
       return badRequest(`Un proyecto puede tener hasta ${MAX_PROJECT_AGENTS} asistentes.`);
     }
+    // Agentes de NEGOCIO en un proyecto con código (2026-11-11): entran, sin acceso al código.
+    // No se bloquea: la reja está en el puente (politicaParaPuente con esDesarrollo: false).
     const negocio = codigos.value.map((c) => porCodigo.get(c)!).filter((a) => !a.esDesarrollo);
-    if (negocio.length > 0 && (await politicaGuardadaConCodigo(guard.project.idProject))) {
-      return badRequest(
-        `${mensajeSoloDesarrollo(negocio.map((a) => a.displayName))} Para agregarlo, primero deje los permisos del proyecto en «Ninguno».`
-      );
-    }
+    const avisos =
+      negocio.length > 0 && (await politicaGuardadaConCodigo(guard.project.idProject).catch(() => false))
+        ? [avisoSinCodigo(negocio.map((a) => a.displayName))]
+        : [];
     const filas = codigos.value.map((c) => ({ id_project: guard.project.idProject, id_agent: porCodigo.get(c)!.idAgent, added_by: guard.user.id }));
     if (perfilNuevo === null) {
       await prisma.chatProjectAgent.createMany({ data: filas });
-      return jsonNoStore({ added: filas.length }, { status: 201 });
+      return jsonNoStore({ added: filas.length, avisos }, { status: 201 });
     }
     // Perfil y asistentes en UNA transacción, y solo si el proyecto SIGUE sin
     // asistentes ni conversaciones (dos pestañas a la vez: gana la primera).
@@ -119,7 +125,7 @@ export async function POST(request: NextRequest, { params }: Ctx) {
       return true;
     });
     if (!hecho) return jsonNoStore({ error: 'El proyecto cambió mientras tanto. Vuelva a abrir «Agregar asistente».' }, { status: 409 });
-    return jsonNoStore({ added: filas.length, profile: perfil }, { status: 201 });
+    return jsonNoStore({ added: filas.length, profile: perfil, avisos }, { status: 201 });
   } catch (error) {
     return serverError('POST /api/proyectos/[id]/agentes', error);
   }

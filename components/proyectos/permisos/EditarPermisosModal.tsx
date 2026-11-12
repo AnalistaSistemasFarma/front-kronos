@@ -8,20 +8,20 @@ import { MAX_MOTIVO, MIN_MOTIVO } from '../../../lib/proyectos/permisos-agentes-
 import type { PermisosProyectoDto } from '../../../lib/proyectos/permisos-agentes-tipos';
 import { apiSend } from '../api';
 import { CONSULTA_ESCRITORIO } from '../ui';
-import { PERMISOS_POR_DEFECTO, permisosListos, valorDesdePolitica, type ValorPermisos } from './FormPermisosAgentes';
+import { permisosListos, valorDesdePolitica, type ValorPermisos } from './FormPermisosAgentes';
 import PermisosSegunAgentes from './PermisosSegunAgentes';
 import css from '../proyectos.module.css';
 
 /**
  * «Cambiar permisos de los agentes» (2026-10-20). Exige el MOTIVO del cambio:
  * queda en el registro con quién, cuándo, el antes y el después.
- * Con algún agente que no es de desarrollo (2026-10-27) no se ofrecen nivel ni
- * repos: guardar deja el proyecto en «Ninguno» (así se corrige uno viejo).
+ * Con agentes de negocio (2026-11-11) se ofrecen igual nivel y repos: ellos
+ * participan sin acceso al código (aviso informativo, no bloquea).
  */
 
-/** Valor inicial del formulario: sin código permitido, siempre «ninguno». */
+/** Valor inicial del formulario: lo guardado (con los repos que siguen activos). */
 export function valorInicialEdicion(datos: PermisosProyectoDto): ValorPermisos {
-  return datos.codeAllowed === false ? PERMISOS_POR_DEFECTO : valorDesdePolitica(datos.policy, datos.catalog);
+  return valorDesdePolitica(datos.policy, datos.catalog);
 }
 export default function EditarPermisosModal({
   opened,
@@ -86,7 +86,6 @@ export default function EditarPermisosModal({
           </Alert>
         )}
         <PermisosSegunAgentes
-          codigoPermitido={datos.codeAllowed !== false}
           agentesNegocio={datos.nonDevAgents ?? []}
           valor={valor}
           onChange={setValor}
