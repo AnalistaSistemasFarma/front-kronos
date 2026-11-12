@@ -162,7 +162,8 @@ export default function ProyectosPage() {
     );
   }, [datos, busqueda]);
 
-  const puedeCrear = (datos?.companies.length ?? 0) > 0 && Object.values(datos?.designables ?? {}).some((l) => l.length > 0);
+  // El asistente es opcional desde el 2026-11-10: basta el permiso del módulo en alguna empresa.
+  const puedeCrear = (datos?.companies.length ?? 0) > 0;
 
   const botonNuevo = (
     <Button

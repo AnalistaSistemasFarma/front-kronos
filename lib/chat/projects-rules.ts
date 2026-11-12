@@ -93,8 +93,8 @@ export const MAX_PROJECT_NAME_CHARS = 120;
 export const MAX_PROJECT_INSTRUCTIONS_CHARS = 8_000;
 /** Miembros por proyecto, contando al dueño. */
 export const MAX_PROJECT_MEMBERS = 20;
-/** Archivos por proyecto. */
-export const MAX_PROJECT_FILES = 20;
+/** Archivos por proyecto (2026-11-06: 20 → 1000, el proyecto también es repositorio documental por carpetas). */
+export const MAX_PROJECT_FILES = 1000;
 /** Proyectos ACTIVOS que una persona puede ser dueña con un mismo agente. */
 export const MAX_OWNED_PROJECTS_PER_AGENT = 10;
 /** Conversaciones activas por proyecto. */
@@ -362,8 +362,20 @@ export function normalizeLinkSummary(raw: unknown): Validacion<string | null> {
   return { ok: true, value };
 }
 
-/** Códigos de agente que llegan del cliente: sin duplicados, en minúsculas, con tope. */
-export function normalizeAgentCodes(raw: unknown): Validacion<string[]> {
+/**
+ * Perfil con el que queda un proyecto creado SIN asistentes (2026-11-10). Es
+ * el de menos alcance; al agregar el PRIMER asistente a un proyecto que nunca
+ * tuvo conversaciones, el dueño escoge el perfil definitivo.
+ */
+export const PERFIL_PROYECTO_SIN_AGENTES = 'sin-conectores';
+
+/**
+ * Códigos de agente que llegan del cliente: sin duplicados, en minúsculas, con tope.
+ * `permitirVacio` (2026-11-10, Nicolás Rivera: «que existan los 2 caminos»): al
+ * CREAR un proyecto el asistente es opcional; sin lista, o lista vacía, vale [].
+ */
+export function normalizeAgentCodes(raw: unknown, opciones: { permitirVacio?: boolean } = {}): Validacion<string[]> {
+  if (opciones.permitirVacio && (raw === undefined || raw === null)) return { ok: true, value: [] };
   if (!Array.isArray(raw)) return { ok: false, error: 'Debe escoger al menos un asistente.' };
   const out: string[] = [];
   for (const item of raw) {
@@ -372,7 +384,7 @@ export function normalizeAgentCodes(raw: unknown): Validacion<string[]> {
     if (!/^[a-z0-9_-]{1,60}$/.test(code)) return { ok: false, error: 'Asistente inválido.' };
     if (!out.includes(code)) out.push(code);
   }
-  if (out.length === 0) return { ok: false, error: 'Debe escoger al menos un asistente.' };
+  if (out.length === 0 && !opciones.permitirVacio) return { ok: false, error: 'Debe escoger al menos un asistente.' };
   if (out.length > MAX_PROJECT_AGENTS) {
     return { ok: false, error: `Un proyecto puede tener hasta ${MAX_PROJECT_AGENTS} asistentes.` };
   }

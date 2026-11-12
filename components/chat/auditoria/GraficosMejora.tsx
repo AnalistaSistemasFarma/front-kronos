@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import {
   Card,
   Group,
@@ -14,6 +14,10 @@ import type { ChartOptions } from "chart.js";
 import "../../../lib/charts/register";
 import { mergeChartOptionsForTheme } from "../../../lib/charts/chartColorScheme";
 import type { GraficosDto } from "../../../lib/agent-audit/automation-db";
+import {
+  DetalleSemanaModal,
+  type CeldaSeleccionada,
+} from "./DetalleSemanaModal";
 
 /**
  * Gráficos del Indicador de automatizaciones (Nicolás, 2026-10-30):
@@ -61,6 +65,7 @@ export function GraficosMejora({
 }) {
   const deptos = graficos.departamentos;
   const semanas = graficos.semanas;
+  const [celda, setCelda] = useState<CeldaSeleccionada | null>(null);
 
   const datosBarras = useMemo(
     () => ({
@@ -97,7 +102,7 @@ export function GraficosMejora({
                 afterBody: (items) => {
                   const d = deptos[items[0]?.dataIndex ?? -1];
                   return d && d.mejora !== null
-                    ? `Mejora: ${h(d.mejora, 1)} %`
+                    ? `Capacidad liberada: ${h(d.mejora, 1)} %`
                     : "";
                 },
               },
@@ -134,12 +139,13 @@ export function GraficosMejora({
     <SimpleGrid cols={1} spacing="md" mb="md">
       <Card withBorder radius="md" padding="md" className="chat-surface">
         <Text fw={600} size="sm">
-          Mapa de calor: % de mejora en tiempo
+          Mapa de calor: capacidad liberada por departamento y semana
         </Text>
         <Text size="xs" c="dimmed" mb="sm">
-          Por departamento y semana. % de mejora = 1 − horas de la persona con
-          IA ÷ horas sin IA. Pase el ratón por una celda para ver las horas.
-          Vacío = esa semana no hubo tareas medidas.
+          Cada celda: horas liberadas esa semana (arriba) y % de capacidad
+          liberada = 1 − horas de la persona con IA ÷ horas sin IA (abajo). El
+          color sigue el %. Vacío = esa semana no hubo tareas medidas. Toque
+          una celda para ver qué se hizo esa semana y por qué.
         </Text>
         {semanas.length === 0 ? (
           <Text size="xs" c="dimmed">
@@ -195,16 +201,58 @@ export function GraficosMejora({
                       }}
                     >
                       {d.departamento}
+                      {d.agentes.length > 0 && (
+                        <div
+                          style={{
+                            fontWeight: 400,
+                            fontSize: 10,
+                            opacity: 0.65,
+                            maxWidth: 180,
+                            whiteSpace: "normal",
+                          }}
+                        >
+                          {d.agentes.join(", ")}
+                        </div>
+                      )}
                     </td>
-                    {d.celdas.map((c) => (
+                    {d.celdas.map((c, i) => (
                       <Tooltip
                         key={c.semana}
                         withArrow
                         disabled={c.mejora === null}
-                        label={`Sin IA ${h(c.horasSinIA, 1)} h · con IA ${h(c.horasConIA, 1)} h · ahorro ${h(c.horasSinIA - c.horasConIA, 1)} h`}
+                        label={`Sin IA ${h(c.horasSinIA, 1)} h · con IA ${h(c.horasConIA, 1)} h · liberadas ${h(c.horasSinIA - c.horasConIA, 1)} h`}
                       >
                         <td
+                          role={c.mejora === null ? undefined : "button"}
+                          tabIndex={c.mejora === null ? undefined : 0}
+                          aria-label={
+                            c.mejora === null
+                              ? undefined
+                              : `Ver detalle de ${d.departamento}, semana ${i + 1}`
+                          }
+                          onClick={
+                            c.mejora === null
+                              ? undefined
+                              : () =>
+                                  setCelda({
+                                    departamento: d.departamento,
+                                    semana: c.semana,
+                                    numero: i + 1,
+                                  })
+                          }
+                          onKeyDown={(e) => {
+                            if (c.mejora === null) return;
+                            if (e.key === "Enter" || e.key === " ") {
+                              e.preventDefault();
+                              setCelda({
+                                departamento: d.departamento,
+                                semana: c.semana,
+                                numero: i + 1,
+                              });
+                            }
+                          }}
                           style={{
+                            cursor: c.mejora === null ? undefined : "pointer",
                             background: fondo(c.mejora),
                             border:
                               "1px solid var(--mantine-color-default-border)",
@@ -219,7 +267,7 @@ export function GraficosMejora({
                                 : undefined,
                           }}
                         >
-                          {c.mejora === null ? "" : `${h(c.mejora)} %`}
+                          {c.mejora === null ? "" : `${h(c.horasSinIA - c.horasConIA, 1)} h`}
                           {c.mejora !== null && (
                             <div
                               style={{
@@ -228,7 +276,7 @@ export function GraficosMejora({
                                 opacity: 0.85,
                               }}
                             >
-                              {h(c.horasSinIA - c.horasConIA, 1)} h
+                              {h(c.mejora)} %
                             </div>
                           )}
                         </td>
@@ -247,7 +295,10 @@ export function GraficosMejora({
                             : undefined,
                       }}
                     >
-                      {d.mejora === null ? "—" : `${h(d.mejora)} %`}
+                      {d.mejora === null ? "—" : `${h(d.horasSinIA - d.horasConIA, 1)} h`}
+                      {d.mejora !== null && (
+                        <div style={{ fontSize: 10, fontWeight: 400, opacity: 0.85 }}>{h(d.mejora)} %</div>
+                      )}
                     </td>
                   </tr>
                 ))}
@@ -277,6 +328,8 @@ export function GraficosMejora({
           </Text>
         </Group>
       </Card>
+
+      <DetalleSemanaModal celda={celda} onClose={() => setCelda(null)} />
 
       <Card withBorder radius="md" padding="md" className="chat-surface">
         <Text fw={600} size="sm">

@@ -227,10 +227,21 @@ export async function assertProjectConversationAccess(
  * puede leer el contexto (con el historial), poner su indicador y responder
  * en el mismo hilo. El id del agente sale de la llave, nunca del payload.
  */
+/** Perfil sin conectores (lib/chat/projects-rules.ts). */
+const PERFIL_SIN_CONECTORES = 'sin-conectores';
+
 export async function assertAgentProjectConversation(
   idAgent: number,
   conversationId: unknown
-): Promise<{ id: number; idProject: number; projectName: string; invitado: boolean; idAgentPrincipal: number } | null> {
+): Promise<{
+  id: number;
+  idProject: number;
+  projectName: string;
+  invitado: boolean;
+  idAgentPrincipal: number;
+  /** Perfil de conectores con el que trabaja ESTE agente en la conversación. */
+  perfil: string;
+} | null> {
   if (!esIdValido(conversationId) || !esIdValido(idAgent)) return null;
 
   const conv = await prisma.chatConversation.findFirst({
@@ -247,6 +258,7 @@ export async function assertAgentProjectConversation(
     select: {
       id: true,
       id_agent: true,
+      mesa: { select: { id_mesa: true } },
       project: {
         select: {
           id_project: true,
@@ -263,7 +275,16 @@ export async function assertAgentProjectConversation(
   const code = conv.project.agents[0]?.agent.code;
   if (!code) return null;
   const config = await cargarConfigProyectos();
-  if (!config.perfiles(code, conv.project.id_company).includes(conv.project.profile)) return null;
+  const perfilesAgente = config.perfiles(code, conv.project.id_company);
+  let perfil = conv.project.profile;
+  if (!perfilesAgente.includes(perfil)) {
+    // MESA DE DISCUSIÓN (2026-11-05, Nicolás Rivera: «que pueda elegir todos los
+    // agentes que quiera»): un agente habilitado en la empresa pero sin el perfil
+    // del proyecto entra a la mesa SIN CONECTORES — menos permisos que cualquier
+    // perfil suyo, y en una mesa solo se conversa.
+    if (!conv.mesa || perfilesAgente.length === 0) return null;
+    perfil = PERFIL_SIN_CONECTORES;
+  }
 
   return {
     id: conv.id,
@@ -271,6 +292,7 @@ export async function assertAgentProjectConversation(
     projectName: conv.project.name,
     invitado: conv.id_agent !== idAgent,
     idAgentPrincipal: conv.id_agent,
+    perfil,
   };
 }
 
@@ -566,9 +588,11 @@ export async function getProjectDetail(user: ProjectUser, acceso: ProjectAccess,
           uploaded_by: true,
           uploaded_by_agent: true,
           id_conversation: true,
+          folder_path: true,
         },
         orderBy: { created_at: 'desc' },
       },
+      folders: { select: { path: true }, orderBy: { path: 'asc' } },
       _count: { select: { tasks: true, subagents: { where: { status: 'aprobado' } } } },
       conversations: {
         where: { archived: false },
@@ -631,7 +655,8 @@ export async function getProjectDetail(user: ProjectUser, acceso: ProjectAccess,
     company: { idCompany: p.company.id_company, companyName: p.company.company.trim() },
     myRole: acceso.role,
     archived: p.archived,
-    capabilities: p.archived ? { ...capabilitiesFor(null), archive: caps.archive } : caps,
+    // Agregar y retirar asistentes (2026-11-10): también la administración de SynerLink.
+    capabilities: p.archived ? { ...capabilitiesFor(null), archive: caps.archive } : { ...caps, manageAgents: caps.manageAgents || opciones.esAdmin === true },
     createdAt: p.created_at.toISOString(),
     updatedAt: p.updated_at.toISOString(),
     agents: p.agents.map((x) => {
@@ -666,7 +691,9 @@ export async function getProjectDetail(user: ProjectUser, acceso: ProjectAccess,
           : null,
       downloadUrl: `/api/proyectos/${p.id_project}/archivos/${f.id_project_file}`,
       puedoQuitar: !p.archived && (caps.removeAny || (caps.contribute && f.uploaded_by === user.id)),
+      folderPath: f.folder_path ?? null,
     })),
+    folders: p.folders.map((x) => x.path),
     conversations: p.conversations.map((c) => {
       const w = motivoDe(c.id_agent);
       return {

@@ -49,6 +49,7 @@ type ReviewInfo = {
   canDecide: boolean;
   canUploadCorrection: boolean;
   readyForSigning: boolean;
+  currentUserId?: string | null;
 };
 
 type Props = {
@@ -304,6 +305,19 @@ export default function OrionReviewPanel({
   const skipValidation = Boolean(state.skipValidation ?? view.skipValidation);
   // Correcciones sin validadores (o con el documento "Sin validación"): subversión directa.
   const correctionNeedsValidators = view.hasValidators && !skipValidation;
+  // La preparadora que también valida: su paso queda aprobado al enviar, sin tarea para sí misma.
+  const selfUserId = view.currentUserId ?? null;
+  const includesSelf = Boolean(selfUserId && validatorIds.includes(selfUserId));
+  const onlySelf = includesSelf && validatorIds.length === 1;
+  const selfNotice = includesSelf ? (
+    <Alert color='teal' variant='light' icon={<IconCheck size={16} />} p='xs'>
+      <Text size='xs'>
+        {onlySelf
+          ? 'Solo usted valida este documento: al enviar queda aprobado para firma, sin crearle una tarea. Al preparar la firma ubica su visto bueno como validador.'
+          : 'Usted también valida este documento: su paso queda aprobado al enviar y no se le crea una tarea. Al preparar la firma ubica su visto bueno como los demás validadores.'}
+      </Text>
+    </Alert>
+  ) : null;
 
   const toggleValidation = (withValidation: boolean) =>
     post(
@@ -464,22 +478,30 @@ export default function OrionReviewPanel({
             value={validatorIds}
             onChange={setValidatorIds}
             disabled={busy === 'submit'}
+            selfUserId={selfUserId}
           />
+          {selfNotice}
           <Group justify='flex-end'>
             <Button variant='default' onClick={() => setSubmitOpen(false)}>
               Cancelar
             </Button>
             <Button
               color='violet'
-              leftSection={<IconSend size={14} />}
+              leftSection={onlySelf ? <IconCheck size={14} /> : <IconSend size={14} />}
               loading={busy === 'submit'}
               disabled={validatorIds.length === 0}
               onClick={async () => {
-                const ok = await post('submit', { validatorIds }, 'Documento enviado a validación');
+                const ok = await post(
+                  'submit',
+                  { validatorIds },
+                  onlySelf ? 'Documento validado: ya puede prepararlo para firma' : 'Documento enviado a validación'
+                );
                 if (ok) setSubmitOpen(false);
               }}
             >
-              Enviar a {validatorIds.length || ''} validador{validatorIds.length === 1 ? '' : 'es'}
+              {onlySelf
+                ? 'Validar y dejar listo para firma'
+                : `Enviar a ${validatorIds.length || ''} validador${validatorIds.length === 1 ? '' : 'es'}`}
             </Button>
           </Group>
         </Stack>
@@ -704,8 +726,10 @@ export default function OrionReviewPanel({
               value={validatorIds}
               onChange={setValidatorIds}
               disabled={busy === 'resubmit'}
+              selfUserId={selfUserId}
             />
           ) : null}
+          {correctionNeedsValidators ? selfNotice : null}
           <Group justify='flex-end'>
             <Button variant='default' onClick={() => setUploadOpen(false)}>
               Cancelar

@@ -30,8 +30,6 @@ import {
   Loader,
   Pagination,
   SegmentedControl,
-  ActionIcon,
-  UnstyledButton,
 } from '@mantine/core';
 import {
   IconCalendar,
@@ -61,13 +59,7 @@ import {
   IconCalendarEvent,
   IconDownload,
   IconListCheck,
-  IconArrowsExchange,
-  IconUsers,
-  IconArrowBackUp,
-  IconChevronUp,
-  IconChevronDown,
-  IconSelector,
-  IconEye,
+  IconFileDescription,
 } from '@tabler/icons-react';
 import { sendMessage } from '../../../../../components/email/utils/sendMessage';
 import FileUpload, { UploadedFile } from '../../../../../components/ui/FileUpload';
@@ -81,15 +73,32 @@ import {
 } from '../../../../../components/request-general/list/RequestListUi';
 import requestListStyles from '../../../../../components/request-general/list/requestList.module.css';
 import WorkloadDistribution from '../../../../../components/request-general/WorkloadDistribution';
+import TeamTasksPanel, { useTeamAccess } from '../../../../../components/request-general/TeamTasksPanel';
 import { RequestFlowBar, useRequestFlows } from '../../../../../components/request-general/RequestFlow';
 import AutoRefreshNote from '../../../../../components/ui/AutoRefreshNote';
 import IosSearchField from '../../../../../components/ui/IosSearchField';
 import { useAutoRefresh } from '../../../../../components/ui/useAutoRefresh';
-import { filterByText } from '../../../../../lib/requests-general/textSearch';
+import { filterByText, requestSearchParts } from '../../../../../lib/requests-general/textSearch';
+import { RequestListFilters } from '../../../../../components/request-general/list/RequestListFilters';
+import {
+  ASSIGNED_STATE_OPTIONS,
+  EMPTY_LIST_FILTERS,
+  buildListOptions,
+  countByStatusGroup,
+  describeListFilters,
+  matchesListFilters,
+  splitPeople,
+  stateGroup,
+  statusGroupOf,
+  type ListFilters,
+  type ListRow,
+  type StatusGroup,
+} from '../../../../../lib/requests-general/listFilters';
 import {
   buildTaskDisplayBadges,
   getSimplifiedTasksProgress,
 } from '@/lib/orion/taskProgress';
+// Solo el tipo: exportBoardExcel (y con él exceljs, ~900 KB) se carga al tocar Exportar.
 import type { BoardRequest } from '@/lib/request-general/exportBoardExcel';
 import { downloadWorkbook } from '@/lib/dashboard/excel/excelHelpers';
 import { formatEstimatedPaymentDateShort } from '@/lib/treasury/estimatedPaymentDate';
@@ -114,6 +123,8 @@ interface Ticket {
   email: string;
   phone: string;
   identification: string;
+  id_status_case?: number;
+  users_category?: string | null;
 }
 
 interface RequestTask {
@@ -142,30 +153,20 @@ interface AssignedTask {
   id_status: number;
   status_task: string;
   assigned: string;
+  category?: string | null;
 }
 
 type AssignedItem =
   | { kind: 'request'; key: string; data: Ticket; createdAt: string }
   | { kind: 'task'; key: string; data: AssignedTask; createdAt: string };
 
-// 'team' solo existe para quien tiene el permiso "Ver tareas de mi equipo" (Líder de solicitudes).
-type TypeFilter = 'all' | 'requests' | 'tasks' | 'team';
+type TypeFilter = 'all' | 'requests' | 'tasks';
 
-interface TeamMember {
-  id: string;
-  name: string;
-  email?: string;
-  departments: string[];
-  openTasks: number;
-  notStartedTasks: number;
-  oldestPendingDays: number | null;
-  isSelf: boolean;
-}
+/** Fila de la lista con lo que necesitan los filtros y el buscador. */
+type AssignedEntry = { item: AssignedItem; row: ListRow; parts: unknown[] };
 
-type TeamSortKey = 'name' | 'openTasks' | 'notStartedTasks' | 'oldestPendingDays';
-
-const TASK_ONLY_STATUSES = ['4'];
-const REQUEST_ONLY_STATUSES = ['7'];
+const entryOfType = (entry: AssignedEntry, type: TypeFilter) =>
+  type === 'all' || (type === 'requests' ? entry.item.kind === 'request' : entry.item.kind === 'task');
 
 interface Note {
   id_note: number;
@@ -208,10 +209,19 @@ function RequestBoard() {
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const isMobile = useMediaQuery('(max-width: 48em)') ?? false;
   const [assignedTasks, setAssignedTasks] = useState<AssignedTask[]>([]);
+  // «Todo lo abierto»: tareas abiertas (no Resuelto/Cancelado, incluye Sin empezar) de las
+  // solicitudes que el usuario ve aquí, aunque estén asignadas a otra persona.
+  const [openAll, setOpenAll] = useState(false);
+  const [openScopeTasks, setOpenScopeTasks] = useState<AssignedTask[]>([]);
   const initialType = searchParams.get('type');
   const [typeFilter, setTypeFilter] = useState<TypeFilter>(
     initialType === 'tasks' || initialType === 'requests' ? initialType : 'all'
   );
+  // Pestaña "Mi equipo": solo para quien tiene el permiso "Ver tareas de mi equipo" (Líder de solicitudes).
+  const teamAccess = useTeamAccess();
+  const canViewTeam = Boolean(teamAccess?.canViewTeam);
+  const [showTeam, setShowTeam] = useState(false);
+  const [teamCount, setTeamCount] = useState<number | null>(null);
   const [tasksByRequest, setTasksByRequest] = useState<Record<number, RequestTask[]>>({});
   const [loading, setLoading] = useState(true);
   const [exporting, setExporting] = useState(false);
@@ -235,55 +245,51 @@ function RequestBoard() {
   const [assignedUsers, setAssignedUsers] = useState<{ value: string; label: string }[]>([]);
   const [idUser, setIdUser] = useState('');
 
-  const [filters, setFilters] = useState({
-    id: '',
-    status: '0',
-    company: '',
-    date_from: '',
-    date_to: '',
-    assigned_to: '',
-    process: '',
-    member: '',
-  });
+  // Filtros iguales a los de Mis solicitudes: el estado es GENERAL ("Pendientes" trae solicitudes
+  // y tareas a la vez) y todo se filtra en el navegador sobre la lista COMPLETA, no por página.
+  // La paginación solo reparte lo ya filtrado para pintarlo.
+  const [filters, setFilters] = useState<ListFilters>(EMPTY_LIST_FILTERS);
   const [currentPage, setCurrentPage] = useState(1);
-
-  const [teamAccess, setTeamAccess] = useState<{ canViewTeam: boolean; companies: number[] }>({
-    canViewTeam: false,
-    companies: [],
-  });
-  const [teamDepartments, setTeamDepartments] = useState<{ value: string; label: string }[]>([]);
-  const [teamDepartment, setTeamDepartment] = useState('');
-  const teamDepartmentRef = useRef('');
-  const teamDepartmentIdsRef = useRef<string[]>([]);
-  const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
-  const [teamLoading, setTeamLoading] = useState(false);
-  const [teamError, setTeamError] = useState<string | null>(null);
-  const [teamSort, setTeamSort] = useState<{ key: TeamSortKey; dir: 'asc' | 'desc' }>({
-    key: 'oldestPendingDays',
-    dir: 'desc',
-  });
-  const [selectedTeamMember, setSelectedTeamMember] = useState('');
-  const [memberTasks, setMemberTasks] = useState<AssignedTask[]>([]);
-  const [memberTasksLoading, setMemberTasksLoading] = useState(false);
-  const [memberTasksError, setMemberTasksError] = useState<string | null>(null);
-  const [appliedMember, setAppliedMember] = useState('');
-  const [reassignTask, setReassignTask] = useState<AssignedTask | null>(null);
-  const [reassignTo, setReassignTo] = useState<string | null>(null);
-  const [reassignReason, setReassignReason] = useState('');
-  const [reassignSaving, setReassignSaving] = useState(false);
-  const [reassignError, setReassignError] = useState<string | null>(null);
-  const [totalTickets, setTotalTickets] = useState(0);
-  const [statusCounts, setStatusCounts] = useState({ open: 0, resolved: 0 });
-  // Filtros con los que se cargó la lista (para cambiar de página y exportar).
-  const appliedFiltersRef = useRef<typeof filters | null>(null);
-  // Buscador libre: las solicitudes se buscan en el servidor (toda la base, antes de paginar);
-  // las tareas ya están completas en memoria y se filtran aquí mismo.
   const [searchInput, setSearchInput] = useState('');
   const deferredSearch = useDeferredValue(searchInput);
-  const appliedSearchRef = useRef('');
-  const visibleTasks = useMemo(
-    () =>
-      filterByText(assignedTasks, deferredSearch, (t) => [
+  const [refreshing, setRefreshing] = useState(false);
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+
+  const byCreatedAtDesc =(a: { createdAt: string }, b: { createdAt: string }) =>
+    new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+
+  const allEntries = useMemo<AssignedEntry[]>(() => {
+    const requests: AssignedEntry[] = tickets.map((t) => ({
+      item: { kind: 'request', key: `req-${t.id}`, data: t, createdAt: t.created_at },
+      row: {
+        requestId: t.id,
+        group: statusGroupOf(t.id_status_case, t.status),
+        statusId: t.id_status_case,
+        companyId: String(t.id_company ?? ''),
+        company: t.company,
+        process: t.process,
+        people: splitPeople(t.user, t.users_category),
+        createdAt: t.created_at,
+      },
+      parts: requestSearchParts(t),
+    }));
+    const ownTaskIds = new Set(assignedTasks.map((t) => t.id));
+    const taskRows = openAll
+      ? [...assignedTasks, ...openScopeTasks.filter((t) => !ownTaskIds.has(t.id))]
+      : assignedTasks;
+    const tasks: AssignedEntry[] = taskRows.map((t) => ({
+      item: { kind: 'task', key: `task-${t.id}`, data: t, createdAt: t.created_at },
+      row: {
+        requestId: t.id_request_general,
+        group: statusGroupOf(t.id_status, t.status_task),
+        statusId: t.id_status,
+        companyId: String(t.id_company ?? ''),
+        company: t.company,
+        process: t.process,
+        people: splitPeople(t.assigned),
+        createdAt: t.created_at,
+      },
+      parts: [
         t.id_request_general,
         t.task,
         t.subject_request,
@@ -293,49 +299,96 @@ function RequestBoard() {
         t.status_task,
         t.name_requester,
         t.assigned,
-      ]),
-    [assignedTasks, deferredSearch]
+      ],
+    }));
+    return [...requests, ...tasks].sort((a, b) => byCreatedAtDesc(a.item, b.item));
+  }, [tickets, assignedTasks, openAll, openScopeTasks]);
+
+  // «Estado» exacto (Sin empezar, Abierto, Cancelado, Resuelto, Devuelta): el filtro que había antes del panel.
+  const listOptions = useMemo(
+    () => ({ ...buildListOptions(allEntries.map((e) => e.row)), states: ASSIGNED_STATE_OPTIONS }),
+    [allEntries]
   );
-  const [refreshing, setRefreshing] = useState(false);
-  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
-
-  const byCreatedAtDesc =(a: { createdAt: string }, b: { createdAt: string }) =>
-    new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
-
-  const requestPageItems: AssignedItem[] = tickets.map((t) => ({
-    kind: 'request',
-    key: `req-${t.id}`,
-    data: t,
-    createdAt: t.created_at,
-  }));
-  const taskItems: AssignedItem[] = visibleTasks
-    .map((t): AssignedItem => ({ kind: 'task', key: `task-${t.id}`, data: t, createdAt: t.created_at }))
-    .sort(byCreatedAtDesc);
-  const taskPageItems = taskItems.slice(
-    (currentPage - 1) * ITEMS_PER_PAGE,
-    currentPage * ITEMS_PER_PAGE
+  // Buscador + filtros del panel (sin estado ni tipo): base de las tarjetas y las pestañas.
+  const matchingEntries = useMemo(
+    () =>
+      filterByText(allEntries, deferredSearch, (e) => e.parts).filter((e) =>
+        matchesListFilters(e.row, filters, { ignoreStatus: true })
+      ),
+    [allEntries, deferredSearch, filters]
   );
-
-  const requestPages = Math.ceil(totalTickets / ITEMS_PER_PAGE);
-  const taskPages = Math.ceil(taskItems.length / ITEMS_PER_PAGE);
-  const totalPages = Math.max(
-    1,
-    typeFilter === 'requests'
-      ? requestPages
-      : typeFilter === 'tasks'
-        ? taskPages
-        : Math.max(requestPages, taskPages)
+  const typedEntries = useMemo(
+    () => matchingEntries.filter((e) => entryOfType(e, typeFilter)),
+    [matchingEntries, typeFilter]
   );
+  const statusCounts = useMemo(() => countByStatusGroup(typedEntries.map((e) => e.row)), [typedEntries]);
+  // En «Todos» cada tarjeta dice cuántas son solicitudes y cuántas tareas.
+  const statusHints = useMemo(() => {
+    if (typeFilter !== 'all') return undefined;
+    const hints: Partial<Record<StatusGroup, string>> = {};
+    for (const group of ['all', 'pending', 'done', 'cancelled'] as StatusGroup[]) {
+      const inGroup = typedEntries.filter((e) => group === 'all' || e.row.group === group);
+      const requests = inGroup.filter((e) => e.item.kind === 'request').length;
+      hints[group] = `${requests} solicitudes · ${inGroup.length - requests} tareas`;
+    }
+    return hints;
+  }, [typedEntries, typeFilter]);
+  const visibleEntries = useMemo(
+    () => typedEntries.filter((e) => matchesListFilters(e.row, filters)),
+    [typedEntries, filters]
+  );
+  // Pestañas Todos / Solicitudes / Tareas con el estado elegido.
+  const kindCounts = useMemo(() => {
+    const withStatus = matchingEntries.filter((e) => matchesListFilters(e.row, filters));
+    const requests = withStatus.filter((e) => e.item.kind === 'request').length;
+    return { all: withStatus.length, requests, tasks: withStatus.length - requests };
+  }, [matchingEntries, filters]);
 
-  // En «Todos» cada página junta su página de solicitudes con su tramo de tareas.
-  const pageItems: AssignedItem[] =
-    typeFilter === 'requests'
-      ? requestPageItems
-      : typeFilter === 'tasks'
-        ? taskPageItems
-        : [...requestPageItems, ...taskPageItems].sort(byCreatedAtDesc);
-  const totalItemsCount = totalTickets + visibleTasks.length;
-  const [filtersExpanded, setFiltersExpanded] = useState(false);
+  const totalPages = Math.max(1, Math.ceil(visibleEntries.length / ITEMS_PER_PAGE));
+  const safePage = Math.min(currentPage, totalPages);
+  const pageItems: AssignedItem[] = visibleEntries
+    .slice((safePage - 1) * ITEMS_PER_PAGE, safePage * ITEMS_PER_PAGE)
+    .map((e) => e.item);
+
+  // Al cambiar filtros, búsqueda o tipo se vuelve a la primera página.
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [filters, deferredSearch, typeFilter]);
+
+  const fetchOpenScopeTasks = async () => {
+    try {
+      const res = await fetch('/api/requests-general/activities-assigned?status=0&scope=open');
+      if (!res.ok) throw new Error('Failed to fetch open tasks');
+      const data: unknown = await res.json();
+      setOpenScopeTasks(Array.isArray(data) ? (data as AssignedTask[]) : []);
+    } catch (err) {
+      console.error('Error fetching open tasks:', err);
+      setOpenScopeTasks([]);
+    }
+  };
+
+  // Encendido: estado «Pendientes» y se traen las tareas abiertas del alcance; la empresa se
+  // elige con el filtro Empresa del panel.
+  const toggleOpenAll = () => {
+    const next = !openAll;
+    setOpenAll(next);
+    if (next) {
+      // Un estado exacto que no sea pendiente (Resuelto, Cancelado) dejaría la lista vacía.
+      setFilters((f) => ({
+        ...f,
+        status: 'pending',
+        state: f.state && stateGroup(f.state) === 'pending' ? f.state : '',
+      }));
+      void fetchOpenScopeTasks();
+    }
+  };
+
+  const clearListFilters = () => {
+    setOpenAll(false);
+    setFilters(EMPTY_LIST_FILTERS);
+    setSearchInput('');
+    setTypeFilter('all');
+  };
   // Flujo completo (en qué paso va) de las solicitudes de la página, también las de cada tarea.
   const { flows: requestFlows } = useRequestFlows(
     pageItems.map((item) =>
@@ -351,215 +404,7 @@ function RequestBoard() {
     }
     fetchCompanies();
     fetchFormData();
-    void fetchTeamAccess();
   }, [session, status, router]);
-
-  const fetchTeamAccess = async () => {
-    try {
-      const res = await fetch('/api/requests-general/team/access');
-      if (!res.ok) throw new Error('team access');
-      const data = await res.json();
-      const canViewTeam = Boolean(data?.canViewTeam);
-      setTeamAccess({
-        canViewTeam,
-        companies: Array.isArray(data?.companies) ? data.companies.map(Number) : [],
-      });
-      const departmentOptions: { value: string; label: string }[] = Array.isArray(data?.departments)
-        ? data.departments
-            .map((d: { id_department?: number | string; department?: string }) => ({
-              value: String(d?.id_department ?? ''),
-              label: String(d?.department ?? ''),
-            }))
-            .filter((d: { value: string; label: string }) => d.value && d.label)
-        : [];
-      setTeamDepartments(departmentOptions);
-      teamDepartmentIdsRef.current = departmentOptions.map((d) => d.value);
-      if (canViewTeam) void fetchTeamMembers();
-    } catch {
-      setTeamAccess({ canViewTeam: false, companies: [] });
-    }
-  };
-
-  const fetchTeamMembers = async (department: string = teamDepartmentRef.current) => {
-    try {
-      setTeamLoading(true);
-      setTeamError(null);
-      const departmentIds = department ? [department] : teamDepartmentIdsRef.current;
-      if (departmentIds.length === 0) {
-        setTeamMembers([]);
-        return;
-      }
-      const params = new URLSearchParams();
-      params.append('departments', departmentIds.join(','));
-
-      const res = await fetch(`/api/requests-general/team/members?${params.toString()}`);
-      if (!res.ok) throw new Error('team members');
-      const data = await res.json();
-      const list: TeamMember[] = Array.isArray(data?.members)
-        ? data.members.map((m: Omit<Partial<TeamMember>, 'departments'> & { departments?: string[] | string | null }) => ({
-            id: String(m.id ?? ''),
-            name: String(m.name ?? ''),
-            email: m.email ?? '',
-            departments: Array.isArray(m.departments)
-              ? m.departments
-              : String(m.departments ?? '')
-                  .split(',')
-                  .map((d) => d.trim())
-                  .filter(Boolean),
-            openTasks: Number(m.openTasks) || 0,
-            notStartedTasks: Number(m.notStartedTasks) || 0,
-            oldestPendingDays:
-              m.oldestPendingDays == null ? null : Number(m.oldestPendingDays),
-            isSelf: Boolean(m.isSelf),
-          }))
-        : [];
-      setTeamMembers(list);
-    } catch (err) {
-      console.error('Error fetching team members:', err);
-      setTeamError('No se pudo cargar la información de tu equipo. Intenta de nuevo.');
-    } finally {
-      setTeamLoading(false);
-    }
-  };
-
-  const teamMemberName = (id: string) => teamMembers.find((m) => m.id === id)?.name || '';
-
-  const sortedTeamMembers = useMemo(() => {
-    const list = [...teamMembers];
-    const { key, dir } = teamSort;
-    const sign = dir === 'asc' ? 1 : -1;
-    list.sort((a, b) => {
-      if (key === 'name') return a.name.localeCompare(b.name, 'es') * sign;
-      const av = a[key];
-      const bv = b[key];
-      if (av == null && bv == null) return a.name.localeCompare(b.name, 'es');
-      if (av == null) return 1;
-      if (bv == null) return -1;
-      return (av - bv) * sign || a.name.localeCompare(b.name, 'es');
-    });
-    return list;
-  }, [teamMembers, teamSort]);
-
-  const toggleTeamSort = (key: TeamSortKey) =>
-    setTeamSort((prev) =>
-      prev.key === key
-        ? { key, dir: prev.dir === 'asc' ? 'desc' : 'asc' }
-        : { key, dir: key === 'name' ? 'asc' : 'desc' }
-    );
-
-  const selectTeamMember = (memberId: string) => {
-    if (selectedTeamMember === memberId) {
-      setSelectedTeamMember('');
-      setMemberTasks([]);
-      setMemberTasksError(null);
-      return;
-    }
-    setSelectedTeamMember(memberId);
-    void fetchMemberTasks(memberId);
-  };
-
-  const fetchMemberTasks = async (memberId: string) => {
-    if (!memberId) return;
-    try {
-      setMemberTasksLoading(true);
-      setMemberTasksError(null);
-      const load = async (statusValue: string) => {
-        const params = new URLSearchParams({ member: memberId, status: statusValue });
-        params.append('idUser', memberId.toString());
-        const res = await fetch(`/api/requests-general/team/team-activities-assigned?${params.toString()}`);
-        if (!res.ok) throw new Error('member tasks');
-        const data = await res.json();
-        return Array.isArray(data) ? (data as AssignedTask[]) : [];
-      };
-      const [open, notStarted] = await Promise.all([load('1'), load('4')]);
-      const byId = new Map<number, AssignedTask>();
-      [...open, ...notStarted].forEach((t) => byId.set(t.id, t));
-      setMemberTasks(
-        [...byId.values()].sort(
-          (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
-        )
-      );
-    } catch (err) {
-      console.error('Error fetching member tasks:', err);
-      setMemberTasks([]);
-      setMemberTasksError('No se pudieron cargar las tareas de esta persona. Intenta de nuevo.');
-    } finally {
-      setMemberTasksLoading(false);
-    }
-  };
-
-  const openTaskInNewTab = (task: AssignedTask) => {
-    sessionStorage.setItem('selectedRequest', JSON.stringify(task));
-    window.open(`/process/request-general/view-activities?id=${task.id}&from=assigned-activities`);
-  };
-
-  const backToMyInbox = () => {
-    const nf = { ...filters, member: '' };
-    setFilters(nf);
-    if (typeFilter === 'team') setTypeFilter('all');
-    if (userId) void fetchAssignedWithUserId(userId, nf);
-  };
-
-  const openReassign = (task: AssignedTask) => {
-    setReassignTask(task);
-    setReassignTo(null);
-    setReassignReason('');
-    setReassignError(null);
-  };
-
-  const closeReassign = () => {
-    if (reassignSaving) return;
-    setReassignTask(null);
-  };
-
-  const reassignOwner = typeFilter === 'team' ? selectedTeamMember : appliedMember;
-  const reassignOptions = teamMembers
-    .filter((m) => m.id !== reassignOwner)
-    .map((m) => ({ value: m.id, label: m.isSelf ? `${m.name} (Yo)` : m.name }));
-
-  const submitReassign = async () => {
-    if (!reassignTask || !reassignTo) {
-      setReassignError('Selecciona a quién reasignar la tarea.');
-      return;
-    }
-    try {
-      setReassignSaving(true);
-      setReassignError(null);
-      const res = await fetch('/api/requests-general/team/reassign-task', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          taskId: reassignTask.id,
-          requestId: reassignTask.id_request_general,
-          toUserId: reassignTo,
-          userId: userId,
-          reason: reassignReason.trim() || undefined,
-        }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        setReassignError(data?.error || data?.message || 'No se pudo reasignar la tarea.');
-        return;
-      }
-      toast.success(`Tarea reasignada a ${teamMemberName(reassignTo) || 'la persona seleccionada'}`);
-      setReassignTask(null);
-      if (userId && appliedFiltersRef.current) {
-        void fetchAssignedWithUserId(userId, appliedFiltersRef.current, { silent: true });
-      }
-      void fetchTeamMembers();
-      if (selectedTeamMember) void fetchMemberTasks(selectedTeamMember);
-    } catch (err) {
-      console.error('Error reassigning team task:', err);
-      setReassignError('No se pudo reasignar la tarea. Intenta de nuevo.');
-    } finally {
-      setReassignSaving(false);
-    }
-  };
-
-  const canReassignInView = teamAccess.canViewTeam && Boolean(appliedMember);
-
-  const getOldestDaysColor = (days: number | null) =>
-    days == null ? 'gray' : days >= 15 ? 'red' : days >= 7 ? 'orange' : 'green';
 
   useEffect(() => {
     if (status === 'loading') return;
@@ -574,7 +419,7 @@ function RequestBoard() {
           if (id) {
             setUserId(id);
             setUserIdInitialized(true);
-            fetchAssignedWithUserId(id, filters);
+            fetchAssignedWithUserId(id);
           } else {
             setUserIdInitialized(true);
           }
@@ -617,122 +462,44 @@ function RequestBoard() {
   }, [formData.category, processCategories]);
 
   const fetchTickets = async () => {
-    if (!userId) {
-      console.log('fetchTickets: No se puede ejecutar sin userId');
-      return;
-    }
-    if (teamAccess.canViewTeam) {
-      void fetchTeamMembers();
-      if (typeFilter === 'team' && filters.member) setTypeFilter('all');
-    }
-    await fetchAssignedWithUserId(userId, filters);
-  };
-
-  // El usuario lo toma el servidor de la sesión; aquí solo van los filtros.
-  const buildTicketParams = (filtersToUse?: typeof filters) => {
-    const params = new URLSearchParams();
-    if (filtersToUse) {
-      if (filtersToUse.id) params.append('id', filtersToUse.id);
-      if (filtersToUse.status) params.append('status', filtersToUse.status);
-      if (filtersToUse.company) params.append('company', filtersToUse.company);
-      if (filtersToUse.date_from) params.append('date_from', filtersToUse.date_from);
-      if (filtersToUse.date_to) params.append('date_to', filtersToUse.date_to);
-      if (filtersToUse.assigned_to) params.append('assigned_to', filtersToUse.assigned_to);
-      if (filtersToUse.process) params.append('process', filtersToUse.process);
-      if (filtersToUse.member) params.append('member', filtersToUse.member);
-    }
-    return params;
-  };
-
-  type RequestPage = {
-    rows: Ticket[];
-    total: number;
-    counts: { open: number; resolved: number };
-  };
-  const EMPTY_REQUEST_PAGE: RequestPage = { rows: [], total: 0, counts: { open: 0, resolved: 0 } };
-
-  // Página de solicitudes que hay en `tickets` (0 = ninguna cargada).
-  const loadedRequestPageRef = useRef(0);
-
-  const includesRequests = (filtersToUse?: typeof filters) =>
-    !TASK_ONLY_STATUSES.includes(filtersToUse?.status || '');
-
-  const fetchRequestPage = async (
-    filtersToUse: typeof filters | undefined,
-    page: number
-  ): Promise<RequestPage> => {
-    const params = buildTicketParams(filtersToUse);
-    params.append('page', String(page));
-    params.append('pageSize', String(ITEMS_PER_PAGE));
-    if (appliedSearchRef.current) params.append('search', appliedSearchRef.current);
-    const res = await fetch(`/api/requests-general/request-assigned?${params.toString()}`);
-    if (!res.ok) throw new Error('Failed to fetch assigned tickets');
-    const data = await res.json();
-    return {
-      rows: Array.isArray(data.rows) ? data.rows : [],
-      total: Number(data.total) || 0,
-      counts: {
-        open: Number(data.counts?.open) || 0,
-        resolved: Number(data.counts?.resolved) || 0,
-      },
-    };
-  };
-
-  const applyRequestPage = (data: RequestPage, page: number) => {
-    setTickets(data.rows);
-    setTotalTickets(data.total);
-    setStatusCounts(data.counts);
-    loadedRequestPageRef.current = page;
-    fetchTasksForTickets(data.rows);
+    if (!userId) return;
+    await fetchAssignedWithUserId(userId);
   };
 
   /**
-   * `silent`: refresca sin tapar la pantalla con el cargador y, si algo falla, deja lo que ya
-   * se veía (búsqueda y refresco automático). `page`: página de solicitudes a cargar.
+   * Trae TODAS las solicitudes y tareas asignadas (todos los estados) de una vez; filtros,
+   * buscador y páginas se resuelven aquí. `silent`: refresca sin tapar la pantalla y, si algo
+   * falla, deja lo que ya se veía (refresco automático).
    */
   const fetchAssignedWithUserId = async (
     userIdToUse: number,
-    filtersToUse?: typeof filters,
-    { silent = false, page = 1 }: { silent?: boolean; page?: number } = {}
+    { silent = false }: { silent?: boolean } = {}
   ) => {
     try {
       if (silent) setRefreshing(true);
       else setLoading(true);
-      appliedFiltersRef.current = filtersToUse ?? null;
-      setAppliedMember(filtersToUse?.member || '');
-      setCurrentPage(page);
 
-      const statusValue = filtersToUse?.status || '';
-      const includeRequests = includesRequests(filtersToUse);
-      const includeTasks = !REQUEST_ONLY_STATUSES.includes(statusValue);
-
-      // activities-assigned aún filtra por ?idUser= (request-assigned usa la sesión).
-      const taskParams = buildTicketParams(filtersToUse);
-      taskParams.append('idUser', userIdToUse.toString());
-
+      // activities-assigned aún recibe ?idUser= (las dos rutas toman el usuario de la sesión).
+      const taskParams = new URLSearchParams({ status: '0', idUser: userIdToUse.toString() });
+      const readArray = (res: Response, what: string) => {
+        if (!res.ok) throw new Error(`Failed to fetch ${what}`);
+        return res.json().then((data: unknown) => (Array.isArray(data) ? data : []));
+      };
       const [requestResult, taskResult] = await Promise.allSettled([
-        includeRequests ? fetchRequestPage(filtersToUse, page) : Promise.resolve(EMPTY_REQUEST_PAGE),
-        includeTasks
-          ? fetch(`/api/requests-general/activities-assigned?${taskParams.toString()}`).then((res) => {
-              if (!res.ok) throw new Error('Failed to fetch assigned tasks');
-              return res.json();
-            })
-          : Promise.resolve([]),
+        fetch('/api/requests-general/request-assigned?status=0').then((res) =>
+          readArray(res, 'assigned tickets')
+        ),
+        fetch(`/api/requests-general/activities-assigned?${taskParams.toString()}`).then((res) =>
+          readArray(res, 'assigned tasks')
+        ),
       ]);
 
       // En silencio, lo que falle no borra lo que ya se veía.
       if (!silent || requestResult.status === 'fulfilled') {
-        applyRequestPage(
-          requestResult.status === 'fulfilled' ? requestResult.value : EMPTY_REQUEST_PAGE,
-          page
-        );
+        setTickets(requestResult.status === 'fulfilled' ? (requestResult.value as Ticket[]) : []);
       }
       if (!silent || taskResult.status === 'fulfilled') {
-        setAssignedTasks(
-          taskResult.status === 'fulfilled' && Array.isArray(taskResult.value)
-            ? taskResult.value
-            : []
-        );
+        setAssignedTasks(taskResult.status === 'fulfilled' ? (taskResult.value as AssignedTask[]) : []);
       }
 
       if (requestResult.status === 'rejected' && taskResult.status === 'rejected') {
@@ -754,56 +521,21 @@ function RequestBoard() {
     }
   };
 
-  // Al escribir en el buscador: espera a que deje de teclear y vuelve a pedir las solicitudes
-  // desde la página 1 (las tareas se filtran al instante en memoria).
-  useEffect(() => {
-    const next = searchInput.trim();
-    if (next === appliedSearchRef.current) return;
-    const timer = window.setTimeout(() => {
-      appliedSearchRef.current = next;
-      if (userId) {
-        void fetchAssignedWithUserId(userId, appliedFiltersRef.current ?? filters, { silent: true });
-      }
-    }, 350);
-    return () => window.clearTimeout(timer);
-    // Solo cuando cambia el texto; los filtros vigentes se leen del ref.
-  }, [searchInput, userId]);
-
-  // Refresco automático cada 30 s (y al volver a la pestaña): misma página, filtros y búsqueda.
+  // Refresco automático cada 30 s (y al volver a la pestaña); filtros y página quedan igual.
   useAutoRefresh(() => {
-    if (userId && appliedFiltersRef.current) {
-      void fetchAssignedWithUserId(userId, appliedFiltersRef.current, {
-        silent: true,
-        page: currentPage,
-      });
-    }
+    if (userId) void fetchAssignedWithUserId(userId, { silent: true });
   });
 
-  // Las solicitudes se piden por página al servidor; las tareas ya están en memoria.
-  const goToPage = async (page: number, type: TypeFilter = typeFilter) => {
-    setCurrentPage(page);
-    const applied = appliedFiltersRef.current ?? filters;
-    if (type === 'tasks' || !includesRequests(applied)) return;
-    if (loadedRequestPageRef.current === page) return;
-    try {
-      setLoading(true);
-      applyRequestPage(await fetchRequestPage(applied, page), page);
-    } catch (err) {
-      console.error('Error fetching assigned tickets page:', err);
-      setError('No se pudieron cargar las solicitudes asignadas. Intenta de nuevo.');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const changeTypeFilter = (type: TypeFilter) => {
-    setTypeFilter(type);
-    if (type === 'team') {
-      void fetchTeamMembers();
-      return;
-    }
-    void goToPage(1, type);
-  };
+  // Avance de tareas de las solicitudes que se ven en la página actual.
+  const pageRequestIds = pageItems
+    .filter((item) => item.kind === 'request')
+    .map((item) => (item.data as Ticket).id)
+    .join(',');
+  useEffect(() => {
+    const ids = new Set(pageRequestIds.split(',').filter(Boolean).map(Number));
+    void fetchTasksForTickets(tickets.filter((t) => ids.has(t.id)));
+    // Solo cuando cambian las solicitudes visibles.
+  }, [pageRequestIds]);
 
   const fetchTasksForTickets = async (ticketsToUse: Ticket[]) => {
     try {
@@ -967,12 +699,6 @@ function RequestBoard() {
     }
   };
 
-  const handleFilterChange = (field: string, value: string) => {
-    setFilters((prev) => ({
-      ...prev,
-      [field]: value,
-    }));
-  };
 
   if (status === 'loading' || loading) {
     return (
@@ -1043,31 +769,6 @@ function RequestBoard() {
     return getTasksProgress(allTasks);
   };
 
-  const pendingTasksCount = assignedTasks.filter((t) =>
-    ['sin empezar', 'abierto'].includes(t.status_task?.toLowerCase())
-  ).length;
-  const completedCount =
-    statusCounts.resolved +
-    assignedTasks.filter((t) => t.status_task?.toLowerCase() === 'resuelto').length;
-
-  const filterByStatus = (value: string, type: TypeFilter = 'all') => {
-    setTypeFilter(type);
-    const nf = { ...filters, status: value };
-    setFilters(nf);
-    if (userId) {
-      fetchAssignedWithUserId(userId, nf);
-    }
-  };
-
-  const STATUS_LABELS: Record<string, string> = {
-    '0': 'Todos',
-    '1': 'Abierto',
-    '2': 'Resuelto',
-    '3': 'Cancelado',
-    '4': 'Sin empezar (solo tareas)',
-    '7': 'Devuelta (solo solicitudes)',
-  };
-
   async function loadTasksByRequest(ids: number[]) {
     const grouped: Record<number, RequestTask[]> = {};
     for (let i = 0; i < ids.length; i += 500) {
@@ -1089,24 +790,25 @@ function RequestBoard() {
 
   async function exportToExcel() {
     if (exporting) return;
-    const applied = appliedFiltersRef.current ?? filters;
+    // Se exporta exactamente lo que se ve (filtros, estado, tipo y buscador) en TODAS las páginas.
+    const allTickets = visibleEntries
+      .filter((e) => e.item.kind === 'request')
+      .map((e) => e.item.data as Ticket);
+    const tasks = visibleEntries
+      .filter((e) => e.item.kind === 'task')
+      .map((e) => e.item.data as AssignedTask);
 
     setExporting(true);
     try {
       const { boardExportFilename, buildBoardWorkbook } = await import('@/lib/request-general/exportBoardExcel');
-
-      const params = buildTicketParams(applied);
-      const response = await fetch(`/api/requests-general/request-assigned?${params.toString()}`);
-      if (!response.ok) throw new Error('solicitudes');
-      const data = await response.json();
-      const allTickets: Ticket[] = Array.isArray(data) ? data : [];
-
-      if (allTickets.length === 0) {
+      if (allTickets.length === 0 && tasks.length === 0) {
         toast.error('No hay registros con los filtros actuales');
         return;
       }
 
-      const tasksById = await loadTasksByRequest(allTickets.map((ticket) => ticket.id));
+      const tasksById = allTickets.length
+        ? await loadTasksByRequest(allTickets.map((ticket) => ticket.id))
+        : {};
 
       const requests: BoardRequest[] = allTickets.map((ticket) => ({
         id: ticket.id,
@@ -1122,27 +824,35 @@ function RequestBoard() {
         tasks: tasksById[ticket.id] ?? [],
       }));
 
-      const companyLabel =
-        companies.find((company) => company.value === applied.company)?.label || 'Todas';
       const workbook = await buildBoardWorkbook({
         module: 'Solicitudes y Tareas Asignadas',
         filters: [
-          { label: 'Estado', value: STATUS_LABELS[applied.status] || 'Todos' },
-          { label: 'Empresa', value: companyLabel },
-          { label: 'Proceso', value: applied.process || 'Todos' },
-          { label: 'ID', value: applied.id || 'Todos' },
-          ...(teamAccess.canViewTeam
-            ? [
-                {
-                  label: 'Persona del equipo',
-                  value: applied.member ? teamMemberName(applied.member) || applied.member : 'Mi bandeja',
-                },
-              ]
-            : []),
-          { label: 'Fecha desde', value: applied.date_from || 'Sin límite' },
-          { label: 'Fecha hasta', value: applied.date_to || 'Sin límite' },
+          {
+            label: 'Vista',
+            value:
+              typeFilter === 'tasks'
+                ? 'Solo tareas'
+                : typeFilter === 'requests'
+                  ? 'Solo solicitudes'
+                  : 'Solicitudes y tareas',
+          },
+          ...describeListFilters(filters, listOptions),
+          { label: 'Búsqueda', value: searchInput.trim() || 'Ninguna' },
         ],
         requests,
+        assignedTasks: tasks.map((task) => ({
+          requestId: task.id_request_general,
+          taskId: task.id_task ?? task.id,
+          task: task.task,
+          subject: task.subject_request,
+          process: task.process,
+          company: task.company,
+          status: task.status_task,
+          createdAt: task.created_at,
+          requester: task.name_requester,
+          assigned: task.assigned,
+          description: task.description,
+        })),
       });
 
       // Hoja extra: "Solicitudes de Pago". Trae los campos extra (pivote de
@@ -1388,12 +1098,29 @@ function RequestBoard() {
     }).format(adjusted);
   };
 
+  // Misma columna que Panel, Visor y Mis solicitudes (Compañía / Categoría); aquí se suma el
+  // proceso en la línea gris porque en Asignadas se trabaja por proceso.
+  const renderCompanyCell = (company: string, category?: string | null, process?: string | null) => (
+    <Stack gap={2}>
+      <Group gap={4} wrap='nowrap'>
+        <IconBuilding size={14} className='text-gray-400' />
+        <Text size='sm' fw={500}>
+          {company}
+        </Text>
+      </Group>
+      <Text size='xs' c='dimmed'>
+        {[category, process].filter(Boolean).join(' · ')}
+      </Text>
+    </Stack>
+  );
+
+  // Etiqueta pequeña que dice qué es cada fila (va debajo del ID): «Solicitud» azul o «Tarea» morada.
   const renderTypeBadge = (kind: AssignedItem['kind']) =>
     kind === 'request' ? (
       <Badge
-        variant='filled'
+        variant='light'
         color='blue'
-        size='sm'
+        size='xs'
         leftSection={<IconTicket size={12} />}
         styles={{ root: { textTransform: 'none' }, label: { overflow: 'visible' } }}
       >
@@ -1401,9 +1128,9 @@ function RequestBoard() {
       </Badge>
     ) : (
       <Badge
-        variant='filled'
+        variant='light'
         color='violet'
-        size='sm'
+        size='xs'
         leftSection={<IconListCheck size={12} />}
         styles={{ root: { textTransform: 'none' }, label: { overflow: 'visible' } }}
       >
@@ -1437,14 +1164,13 @@ function RequestBoard() {
         );
       }}
     >
-      <Table.Td style={{ whiteSpace: 'nowrap' }}>{renderTypeBadge('task')}</Table.Td>
-      <Table.Td>
-        <Text size='sm' fw={700} c='var(--mantine-color-violet-light-color)'>
-          {task.id_request_general}
-        </Text>
-        <Text size='xs' c='dimmed' style={{ whiteSpace: 'nowrap' }}>
-          Tarea #{task.id_task ?? task.id}
-        </Text>
+      <Table.Td style={{ whiteSpace: 'nowrap' }}>
+        <Stack gap={4} align='flex-start'>
+          <Text size='sm' fw={700} c='var(--mantine-color-violet-light-color)'>
+            {task.id_request_general}
+          </Text>
+          {renderTypeBadge('task')}
+        </Stack>
       </Table.Td>
       <Table.Td style={{ minWidth: 240, maxWidth: 320 }}>
         <Text size='sm' fw={600} lineClamp={2}>
@@ -1457,19 +1183,7 @@ function RequestBoard() {
           <RequestFlowBar flow={requestFlows[Number(task.id_request_general)]} />
         </div>
       </Table.Td>
-      <Table.Td>
-        <Stack gap={2}>
-          <Text size='sm' fw={500}>
-            {task.process}
-          </Text>
-          <Group gap={4} wrap='nowrap'>
-            <IconBuilding size={13} className='text-gray-400' />
-            <Text size='xs' c='dimmed'>
-              {task.company}
-            </Text>
-          </Group>
-        </Stack>
-      </Table.Td>
+      <Table.Td>{renderCompanyCell(task.company, task.category, task.process)}</Table.Td>
       <Table.Td style={{ whiteSpace: 'nowrap' }}>{renderStatusBadge(task.status_task)}</Table.Td>
       <Table.Td>
         <Group gap={4} wrap='nowrap' align='flex-start'>
@@ -1490,395 +1204,11 @@ function RequestBoard() {
             <Text size='sm' c='dimmed'>
               {task.assigned}
             </Text>
-            {canReassignInView && renderReassignAction(task)}
           </Group>
         </Stack>
       </Table.Td>
     </Table.Tr>
   );
-
-  function renderReassignAction(task: AssignedTask) {
-    const closed = ['resuelto', 'cancelado'].includes(task.status_task?.toLowerCase());
-    if (closed) return null;
-    return (
-      <Tooltip label='Reasignar tarea' withArrow>
-        <ActionIcon
-          variant='light'
-          color='violet'
-          size='sm'
-          radius='xl'
-          aria-label='Reasignar tarea'
-          onClick={(e) => {
-            e.stopPropagation();
-            openReassign(task);
-          }}
-          onKeyDown={(e) => e.stopPropagation()}
-        >
-          <IconArrowsExchange size={14} />
-        </ActionIcon>
-      </Tooltip>
-    );
-  }
-
-  const renderTeamSortIcon = (key: TeamSortKey) =>
-    teamSort.key !== key ? (
-      <IconSelector size={14} />
-    ) : teamSort.dir === 'asc' ? (
-      <IconChevronUp size={14} />
-    ) : (
-      <IconChevronDown size={14} />
-    );
-
-  const renderTeamTh = (key: TeamSortKey, label: string, align: 'left' | 'center' = 'center') => (
-    <Table.Th style={{ whiteSpace: 'nowrap', textAlign: align }}>
-      <UnstyledButton onClick={() => toggleTeamSort(key)} aria-label={`Ordenar por ${label}`}>
-        <Group gap={4} wrap='nowrap' justify={align === 'center' ? 'center' : 'flex-start'}>
-          <Text size='sm' fw={600}>
-            {label}
-          </Text>
-          {renderTeamSortIcon(key)}
-        </Group>
-      </UnstyledButton>
-    </Table.Th>
-  );
-
-  const renderOldestBadge = (days: number | null) => (
-    <Badge variant='light' color={getOldestDaysColor(days)} radius='sm'>
-      {days == null ? '—' : `${days} ${days === 1 ? 'día' : 'días'}`}
-    </Badge>
-  );
-
-  const renderTeamSummary = () => (
-    <>
-      <Group justify='space-between' align='flex-end' wrap='wrap' gap='sm' mb='md'>
-        <Text size='sm' c='dimmed' style={{ flex: '1 1 260px' }}>
-          Personas activas de tus departamentos. Haz clic en una persona para ver sus tareas
-          pendientes.
-        </Text>
-        <Select
-          label='Departamento'
-          placeholder='Todos mis departamentos'
-          data={teamDepartments}
-          value={teamDepartment || null}
-          onChange={(value) => {
-            const next = value ?? '';
-            setTeamDepartment(next);
-            teamDepartmentRef.current = next;
-            setSelectedTeamMember('');
-            setMemberTasks([]);
-            setMemberTasksError(null);
-            void fetchTeamMembers(next);
-          }}
-          clearable
-          searchable
-          nothingFoundMessage='Sin departamentos'
-          radius='md'
-          w={{ base: '100%', sm: 280 }}
-        />
-      </Group>
-
-      {teamError && (
-        <Alert icon={<IconAlertCircle size={20} />} color='red' radius='lg' mb='md'>
-          {teamError}
-        </Alert>
-      )}
-
-      <Stack gap='xs' hiddenFrom='md'>
-        {teamLoading && teamMembers.length === 0 ? (
-          <Group justify='center' py='xl'>
-            <Loader size='sm' />
-          </Group>
-        ) : sortedTeamMembers.length === 0 ? (
-          <Text size='sm' c='dimmed' ta='center' py='xl'>
-            No hay personas en tu equipo con los filtros actuales
-          </Text>
-        ) : (
-          sortedTeamMembers.map((m) => (
-            <Paper
-              key={m.id}
-              withBorder
-              radius='md'
-              p='sm'
-              role='button'
-              tabIndex={0}
-              onClick={() => selectTeamMember(m.id)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') selectTeamMember(m.id);
-              }}
-              style={{
-                cursor: 'pointer',
-                borderColor:
-                  selectedTeamMember === m.id ? 'var(--mantine-color-violet-filled)' : undefined,
-              }}
-            >
-              <Group justify='space-between' wrap='nowrap' gap='xs' mb={4}>
-                <Text size='sm' fw={600} style={{ overflowWrap: 'anywhere' }}>
-                  {m.name}
-                  {m.isSelf ? ' (Yo)' : ''}
-                </Text>
-                {renderOldestBadge(m.oldestPendingDays)}
-              </Group>
-              <Text size='xs' c='dimmed'>
-                {m.openTasks} abiertas · {m.notStartedTasks} sin empezar
-              </Text>
-              {m.departments.length > 0 && (
-                <Text size='xs' c='dimmed' style={{ overflowWrap: 'anywhere' }}>
-                  {m.departments.join(' · ')}
-                </Text>
-              )}
-            </Paper>
-          ))
-        )}
-      </Stack>
-
-      <Box visibleFrom='md' className='overflow-x-auto' pos='relative'>
-        <LoadingOverlay visible={teamLoading} />
-        <Table striped highlightOnHover>
-          <Table.Thead>
-            <Table.Tr>
-              {renderTeamTh('name', 'Persona', 'left')}
-              {renderTeamTh('openTasks', 'Tareas abiertas')}
-              {renderTeamTh('notStartedTasks', 'Tareas sin empezar')}
-              {renderTeamTh('oldestPendingDays', 'Pendiente más antigua')}
-              <Table.Th style={{ width: 1 }} />
-            </Table.Tr>
-          </Table.Thead>
-          <Table.Tbody>
-            {sortedTeamMembers.length === 0 ? (
-              <Table.Tr>
-                <Table.Td colSpan={5} className='text-center py-12 text-gray-500'>
-                  <div className='flex flex-col items-center gap-3'>
-                    <IconUsers size={48} className='text-gray-300' />
-                    <Text size='lg' fw={500}>
-                      {teamLoading ? 'Cargando tu equipo...' : 'No hay personas en tu equipo'}
-                    </Text>
-                    {!teamLoading && (
-                      <Text size='sm' c='gray.5'>
-                        Revisa los departamentos asignados o el filtro de empresa
-                      </Text>
-                    )}
-                  </div>
-                </Table.Td>
-              </Table.Tr>
-            ) : (
-              sortedTeamMembers.map((m) => (
-                <Table.Tr
-                  key={m.id}
-                  className='cursor-pointer transition-colors'
-                  onClick={() => selectTeamMember(m.id)}
-                  bg={selectedTeamMember === m.id ? 'var(--mantine-color-violet-light)' : undefined}
-                >
-                  <Table.Td>
-                    <Group gap={6} wrap='nowrap'>
-                      <IconUser size={14} className='text-gray-400' />
-                      <Text size='sm' fw={600}>
-                        {m.name}
-                      </Text>
-                      {m.isSelf && (
-                        <Badge size='xs' variant='light' color='blue'>
-                          Yo
-                        </Badge>
-                      )}
-                    </Group>
-                    {m.departments.length > 0 && (
-                      <Group gap={4} mt={4} wrap='wrap'>
-                        {m.departments.map((d) => (
-                          <Badge
-                            key={d}
-                            size='xs'
-                            variant='outline'
-                            color='gray'
-                            styles={{ root: { textTransform: 'none' } }}
-                          >
-                            {d}
-                          </Badge>
-                        ))}
-                      </Group>
-                    )}
-                  </Table.Td>
-                  <Table.Td ta='center'>
-                    <Text size='sm' fw={700} c='var(--mantine-color-orange-light-color)'>
-                      {m.openTasks}
-                    </Text>
-                  </Table.Td>
-                  <Table.Td ta='center'>
-                    <Text size='sm' fw={700} c='dimmed'>
-                      {m.notStartedTasks}
-                    </Text>
-                  </Table.Td>
-                  <Table.Td ta='center'>{renderOldestBadge(m.oldestPendingDays)}</Table.Td>
-                  <Table.Td>
-                    {selectedTeamMember === m.id ? (
-                      <IconChevronUp size={16} className='text-gray-500' />
-                    ) : (
-                      <IconChevronDown size={16} className='text-gray-400' />
-                    )}
-                  </Table.Td>
-                </Table.Tr>
-              ))
-            )}
-          </Table.Tbody>
-        </Table>
-      </Box>
-
-      {selectedTeamMember && renderMemberTasks()}
-    </>
-  );
-
-  const renderMemberTasks = () => {
-    const member = teamMembers.find((m) => m.id === selectedTeamMember);
-    return (
-      <Paper withBorder radius='lg' p='md' mt='lg'>
-        <Group justify='space-between' wrap='wrap' gap='xs' mb='sm'>
-          <Group gap={8} wrap='nowrap'>
-            <IconListCheck size={18} className='text-violet-500' />
-            <Text fw={700} size='sm'>
-              Tareas pendientes de {member?.name || 'la persona seleccionada'}
-              {member?.isSelf ? ' (Yo)' : ''}
-            </Text>
-            {!memberTasksLoading && (
-              <Badge size='sm' variant='light' color='violet'>
-                {memberTasks.length}
-              </Badge>
-            )}
-          </Group>
-          <Button
-            size='xs'
-            variant='subtle'
-            color='gray'
-            leftSection={<IconX size={14} />}
-            onClick={() => selectTeamMember(selectedTeamMember)}
-          >
-            Cerrar
-          </Button>
-        </Group>
-
-        {memberTasksError && (
-          <Alert icon={<IconAlertCircle size={20} />} color='red' radius='lg' mb='sm'>
-            {memberTasksError}
-          </Alert>
-        )}
-
-        {memberTasksLoading ? (
-          <Group justify='center' py='xl'>
-            <Loader size='sm' />
-          </Group>
-        ) : memberTasks.length === 0 ? (
-          !memberTasksError && (
-            <Text size='sm' c='dimmed' ta='center' py='xl'>
-              No tiene tareas abiertas ni sin empezar
-            </Text>
-          )
-        ) : (
-          <>
-            <Stack gap='xs' hiddenFrom='md'>
-              {memberTasks.map((task) => (
-                <Paper key={task.id} withBorder radius='md' p='sm'>
-                  <Group justify='space-between' wrap='nowrap' gap='xs' mb={4}>
-                    <Text size='xs' c='dimmed'>
-                      Solicitud #{task.id_request_general} · Tarea #{task.id_task ?? task.id}
-                    </Text>
-                    {renderStatusBadge(task.status_task)}
-                  </Group>
-                  <Text size='sm' fw={600} style={{ overflowWrap: 'anywhere' }}>
-                    {task.task}
-                  </Text>
-                  <Text size='xs' c='dimmed' lineClamp={2}>
-                    {task.subject_request}
-                  </Text>
-                  <Group justify='space-between' wrap='nowrap' gap='xs' mt={6}>
-                    <Text size='xs' c='dimmed'>
-                      {formatAssignedDate(task.created_at)}
-                    </Text>
-                    {renderMemberTaskActions(task)}
-                  </Group>
-                </Paper>
-              ))}
-            </Stack>
-
-            <Box visibleFrom='md' className='overflow-x-auto'>
-              <Table striped highlightOnHover>
-                <Table.Thead>
-                  <Table.Tr>
-                    <Table.Th>Solicitud</Table.Th>
-                    <Table.Th>Tarea</Table.Th>
-                    <Table.Th>Proceso</Table.Th>
-                    <Table.Th>Estado</Table.Th>
-                    <Table.Th>Fecha</Table.Th>
-                    <Table.Th style={{ width: 1 }} ta='center'>
-                      Acciones
-                    </Table.Th>
-                  </Table.Tr>
-                </Table.Thead>
-                <Table.Tbody>
-                  {memberTasks.map((task) => (
-                    <Table.Tr key={task.id}>
-                      <Table.Td>
-                        <Text size='sm' fw={700} c='var(--mantine-color-violet-light-color)'>
-                          {task.id_request_general}
-                        </Text>
-                        <Text size='xs' c='dimmed' style={{ whiteSpace: 'nowrap' }}>
-                          Tarea #{task.id_task ?? task.id}
-                        </Text>
-                      </Table.Td>
-                      <Table.Td style={{ minWidth: 220, maxWidth: 320 }}>
-                        <Text size='sm' fw={600} lineClamp={2}>
-                          {task.task}
-                        </Text>
-                        <Text size='xs' c='dimmed' lineClamp={2}>
-                          {task.subject_request}
-                        </Text>
-                      </Table.Td>
-                      <Table.Td>
-                        <Text size='sm' fw={500}>
-                          {task.process}
-                        </Text>
-                        <Group gap={4} wrap='nowrap'>
-                          <IconBuilding size={13} className='text-gray-400' />
-                          <Text size='xs' c='dimmed'>
-                            {task.company}
-                          </Text>
-                        </Group>
-                      </Table.Td>
-                      <Table.Td style={{ whiteSpace: 'nowrap' }}>
-                        {renderStatusBadge(task.status_task)}
-                      </Table.Td>
-                      <Table.Td>
-                        <Text size='sm' c='dimmed'>
-                          {formatAssignedDate(task.created_at)}
-                        </Text>
-                      </Table.Td>
-                      <Table.Td>{renderMemberTaskActions(task)}</Table.Td>
-                    </Table.Tr>
-                  ))}
-                </Table.Tbody>
-              </Table>
-            </Box>
-          </>
-        )}
-      </Paper>
-    );
-  };
-
-  function renderMemberTaskActions(task: AssignedTask) {
-    return (
-      <Group gap={6} wrap='nowrap' justify='center'>
-        <Tooltip label='Ver tarea' withArrow>
-          <ActionIcon
-            variant='light'
-            color='blue'
-            size='sm'
-            radius='xl'
-            aria-label='Ver tarea'
-            onClick={() => openTaskInNewTab(task)}
-          >
-            <IconEye size={14} />
-          </ActionIcon>
-        </Tooltip>
-        {renderReassignAction(task)}
-      </Group>
-    );
-  }
 
   const globalProgress = getGlobalTasksProgress();
 
@@ -1908,80 +1238,16 @@ function RequestBoard() {
         }
       />
 
-      {typeFilter !== 'team' && (
-      <div className={requestListStyles.statGrid}>
-        <StatFilterTile
-          icon={<IconTicket size={20} />}
-          label='Total asignado'
-          value={totalItemsCount}
-          hint={`${totalTickets} solicitudes · ${assignedTasks.length} tareas`}
-          tone='info'
-          active={filters.status === '0' && typeFilter === 'all'}
-          onClick={() => filterByStatus('0')}
-          ariaLabel='Mostrar todas las solicitudes y tareas'
-        />
-        <StatFilterTile
-          icon={<IconProgress size={20} />}
-          label='Solicitudes pendientes'
-          value={statusCounts.open}
-          tone='warning'
-          active={filters.status === '1' && typeFilter === 'requests'}
-          onClick={() => filterByStatus('1', 'requests')}
-          ariaLabel='Filtrar solicitudes pendientes'
-        />
-        <StatFilterTile
-          icon={<IconListCheck size={20} />}
-          label='Tareas pendientes'
-          value={pendingTasksCount}
-          tone='violet'
-          active={typeFilter === 'tasks'}
-          onClick={() => filterByStatus('0', 'tasks')}
-          ariaLabel='Mostrar tareas asignadas'
-        />
-        <StatFilterTile
-          icon={<IconCheck size={20} />}
-          label='Completadas'
-          value={completedCount}
-          tone='ok'
-          active={filters.status === '2'}
-          onClick={() => filterByStatus('2')}
-          ariaLabel='Filtrar solicitudes y tareas completadas'
-        />
-        <ProgressRingTile
-          label={`Avance de tareas${totalPages > 1 ? ' (esta página)' : ''}`}
-          done={globalProgress.done}
-          total={globalProgress.total}
-          percent={globalProgress.percent}
-        />
-      </div>
-      )}
-
-      {canReassignInView && typeFilter !== 'team' && (
-        <Alert
-          icon={<IconUsers size={20} />}
-          color='blue'
-          radius='lg'
-          mt='md'
-          title={`Estás viendo la bandeja de ${teamMemberName(appliedMember) || 'una persona de tu equipo'}`}
-        >
-          <Group justify='space-between' wrap='wrap' gap='sm'>
-            <Text size='sm'>
-              Puedes reasignar sus tareas con el botón{' '}
-              <IconArrowsExchange size={14} style={{ verticalAlign: 'middle' }} /> a otra persona de tu
-              equipo o a ti. Para resolverlas o editarlas, primero reasígnatelas.
-            </Text>
-            <Button
-              size='xs'
-              variant='light'
-              radius='xl'
-              leftSection={<IconArrowBackUp size={14} />}
-              onClick={backToMyInbox}
-            >
-              Volver a mi bandeja
-            </Button>
-          </Group>
-        </Alert>
-      )}
+      <RequestListFilters
+        filters={filters}
+        onChange={setFilters}
+        onClear={clearListFilters}
+        counts={statusCounts}
+        hints={statusHints}
+        options={listOptions}
+        progress={globalProgress}
+        progressLabel={`Avance de tareas${totalPages > 1 ? ' (esta página)' : ''}`}
+      />
 
       {error && (
         <Alert icon={<IconAlertCircle size={20} />} title='Error' color='red' radius='lg' mt='md'>
@@ -1989,142 +1255,13 @@ function RequestBoard() {
         </Alert>
       )}
 
-      <FilterPanel
-        expanded={filtersExpanded}
-        onToggle={() => setFiltersExpanded(!filtersExpanded)}
-        icon={<IconFilter size={18} />}
-      >
-          <Collapse in={filtersExpanded}>
-            <Box mt='md'>
-              <Grid>
-                <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
-                  <TextInput
-                    label='ID Solicitud'
-                    type='text'
-                    value={filters.id}
-                    onChange={(e) => handleFilterChange('id', e.target.value)}
-                    leftSection={<IconFilter size={16} />}
-                    data-testid='id-filter'
-                  />
-                </Grid.Col>
-                <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
-                  <Select
-                    label='Estado'
-                    placeholder='Todos los estados'
-                    clearable
-                    data={[
-                      { value: '0', label: 'Todos' },
-                      { value: '4', label: 'Sin Empezar (solo tareas)' },
-                      { value: '1', label: 'Abierto' },
-                      { value: '3', label: 'Cancelado' },
-                      { value: '2', label: 'Resuelto' },
-                      { value: '7', label: 'Devuelta (solo solicitudes)' },
-                    ]}
-                    value={filters.status}
-                    onChange={(value) => handleFilterChange('status', value || '')}
-                    leftSection={<IconFlag size={16} />}
-                  />
-                </Grid.Col>
-                <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
-                  <Select
-                    label='Empresa'
-                    placeholder='Todas las empresas'
-                    clearable
-                    data={companies}
-                    value={filters.company}
-                    onChange={(value) => handleFilterChange('company', value || '')}
-                    leftSection={<IconBuilding size={16} />}
-                  />
-                </Grid.Col>
-                <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
-                  <Select
-                    label='Proceso'
-                    placeholder='Todas los procesos'
-                    clearable
-                    data={processes}
-                    value={filters.process}
-                    onChange={(value) => handleFilterChange('process', value || '')}
-                    leftSection={<IconBuilding size={16} />}
-                  />
-                </Grid.Col>
-                <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
-                  <TextInput
-                    label='Fecha Desde'
-                    type='date'
-                    value={filters.date_from}
-                    onChange={(e) => handleFilterChange('date_from', e.target.value)}
-                    leftSection={<IconCalendarEvent size={16} />}
-                  />
-                </Grid.Col>
-                <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
-                  <TextInput
-                    label='Fecha Hasta'
-                    type='date'
-                    value={filters.date_to}
-                    onChange={(e) => handleFilterChange('date_to', e.target.value)}
-                    leftSection={<IconCalendarEvent size={16} />}
-                  />
-                </Grid.Col>
-                {teamAccess.canViewTeam && (
-                  <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
-                    <Select
-                      label='Persona del equipo'
-                      placeholder='Mi bandeja'
-                      clearable
-                      searchable
-                      nothingFoundMessage='No hay personas en tu equipo'
-                      data={teamMembers
-                        .filter((m) => !m.isSelf)
-                        .map((m) => ({ value: m.id, label: m.name }))}
-                      value={filters.member || null}
-                      onChange={(value) => handleFilterChange('member', value || '')}
-                      leftSection={<IconUsers size={16} />}
-                      data-testid='team-member-filter'
-                    />
-                  </Grid.Col>
-                )}
-              </Grid>
-
-              <Group justify='flex-end' mt='md'>
-                <Button
-                  variant='outline'
-                  onClick={() => {
-                    const clearedFilters = {
-                      id: '',
-                      status: '0',
-                      company: '',
-                      date_from: '',
-                      date_to: '',
-                      assigned_to: '',
-                      process: '',
-                      member: '',
-                    };
-                    setFilters(clearedFilters);
-                    if (teamAccess.canViewTeam) void fetchTeamMembers();
-                    setTypeFilter('all');
-                    if (userId) {
-                      fetchAssignedWithUserId(userId, clearedFilters);
-                    }
-                  }}
-                  leftSection={<IconX size={16} />}
-                >
-                  Limpiar Filtros
-                </Button>
-                <Button onClick={fetchTickets} leftSection={<IconRefresh size={16} />}>
-                  Aplicar Filtros
-                </Button>
-              </Group>
-            </Box>
-          </Collapse>
-      </FilterPanel>
-
-        <Card shadow='sm' radius='md' withBorder className='overflow-hidden' mt='md'>
+        <Card shadow='sm' radius='md' withBorder className='overflow-hidden'>
           <LoadingOverlay visible={loading} />
 
-          <Group justify='space-between' mb='md' wrap='wrap' gap='sm'>
-            <Title order={3} className='flex items-center gap-2 text-lg sm:text-xl'>
-              <IconTicket size={20} />
-              Lista de Solicitudes y Tareas Asignadas
+          <Group justify='space-between' align='center' mb='xs' wrap='wrap'>
+            <Title order={3} className='flex items-center gap-2'>
+              <IconFileDescription size={20} />
+              Lista de Solicitudes y Tareas
             </Title>
             <AutoRefreshNote refreshing={refreshing} lastUpdated={lastUpdated} />
           </Group>
@@ -2137,31 +1274,53 @@ function RequestBoard() {
                 placeholder='Buscar ID, asunto, tarea, empresa, proceso, estado o persona'
                 ariaLabel='Buscar solicitudes y tareas'
                 meta={
-                  searchInput.trim()
-                    ? `${totalTickets} solicitud(es) y ${visibleTasks.length} tarea(s) coinciden`
+                  visibleEntries.length !== allEntries.length
+                    ? `${kindCounts.requests} solicitud(es) y ${kindCounts.tasks} tarea(s) coinciden`
                     : 'Busca en todas, no solo en esta página; no importan tildes ni mayúsculas'
                 }
               />
             </Box>
+            <Button
+              variant={openAll ? 'filled' : 'light'}
+              size={isMobile ? 'xs' : 'sm'}
+              onClick={toggleOpenAll}
+              aria-pressed={openAll}
+              data-testid='open-all-filter'
+            >
+              Todo lo abierto
+            </Button>
             <SegmentedControl
               fullWidth={isMobile}
               size={isMobile ? 'xs' : 'sm'}
               w={{ base: '100%', sm: 'auto' }}
-              value={typeFilter}
-              onChange={(value) => changeTypeFilter(value as TypeFilter)}
+              value={showTeam ? 'team' : typeFilter}
+              onChange={(value) => {
+                if (value === 'team') {
+                  setShowTeam(true);
+                  return;
+                }
+                setShowTeam(false);
+                setTypeFilter(value as TypeFilter);
+              }}
               data={[
-                { value: 'all', label: `Todos (${totalItemsCount})` },
-                { value: 'requests', label: `Solicitudes (${totalTickets})` },
-                { value: 'tasks', label: `Tareas (${visibleTasks.length})` },
-                ...(teamAccess.canViewTeam
-                  ? [{ value: 'team', label: `Mi equipo (${teamMembers.length})` }]
+                { value: 'all', label: `Todos (${kindCounts.all})` },
+                { value: 'requests', label: `Solicitudes (${kindCounts.requests})` },
+                { value: 'tasks', label: `Tareas (${kindCounts.tasks})` },
+                ...(canViewTeam
+                  ? [{ value: 'team', label: teamCount == null ? 'Mi equipo' : `Mi equipo (${teamCount})` }]
                   : []),
               ]}
             />
           </Group>
 
-          {typeFilter === 'team' ? (
-            renderTeamSummary()
+          {showTeam && teamAccess && canViewTeam ? (
+            <TeamTasksPanel
+              departments={teamAccess.departments}
+              renderStatusBadge={renderStatusBadge}
+              formatDate={formatAssignedDate}
+              onReassigned={() => void fetchTickets()}
+              onMembersCount={setTeamCount}
+            />
           ) : (
           <>
 
@@ -2236,12 +1395,9 @@ function RequestBoard() {
                         .filter(Boolean)
                         .join(' · ')}
                     </Text>
-                    <Group justify='space-between' wrap='nowrap' gap='xs'>
-                      <Text size='xs' c='dimmed' style={{ overflowWrap: 'anywhere' }}>
-                        {isTask ? t!.name_requester : r!.requester} → {isTask ? t!.assigned : r!.user}
-                      </Text>
-                      {isTask && canReassignInView && renderReassignAction(t!)}
-                    </Group>
+                    <Text size='xs' c='dimmed' style={{ overflowWrap: 'anywhere' }}>
+                      {isTask ? t!.name_requester : r!.requester} → {isTask ? t!.assigned : r!.user}
+                    </Text>
                   </Paper>
                 );
               })
@@ -2252,10 +1408,9 @@ function RequestBoard() {
             <Table striped highlightOnHover>
               <Table.Thead>
                 <Table.Tr>
-                  <Table.Th style={{ whiteSpace: 'nowrap', width: 1 }}>Tipo</Table.Th>
                   <Table.Th>ID</Table.Th>
                   <Table.Th>Asunto</Table.Th>
-                  <Table.Th>Proceso / Empresa</Table.Th>
+                  <Table.Th>Compañía / Categoría</Table.Th>
                   <Table.Th>Estado</Table.Th>
                   <Table.Th>Fecha</Table.Th>
                   <Table.Th>Solicitante / Asignado</Table.Th>
@@ -2264,7 +1419,7 @@ function RequestBoard() {
               <Table.Tbody>
                 {pageItems.length === 0 ? (
                   <Table.Tr>
-                    <Table.Td colSpan={7} className='text-center py-12 text-gray-500'>
+                    <Table.Td colSpan={6} className='text-center py-12 text-gray-500'>
                       <div className='flex flex-col items-center gap-3'>
                         <IconTicket size={48} className='text-gray-300' />
                         <Text size='lg' fw={500}>
@@ -2297,11 +1452,13 @@ function RequestBoard() {
                         );
                       }}
                     >
-                      <Table.Td style={{ whiteSpace: 'nowrap' }}>{renderTypeBadge('request')}</Table.Td>
-                      <Table.Td>
-                        <Text size='sm' fw={700} c='var(--mantine-color-blue-light-color)'>
-                          {ticket.id}
-                        </Text>
+                      <Table.Td style={{ whiteSpace: 'nowrap' }}>
+                        <Stack gap={4} align='flex-start'>
+                          <Text size='sm' fw={700} c='var(--mantine-color-blue-light-color)'>
+                            {ticket.id}
+                          </Text>
+                          {renderTypeBadge('request')}
+                        </Stack>
                       </Table.Td>
                       <Table.Td style={{ minWidth: 240, maxWidth: 320 }}>
                         <Text size='sm' fw={500} lineClamp={2}>
@@ -2353,19 +1510,7 @@ function RequestBoard() {
                           </Stack>
                         ) : null}
                       </Table.Td>
-                      <Table.Td>
-                        <Stack gap={2}>
-                          <Text size='sm' fw={500}>
-                            {ticket.process}
-                          </Text>
-                          <Group gap={4} wrap='nowrap'>
-                            <IconBuilding size={13} className='text-gray-400' />
-                            <Text size='xs' c='dimmed'>
-                              {ticket.company}
-                            </Text>
-                          </Group>
-                        </Stack>
-                      </Table.Td>
+                      <Table.Td>{renderCompanyCell(ticket.company, ticket.category, ticket.process)}</Table.Td>
                       <Table.Td style={{ whiteSpace: 'nowrap' }}>
                         {renderStatusBadge(ticket.status)}
                       </Table.Td>
@@ -2403,8 +1548,8 @@ function RequestBoard() {
             <Group justify='center' mt='md'>
               <Pagination
                 total={totalPages}
-                value={currentPage}
-                onChange={(page) => void goToPage(page)}
+                value={safePage}
+                onChange={setCurrentPage}
                 siblings={isMobile ? 0 : 1}
                 size={isMobile ? 'sm' : 'md'}
               />
@@ -2413,86 +1558,6 @@ function RequestBoard() {
           </>
           )}
         </Card>
-
-        <Modal
-          opened={reassignTask !== null}
-          onClose={closeReassign}
-          title={
-            <Group gap='sm'>
-              <IconArrowsExchange size={20} />
-              <Text fw={600}>Reasignar tarea</Text>
-            </Group>
-          }
-          radius='lg'
-          centered
-          overlayProps={{ blur: 4 }}
-        >
-          {reassignTask && (
-            <Stack gap='md'>
-              <Paper withBorder radius='md' p='sm'>
-                <Text size='sm' fw={600}>
-                  {reassignTask.task}
-                </Text>
-                <Text size='xs' c='dimmed'>
-                  Solicitud #{reassignTask.id_request_general} · {reassignTask.subject_request}
-                </Text>
-                <Group gap={4} mt={6} wrap='nowrap'>
-                  <IconUserCheck size={14} className='text-gray-400' />
-                  <Text size='xs' c='dimmed'>
-                    Asignada actualmente a {reassignTask.assigned}
-                  </Text>
-                </Group>
-              </Paper>
-
-              <Select
-                label='Reasignar a'
-                placeholder='Selecciona una persona de tu equipo'
-                searchable
-                required
-                data={reassignOptions}
-                value={reassignTo}
-                onChange={setReassignTo}
-                leftSection={<IconUsers size={16} />}
-                nothingFoundMessage='No hay otras personas en tu equipo'
-                comboboxProps={{ withinPortal: true }}
-              />
-
-              <Textarea
-                label='Motivo (opcional)'
-                placeholder='Ej. Redistribución de carga por vacaciones'
-                autosize
-                minRows={2}
-                maxLength={500}
-                value={reassignReason}
-                onChange={(e) => setReassignReason(e.currentTarget.value)}
-              />
-
-              <Text size='xs' c='dimmed'>
-                La reasignación queda registrada y se notifica a la persona que recibe la tarea.
-              </Text>
-
-              {reassignError && (
-                <Alert icon={<IconAlertCircle size={16} />} color='red' radius='md'>
-                  {reassignError}
-                </Alert>
-              )}
-
-              <Group justify='flex-end' gap='sm'>
-                <Button variant='outline' onClick={closeReassign} disabled={reassignSaving}>
-                  Cancelar
-                </Button>
-                <Button
-                  leftSection={<IconCheck size={16} />}
-                  onClick={() => void submitReassign()}
-                  loading={reassignSaving}
-                  disabled={!reassignTo}
-                >
-                  Reasignar
-                </Button>
-              </Group>
-            </Stack>
-          )}
-        </Modal>
     </RequestsPage>
   );
 }

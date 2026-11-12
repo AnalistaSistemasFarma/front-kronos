@@ -1,0 +1,27 @@
+{
+  "_doc": "Objetos de KRONOSDB que el codigo usa por SQL directo y que NO estan en schema.prisma (verificar-esquema.ps1 no los ve). scripts/bluegreen/verificar-objetos-sql.cjs los comprueba en SOLO LECTURA antes del cambio de color: si falta alguno, el deploy se detiene y la version activa sigue atendiendo. Agregue aqui cada tabla o columna nueva que se cree con un SQL manual y que el codigo use sin Prisma. Pase completo 2026-11-09: + ventas-config-empresa, errores de IA y analisis de seguridad.",
+  "columnas": [
+    ["task_process_category", "task_kind"],
+    ["request_form_value", "locked"],
+    ["sales_company_config", "id_process_category_oferta"],
+    ["sales_company_config", "descripcion_editable"],
+    ["sales_company_config", "id_price_list_default"],
+    ["sales_company_config", "id_process_category_directa"],
+    ["sales_company_config", "exige_oc"]
+  ],
+  "tablas": [
+    "task_sap_action",
+    "workflow_execution_log",
+    "sales_company_config",
+    "sales_stage_department",
+    "sales_authorization",
+    "sales_automation_config",
+    "sales_automation_doc",
+    "sales_automation_run",
+    "sales_offer_draft",
+    "agent_error_issue",
+    "agent_error_event",
+    "agent_security_run",
+    "agent_security_finding"
+  ]
+}

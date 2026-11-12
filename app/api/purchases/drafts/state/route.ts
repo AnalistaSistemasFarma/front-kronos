@@ -1,3 +1,6 @@
+import sql from 'mssql';
+import sqlConfig from '../../../../../dbconfig.js';
+import { prisma } from '../../../../../lib/prisma';
 import { getServerSession } from 'next-auth';
 import { NextRequest, NextResponse } from 'next/server';
 import { authOptions } from '../../../auth/[...nextauth]/route';
@@ -57,6 +60,19 @@ export async function POST(request: NextRequest) {
       const patch: Record<string, unknown> = { U_SEND_State: check.to };
       if (check.requiresReason) patch.U_Motivo_Can_Solicitud = reason;
       await sapPatch(sap, `Drafts(${docEntry})`, patch, false, { ifMatch: draft['odata.etag'] as string | undefined });
+      if (action === 'anular') {
+        // Si estaba «En Borrador» en Mis solicitudes, esa solicitud se cancela también.
+        const link = await prisma.purchaseAuthorization.findFirst({
+          where: { id_company: companyId, doc_entry: docEntry, status: 'draft' },
+        });
+        if (link) {
+          await prisma.purchaseAuthorization.update({ where: { id: link.id }, data: { status: 'cancelled', error: reason || null } });
+          const pool = await sql.connect(sqlConfig);
+          await pool.request().input('id', sql.Int, link.id_request_general)
+            .query(`UPDATE requests_general SET status_req = 3 WHERE id = @id;
+                    UPDATE task_request_general SET id_status = 3 WHERE id_request_general = @id AND id_status = 4;`);
+        }
+      }
       return NextResponse.json({ ok: true, state: check.to });
     } finally {
       await sapLogout(sap);

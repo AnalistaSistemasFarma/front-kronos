@@ -119,3 +119,71 @@ describe('Vitrina Comercial — SQL de líneas y grupos (2026-10-23)', () => {
     expect(r).not.toMatch(/\bTRUNCATE\b|DROP TABLE \[dbo\]\.\[vitrina_(presentacion|codigo_sap|area|historial)\]/i);
   });
 });
+
+// Vitrina (2026-11-04): modelo 3D. Solo una tabla NUEVA; no toca la CHECK de vitrina_imagen.
+describe('Vitrina Comercial — SQL del modelo 3D (2026-11-04)', () => {
+  const raiz = join(__dirname, '..', '..', '..', 'prisma');
+  // eslint-disable-next-line security/detect-non-literal-fs-filename -- rutas fijas del repositorio.
+  const leer = (f: string) => readFileSync(f, 'utf8');
+  const bloque = (s: string) => s.slice(s.indexOf('/* BLOQUE-DDL-INICIO */'), s.indexOf('/* BLOQUE-DDL-FIN */'));
+  const mig = leer(join(raiz, 'migrations', '20261104120000_vitrina_modelo_3d', 'migration.sql'));
+  const manual = (amb: string) => leer(join(raiz, 'manual', `2026-11-04-vitrina-modelo-3d-${amb}.sql`));
+  const comentarios = (s: string) => [...s.matchAll(/\/\*([\s\S]*?)\*\//g)].map((m) => m[1]);
+
+  it('crea solo vitrina_modelo_3d, idempotente, con FK, índice y CHECK; sin DROP ni cambios a tablas existentes', () => {
+    const b = bloque(mig);
+    expect(b.length).toBeGreaterThan(500);
+    expect([...b.matchAll(/CREATE TABLE \[dbo\]\.\[(\w+)\]/g)].map((m) => m[1])).toEqual(['vitrina_modelo_3d']);
+    expect(b).toContain("IF OBJECT_ID(N'dbo.vitrina_modelo_3d', N'U') IS NULL");
+    expect(b.replace(/ON (DELETE|UPDATE) NO ACTION/g, '')).not.toMatch(/\b(DROP|DELETE|UPDATE|TRUNCATE|ALTER COLUMN)\b/i);
+    for (const m of b.matchAll(/ALTER TABLE \[dbo\]\.\[(\w+)\]/g)) expect(m[1]).toBe('vitrina_modelo_3d');
+    expect(b).not.toContain('vitrina_imagen');
+    for (const c of ['[id_presentacion] INT NOT NULL', '[ruta_archivo] NVARCHAR(500) NOT NULL', '[nombre_original] NVARCHAR(255) NOT NULL', '[tamano_bytes] INT NOT NULL', '[version] INT NOT NULL', '[vigente] BIT NOT NULL', '[ancho_cm] DECIMAL(7,2) NULL', '[alto_cm] DECIMAL(7,2) NULL', '[profundo_cm] DECIMAL(7,2) NULL', '[cargado_por] NVARCHAR(50) NOT NULL', '[cargado_en] DATETIME2 NOT NULL']) {
+      expect(b).toContain(c);
+    }
+    expect(b).toContain('[vitrina_modelo_3d_id_presentacion_fkey] FOREIGN KEY ([id_presentacion]) REFERENCES [dbo].[vitrina_presentacion]([id_presentacion])');
+    expect(b).toContain("IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_vitrina_modelo_3d_presentacion'");
+    expect(b).toContain("IF NOT EXISTS (SELECT 1 FROM sys.check_constraints WHERE name = N'CK_vitrina_modelo_3d_tamano'");
+    expect(b).toContain("IF NOT EXISTS (SELECT 1 FROM sys.check_constraints WHERE name = N'CK_vitrina_modelo_3d_dimensiones'");
+  });
+
+  it('PRUEBAS y PROD repiten el bloque y tienen su guarda; no tienen semilla', () => {
+    for (const amb of ['PRUEBAS', 'PROD']) {
+      const f = manual(amb);
+      expect(bloque(f)).toBe(bloque(mig));
+      expect(f).toMatch(amb === 'PROD' ? /DB_NAME\(\) NOT IN \(N'KRONOSDB'\)/ : /DB_NAME\(\) NOT IN \(N'KRONOSDB_PRUEBAS', N'kronos_ci'\)/);
+      expect(f.replace(/ON (DELETE|UPDATE) NO ACTION/g, '')).not.toMatch(/\b(DROP|DELETE|UPDATE|TRUNCATE|INSERT)\b/i);
+    }
+  });
+
+  it('el de PRUEBAS solo nombra la base de producción en la guarda DB_NAME()', () => {
+    const lineas = manual('PRUEBAS').split('\n').filter((l) => /KRONOSDB/.test(l));
+    expect(lineas).toEqual(["IF DB_NAME() NOT IN (N'KRONOSDB_PRUEBAS', N'kronos_ci')"]);
+  });
+
+  it('ningún comentario abre otro comentario (T-SQL los anida)', () => {
+    for (const f of [mig, manual('PRUEBAS'), manual('PROD'), manual('reversa')]) {
+      for (const c of comentarios(f)) expect(c).not.toContain('/*');
+    }
+  });
+
+  it('la reversa tiene guarda, pide su bandera si hay modelos y solo quita su tabla', () => {
+    const r = manual('reversa');
+    expect(r).toContain('DB_NAME() NOT IN');
+    expect(r).toContain("SESSION_CONTEXT(N'vitrina_modelo3d_reversa_acepta_perdida')");
+    expect([...r.matchAll(/DROP TABLE \[dbo\]\.\[(\w+)\]/g)].map((m) => m[1])).toEqual(['vitrina_modelo_3d']);
+    expect(r).not.toMatch(/\bTRUNCATE\b|DROP COLUMN|DROP CONSTRAINT/i);
+  });
+
+  it('la CI corre la migración, PRUEBAS, PROD que se niega y la reversa (con su bandera) antes de la del V2', () => {
+    const ci = readFileSync(join(raiz, '..', '.github', 'workflows', 'ci.yml'), 'utf8');
+    expect(ci).toContain('prisma/migrations/20261104120000_vitrina_modelo_3d/migration.sql');
+    expect(ci).toContain('--file prisma/manual/2026-11-04-vitrina-modelo-3d-PRUEBAS.sql');
+    expect(ci).toContain('if npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-11-04-vitrina-modelo-3d-PROD.sql; then');
+    expect(ci).toMatch(/FLAGS="[^"]*\bvitrina_modelo3d_reversa_acepta_perdida\b/);
+    const rev = ci.indexOf('reversa prisma/manual/2026-11-04-vitrina-modelo-3d-reversa.sql');
+    expect(rev).toBeGreaterThan(0);
+    expect(rev).toBeLessThan(ci.indexOf('reversa prisma/manual/2026-10-23-vitrina-lineas-grupos-reversa.sql'));
+    expect(ci.indexOf('migra 20261104120000_vitrina_modelo_3d')).toBeGreaterThan(ci.indexOf('migra 20261023120000_vitrina_lineas_grupos'));
+  });
+});

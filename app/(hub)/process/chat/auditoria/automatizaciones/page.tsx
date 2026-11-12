@@ -51,6 +51,8 @@ const h = (v: number | null | undefined, dec = 0) =>
         maximumFractionDigits: dec,
         minimumFractionDigits: dec,
       });
+/** Días hábiles de un mes promedio (para «≈ h por día hábil»). */
+const DIAS_HABILES_MES = 20;
 const fechaCorta = (iso: string | null) => {
   if (!iso) return "—";
   const [a, m, d] = iso.slice(0, 10).split("-");
@@ -199,7 +201,7 @@ export default function IndicadorAutomatizacionesPage() {
         <Group gap="sm" mb={2} wrap="nowrap">
           <IconChartBar size={26} className="chat-folder__icon" />
           <Title order={1} className="ios-process-hub__title text-3xl">
-            Indicador de automatizaciones
+            Indicador de automatizaciones · capacidad liberada
           </Title>
         </Group>
         <Text className="ios-process-hub__subtitle" mb="lg">
@@ -322,64 +324,182 @@ export default function IndicadorAutomatizacionesPage() {
               mb="md"
               className="chat-surface"
             >
-              <Text fw={600} size="sm" mb={6}>
-                Resumen
+              <Text fw={600} size="sm" mb={2}>
+                Capacidad operativa liberada
               </Text>
-              <Group gap="xl" wrap="wrap">
+              <Text size="xs" c="dimmed" mb="sm">
+                Tiempo de trabajo que los agentes le devuelven a las personas.
+                No es plata ahorrada: es capacidad que el equipo puede usar en
+                otras tareas.
+              </Text>
+              <Group gap="xl" wrap="wrap" align="flex-start">
                 <div>
                   <Text size="xs" c="dimmed">
-                    Horas de la persona sin IA
+                    Por mes (promedio)
                   </Text>
-                  <Text fw={700}>{h(tot.antes)}</Text>
-                </div>
-                <div>
-                  <Text size="xs" c="dimmed">
-                    Horas de la persona con IA
-                  </Text>
-                  <Text fw={700}>{h(tot.despues)}</Text>
-                </div>
-                <div>
-                  <Text size="xs" c="dimmed">
-                    Horas ahorradas en el periodo
-                  </Text>
-                  <Text fw={700} c="green">
-                    {h(tot.ahorradas)}
-                  </Text>
-                </div>
-                <div>
-                  <Text size="xs" c="dimmed">
-                    Ahorro proyectado al mes
-                  </Text>
-                  <Text fw={700} c="green">
+                  <Text fw={800} size="xl" c="green" data-testid="capacidad-mes">
                     {h(tot.mes)} h
                   </Text>
+                  <Text size="xs" c="dimmed">
+                    ≈ {h(tot.mes / DIAS_HABILES_MES, 1)} h por día hábil
+                  </Text>
                 </div>
                 <div>
                   <Text size="xs" c="dimmed">
-                    Reducción del tiempo humano
+                    % de capacidad liberada
                   </Text>
-                  <Text fw={700}>
+                  <Text fw={800} size="xl">
                     {tot.reduccion === null ? "—" : `${h(tot.reduccion, 1)} %`}
                   </Text>
+                  <Text size="xs" c="dimmed">
+                    de las horas que tomarían sin IA
+                  </Text>
                 </div>
                 <div>
                   <Text size="xs" c="dimmed">
-                    Tareas automatizadas medidas
+                    Acumulado del periodo
                   </Text>
-                  <Text fw={700}>{h(tot.ocurrencias)}</Text>
+                  <Text fw={700}>{h(tot.ahorradas)} h</Text>
+                  <Text size="xs" c="dimmed">
+                    {fechaCorta(datos.periodoDesde)} a {fechaCorta(datos.corte)}
+                    {datos.semanas ? ` (${h(datos.semanas, 1)} semanas)` : ""}
+                  </Text>
                 </div>
                 <div>
                   <Text size="xs" c="dimmed">
-                    Casos de uso con ahorro
+                    Horas sin IA → con IA (periodo)
                   </Text>
-                  <Text fw={700}>{h(tot.casos)}</Text>
+                  <Text fw={700}>
+                    {h(tot.antes)} h → {h(tot.despues)} h
+                  </Text>
+                </div>
+                <div>
+                  <Text size="xs" c="dimmed">
+                    Tareas medidas · casos de uso
+                  </Text>
+                  <Text fw={700}>
+                    {h(tot.ocurrencias)} · {h(tot.casos)}
+                  </Text>
                 </div>
               </Group>
-              <Text size="xs" c="dimmed" mt={8}>
-                Estimación conservadora, por validar con cada área. No incluye
-                costos.
-              </Text>
+              <Alert color="gray" variant="light" mt="sm" p="xs">
+                <Text size="xs">
+                  <b>Cómo se calcula.</b> Por cada caso de uso: las veces que
+                  se pidió en el chat × (los minutos que le tomaría a una
+                  persona sin IA − los minutos de la persona pidiendo y
+                  revisando). «Acumulado del periodo» suma todo el periodo
+                  analizado; «Por mes» es ese mismo total llevado a un mes
+                  promedio (30,44 días). Estimación conservadora, por validar
+                  con cada área.
+                </Text>
+                <Text size="xs" mt={4}>
+                  <b>Alcance.</b> Solo incluye los agentes y procesos medidos (
+                  {h(datos.agentes.length)} agentes).
+                  {datos.sinMedir.length > 0
+                    ? ` Faltan por medir ${datos.sinMedir.length}: ${datos.sinMedir
+                        .slice(0, 12)
+                        .map((a) => a.displayName)
+                        .join(", ")}${datos.sinMedir.length > 12 ? "…" : ""}.`
+                    : " Todos los agentes activos están medidos."}
+                </Text>
+              </Alert>
             </Card>
+
+            {datos.departamentos.length > 0 && (
+              <Card
+                withBorder
+                radius="md"
+                padding="md"
+                mb="md"
+                className="chat-surface"
+              >
+                <Text fw={600} size="sm" mb={6}>
+                  Por departamento
+                </Text>
+                <ScrollArea type="auto">
+                  <Table striped verticalSpacing={6} fz="sm">
+                    <Table.Thead>
+                      <Table.Tr>
+                        <Table.Th>Departamento</Table.Th>
+                        <Table.Th ta="right">Agentes</Table.Th>
+                        <Table.Th ta="right">Sin IA → con IA (periodo)</Table.Th>
+                        <Table.Th ta="right">Liberadas por mes</Table.Th>
+                        <Table.Th ta="right">% liberado</Table.Th>
+                      </Table.Tr>
+                    </Table.Thead>
+                    <Table.Tbody>
+                      {datos.departamentos.map((d) => (
+                        <Table.Tr key={d.departamento}>
+                          <Table.Td fw={600}>{d.departamento}</Table.Td>
+                          <Table.Td ta="right">{d.agentes}</Table.Td>
+                          <Table.Td ta="right">
+                            {h(d.horasSinIA)} h → {h(d.horasConIA)} h
+                          </Table.Td>
+                          <Table.Td ta="right" fw={700} c="green">
+                            {h(d.horasMes, 1)} h
+                          </Table.Td>
+                          <Table.Td ta="right">
+                            {d.porcentaje === null ? "—" : `${h(d.porcentaje, 1)} %`}
+                          </Table.Td>
+                        </Table.Tr>
+                      ))}
+                    </Table.Tbody>
+                  </Table>
+                </ScrollArea>
+              </Card>
+            )}
+
+            {datos.casosRelevantes.length > 0 && (
+              <Card
+                withBorder
+                radius="md"
+                padding="md"
+                mb="md"
+                className="chat-surface"
+              >
+                <Text fw={600} size="sm" mb={2}>
+                  Casos de uso más relevantes
+                </Text>
+                <Text size="xs" c="dimmed" mb={6}>
+                  Los que más capacidad liberan por mes.
+                </Text>
+                <ScrollArea type="auto">
+                  <Table striped verticalSpacing={6} fz="sm">
+                    <Table.Thead>
+                      <Table.Tr>
+                        <Table.Th>Caso de uso</Table.Th>
+                        <Table.Th>Departamento · agente</Table.Th>
+                        <Table.Th ta="right">Veces</Table.Th>
+                        <Table.Th ta="right">Antes → con IA</Table.Th>
+                        <Table.Th ta="right">Liberadas por mes</Table.Th>
+                      </Table.Tr>
+                    </Table.Thead>
+                    <Table.Tbody>
+                      {datos.casosRelevantes.map((c, i) => (
+                        <Table.Tr key={`${c.code}-${i}`}>
+                          <Table.Td>{c.caso}</Table.Td>
+                          <Table.Td>
+                            {c.departamento} ·{" "}
+                            <Link
+                              href={`/process/chat/auditoria/automatizaciones/${encodeURIComponent(c.code)}`}
+                            >
+                              {c.agente}
+                            </Link>
+                          </Table.Td>
+                          <Table.Td ta="right">{h(c.ocurrencias)}</Table.Td>
+                          <Table.Td ta="right">
+                            {h(c.minHumano)} → {h(c.minDespues)} min
+                          </Table.Td>
+                          <Table.Td ta="right" fw={700} c="green">
+                            {h(c.horasMes, 1)} h
+                          </Table.Td>
+                        </Table.Tr>
+                      ))}
+                    </Table.Tbody>
+                  </Table>
+                </ScrollArea>
+              </Card>
+            )}
 
             {datos.graficos && (
               <GraficosMejora
@@ -390,7 +510,7 @@ export default function IndicadorAutomatizacionesPage() {
 
             <Card withBorder radius="md" padding="md" className="chat-surface">
               <Text fw={600} size="sm" mb={6}>
-                Por agente
+                Detalle por agente
               </Text>
               <ScrollArea type="auto">
                 <Table
@@ -406,9 +526,9 @@ export default function IndicadorAutomatizacionesPage() {
                       <Table.Th>Sin IA vs con IA (horas)</Table.Th>
                       <Table.Th ta="right">Sin IA</Table.Th>
                       <Table.Th ta="right">Con IA</Table.Th>
-                      <Table.Th ta="right">Ahorradas</Table.Th>
-                      <Table.Th ta="right">Al mes</Table.Th>
-                      <Table.Th ta="right">Reducción</Table.Th>
+                      <Table.Th ta="right">Liberadas (periodo)</Table.Th>
+                      <Table.Th ta="right">Por mes</Table.Th>
+                      <Table.Th ta="right">% liberado</Table.Th>
                       <Table.Th ta="right">Tareas</Table.Th>
                       <Table.Th />
                     </Table.Tr>

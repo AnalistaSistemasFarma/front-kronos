@@ -169,10 +169,12 @@ export function jsonParaCodigo(politica, archivo, idProject) {
   const operadores = politica.pases ? (techo ? politica.autorizadores.filter((c) => techo.includes(c)) : politica.autorizadores) : [];
   // El montaje bajo demanda es del Mac (archivo local), no de la base: se conserva si el archivo lo pide.
   const bajoDemanda = archivo?.proyectos?.[String(idProject)]?.bajoDemanda === true;
+  // Igual con la terminal completa de operadores (bandera del Mac, codigo.mjs).
+  const terminalCompleta = archivo?.proyectos?.[String(idProject)]?.terminalCompleta === true;
   return {
     operadoresPases: operadores,
     repos,
-    proyectos: { [String(idProject)]: { repos: nombres, nivel: 2, pases: politica.pases && operadores.length > 0, ...(bajoDemanda ? { bajoDemanda: true } : {}) } },
+    proyectos: { [String(idProject)]: { repos: nombres, nivel: 2, pases: politica.pases && operadores.length > 0, ...(bajoDemanda ? { bajoDemanda: true } : {}), ...(terminalCompleta ? { terminalCompleta: true } : {}) } },
   };
 }
 

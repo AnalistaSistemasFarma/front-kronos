@@ -27,7 +27,8 @@ export async function POST(req) {
       );
     }
 
-    const { userEmail, title, table, outro, logoUrl } = await req.json();
+    const { userEmail, title, table, outro, logoUrl, from, fromEmail, sender } =
+      await req.json();
 
     if (!userEmail || !String(userEmail).trim()) {
       return new Response(
@@ -37,12 +38,21 @@ export async function POST(req) {
     }
 
     const targetUrl = buildEmailTargetUrl(apiEmail);
+    const resolvedFromRaw = String(
+      fromEmail || from || sender || process.env.ORION_INVITE_FROM || 'notificador@gsslatam.com'
+    ).trim();
+    const emailOnly =
+      /<([^>]+)>/.exec(resolvedFromRaw)?.[1]?.trim() || resolvedFromRaw;
     const payload = {
       userEmail,
       title,
       table,
       outro,
       logoUrl: logoUrl || DEFAULT_EMAIL_LOGO,
+      from: emailOnly.includes('<') ? emailOnly : `GSS LATAM <${emailOnly}>`,
+      fromEmail: emailOnly,
+      sender: emailOnly,
+      mailFrom: emailOnly,
     };
 
     const { status, body } = await postToEmailService(targetUrl, payload);

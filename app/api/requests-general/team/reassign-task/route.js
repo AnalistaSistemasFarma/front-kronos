@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server';
 import sqlConfig from '../../../../../dbconfig.js';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '../../../auth/[...nextauth]/route';
+import { canManageTeamMembers } from '../../../../../lib/request-general/teamTasksScope';
 
 const TAG = '[reassign-task]';
 
@@ -36,6 +37,23 @@ export async function POST(req) {
 
   try {
     const pool = await sql.connect(sqlConfig);
+
+    // Solo tareas abiertas de alguien de su equipo, y solo hacia alguien de su equipo.
+    const current = await pool
+      .request()
+      .input('id', sql.Int, taskId)
+      .query(`SELECT id_assigned, id_status FROM task_request_general WHERE id = @id`);
+    const task = current.recordset[0];
+    if (!task) {
+      return NextResponse.json({ error: 'La tarea no existe' }, { status: 404 });
+    }
+    if (![1, 4].includes(Number(task.id_status))) {
+      return NextResponse.json({ error: 'Solo se pueden reasignar tareas abiertas o sin empezar' }, { status: 409 });
+    }
+    if (!(await canManageTeamMembers(sessionUserId, [String(task.id_assigned), toUserId]))) {
+      return NextResponse.json({ error: 'No tienes permiso para reasignar esta tarea' }, { status: 403 });
+    }
+
     transaction = new sql.Transaction(pool);
     await transaction.begin();
 

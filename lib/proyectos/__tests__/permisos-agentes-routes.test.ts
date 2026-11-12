@@ -17,6 +17,7 @@ const h = vi.hoisted(() => {
     chatProjectAgentPolicyLog: { create: vi.fn(), findMany: vi.fn() },
     chatProject: { findMany: vi.fn(), create: vi.fn(), count: vi.fn() },
     chatProjectAgent: { findMany: vi.fn(), createMany: vi.fn() },
+    chatConversation: { count: vi.fn(async () => 0) },
     agent: { findMany: vi.fn() },
     user: { findMany: vi.fn() },
     $transaction: vi.fn(),
@@ -173,7 +174,7 @@ describe('PATCH /api/proyectos/[id]/permisos', () => {
     );
     const r = await cambiarPermisos(req('/api/proyectos/7/permisos', 'PATCH', cuerpo), params());
     expect(r.status).toBe(200);
-    expect(await r.json()).toEqual({ updated: true });
+    expect(await r.json()).toEqual({ updated: true, avisos: [] });
     expect(db.chatProjectAgentPolicy.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
         id_project: 7,
@@ -195,11 +196,11 @@ describe('PATCH /api/proyectos/[id]/permisos', () => {
     db.chatProjectAgentPolicyRepo.findMany.mockResolvedValue([{ repo: repo('sapsend') }]);
     // Igual que lo guardado: no escribe.
     const igual = await cambiarPermisos(req('/api/proyectos/7/permisos', 'PATCH', { codeLevel: 'lectura', repos: ['sapsend'], reason: MOTIVO }), params());
-    expect(await igual.json()).toEqual({ updated: false });
+    expect(await igual.json()).toEqual({ updated: false, avisos: [] });
     expect(db.chatProjectAgentPolicyLog.create).not.toHaveBeenCalled();
     // A «ninguno» (revocar): actualiza, borra los repos y registra el antes.
     const r = await cambiarPermisos(req('/api/proyectos/7/permisos', 'PATCH', { codeLevel: 'ninguno', reason: 'Se terminó el ajuste de tesorería.' }), params());
-    expect(await r.json()).toEqual({ updated: true });
+    expect(await r.json()).toEqual({ updated: true, avisos: [] });
     expect(db.chatProjectAgentPolicy.update).toHaveBeenCalledWith({ where: { id_project: 7 }, data: expect.objectContaining({ code_level: 'ninguno', deploy_approvers: null }) });
     expect(db.chatProjectAgentPolicyRepo.deleteMany).toHaveBeenCalledWith({ where: { id_project: 7 } });
     expect(db.chatProjectAgentPolicyRepo.createMany).not.toHaveBeenCalled();
@@ -364,86 +365,63 @@ describe('POST /api/proyectos con permisos', () => {
 });
 
 /*
- * Regla de Nicolás Rivera (2026-10-27, 16:08 COT): «el tema de los proyectos de desarrollo sí, solo
- * debería ser de los agentes que desarrollan». Código y repos SOLO con agentes de desarrollo
- * (agent.es_desarrollo); el servidor lo rechaza con 400 aunque llegue por la API.
+ * Regla de Nicolás Rivera (2026-10-27): el código y los repos son solo de los agentes que desarrollan.
+ * Ajuste del 2026-11-11 (15:22 COT, «la mesa de discusión no debe depender de proyectos de
+ * desarrollo»): un agente de NEGOCIO sí entra a un proyecto con código y a sus mesas, SIN acceso al
+ * código. La reja es el PUENTE (politicaParaPuente con esDesarrollo: false → «ninguno» y sin repos);
+ * la interfaz y la API ya no bloquean: responden un aviso informativo.
  */
-describe('código y repos solo para agentes de desarrollo (2026-10-27)', () => {
+describe('agentes de negocio en proyectos con código (2026-10-27 → 2026-11-11)', () => {
+  const AVISO_PLAY = 'Play no es agente de desarrollo: participa sin acceso al código.';
   const conPlay = () => db.chatProjectAgent.findMany.mockResolvedValue([{ id_agent: 16 }]);
   const repoSapsend = () =>
     db.chatProjectRepoCatalog.findMany.mockImplementation(async (q: { where?: { slug?: unknown } }) =>
       q?.where?.slug ? [{ id_repo: 2, slug: 'sapsend' }] : [repo('front-kronos'), repo('sapsend')]
     );
+  const filaConCodigo = () => {
+    db.chatProjectAgentPolicy.findUnique.mockResolvedValue({ code_level: 'desarrollo', deploy_approvers: null, reason: 'x', updated_by: 'u', updated_at: new Date() });
+    db.chatProjectAgentPolicyRepo.findMany.mockResolvedValue([{ repo: repo('sapsend') }]);
+  };
 
-  it('PATCH con Play (negocio): «lectura» o solo repos → 400 con mensaje claro y nada se escribe', async () => {
+  it('PATCH con Orus y Play: guarda el código y avisa que Play queda sin acceso (no 400)', async () => {
     conPermisoEn(8);
-    conPlay();
-    for (const cuerpo of [
-      { codeLevel: 'lectura', repos: ['front-kronos', 'sapsend'], reason: MOTIVO },
-      { codeLevel: 'ninguno', repos: ['sapsend'], reason: MOTIVO },
-      { codeLevel: 'desarrollo_pases', repos: ['sapsend'], reason: MOTIVO },
-    ]) {
-      const r = await cambiarPermisos(req('/api/proyectos/7/permisos', 'PATCH', cuerpo), params());
-      expect(r.status).toBe(400);
-      expect((await r.json()).error).toBe(
-        'El acceso a código y los repositorios solo se asignan a agentes de desarrollo. Play no es agente de desarrollo: el proyecto queda en «Ninguno» y sin repositorios.'
-      );
-    }
-    expect(db.chatProjectAgentPolicy.create).not.toHaveBeenCalled();
-    expect(db.chatProjectAgentPolicy.update).not.toHaveBeenCalled();
-    expect(db.chatProjectAgentPolicyLog.create).not.toHaveBeenCalled();
+    repoSapsend();
+    db.chatProjectAgent.findMany.mockResolvedValue([{ id_agent: 7 }, { id_agent: 16 }]);
+    const r = await cambiarPermisos(req('/api/proyectos/7/permisos', 'PATCH', { codeLevel: 'desarrollo', repos: ['sapsend'], reason: MOTIVO }), params());
+    expect(r.status).toBe(200);
+    expect(await r.json()).toEqual({ updated: true, avisos: [AVISO_PLAY] });
+    expect(db.chatProjectAgentPolicy.create).toHaveBeenCalledWith({ data: expect.objectContaining({ code_level: 'desarrollo' }) });
   });
 
-  it('PATCH con Play a «ninguno» sí pasa (así se corrige un proyecto viejo como el 9)', async () => {
+  it('PATCH solo con Play también guarda (no se exige que TODOS sean de desarrollo)', async () => {
+    conPermisoEn(8);
+    repoSapsend();
+    conPlay();
+    const r = await cambiarPermisos(req('/api/proyectos/7/permisos', 'PATCH', { codeLevel: 'lectura', repos: ['sapsend'], reason: MOTIVO }), params());
+    expect(r.status).toBe(200);
+    expect((await r.json()).avisos).toEqual([AVISO_PLAY]);
+  });
+
+  it('PATCH a «ninguno» con Play: guarda sin avisos', async () => {
     conPermisoEn(8);
     conPlay();
     db.chatProjectAgentPolicy.findUnique.mockResolvedValue({ code_level: 'lectura', deploy_approvers: null, reason: 'x', updated_by: 'u-x', updated_at: new Date() });
     db.chatProjectAgentPolicyRepo.findMany.mockResolvedValue([{ repo: repo('front-kronos') }, { repo: repo('sapsend') }]);
-    const r = await cambiarPermisos(req('/api/proyectos/7/permisos', 'PATCH', { codeLevel: 'ninguno', reason: 'Play es agente de negocio.' }), params());
+    const r = await cambiarPermisos(req('/api/proyectos/7/permisos', 'PATCH', { codeLevel: 'ninguno', reason: 'Sin código por ahora.' }), params());
     expect(r.status).toBe(200);
-    expect(db.chatProjectAgentPolicy.update).toHaveBeenCalledWith({ where: { id_project: 7 }, data: expect.objectContaining({ code_level: 'ninguno' }) });
+    expect((await r.json()).avisos).toEqual([]);
     expect(db.chatProjectAgentPolicyRepo.deleteMany).toHaveBeenCalledWith({ where: { id_project: 7 } });
   });
 
-  it('PATCH con Orus y Play juntos: basta uno de negocio para rechazar', async () => {
-    conPermisoEn(8);
-    db.chatProjectAgent.findMany.mockResolvedValue([{ id_agent: 7 }, { id_agent: 16 }]);
-    const r = await cambiarPermisos(req('/api/proyectos/7/permisos', 'PATCH', { codeLevel: 'lectura', repos: ['sapsend'], reason: MOTIVO }), params());
-    expect(r.status).toBe(400);
-    expect((await r.json()).error).toContain('Play no es agente de desarrollo');
-  });
-
-  it('PATCH con Pedro (desarrollo): guarda', async () => {
-    conPermisoEn(8);
-    repoSapsend();
-    db.chatProjectAgent.findMany.mockResolvedValue([{ id_agent: 11 }]);
-    const r = await cambiarPermisos(req('/api/proyectos/7/permisos', 'PATCH', { codeLevel: 'lectura', repos: ['sapsend'], reason: MOTIVO }), params());
-    expect(r.status).toBe(200);
-    expect(db.chatProjectAgentPolicy.create).toHaveBeenCalled();
-  });
-
-  it('código antes que el DDL (sin la columna es_desarrollo): nadie es de desarrollo → 400 (falla cerrado)', async () => {
-    conPermisoEn(8);
-    db.agent.findMany.mockImplementation(async (q: { select: Record<string, boolean> }) => {
-      if (q.select.es_desarrollo) throw Object.assign(new Error("Invalid column name 'es_desarrollo'."), { code: 'P2022' });
-      return [{ id_agent: 7, code: 'horus', display_name: 'Orus' }];
-    });
-    const r = await cambiarPermisos(req('/api/proyectos/7/permisos', 'PATCH', { codeLevel: 'lectura', repos: ['sapsend'], reason: MOTIVO }), params());
-    expect(r.status).toBe(400);
-  });
-
-  it('GET: dice si se permite código y quiénes no son de desarrollo; sin código, no manda catálogo', async () => {
+  it('GET: codeAllowed siempre true, nonDevAgents con los de negocio y el catálogo para quien edita', async () => {
     conPermisoEn(8);
     conPlay();
     const body = await (await verPermisos(req('/api/proyectos/7/permisos'), params())).json();
-    expect(body).toMatchObject({ canEdit: true, codeAllowed: false, nonDevAgents: ['Play'], catalog: [] });
-    db.chatProjectAgent.findMany.mockResolvedValue([{ id_agent: 7 }]);
-    const orus = await (await verPermisos(req('/api/proyectos/7/permisos'), params())).json();
-    expect(orus).toMatchObject({ codeAllowed: true, nonDevAgents: [] });
-    expect(orus.catalog).toHaveLength(2);
+    expect(body).toMatchObject({ canEdit: true, codeAllowed: true, nonDevAgents: ['Play'] });
+    expect(body.catalog).toHaveLength(2);
   });
 
-  describe('POST /api/proyectos', () => {
+  describe('POST /api/proyectos (agentes mixtos)', () => {
     const base = { name: 'Comercio Exterior LATAM', idCompany: 8, profile: 'gss' };
     beforeEach(() => {
       h.moduleCompanies.mockResolvedValue([{ idCompany: 8, companyName: 'GSS' }]);
@@ -460,30 +438,22 @@ describe('código y repos solo para agentes de desarrollo (2026-10-27)', () => {
       );
       db.chatProject.count.mockResolvedValue(0);
       db.chatProject.create.mockResolvedValue({ id_project: 41 });
+      repoSapsend();
     });
 
-    it('Play con «lectura» y repos (el caso del proyecto 9): 400 y no se crea el proyecto', async () => {
-      conPermisoEn(8);
-      const r = await crearProyecto(
-        req('/api/proyectos', 'POST', { ...base, agentCodes: ['play'], agentPolicy: { codeLevel: 'lectura', repos: ['front-kronos', 'sapsend'], reason: MOTIVO } })
-      );
-      expect(r.status).toBe(400);
-      expect((await r.json()).error).toContain('Play no es agente de desarrollo');
-      expect(db.chatProject.create).not.toHaveBeenCalled();
-      expect(db.$transaction).not.toHaveBeenCalled();
-    });
-
-    it('Orus + Play con código: 400', async () => {
+    it('Orus + Play con código: se crea con la política y avisa de Play', async () => {
       conPermisoEn(8);
       const r = await crearProyecto(req('/api/proyectos', 'POST', { ...base, agentCodes: ['horus', 'play'], agentPolicy: { codeLevel: 'desarrollo', repos: ['sapsend'], reason: MOTIVO } }));
-      expect(r.status).toBe(400);
-      expect(db.chatProject.create).not.toHaveBeenCalled();
+      expect(r.status).toBe(201);
+      expect((await r.json()).avisos).toEqual([AVISO_PLAY]);
+      expect(db.chatProjectAgentPolicy.create).toHaveBeenCalledWith({ data: expect.objectContaining({ id_project: 41, code_level: 'desarrollo' }) });
     });
 
-    it('Play con «ninguno» (o sin agentPolicy): se crea normal', async () => {
+    it('Play con «ninguno» (o sin agentPolicy): se crea normal y sin avisos', async () => {
       conPermisoEn(8);
       const r = await crearProyecto(req('/api/proyectos', 'POST', { ...base, agentCodes: ['play'], agentPolicy: { codeLevel: 'ninguno', repos: [] } }));
       expect(r.status).toBe(201);
+      expect((await r.json()).avisos).toEqual([]);
       const sin = await crearProyecto(req('/api/proyectos', 'POST', { ...base, agentCodes: ['play'] }));
       expect(sin.status).toBe(201);
     });
@@ -504,34 +474,57 @@ describe('código y repos solo para agentes de desarrollo (2026-10-27)', () => {
       );
     });
 
-    it('a un proyecto CON código no se le agrega un agente de negocio (400); uno de desarrollo sí', async () => {
-      db.chatProjectAgentPolicy.findUnique.mockResolvedValue({ code_level: 'desarrollo', deploy_approvers: null, reason: 'x', updated_by: 'u', updated_at: new Date() });
-      db.chatProjectAgentPolicyRepo.findMany.mockResolvedValue([{ repo: repo('sapsend') }]);
-      const r = await agregarAgentes(req('/api/proyectos/7/agentes', 'POST', { agentCodes: ['play'] }), params());
-      expect(r.status).toBe(400);
-      expect((await r.json()).error).toContain('Play no es agente de desarrollo');
-      expect(db.chatProjectAgent.createMany).not.toHaveBeenCalled();
-      const ok = await agregarAgentes(req('/api/proyectos/7/agentes', 'POST', { agentCodes: ['pedro'] }), params());
-      expect(ok.status).toBe(201);
-    });
-
-    it('a un proyecto en «ninguno», cualquiera', async () => {
+    it('a un proyecto CON código se le agrega un agente de negocio (201) con aviso; uno de desarrollo, sin aviso', async () => {
+      filaConCodigo();
       const r = await agregarAgentes(req('/api/proyectos/7/agentes', 'POST', { agentCodes: ['play'] }), params());
       expect(r.status).toBe(201);
-      expect(db.chatProjectAgent.createMany).toHaveBeenCalled();
+      expect(await r.json()).toEqual({ added: 1, avisos: [AVISO_PLAY] });
+      expect(db.chatProjectAgent.createMany).toHaveBeenCalledWith({ data: [{ id_project: 7, id_agent: 16, added_by: 'u-ana' }] });
+      const ok = await agregarAgentes(req('/api/proyectos/7/agentes', 'POST', { agentCodes: ['pedro'] }), params());
+      expect(ok.status).toBe(201);
+      expect((await ok.json()).avisos).toEqual([]);
+    });
+
+    it('a un proyecto en «ninguno», cualquiera y sin avisos', async () => {
+      const r = await agregarAgentes(req('/api/proyectos/7/agentes', 'POST', { agentCodes: ['play'] }), params());
+      expect(r.status).toBe(201);
+      expect((await r.json()).avisos).toEqual([]);
     });
   });
 
-  it('el PUENTE de un agente de negocio recibe «ninguno» de la base aunque la fila diga otra cosa', async () => {
+  it('el PUENTE de un agente de negocio en un proyecto de desarrollo recibe «ninguno» y SIN repos', async () => {
     h.agent.mockResolvedValue({ idAgent: 16, code: 'play', scope: 'projects' });
     h.assertConv.mockResolvedValue({ id: 144, idProject: 9, projectName: 'Comercio Exterior LATAM' });
-    db.chatProjectAgentPolicy.findUnique.mockResolvedValue({ code_level: 'lectura', deploy_approvers: null, reason: 'x', updated_by: 'u', updated_at: new Date() });
+    db.chatProjectAgentPolicy.findUnique.mockResolvedValue({
+      code_level: 'desarrollo_pases',
+      deploy_approvers: 'nicolas.rivera@gsslatam.com',
+      reason: 'x',
+      updated_by: 'u',
+      updated_at: new Date(),
+    });
     db.chatProjectAgentPolicyRepo.findMany.mockResolvedValue([{ repo: repo('front-kronos') }, { repo: repo('sapsend') }]);
     const body = await (await politicaPuente(req('/api/chat/agent/projects/policy?idConversation=144'))).json();
     expect(body.policy).toEqual({ idProject: 9, source: 'bd', codeLevel: 'ninguno', level: 0, deploys: false, repos: [], deployApprovers: [], connectors: [], updatedAt: null });
+    // También en la lista de todos sus proyectos (sin idConversation).
+    db.chatProject.findMany.mockResolvedValue([{ id_project: 9 }, { id_project: 12 }]);
+    const todas = await (await politicaPuente(req('/api/chat/agent/projects/policy'))).json();
+    for (const p of todas.policies) expect(p).toMatchObject({ codeLevel: 'ninguno', level: 0, deploys: false, repos: [], deployApprovers: [] });
     // Orus, con la misma fila, sí la recibe.
     h.agent.mockResolvedValue({ idAgent: 7, code: 'horus', scope: 'projects' });
     const orus = await (await politicaPuente(req('/api/chat/agent/projects/policy?idConversation=144'))).json();
-    expect(orus.policy).toMatchObject({ source: 'bd', codeLevel: 'lectura', level: 1 });
+    expect(orus.policy).toMatchObject({ source: 'bd', codeLevel: 'desarrollo_pases', level: 3 });
+    expect(orus.policy.repos).toHaveLength(2);
+  });
+
+  it('código antes que el DDL (sin la columna es_desarrollo): nadie es de desarrollo → el puente da «ninguno» (falla cerrado)', async () => {
+    db.agent.findMany.mockImplementation(async (q: { select: Record<string, boolean> }) => {
+      if (q.select.es_desarrollo) throw Object.assign(new Error("Invalid column name 'es_desarrollo'."), { code: 'P2022' });
+      return [{ id_agent: 7, code: 'horus', display_name: 'Orus' }];
+    });
+    h.agent.mockResolvedValue({ idAgent: 7, code: 'horus', scope: 'projects' });
+    h.assertConv.mockResolvedValue({ id: 144, idProject: 9, projectName: 'P' });
+    filaConCodigo();
+    const body = await (await politicaPuente(req('/api/chat/agent/projects/policy?idConversation=144'))).json();
+    expect(body.policy).toMatchObject({ codeLevel: 'ninguno', repos: [] });
   });
 });

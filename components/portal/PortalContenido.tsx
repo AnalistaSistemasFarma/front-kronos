@@ -1,8 +1,8 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Group, Select, TextInput } from '@mantine/core';
-import { IconBuilding, IconSearch } from '@tabler/icons-react';
+import { Alert, Button, Group, Select, TextInput } from '@mantine/core';
+import { IconBuilding, IconDownload, IconSearch } from '@tabler/icons-react';
 import {
   TODAS_LAS_EMPRESAS,
   contarCorreos,
@@ -395,6 +395,7 @@ export default function PortalContenido({
     setBusquedaExtension('');
     setEmpresaCorreo(TODAS_LAS_EMPRESAS);
     setBusquedaCorreo('');
+    setAvisoExportar(null);
   };
 
   // ── "Correos Corporativos" y "Extensiones Corporativas" dentro de Contactos
@@ -427,6 +428,28 @@ export default function PortalContenido({
   // controles Mantine que la barra de filtros de Artículos.
   const [empresaCorreo, setEmpresaCorreo] = useState(TODAS_LAS_EMPRESAS);
   const [busquedaCorreo, setBusquedaCorreo] = useState('');
+  // Exportar a Excel (Cristian, 2026-11-05): todo el directorio, solo personas,
+  // una hoja por empresa. No depende del buscador ni del filtro de la pantalla.
+  const [exportandoCorreos, setExportandoCorreos] = useState(false);
+  const [avisoExportar, setAvisoExportar] = useState<{ tipo: 'ok' | 'error'; texto: string } | null>(null);
+  const exportarCorreos = async () => {
+    if (!correosGrupos) return;
+    setAvisoExportar(null);
+    setExportandoCorreos(true);
+    try {
+      // Se carga solo al pulsar: `exceljs` pesa y casi nadie exporta.
+      const { exportarCorreosExcel } = await import('../../lib/portal/correos-exportar');
+      const r = await exportarCorreosExcel(correosGrupos);
+      setAvisoExportar({
+        tipo: 'ok',
+        texto: `Se descargó ${r.archivo} con ${r.personas} personas (${r.excluidos} buzones genéricos omitidos).`,
+      });
+    } catch {
+      setAvisoExportar({ tipo: 'error', texto: 'No se pudo generar el Excel. Intente de nuevo.' });
+    } finally {
+      setExportandoCorreos(false);
+    }
+  };
   const correosFiltrados = useMemo(
     () => (correosGrupos ? filtrarGruposCorreo(correosGrupos, empresaCorreo, busquedaCorreo) : []),
     [correosGrupos, empresaCorreo, busquedaCorreo]
@@ -846,6 +869,17 @@ export default function PortalContenido({
                       </button>
                     </div>
                   )}
+                  {avisoExportar && (
+                    <Alert
+                      color={avisoExportar.tipo === 'ok' ? 'green' : 'red'}
+                      withCloseButton
+                      onClose={() => setAvisoExportar(null)}
+                      role={avisoExportar.tipo === 'ok' ? 'status' : 'alert'}
+                      mb='sm'
+                    >
+                      {avisoExportar.texto}
+                    </Alert>
+                  )}
                   {correosGrupos && correosGrupos.length > 0 && (
                     <Group gap='sm' wrap='wrap'>
                       <TextInput
@@ -866,6 +900,15 @@ export default function PortalContenido({
                         comboboxProps={{ withinPortal: true, zIndex: 1100 }}
                         style={{ flex: '0 1 220px', minWidth: 180 }}
                       />
+                      <Button
+                        variant='light'
+                        leftSection={<IconDownload size={16} />}
+                        loading={exportandoCorreos}
+                        onClick={() => void exportarCorreos()}
+                        data-testid='exportar-correos'
+                      >
+                        Exportar a Excel
+                      </Button>
                     </Group>
                   )}
                   {correosGrupos && busquedaCorreo.trim() && correosFiltrados.length === 0 && (

@@ -9,6 +9,7 @@ import {
   normalizeProjectDescription,
   normalizeProjectInstructions,
   normalizeProjectName,
+  PERFIL_PROYECTO_SIN_AGENTES,
   PROJECT_PROFILES,
 } from '../../../lib/chat/projects-rules';
 import type { ListaProyectosDto } from '../../../lib/proyectos/tipos';
@@ -16,7 +17,7 @@ import { pedirSugerencia } from '../../../lib/proyectos/equipo';
 import { estadosTrabajandoVisibles } from '../../../lib/proyectos/estado-agente-servidor';
 import { cargarOperadoresPases, normalizarMotivo, normalizarPolitica, type PoliticaEntrada } from '../../../lib/proyectos/permisos-agentes-rules';
 import { catalogoActivo, ErrorPermisos, guardarPolitica, puedeGestionarPermisos, tablaNoExiste } from '../../../lib/proyectos/permisos-agentes';
-import { agentesDeNegocio, codigoPermitido, mensajeSoloDesarrollo, pideCodigo } from '../../../lib/proyectos/agentes-desarrollo-rules';
+import { agentesDeNegocio, avisoSinCodigo, pideCodigo } from '../../../lib/proyectos/agentes-desarrollo-rules';
 
 export const dynamic = 'force-dynamic';
 
@@ -34,8 +35,15 @@ export const dynamic = 'force-dynamic';
  *        cambiarlos en esa empresa (administración o el subproceso
  *        /process/proyectos/permisos-agentes); si no puede y pide algo distinto
  *        de «ninguno», 403. Sin agentPolicy, el proyecto queda en «ninguno».
- *        Código o repos con algún asistente que NO es de desarrollo: 400 y no se
- *        crea nada (regla del 2026-10-27, lib/proyectos/agentes-desarrollo-rules.ts).
+ *        Agentes mixtos (2026-11-11, Nicolás Rivera): código o repos con algún
+ *        asistente que NO es de desarrollo SÍ se guarda; ese asistente participa
+ *        sin acceso al código (el puente le entrega «ninguno»). La respuesta trae
+ *        `avisos` informativos (lib/proyectos/agentes-desarrollo-rules.ts).
+ *        SIN ASISTENTES (2026-11-10, Nicolás Rivera: «que existan los 2 caminos»):
+ *        agentCodes vacío u omitido crea un proyecto solo de personas (miembros,
+ *        tareas, archivos, vínculos), con perfil «sin-conectores» y sin
+ *        sugerencia de equipo. Los asistentes se agregan después en
+ *        /api/proyectos/[id]/agentes.
  *
  * SEGURIDAD
  *   - La persona sale de la SESIÓN; el dueño es SIEMPRE quien crea.
@@ -92,10 +100,12 @@ export async function POST(request: NextRequest) {
     if (!descripcion.ok) return badRequest(descripcion.error);
     const instrucciones = normalizeProjectInstructions(payload.instructions);
     if (!instrucciones.ok) return badRequest(instrucciones.error);
-    const codigos = normalizeAgentCodes(payload.agentCodes);
+    const codigos = normalizeAgentCodes(payload.agentCodes, { permitirVacio: true });
     if (!codigos.ok) return badRequest(codigos.error);
-    if (!isKnownProfile(payload.profile)) return badRequest('Escoja el perfil de conectores.');
-    const perfil = payload.profile;
+    // Sin asistentes el perfil no aplica todavía: queda el de menos alcance.
+    const sinAgentes = codigos.value.length === 0;
+    if (!sinAgentes && !isKnownProfile(payload.profile)) return badRequest('Escoja el perfil de conectores.');
+    const perfil = sinAgentes ? PERFIL_PROYECTO_SIN_AGENTES : (payload.profile as string);
 
     const idCompany = Number(payload.idCompany);
     if (!Number.isInteger(idCompany) || idCompany <= 0) return badRequest('Escoja la empresa del proyecto.');
@@ -142,10 +152,6 @@ export async function POST(request: NextRequest) {
           { status: 403 }
         );
       }
-      // Código o repos solo con agentes de desarrollo (2026-10-27): TODOS los escogidos.
-      if (puede && pideCodigo(pedida) && !codigoPermitido(agentes)) {
-        return badRequest(mensajeSoloDesarrollo(agentesDeNegocio(agentes).map((a) => a.displayName)));
-      }
       if (puede) {
         const catalogo = await catalogoActivo();
         const v = normalizarPolitica(pedida, { catalogoActivo: catalogo.map((r) => r.slug), operadores: cargarOperadoresPases() });
@@ -161,14 +167,14 @@ export async function POST(request: NextRequest) {
       name: nombre.value,
       description: descripcion.value,
       // «Agente con el que se creó» (columna de la F1). El acceso lo dan
-      // las filas de chat_project_agent.
-      id_agent: agentes[0].idAgent,
+      // las filas de chat_project_agent. NULL si se creó sin asistentes.
+      id_agent: agentes[0]?.idAgent ?? null,
       id_company: idCompany,
       profile: perfil,
       instructions: instrucciones.value,
       created_by: user.id,
       members: { create: [{ id_user: user.id, role: 'owner', added_by: user.id }] },
-      agents: { create: agentes.map((a) => ({ id_agent: a.idAgent, added_by: user.id })) },
+      ...(agentes.length > 0 ? { agents: { create: agentes.map((a) => ({ id_agent: a.idAgent, added_by: user.id })) } } : {}),
     };
     // Con permisos escogidos: proyecto, política y registro en UNA transacción
     // (si la política no se puede guardar, el proyecto no queda creado a medias).
@@ -193,7 +199,7 @@ export async function POST(request: NextRequest) {
     // «De primeras» (pedido de Nicolás, 2026-10-18): la sugerencia de equipo
     // sale con la creación. Si no se puede pedir, el proyecto queda creado igual.
     let teamRequested = false;
-    if (payload.suggestTeam === true) {
+    if (payload.suggestTeam === true && agentes.length > 0) {
       try {
         await pedirSugerencia(
           { id: user.id, email: user.email },
@@ -206,7 +212,10 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    return jsonNoStore({ idProject: creado.id_project, teamRequested }, { status: 201 });
+    // Agentes de negocio en un proyecto con código: entran, sin acceso al código (aviso, no bloqueo).
+    const negocio = pol && pideCodigo(pol.entrada) ? agentesDeNegocio(agentes).map((a) => a.displayName) : [];
+    const avisos = negocio.length > 0 ? [avisoSinCodigo(negocio)] : [];
+    return jsonNoStore({ idProject: creado.id_project, teamRequested, avisos }, { status: 201 });
   } catch (error) {
     return serverError('POST /api/proyectos', error);
   }

@@ -3,6 +3,7 @@ import sqlConfig from '../../../../../dbconfig';
 import { NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '../../../auth/[...nextauth]/route';
+import { canManageTeamMembers } from '../../../../../lib/request-general/teamTasksScope';
 
 export async function GET(req) {
   try {
@@ -55,6 +56,11 @@ export async function GET(req) {
     }
 
     else if (!status) query += ` AND sc.id_status_case = 4`;
+
+    // Solo el Líder de solicitudes y solo para personas de sus departamentos.
+    if (!(await canManageTeamMembers(userId, [member]))) {
+      return NextResponse.json({ error: 'No tienes permiso para ver las tareas de esta persona' }, { status: 403 });
+    }
 
     const request = pool.request();
 

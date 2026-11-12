@@ -5,10 +5,12 @@ import {
   applyDraftConverted,
   applyDraftEditValidators,
   applyDraftInternalDecision,
+  applyDraftMarkAsCorrection,
   applyDraftNewVersion,
   applyDraftResendInternal,
   applyDraftReviewerInvite,
   applyDraftSendClient,
+  applyDraftSelfApproval,
   applyDraftSubmitInternal,
   createDraftState,
   draftCorrectionRequests,
@@ -132,11 +134,45 @@ describe('preparación Word: validación interna', () => {
     expect(applyDraftNewVersion(respondieron, { actor: elaborador, version: version('b') }).versionLabel).toBe('v0.2');
   });
 
-  it('un validador nunca sube, aunque además tenga permiso de preparar', () => {
+  it('un validador puro no sube; la preparadora sí aunque también valide', () => {
     let s = applyDraftInternalDecision(enValidacion(), { actor: ana, decision: 'return', comment: 'Anexo' });
     s = applyDraftInternalDecision(s, { actor: beto, decision: 'approve' });
-    const perms = resolveDraftPermissions({ state: s, actorEmail: 'ana@x.com', isElaborator: true });
-    expect(perms).toMatchObject({ canUpload: false, canSubmitInternal: false, canConvertPdf: false, canViewBoard: true });
+    // Validador puro: aunque en el flujo tenga permiso de preparar, aquí no es dueña del documento.
+    const validadora = resolveDraftPermissions({ state: s, actorEmail: 'ana@x.com', isElaborator: false });
+    expect(validadora).toMatchObject({
+      canUpload: false,
+      canSubmitInternal: false,
+      canConvertPdf: false,
+      canViewBoard: true,
+    });
+    // Preparadora que también figura como validadora: conserva corrección y no marca como validadora.
+    const elaV: OrionReviewValidator = { userId: 'u-ela', email: 'ela@x.com', name: 'Ela', order: 1 };
+    let corr = applyDraftSelfApproval(
+      applyDraftSubmitInternal(nuevo(), { actor: elaborador, validators: [elaV, ...validators] }),
+      elaborador
+    );
+    corr = applyDraftInternalDecision(corr, { actor: ana, decision: 'return', comment: 'Anexo' });
+    corr = applyDraftInternalDecision(corr, { actor: beto, decision: 'approve' });
+    expect(draftReviewPhase(corr)).toBe('correccion');
+    const prepYVal = resolveDraftPermissions({ state: corr, actorEmail: 'ela@x.com', isElaborator: true });
+    expect(prepYVal).toMatchObject({
+      canUpload: true,
+      canMark: false,
+      canDecideInternal: false,
+      canViewBoard: true,
+    });
+    // En revisión, ve el tablero y puede editar validadores (isElaborator en UI); no decide ni marca.
+    const enRev = applyDraftSelfApproval(
+      applyDraftSubmitInternal(nuevo(), { actor: elaborador, validators: [elaV, ...validators] }),
+      elaborador
+    );
+    const mid = resolveDraftPermissions({ state: enRev, actorEmail: 'ela@x.com', isElaborator: true });
+    expect(mid).toMatchObject({
+      canMark: false,
+      canDecideInternal: false,
+      canUpload: false,
+      canViewBoard: true,
+    });
   });
 
   it('los validadores no suben archivos: marcan en el tablero', () => {
@@ -238,11 +274,32 @@ describe('preparación Word: validación interna', () => {
     expect(draftReviewPhase(s)).toBeNull();
   });
 
-  it('en corrección los validadores ya no marcan: el turno es de la preparadora', () => {
+  it('en corrección solo sigue marcando quien pidió corrección, y solo hasta que suban la corregida', () => {
     let s = applyDraftInternalDecision(enValidacion(), { actor: ana, decision: 'return', comment: 'Anexo B' });
     expect(resolveDraftPermissions({ state: s, actorEmail: 'beto@x.com', isElaborator: false }).canMark).toBe(true);
     s = applyDraftInternalDecision(s, { actor: beto, decision: 'approve' });
+    expect(resolveDraftPermissions({ state: s, actorEmail: 'ana@x.com', isElaborator: false }).canMark).toBe(true);
+    expect(resolveDraftPermissions({ state: s, actorEmail: 'beto@x.com', isElaborator: false }).canMark).toBe(false);
+    s = applyDraftNewVersion(s, { actor: elaborador, version: version('b') });
     expect(resolveDraftPermissions({ state: s, actorEmail: 'ana@x.com', isElaborator: false }).canMark).toBe(false);
+  });
+
+  it('guardar una marca cuenta como pedir corrección (una sola vez por ronda)', () => {
+    const first = applyDraftMarkAsCorrection(enValidacion(), ana, 'Cambiar fecha');
+    expect(first.changed).toBe(true);
+    expect(first.state.internalReview?.approvals.find((a) => a.email === 'ana@x.com')).toMatchObject({
+      decision: 'DEVUELTO',
+      comment: 'Cambiar fecha',
+      correctionVersion: 'v0.1',
+    });
+    expect(draftReviewPhase(first.state)).toBe('revision');
+    const second = applyDraftMarkAsCorrection(first.state, ana, 'Otra cosa');
+    expect(second.changed).toBe(false);
+    expect(second.state).toBe(first.state);
+    // Quien ya había aprobado y marca algo nuevo también queda pidiendo corrección.
+    const aprobado = applyDraftInternalDecision(enValidacion(), { actor: beto, decision: 'approve' });
+    const marca = applyDraftMarkAsCorrection(aprobado, beto, 'Faltó el anexo');
+    expect(marca.state.internalReview?.approvals.find((a) => a.email === 'beto@x.com')?.decision).toBe('DEVUELTO');
   });
 });
 

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  urlReenviarAdjunto,
   lenguajeDe,
   parsearCsv,
   resaltar,
@@ -62,13 +63,22 @@ describe('tipoDeVisor', () => {
 });
 
 describe('urlVistaAdjunto', () => {
-  it('solo para la ruta de adjuntos del chat', () => {
+  it('adjuntos del chat y, desde 2026-11-05, archivos de proyecto', () => {
     expect(urlVistaAdjunto('/api/chat/attachments/42')).toBe('/api/chat/attachments/42/vista');
     expect(urlVistaAdjunto('/api/chat/attachments/42', 'pdf')).toBe('/api/chat/attachments/42/vista?como=pdf');
-    expect(urlVistaAdjunto('/api/proyectos/1/archivos/2')).toBeNull();
+    expect(urlVistaAdjunto('/api/proyectos/1/archivos/2')).toBe('/api/proyectos/1/archivos/2/vista');
+    expect(urlVistaAdjunto('/api/proyectos/1/archivos/2', 'pdf')).toBe('/api/proyectos/1/archivos/2/vista?como=pdf');
+    expect(urlVistaAdjunto('/api/proyectos/1/archivos/2/otra')).toBeNull();
     expect(urlVistaAdjunto('https://onedrive/x')).toBeNull();
     expect(urlVistaAdjunto('/api/chat/attachments/42?inline=1')).toBeNull();
     expect(urlVistaAdjunto(null)).toBeNull();
+  });
+});
+
+describe('urlReenviarAdjunto', () => {
+  it('chat o proyecto, según la URL de descarga', () => {
+    expect(urlReenviarAdjunto('/api/chat/attachments/42', 42)).toBe('/api/chat/attachments/42/reenviar');
+    expect(urlReenviarAdjunto('/api/proyectos/1/archivos/2', 2)).toBe('/api/proyectos/1/archivos/2/reenviar');
   });
 });
 
