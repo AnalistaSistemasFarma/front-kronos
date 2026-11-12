@@ -40,11 +40,26 @@ const fila = (over: Partial<Fila>): Fila => ({
 });
 
 describe('rutaVistaVentas', () => {
-  it('consulta la vista sin $select y con rango por Fecha', () => {
+  it('consulta la vista con $select explícito y rango por Fecha', () => {
     const r = rutaVistaVentas('2026-11-01', '2026-11-10');
     expect(r).toContain('view.svc/OLP_IND_VentasB1SLQuery');
-    expect(r).not.toContain('$select');
+    expect(r).toContain('$select=Fecha,NDocumento,');
     expect(r).toContain("Fecha ge '2026-11-01' and Fecha le '2026-11-10'");
+  });
+
+  it('nunca pide N° Documento ni Documento en el esquema nuevo', () => {
+    const sel = rutaVistaVentas('2026-11-01', '2026-11-10', 'nuevo').match(/\$select=([^&]*)/)![1].split(',');
+    expect(sel).not.toContain('Documento');
+    expect(sel.some((c) => c.includes('°'))).toBe(false);
+  });
+
+  it('en el esquema viejo pide los nombres viejos, sin N° Documento ni columnas nuevas', () => {
+    const sel = rutaVistaVentas('2026-11-01', '2026-11-10', 'viejo').match(/\$select=([^&]*)/)![1].split(',');
+    expect(sel).toContain('Documento');
+    expect(sel).not.toContain('NDocumento');
+    expect(sel.some((c) => c.includes('°'))).toBe(false);
+    expect(sel).not.toContain('U_IT_LineaTerapeutica');
+    expect(sel).not.toContain('Municipio_Factura');
   });
 });
 
@@ -59,6 +74,12 @@ describe('aFila', () => {
     expect(n.cost).toBe(-100);
     expect(n.oc).toBe('');
     expect(n.lt).toBe('Sin línea terapéutica');
+  });
+
+  it('en el esquema viejo marca línea terapéutica y ciudad como No disponible', () => {
+    const f = aFila({ NDocumento: 'Facturas', Fecha: '2026-11-10', Cantidad: 1, Total: 10, U_IT_LineaTerapeutica: 'X', Municipio_Factura: 'Y' }, 'viejo');
+    expect(f.lt).toBe('No disponible');
+    expect(f.ciu).toBe('No disponible');
   });
 });
 

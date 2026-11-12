@@ -8,6 +8,7 @@
  * Colombia (las de la vista ya vienen como AAAA-MM-DD locales).
  */
 import { diasHabiles, iso, rangosMes } from './calculo';
+import { NO_DISPONIBLE, selectDe, type EsquemaVentas } from './esquema';
 import { VISTA_LINEAS, type LineaVenta } from './lineas';
 
 /** Línea compacta que viaja al navegador. */
@@ -58,16 +59,18 @@ export interface TableroDatos {
   filasAnterior: Fila[];
   filasAnio: Fila[];
   avisos: string[];
+  /** Esquema detectado de la vista (ver ./esquema). */
+  esquema?: EsquemaVentas;
 }
 
 /**
- * Ruta OData (solo lectura) de la vista de líneas para un rango de fechas.
- * Sin $select: el Service Layer de OLP rechaza $select sobre esta vista
- * («invalid property 'NDocumento'», visto en PRUEBAS el 2026-11-12). La
- * reducción de campos se hace en el servidor con aFila antes de responder.
+ * Ruta OData (solo lectura) de la vista de líneas para un rango de fechas, con
+ * `$select` EXPLÍCITO según el esquema de la vista (ver ./esquema). Sin `$select`
+ * el Service Layer mezcla la estructura vieja y la nueva de la vista y falla con
+ * «'N° Documento' no es válido» o un 500.
  */
-export const rutaVistaVentas = (desde: string, hasta: string) =>
-  `view.svc/${VISTA_LINEAS}?$filter=Fecha ge '${desde}' and Fecha le '${hasta}'`;
+export const rutaVistaVentas = (desde: string, hasta: string, esquema: EsquemaVentas = 'nuevo') =>
+  `view.svc/${VISTA_LINEAS}?$select=${selectDe(esquema).join(',')}&$filter=Fecha ge '${desde}' and Fecha le '${hasta}'`;
 
 const txt = (v: unknown) => String(v ?? '').trim();
 const num = (v: unknown) => {
@@ -75,8 +78,12 @@ const num = (v: unknown) => {
   return Number.isFinite(n) ? n : 0;
 };
 
-/** Normaliza una línea de la vista a la fila compacta. */
-export function aFila(l: LineaVenta): Fila {
+/**
+ * Normaliza una línea (ya pasada por normalizarLinea) a la fila compacta. En el
+ * esquema viejo la línea terapéutica y la ciudad no existen: «No disponible».
+ */
+export function aFila(l: LineaVenta, esquema: EsquemaVentas = 'nuevo'): Fila {
+  const viejo = esquema === 'viejo';
   const nota = txt(l.NDocumento).toLowerCase().startsWith('nota');
   const q = num(l.Cantidad);
   const signo = nota ? -1 : 1;
@@ -93,12 +100,12 @@ export function aFila(l: LineaVenta): Fila {
     v: txt(l.Vendedor) || 'Sin vendedor',
     pc: pc || pn,
     pn: pn || 'Sin descripción',
-    lt: txt(l.U_IT_LineaTerapeutica) || 'Sin línea terapéutica',
+    lt: viejo ? NO_DISPONIBLE : txt(l.U_IT_LineaTerapeutica) || 'Sin línea terapéutica',
     q,
     val: num(l.Total),
     cost: num(l.Costo) * Math.abs(q) * signo,
     oc,
-    ciu: txt(l.Municipio_Factura) || 'Sin ciudad',
+    ciu: viejo ? NO_DISPONIBLE : txt(l.Municipio_Factura) || 'Sin ciudad',
   };
 }
 
