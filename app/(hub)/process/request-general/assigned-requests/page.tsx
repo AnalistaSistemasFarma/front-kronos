@@ -338,7 +338,7 @@ function RequestBoard() {
   const statusHints = useMemo(() => {
     if (typeFilter !== 'all') return undefined;
     const hints: Partial<Record<StatusGroup, string>> = {};
-    for (const group of ['all', 'pending', 'done', 'cancelled'] as StatusGroup[]) {
+    for (const group of ['all', 'pending', 'returned', 'done', 'cancelled'] as StatusGroup[]) {
       const inGroup = typedEntries.filter((e) => group === 'all' || e.row.group === group);
       const requests = inGroup.filter((e) => e.item.kind === 'request').length;
       hints[group] = `${requests} solicitudes · ${inGroup.length - requests} tareas`;
@@ -1290,6 +1290,7 @@ function RequestBoard() {
         onChange={setFilters}
         onClear={clearListFilters}
         counts={statusCounts}
+        showReturned
         hints={statusHints}
         options={listOptions}
         progress={globalProgress}

@@ -1,5 +1,6 @@
 import { sapGet, sapGetAll, sapPost, sapPatch, sapDelete, type SapSession } from '../sap/serviceLayer';
 import type { CompanySapEndpoint } from './access';
+import { AUTO_LOG_PREFIX, DATE_FIELDS, FIELD_LABELS } from './fields';
 
 /**
  * Logica de negocio de registros sanitarios (UDO de SAP B1), compartida por las
@@ -193,8 +194,6 @@ export async function getNombresExistentes(
 }
 
 /**
- * Agrega una linea a la bitacora (colección hija). Append: sin
- * B1S-ReplaceCollectionsOnPatch. El nombre de la colección varia por empresa.
  */
 export async function agregarLog(
   session: SapSession,
@@ -202,13 +201,63 @@ export async function agregarLog(
   logCollection: string,
   docNum: number,
   userName: string,
-  comentario: string
+  comentarios: string | string[]
 ): Promise<void> {
+  const lineas = (Array.isArray(comentarios) ? comentarios : [comentarios])
+    .map((c) => c.trim())
+    .filter(Boolean);
+  if (lineas.length === 0) return;
+
+  const fecha = today();
   await sapPatch(session, `${entity}(${docNum})`, {
-    [logCollection]: [
-      { U_RegSan_Fec: today(), U_RegSan_Nom: userName, U_RegSan_Com: comentario },
-    ],
+    [logCollection]: lineas.map((c) => ({
+      U_RegSan_Fec: fecha,
+      U_RegSan_Nom: userName,
+      U_RegSan_Com: c,
+    })),
   });
+}
+
+export async function getRegistro(
+  session: SapSession,
+  entity: string,
+  docNum: number
+): Promise<Record<string, unknown>> {
+  return sapGet<Record<string, unknown>>(session, `${entity}(${docNum})`);
+}
+
+export interface RecordChange {
+  field: string;
+  label: string;
+  oldValue: string;
+  newValue: string;
+}
+
+/** Valor comparable: string recortado; las fechas de SAP vienen con hora. */
+function comparable(field: string, value: unknown): string {
+  const s = value == null ? '' : String(value).trim();
+  return DATE_FIELDS.includes(field) ? s.slice(0, 10) : s;
+}
+
+export function describeChanges(
+  before: Record<string, unknown>,
+  changes: HealthRecordInput
+): RecordChange[] {
+  const out: RecordChange[] = [];
+  for (const [field, value] of Object.entries(changes)) {
+    const oldValue = comparable(field, before[field]);
+    const newValue = comparable(field, value);
+    if (oldValue === newValue) continue;
+    out.push({ field, label: FIELD_LABELS[field] ?? field, oldValue, newValue });
+  }
+  return out;
+}
+
+export function changeLogLines(changes: RecordChange[]): string[] {
+  return changes.map(
+    (c) =>
+      `${AUTO_LOG_PREFIX} "${c.label}". Nuevo valor: "${c.newValue}". Valor anterior: "${c.oldValue}".`
+  );
 }
 
 /**

@@ -3,8 +3,18 @@
 import React, { useState, useEffect } from 'react';
 import {
   Modal, Select, TextInput, Textarea, Button, Group, Stack, Alert, NumberInput, SimpleGrid, Badge, Text,
+  Checkbox, Divider, Paper, ScrollArea,
 } from '@mantine/core';
-import { PAISES, ESTADOS, OBSOLETO, DATE_FIELDS } from '../../../../lib/health-records/fields';
+import { IconMessagePlus, IconSpeakerphone } from '@tabler/icons-react';
+import {
+  PAISES,
+  ESTADOS,
+  OBSOLETO,
+  DATE_FIELDS,
+  AUTO_LOG_PREFIX,
+  OBSERVATION_MAX_LENGTH,
+  type HealthRecordLog,
+} from '../../../../lib/health-records/fields';
 
 export interface HealthRecord {
   companyId: number;
@@ -17,6 +27,7 @@ export interface HealthRecord {
   U_Titular?: string;
   U_Fecha_Vencimiento?: string;
   U_Estado_Comercializacion?: string;
+  logs?: HealthRecordLog[];
   [key: string]: unknown;
 }
 
@@ -24,7 +35,7 @@ interface Props {
   record: HealthRecord | null;
   canWrite: boolean;
   onClose: () => void;
-  onUpdated: () => void;
+  onUpdated: (notifyWarning?: string) => void;
 }
 
 /** Los 16 campos U_* editables (mismos que CreateModal). */
@@ -67,6 +78,15 @@ export default function EditModal({ record, canWrite, onClose, onUpdated }: Prop
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const [addingObs, setAddingObs] = useState(false);
+  const [observacion, setObservacion] = useState('');
+  const [notifyObs, setNotifyObs] = useState(false);
+  const [savingObs, setSavingObs] = useState(false);
+
+  const [divulging, setDivulging] = useState(false);
+  const [divulged, setDivulged] = useState(false);
+  const [success, setSuccess] = useState<string | null>(null);
+
   useEffect(() => {
     if (record) {
       const initial = fromRecord(record);
@@ -74,10 +94,62 @@ export default function EditModal({ record, canWrite, onClose, onUpdated }: Prop
       setOriginal(initial);
       setComentario('');
       setError(null);
+      setAddingObs(false);
+      setObservacion('');
+      setNotifyObs(false);
+      setDivulged(false);
+      setSuccess(null);
     }
   }, [record]);
 
+  const busy = saving || savingObs || divulging;
+
+  const close = () => {
+    if (divulged) onUpdated();
+    onClose();
+  };
+
+  const divulgar = async () => {
+    if (!record) return;
+    setError(null);
+    setSuccess(null);
+    if (
+      !window.confirm(
+        `¿Enviar a divulgar el registro sanitario ${record.U_Registro_Sanitario ?? ''}? ` +
+          'Se enviará un correo a la lista de divulgación de la empresa.'
+      )
+    ) {
+      return;
+    }
+
+    setDivulging(true);
+    try {
+      const res = await fetch('/api/health-records/divulge', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ companyId: record.companyId, docNum: record.DocNum }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error || 'No se pudo enviar la divulgación');
+        return;
+      }
+      setDivulged(true);
+      setSuccess(
+        data.logWarning
+          ? `Divulgación enviada. ${data.logWarning}`
+          : 'Divulgación enviada. Quedó registrada en la bitácora.'
+      );
+    } catch {
+      setError('Error de red al enviar la divulgación');
+    } finally {
+      setDivulging(false);
+    }
+  };
+
   const set = (field: string, value: string) => setForm((r) => ({ ...r, [field]: value }));
+
+  const logs = [...(record?.logs ?? [])].reverse();
 
   const submit = async () => {
     if (!record) return;
@@ -92,9 +164,20 @@ export default function EditModal({ record, canWrite, onClose, onUpdated }: Prop
     if (Object.keys(changes).length === 0) {
       setError(
         comentario.trim()
-          ? 'Debe modificar al menos un campo para guardar (el comentario solo no basta).'
+          ? 'Debe modificar al menos un campo para guardar. Para dejar solo un comentario use "Añadir observación".'
           : 'No hay cambios para guardar.'
       );
+      return;
+    }
+
+    if (
+      (original.U_Obsoleto ?? '').toUpperCase() !== 'SI' &&
+      (changes.U_Obsoleto ?? '').toUpperCase() === 'SI' &&
+      !window.confirm(
+        `Va a marcar el registro sanitario ${record.U_Registro_Sanitario ?? ''} como OBSOLETO. ` +
+          'Se notificará la obsolescencia por correo. ¿Desea continuar?'
+      )
+    ) {
       return;
     }
 
@@ -115,7 +198,7 @@ export default function EditModal({ record, canWrite, onClose, onUpdated }: Prop
         setError(data.error || 'No se pudo actualizar el registro');
         return;
       }
-      onUpdated();
+      onUpdated(data.notifyWarning);
       onClose();
     } catch {
       setError('Error de red al actualizar el registro');
@@ -124,16 +207,56 @@ export default function EditModal({ record, canWrite, onClose, onUpdated }: Prop
     }
   };
 
+  const submitObservation = async () => {
+    if (!record) return;
+    setError(null);
+    const texto = observacion.trim();
+    if (!texto) {
+      setError('Escriba la observación.');
+      return;
+    }
+
+    setSavingObs(true);
+    try {
+      const res = await fetch('/api/health-records/log', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          companyId: record.companyId,
+          docNum: record.DocNum,
+          comentario: texto,
+          notify: notifyObs,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error || 'No se pudo agregar la observación');
+        return;
+      }
+      onUpdated(data.notifyWarning);
+      onClose();
+    } catch {
+      setError('Error de red al agregar la observación');
+    } finally {
+      setSavingObs(false);
+    }
+  };
+
   return (
     <Modal
       opened={!!record}
-      onClose={onClose}
+      onClose={close}
       title={canWrite ? 'Editar registro sanitario' : 'Detalle del registro'}
       size="lg"
     >
       {record && (
         <Stack gap="sm">
           {error && <Alert color="red">{error}</Alert>}
+          {success && (
+            <Alert color="green" withCloseButton onClose={() => setSuccess(null)}>
+              {success}
+            </Alert>
+          )}
 
           <Group gap="xs">
             <Text size="sm" fw={500}>Empresa:</Text>
@@ -160,15 +283,122 @@ export default function EditModal({ record, canWrite, onClose, onUpdated }: Prop
           </SimpleGrid>
 
           {canWrite && (
-            <Textarea label="Comentario (queda en la bitacora)" value={comentario} onChange={(e) => setComentario(e.currentTarget.value)} minRows={2} />
+            <Textarea label="Comentario (queda en la bitácora junto con los cambios)" value={comentario} onChange={(e) => setComentario(e.currentTarget.value)} minRows={2} />
           )}
 
-          <Group justify="flex-end" mt="sm">
-            <Button variant="default" onClick={onClose} disabled={saving}>
-              {canWrite ? 'Cancelar' : 'Cerrar'}
-            </Button>
-            {canWrite && <Button onClick={submit} loading={saving}>Guardar</Button>}
+          <Group justify="space-between" mt="sm">
+            {canWrite ? (
+              <Button
+                variant="light"
+                color="teal"
+                leftSection={<IconSpeakerphone size={16} />}
+                onClick={divulgar}
+                loading={divulging}
+                disabled={saving || savingObs}
+              >
+                Enviar a divulgar
+              </Button>
+            ) : (
+              <span />
+            )}
+            <Group gap="xs">
+              <Button variant="default" onClick={close} disabled={busy}>
+                {canWrite ? 'Cancelar' : 'Cerrar'}
+              </Button>
+              {canWrite && <Button onClick={submit} loading={saving} disabled={savingObs || divulging}>Guardar</Button>}
+            </Group>
           </Group>
+
+          <Divider label="Bitácora" labelPosition="left" mt="xs" />
+
+          {canWrite && !addingObs && (
+            <Group>
+              <Button
+                variant="light"
+                size="xs"
+                leftSection={<IconMessagePlus size={14} />}
+                onClick={() => setAddingObs(true)}
+                disabled={saving}
+              >
+                Añadir observación
+              </Button>
+            </Group>
+          )}
+
+          {canWrite && addingObs && (
+            <Paper withBorder radius="sm" p="sm">
+              <Stack gap="xs">
+                <Textarea
+                  label="Observación"
+                  placeholder="Escriba la observación"
+                  value={observacion}
+                  onChange={(e) => setObservacion(e.currentTarget.value)}
+                  maxLength={OBSERVATION_MAX_LENGTH}
+                  minRows={3}
+                  autosize
+                  description={`${observacion.length}/${OBSERVATION_MAX_LENGTH}`}
+                  autoFocus
+                />
+                <Checkbox
+                  label="¿Notificar por email?"
+                  checked={notifyObs}
+                  onChange={(e) => setNotifyObs(e.currentTarget.checked)}
+                />
+                <Group justify="flex-end" gap="xs">
+                  <Button
+                    variant="default"
+                    size="xs"
+                    onClick={() => {
+                      setAddingObs(false);
+                      setObservacion('');
+                      setNotifyObs(false);
+                    }}
+                    disabled={savingObs}
+                  >
+                    Cancelar
+                  </Button>
+                  <Button size="xs" onClick={submitObservation} loading={savingObs} disabled={saving}>
+                    Añadir observación
+                  </Button>
+                </Group>
+              </Stack>
+            </Paper>
+          )}
+
+          {logs.length === 0 ? (
+            <Text size="sm" c="dimmed">Sin observaciones registradas.</Text>
+          ) : (
+            <ScrollArea.Autosize mah={260}>
+              <Stack gap={6}>
+                {logs.map((log, i) => {
+                  const texto = log.U_RegSan_Com ?? '';
+                  const automatico = texto.startsWith(AUTO_LOG_PREFIX);
+                  return (
+                    <Paper key={i} withBorder radius="sm" px="sm" py={6}>
+                      <Group gap="xs" wrap="nowrap">
+                        <Text size="xs" c="dimmed" style={{ whiteSpace: 'nowrap' }}>
+                          {(log.U_RegSan_Fec ?? '').slice(0, 10)}
+                        </Text>
+                        <Text size="xs" fw={600} truncate>
+                          {log.U_RegSan_Nom || '-'}
+                        </Text>
+                        {automatico && (
+                          <Badge size="xs" variant="light" color="gray">Cambio</Badge>
+                        )}
+                      </Group>
+                      <Text
+                        size="sm"
+                        c={automatico ? 'dimmed' : undefined}
+                        style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}
+                      >
+                        {texto}
+                      </Text>
+                    </Paper>
+                  );
+                })}
+              </Stack>
+            </ScrollArea.Autosize>
+          )}
         </Stack>
       )}
     </Modal>

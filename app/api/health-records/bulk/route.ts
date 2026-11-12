@@ -11,6 +11,7 @@ import {
   registroExiste,
   sanitizeRecord,
 } from '../../../../lib/health-records/records';
+import { notifyCreated, toNotifyWarning } from '../../../../lib/health-records/notifications';
 import { sapLogin, sapLogout, SapError } from '../../../../lib/sap/serviceLayer';
 
 /**
@@ -79,6 +80,7 @@ export async function POST(request: NextRequest) {
     const failed: { row: number; registro: string; error: string }[] = [];
     const warnings: { row: number; field: string; value: string; similar: string }[] = [];
     const seen = new Set<string>();
+    const creados: Record<string, unknown>[] = [];
 
     try {
       for (let i = 0; i < rows.length; i++) {
@@ -167,6 +169,7 @@ export async function POST(request: NextRequest) {
           }
           const docNum = await crearRegistro(sap, company.endpoint, record, userName, 'Creado por cargue masivo');
           ok.push({ row: rowNum, registro, docNum });
+          creados.push({ ...record, DocNum: docNum });
         } catch (err) {
           const msg = err instanceof SapError ? err.friendly : err instanceof Error ? err.message : 'Error';
           failed.push({ row: rowNum, registro, error: msg });
@@ -176,8 +179,22 @@ export async function POST(request: NextRequest) {
       await sapLogout(sap);
     }
 
+    let notifyWarning: string | undefined;
+    let notified = false;
+    if (!dryRun && creados.length > 0) {
+      const result = await notifyCreated(
+        { companyId, companyName: company.companyName },
+        creados,
+        'Cargue masivo'
+      );
+      notifyWarning = toNotifyWarning(result);
+      notified = result.sent.length > 0;
+    }
+
     return NextResponse.json({
       dryRun,
+      notified,
+      notifyWarning,
       summary: {
         total: rows.length,
         creados: ok.length,

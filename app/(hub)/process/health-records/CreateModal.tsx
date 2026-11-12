@@ -16,7 +16,7 @@ interface Props {
   opened: boolean;
   onClose: () => void;
   companies: WritableCompany[];
-  onCreated: () => void;
+  onCreated: (notifyWarning?: string) => void;
 }
 
 const EMPTY = {
@@ -110,7 +110,7 @@ export default function CreateModal({ opened, onClose, companies, onCreated }: P
         return;
       }
       reset();
-      onCreated();
+      onCreated(data.notifyWarning);
       onClose();
     } catch {
       setError('Error de red al crear el registro');
@@ -191,7 +191,7 @@ export default function CreateModal({ opened, onClose, companies, onCreated }: P
           <TextInput label="Enlace archivo" value={record.U_SEND_Link} onChange={(e) => set('U_SEND_Link', e.currentTarget.value)} />
         </SimpleGrid>
 
-        <Textarea label="Comentario (queda en la bitacora)" value={comentario} onChange={(e) => setComentario(e.currentTarget.value)} minRows={2} />
+        <Textarea label="Comentario (queda en la bitácora y en el correo de creación)" value={comentario} onChange={(e) => setComentario(e.currentTarget.value)} minRows={2} />
 
         <Group justify="flex-end" mt="sm">
           <Button variant="default" onClick={onClose} disabled={saving}>Cancelar</Button>
