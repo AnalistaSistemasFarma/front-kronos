@@ -239,7 +239,7 @@ export function lineasMultiagente(contexto, agente, rutaHilo) {
   // Solo si SynerLink lo anuncia (`agentMentions`; nunca en mesas ni en un
   // SynerLink anterior al cambio).
   if (c.agentMentions === true) lineas.push(
-    '- Si para lo que le pidió la persona necesita a otro asistente del proyecto, puede mencionarlo con @ (por ejemplo @Zoe) y recibirá su mensaje. Úselo solo cuando haga falta para el trabajo: no para saludar, agradecer ni cerrar. SynerLink pausa las cadenas largas entre asistentes; si ve el aviso de pausa, no insista y espere a la persona.'
+    '- Si para lo que le pidió la persona necesita a otro asistente del proyecto, puede mencionarlo con @ (por ejemplo @Nombre) y recibirá su mensaje. Úselo solo cuando haga falta para el trabajo: no para saludar, agradecer ni cerrar. SynerLink pausa las cadenas largas entre asistentes; si ve el aviso de pausa, no insista y espere a la persona.'
   );
   return lineas;
 }
