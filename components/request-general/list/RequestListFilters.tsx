@@ -3,6 +3,7 @@
 import { useState, type ReactNode } from 'react';
 import { Badge, Box, Button, Collapse, Grid, Group, Select, Text, TextInput } from '@mantine/core';
 import {
+  IconArrowBackUp,
   IconBuilding,
   IconCalendarEvent,
   IconCheck,
@@ -42,8 +43,11 @@ export function RequestListFilters({
   options,
   progress,
   progressLabel = 'Avance de tareas',
+  progressHint,
+  onProgressClick,
   extraFields,
   extraActiveCount = 0,
+  showReturned = false,
 }: {
   filters: ListFilters;
   onChange: (next: ListFilters) => void;
@@ -55,28 +59,39 @@ export function RequestListFilters({
   options: ListOptions;
   progress: { done: number; total: number; percent: number };
   progressLabel?: string;
-  /** Filtros propios de la pantalla (p. ej. Departamento en Observar), dentro del mismo panel. */
+  progressHint?: ReactNode;
+  onProgressClick?: () => void;
   extraFields?: ReactNode;
-  /** Cuántos de esos filtros propios están puestos (para el contador del panel). */
   extraActiveCount?: number;
+  showReturned?: boolean;
 }) {
   const [expanded, setExpanded] = useState(false);
   const set = <K extends keyof ListFilters>(key: K, value: ListFilters[K]) =>
     onChange({ ...filters, [key]: value });
-  // Tarjeta: si el estado exacto elegido no es de ese grupo, se quita (si no, la lista saldría vacía).
+  const groupOfState = (state: string): StatusGroup => {
+    const group = stateGroup(state);
+    return group === 'returned' && !showReturned ? 'pending' : group;
+  };
   const pickStatus = (status: StatusGroup) => {
     const next = filters.status === status && status !== 'all' ? 'all' : status;
-    const keepState = filters.state && next !== 'all' && stateGroup(filters.state) === next;
+    const keepState = filters.state && next !== 'all' && groupOfState(filters.state) === next;
     onChange({ ...filters, status: next, state: keepState ? filters.state : '' });
   };
-  // Estado exacto: la tarjeta pasa a su grupo (Devuelta → Pendientes).
   const pickState = (state: string) =>
-    onChange({ ...filters, state, status: state ? stateGroup(state) : filters.status });
+    onChange({ ...filters, state, status: state ? groupOfState(state) : filters.status });
   const active = activeFilterCount(filters) + extraActiveCount;
 
-  const tiles: Array<{ key: StatusGroup; label: string; icon: ReactNode; tone: 'info' | 'warning' | 'ok' | 'critical' }> = [
+  const tiles: Array<{
+    key: StatusGroup;
+    label: string;
+    icon: ReactNode;
+    tone: 'info' | 'warning' | 'ok' | 'critical' | 'violet';
+  }> = [
     { key: 'all', label: 'Total', icon: <IconListDetails size={20} />, tone: 'info' },
     { key: 'pending', label: 'Pendientes', icon: <IconProgress size={20} />, tone: 'warning' },
+    ...(showReturned
+      ? [{ key: 'returned' as const, label: 'Devueltas', icon: <IconArrowBackUp size={20} />, tone: 'violet' as const }]
+      : []),
     { key: 'done', label: 'Completadas', icon: <IconCheck size={20} />, tone: 'ok' },
     { key: 'cancelled', label: 'Canceladas', icon: <IconX size={20} />, tone: 'critical' },
   ];
@@ -102,6 +117,8 @@ export function RequestListFilters({
           done={progress.done}
           total={progress.total}
           percent={progress.percent}
+          hint={progressHint}
+          onClick={onProgressClick}
         />
       </div>
 
