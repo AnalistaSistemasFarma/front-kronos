@@ -34,7 +34,12 @@ import { sapGet, sapLogin, sapLogout, SapError, type SapSession } from '../../..
 
 const CAP = 60000;
 const VISTA_PREFIJO = 'OLP_IND_VentasB1SLQuery';
-const PAGE_SIZE = 1000;
+/**
+ * Páginas pequeñas: la vista es una consulta pesada y, con páginas de 1000 filas,
+ * el Service Layer responde «Internal server error.» (visto en PRUEBAS el
+ * 2026-11-12); con páginas cortas la misma consulta responde bien.
+ */
+const PAGE_SIZE = 100;
 const REINTENTOS = 5;
 const espera = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -64,8 +69,20 @@ async function leer(sap: SapSession, desde: string, hasta: string): Promise<Fila
   const out: Fila[] = [];
   let next: string | null = rutaVistaVentas(desde, hasta);
   while (next && out.length < CAP) {
-    const page: { value?: LineaVenta[]; 'odata.nextLink'?: string; '@odata.nextLink'?: string } =
-      await paginaConReintento(sap, next);
+    let page: { value?: LineaVenta[]; 'odata.nextLink'?: string; '@odata.nextLink'?: string };
+    try {
+      page = await paginaConReintento(sap, next);
+    } catch (e) {
+      // Mensaje con contexto para poder diagnosticar desde la pantalla.
+      if (e instanceof SapError) {
+        throw new SapError(
+          `SAP (${e.status}) al leer ventas del ${desde} al ${hasta}, fila ${out.length}: ${e.friendly}`,
+          e.status,
+          ''
+        );
+      }
+      throw e;
+    }
     for (const l of page.value ?? []) out.push(aFila(l));
     const link = page['@odata.nextLink'] ?? page['odata.nextLink'] ?? null;
     next = link ? link.replace(/^\/+/, '') : null;
