@@ -9,88 +9,79 @@ import { parseCorte, iso } from '../../../../lib/dashboards/gestion-comercial/ca
 import type { LineaVenta } from '../../../../lib/dashboards/gestion-comercial/lineas';
 import {
   aFila,
+  filasDesdeCabeceras,
   habilesDelMes,
   rangosTablero,
-  rutaVistaVentas,
+  rutaVistaPagina,
+  type Cabecera,
   type Fila,
   type TableroDatos,
 } from '../../../../lib/dashboards/gestion-comercial/tablero';
-import { sapGet, sapLogin, sapLogout, SapError, type SapSession } from '../../../../lib/sap/serviceLayer';
+import { sapGet, sapGetAll, sapLogin, sapLogout, SapError, type SapSession } from '../../../../lib/sap/serviceLayer';
 
 /**
  * Tablero comercial — datos en vivo de SAP, SOLO LECTURA (GET).
  *
  *   GET                          -> { empresas:[{ id, nombre, lista }] }
  *   GET ?companyId[&corte=AAAA-MM-DD]
- *     -> TableroDatos: líneas compactas de la vista OLP_IND_VentasB1SLQuery para
- *        (1) el mes del corte hasta el corte, (2) el mismo lapso del mes anterior
- *        y (3) el mismo lapso del año anterior. Tres consultas acotadas por fecha,
- *        sin recorrer documentos. La agregación por filtros se hace en la página.
+ *     -> TableroDatos con tres ventanas: mes del corte, mismo lapso del mes
+ *        anterior y del año anterior.
  *
- * Acceso: subproceso «Dashboard de gestión comercial»
- * (/process/dashboards/gestion-comercial) asignado al usuario en la empresa.
- * 401 sin sesión; 403 sin permiso; 409 sin Service Layer.
+ * Fuente principal: vista OLP_IND_VentasB1SLQuery (detalle por línea), leída con
+ * paginación explícita $top/$skip (sin encabezado Prefer ni nextLink, que es la
+ * forma en que la vista responde de manera estable) y reintentos por página.
+ *
+ * Plan B por ventana: si la vista falla, esa ventana se arma con las cabeceras
+ * de Invoices / CreditNotes (la misma fuente del dashboard de venta diaria) y se
+ * avisa en pantalla. Así una falla de la vista nunca deja el tablero en blanco.
+ *
+ * Acceso: subproceso «Dashboard de gestión comercial». 401 sin sesión; 403 sin
+ * permiso; 409 sin Service Layer.
  */
 
 const CAP = 60000;
-const VISTA_PREFIJO = 'OLP_IND_VentasB1SLQuery';
-/**
- * Páginas pequeñas: la vista es una consulta pesada y, con páginas de 1000 filas,
- * el Service Layer responde «Internal server error.» (visto en PRUEBAS el
- * 2026-11-12); con páginas cortas la misma consulta responde bien.
- */
-const PAGE_SIZE = 100;
-const REINTENTOS = 5;
+const TOP = 200;
+const REINTENTOS = 3;
 const espera = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-/**
- * GET de una página con reintentos. La vista OLP_IND_VentasB1SLQuery responde de
- * forma intermitente con error 400/500 («'N° Documento' no es válido» o
- * «Internal server error») y, segundos después, la MISMA consulta responde bien
- * (verificado en OLP el 2026-11-12). Se reintenta la página, no toda la lectura.
- * Errores 401/403 no se reintentan.
- */
-async function paginaConReintento<T>(sap: SapSession, path: string): Promise<T> {
+async function paginaVista(sap: SapSession, path: string): Promise<LineaVenta[]> {
   let ultimo: unknown;
   for (let intento = 0; intento < REINTENTOS; intento++) {
     try {
-      return await sapGet<T>(sap, path, { Prefer: `odata.maxpagesize=${PAGE_SIZE}` });
+      const page = await sapGet<{ value?: LineaVenta[] }>(sap, path);
+      return page.value ?? [];
     } catch (e) {
       ultimo = e;
       if (e instanceof SapError && (e.status === 401 || e.status === 403)) throw e;
-      await espera(400 * (intento + 1));
+      await espera(500 * (intento + 1));
     }
   }
   throw ultimo;
 }
 
-/** Lee todas las páginas de la vista para un rango (siguiendo nextLink), con reintento por página. */
-async function leer(sap: SapSession, desde: string, hasta: string): Promise<Fila[]> {
+/** Lee la vista para un rango con $top/$skip hasta que una página venga incompleta. */
+async function leerVista(sap: SapSession, desde: string, hasta: string): Promise<Fila[]> {
   const out: Fila[] = [];
-  let next: string | null = rutaVistaVentas(desde, hasta);
-  while (next && out.length < CAP) {
-    let page: { value?: LineaVenta[]; 'odata.nextLink'?: string; '@odata.nextLink'?: string };
-    try {
-      page = await paginaConReintento(sap, next);
-    } catch (e) {
-      // Mensaje con contexto para poder diagnosticar desde la pantalla.
-      if (e instanceof SapError) {
-        throw new SapError(
-          `SAP (${e.status}) al leer ventas del ${desde} al ${hasta}, fila ${out.length}: ${e.friendly}`,
-          e.status,
-          ''
-        );
-      }
-      throw e;
-    }
-    for (const l of page.value ?? []) out.push(aFila(l));
-    const link = page['@odata.nextLink'] ?? page['odata.nextLink'] ?? null;
-    next = link ? link.replace(/^\/+/, '') : null;
-    // nextLink de view.svc puede venir relativo a view.svc/ o a /b1s/v1/.
-    if (next && !next.startsWith('view.svc/') && next.startsWith(VISTA_PREFIJO)) next = `view.svc/${next}`;
+  for (let skip = 0; skip < CAP; skip += TOP) {
+    const lineas = await paginaVista(sap, rutaVistaPagina(desde, hasta, TOP, skip));
+    for (const l of lineas) out.push(aFila(l));
+    if (lineas.length < TOP) break;
   }
-  return out.slice(0, CAP);
+  return out;
 }
+
+const rutaCab = (entidad: 'Invoices' | 'CreditNotes', desde: string, hasta: string) =>
+  `${entidad}?$select=DocNum,DocDate,DocTotal,VatSum,CardCode,CardName,SalesPersonCode,Cancelled` +
+  `&$filter=DocDate ge '${desde}' and DocDate le '${hasta}'`;
+
+async function leerCabeceras(sap: SapSession, desde: string, hasta: string, vendedores: Map<number, string>): Promise<Fila[]> {
+  const facturas = await sapGetAll<Cabecera>(sap, rutaCab('Invoices', desde, hasta), { cap: 30000 });
+  const notas = await sapGetAll<Cabecera>(sap, rutaCab('CreditNotes', desde, hasta), { cap: 30000 });
+  return filasDesdeCabeceras(facturas, notas, vendedores);
+}
+
+const detalle = (e: unknown) =>
+  e instanceof SapError ? `SAP ${e.status}: ${e.friendly}` : e instanceof Error ? e.message : String(e);
 
 export async function GET(request: NextRequest) {
   try {
@@ -128,27 +119,46 @@ export async function GET(request: NextRequest) {
     const r = rangosTablero(corte);
     const avisos: string[] = [];
     const sap = await sapLogin(acceso.endpoint);
-    let filas: Fila[];
-    let filasAnterior: Fila[] = [];
-    let filasAnio: Fila[] = [];
+    const ventanas: Record<'actual' | 'anterior' | 'anio', Fila[]> = { actual: [], anterior: [], anio: [] };
     try {
-      filas = await leer(sap, r.actual.desde, r.actual.hasta);
-      try {
-        filasAnterior = await leer(sap, r.anterior.desde, r.anterior.hasta);
-      } catch (e) {
-        console.error('Tablero comercial: mes anterior no disponible', e);
-        avisos.push('No se pudo leer el mes anterior; los comparativos mensuales quedan vacíos.');
-      }
-      try {
-        filasAnio = await leer(sap, r.anioAnterior.desde, r.anioAnterior.hasta);
-      } catch (e) {
-        console.error('Tablero comercial: año anterior no disponible', e);
-        avisos.push('No se pudo leer el año anterior; los comparativos anuales quedan vacíos.');
+      let vendedores: Map<number, string> | null = null;
+      const nombres = async () => {
+        if (vendedores) return vendedores;
+        const lista = await sapGetAll<{ SalesEmployeeCode?: number; SalesEmployeeName?: string }>(
+          sap,
+          `SalesPersons?$select=SalesEmployeeCode,SalesEmployeeName`,
+          { cap: 5000 }
+        );
+        vendedores = new Map(lista.map((v) => [Number(v.SalesEmployeeCode), String(v.SalesEmployeeName ?? '').trim()]));
+        return vendedores;
+      };
+
+      const plan: Array<{ k: 'actual' | 'anterior' | 'anio'; desde: string; hasta: string; nombre: string }> = [
+        { k: 'actual', ...r.actual, nombre: 'mes actual' },
+        { k: 'anterior', ...r.anterior, nombre: 'mes anterior' },
+        { k: 'anio', ...r.anioAnterior, nombre: 'año anterior' },
+      ];
+      for (const v of plan) {
+        try {
+          ventanas[v.k] = await leerVista(sap, v.desde, v.hasta);
+        } catch (eVista) {
+          console.error(`Tablero comercial: vista falló (${v.nombre})`, eVista);
+          try {
+            ventanas[v.k] = await leerCabeceras(sap, v.desde, v.hasta, await nombres());
+            avisos.push(
+              `La vista de líneas de SAP no respondió para el ${v.nombre} (${detalle(eVista)}). ` +
+                'Se muestran los totales por factura; el detalle por producto, línea terapéutica y ciudad no está disponible en ese periodo.'
+            );
+          } catch (eCab) {
+            console.error(`Tablero comercial: cabeceras fallaron (${v.nombre})`, eCab);
+            if (v.k === 'actual') throw eCab;
+            avisos.push(`No se pudo leer el ${v.nombre} (${detalle(eCab)}); sus comparativos quedan vacíos.`);
+          }
+        }
       }
     } finally {
       await sapLogout(sap);
     }
-    if (filas.length >= CAP) avisos.push(`Se alcanzó el tope de ${CAP.toLocaleString('es-CO')} líneas; el mes puede estar incompleto.`);
 
     const habiles = habilesDelMes(corte);
     const datos: TableroDatos = {
@@ -159,15 +169,16 @@ export async function GET(request: NextRequest) {
       diasHabilesMes: habiles.mes,
       diasHabilesTranscurridos: habiles.transcurridos,
       actualizado: new Date().toISOString(),
-      filas,
-      filasAnterior,
-      filasAnio,
+      filas: ventanas.actual,
+      filasAnterior: ventanas.anterior,
+      filasAnio: ventanas.anio,
       avisos,
     };
     return NextResponse.json(datos, { headers: { 'Cache-Control': 'no-store' } });
   } catch (error) {
-    if (error instanceof SapError) return NextResponse.json({ error: error.friendly }, { status: error.status });
     console.error('Error en tablero comercial:', error);
-    return NextResponse.json({ error: 'Error interno' }, { status: 500 });
+    const msg = `No se pudo cargar el tablero. Detalle: ${detalle(error)}`;
+    const status = error instanceof SapError && error.status >= 400 && error.status < 600 ? error.status : 500;
+    return NextResponse.json({ error: msg }, { status });
   }
 }

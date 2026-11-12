@@ -102,6 +102,67 @@ export function aFila(l: LineaVenta): Fila {
   };
 }
 
+/** Ruta de la vista con paginación explícita ($top/$skip), sin depender de nextLink. */
+export const rutaVistaPagina = (desde: string, hasta: string, top: number, skip: number) =>
+  `${rutaVistaVentas(desde, hasta)}&$top=${top}&$skip=${skip}`;
+
+/** Cabecera de factura / nota crédito (Invoices / CreditNotes). */
+export interface Cabecera {
+  DocNum?: number;
+  DocDate?: string;
+  DocTotal?: number;
+  VatSum?: number;
+  CardCode?: string;
+  CardName?: string;
+  SalesPersonCode?: number;
+  Cancelled?: string;
+}
+
+/**
+ * Plan B cuando la vista de líneas no responde: una fila por documento, armada
+ * con las cabeceras de Invoices / CreditNotes (fuente que usa también el
+ * dashboard de venta diaria). Valor sin IVA = DocTotal - VatSum. Sin detalle
+ * de producto, línea terapéutica ni ciudad.
+ */
+export function filasDesdeCabeceras(
+  facturas: Cabecera[],
+  notas: Cabecera[],
+  vendedores: Map<number, string>
+): Fila[] {
+  const una = (c: Cabecera, t: 'F' | 'N'): Fila | null => {
+    if (c.Cancelled === 'tYES') return null;
+    const neto = num(c.DocTotal) - num(c.VatSum);
+    const val = t === 'N' ? -Math.abs(neto) : neto;
+    return {
+      f: txt(c.DocDate).slice(0, 10),
+      t,
+      d: typeof c.DocNum === 'number' ? c.DocNum : null,
+      cc: txt(c.CardCode),
+      cn: txt(c.CardName) || txt(c.CardCode),
+      nit: txt(c.CardCode),
+      v: vendedores.get(num(c.SalesPersonCode)) || 'Sin vendedor',
+      pc: 'SIN-DETALLE',
+      pn: 'Sin detalle de producto',
+      lt: 'Sin línea terapéutica',
+      q: 0,
+      val,
+      cost: 0,
+      oc: '',
+      ciu: 'Sin ciudad',
+    };
+  };
+  const out: Fila[] = [];
+  for (const c of facturas) {
+    const f = una(c, 'F');
+    if (f) out.push(f);
+  }
+  for (const c of notas) {
+    const f = una(c, 'N');
+    if (f) out.push(f);
+  }
+  return out;
+}
+
 /** Rangos del tablero: mes del corte, mismo lapso mes anterior y año anterior. */
 export function rangosTablero(corte: Date): { actual: Rango; anterior: Rango; anioAnterior: Rango } {
   const base = rangosMes(corte);
