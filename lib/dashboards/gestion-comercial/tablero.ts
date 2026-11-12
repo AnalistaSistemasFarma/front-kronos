@@ -60,27 +60,14 @@ export interface TableroDatos {
   avisos: string[];
 }
 
-const CAMPOS = [
-  'NDocumento',
-  'Fecha',
-  'Codigo',
-  'Nombre',
-  'NIT',
-  'Documento',
-  'Referencia',
-  'Descripcion_Articulo',
-  'Cantidad',
-  'Total',
-  'Costo',
-  'Vendedor',
-  'U_IT_LineaTerapeutica',
-  'Orden_Compra',
-  'Municipio_Factura',
-].join(',');
-
-/** Ruta OData (solo lectura) de la vista de líneas para un rango, con $select. */
+/**
+ * Ruta OData (solo lectura) de la vista de líneas para un rango de fechas.
+ * Sin $select: el Service Layer de OLP rechaza $select sobre esta vista
+ * («invalid property 'NDocumento'», visto en PRUEBAS el 2026-11-12). La
+ * reducción de campos se hace en el servidor con aFila antes de responder.
+ */
 export const rutaVistaVentas = (desde: string, hasta: string) =>
-  `view.svc/${VISTA_LINEAS}?$select=${CAMPOS}&$filter=Fecha ge '${desde}' and Fecha le '${hasta}'`;
+  `view.svc/${VISTA_LINEAS}?$filter=Fecha ge '${desde}' and Fecha le '${hasta}'`;
 
 const txt = (v: unknown) => String(v ?? '').trim();
 const num = (v: unknown) => {

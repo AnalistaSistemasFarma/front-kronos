@@ -1,9 +1,11 @@
 'use client';
 
 /**
- * Tablero Comercial (OLP) — réplica del tablero de BI «Gestión Comercial»
- * (tema Insight: barra superior azul noche, menú lateral, filtros globales,
- * panel de insights, fichas de cliente / producto / vendedor / pedido).
+ * Dashboard de gestión comercial (OLP). Replica el contenido del tablero de BI
+ * «Gestión Comercial» (secciones, filtros globales, insights y fichas de
+ * cliente / producto / vendedor / pedido) DENTRO del esquema de diseño de
+ * SynerLink: DashboardPageShell, Tabs y Select de Mantine, KpiStatCard,
+ * ChartCard y ChartBox.
  *
  * Datos en vivo, solo lectura, desde la vista SAP OLP_IND_VentasB1SLQuery vía
  * /api/dashboards/gestion-comercial (mes del corte, mismo lapso del mes anterior
@@ -13,7 +15,35 @@
  * regional y proveedor. Esos espacios se muestran marcados como pendientes.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Loader } from '@mantine/core';
+import {
+  Alert,
+  Badge,
+  Button,
+  Group,
+  Loader,
+  Paper,
+  SegmentedControl,
+  Select,
+  SimpleGrid,
+  Stack,
+  Tabs,
+  Text,
+  Title,
+} from '@mantine/core';
+import {
+  IconArrowLeft,
+  IconBulb,
+  IconCalendarStats,
+  IconChartBar,
+  IconFlag,
+  IconPackage,
+  IconReportAnalytics,
+  IconTable,
+  IconTruck,
+  IconUser,
+  IconUsers,
+} from '@tabler/icons-react';
+import DashboardPageShell from '../../../../../components/dashboard/DashboardPageShell';
 import type { ChartData, ChartOptions } from 'chart.js';
 import { ChartBox } from '../../../../../components/charts/ChartBox';
 import { useDashboardChartPalette } from '../../../../../components/dashboard/useDashboardChartPalette';
@@ -51,7 +81,6 @@ import {
   Card,
   EstadoCliente,
   HBars,
-  Icono,
   Kpi,
   Var,
   cx,
@@ -68,15 +97,15 @@ type Pagina = 'diario' | 'resumen' | 'cierre' | 'clientes' | 'productos' | 'vend
 type Ficha = { tipo: 'cliente' | 'producto' | 'vendedor' | 'pedido'; clave: string } | null;
 type Orden = 'f' | 'cn' | 'd' | 'oc' | 'pn' | 'v' | 'q' | 'val';
 
-const MENU: Array<{ key: Pagina; label: string; desc: string; icon: string; sep?: string }> = [
-  { key: 'diario', label: 'Seguimiento diario', desc: 'Mes en curso', icon: 'pulse' },
-  { key: 'resumen', label: 'Resumen comercial', desc: 'Periodo y comparativos', icon: 'grid' },
-  { key: 'cierre', label: 'Cierre mensual', desc: 'Último mes cerrado', icon: 'flag' },
-  { key: 'clientes', label: 'Clientes', desc: 'Ficha e histórico', icon: 'users', sep: 'Consultas' },
-  { key: 'productos', label: 'Productos', desc: 'Ventas y compradores', icon: 'box' },
-  { key: 'vendedores', label: 'Vendedores', desc: 'Resultados y cartera', icon: 'user' },
-  { key: 'pedidos', label: 'Pedidos', desc: 'Trazabilidad', icon: 'truck' },
-  { key: 'detalle', label: 'Detalle de ventas', desc: 'Consulta línea a línea', icon: 'table' },
+const MENU: Array<{ key: Pagina; label: string; icon: typeof IconUser }> = [
+  { key: 'diario', label: 'Seguimiento diario', icon: IconReportAnalytics },
+  { key: 'resumen', label: 'Resumen comercial', icon: IconChartBar },
+  { key: 'cierre', label: 'Cierre mensual', icon: IconFlag },
+  { key: 'clientes', label: 'Clientes', icon: IconUsers },
+  { key: 'productos', label: 'Productos', icon: IconPackage },
+  { key: 'vendedores', label: 'Vendedores', icon: IconUser },
+  { key: 'pedidos', label: 'Pedidos', icon: IconTruck },
+  { key: 'detalle', label: 'Detalle de ventas', icon: IconTable },
 ];
 
 const ENCABEZADO: Record<Pagina, { e: string; t: string; d: string }> = {
@@ -90,11 +119,7 @@ const ENCABEZADO: Record<Pagina, { e: string; t: string; d: string }> = {
   detalle: { e: 'Consultas', t: 'Detalle de ventas', d: 'Consulta línea a línea, paginada.' },
 };
 
-const AZ1 = '#005EA8';
-const AZ4 = '#0A9EE0';
-const MO2 = '#8254CC';
-const MO4 = '#946FEF';
-const GRIS = '#BFBFBF';
+const GRIS = '#adb5bd';
 
 const nombreMes = (mes: string) => {
   const [y, m] = mes.split('-').map(Number);
@@ -105,7 +130,10 @@ const nombreMes = (mes: string) => {
 const unicos = (filas: Fila[], k: (r: Fila) => string) => [...new Set(filas.map(k))].filter(Boolean).sort((a, b) => a.localeCompare(b, 'es'));
 
 export default function TableroComercialPage() {
-  const { isDark } = useDashboardChartPalette();
+  const { palette, isDark } = useDashboardChartPalette();
+  const AZ1 = palette.blue600;
+  const AZ4 = isDark ? '#4dabf7' : '#228be6';
+  const MO4 = isDark ? '#b69cff' : '#946fef';
   const hoy = hoyBogota();
   const cerrados = useMemo(() => mesesCerrados(hoy, 12), [hoy]);
 
@@ -118,9 +146,8 @@ export default function TableroComercialPage() {
   const [data, setData] = useState<TableroDatos | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [menu, setMenu] = useState(false);
   const [insOn, setInsOn] = useState(true);
-  const [focus, setFocus] = useState(false);
+  const focus = false;
   const [filtros, setFiltros] = useState<Filtros>(FILTROS_VACIOS);
   const [med, setMed] = useState<Medida>('neta');
   const [cliQ, setCliQ] = useState('');
@@ -256,7 +283,6 @@ export default function TableroComercialPage() {
   const ir = (p: Pagina, f: Ficha = null) => {
     setPagina(p);
     setFicha(f);
-    setMenu(false);
     setBusq('');
   };
   const abrirCliente = (cc: string) => ir('clientes', { tipo: 'cliente', clave: cc });
@@ -501,8 +527,8 @@ export default function TableroComercialPage() {
           <Kpi label='Venta acumulada' value={mm(tA.neta)} sub={money(tA.neta)} tone='a' />
           <Kpi label='Meta del mes' value='—' sub='Pendiente: cargar el presupuesto' />
           <Kpi label='Proyección de cierre' value={mm(proyeccion)} sub={`Promedio por día hábil ${mm(promHabil)}`} tone='b' progress={habM ? habT / habM : null} />
-          <Kpi label='Vs. mes anterior al mismo corte' value={<Var v={variacion(tA.neta, tP.neta)} />} sub={`Mes anterior: ${mm(tP.neta)}`} />
-          <Kpi label='Vs. año anterior al mismo corte' value={<Var v={variacion(tA.neta, tY.neta)} />} sub={`Año anterior: ${mm(tY.neta)}`} />
+          <Kpi label='Vs. mes anterior al mismo corte' value={pct(variacion(tA.neta, tP.neta))} trend={variacion(tA.neta, tP.neta)} sub={`Mes anterior: ${mm(tP.neta)}`} />
+          <Kpi label='Vs. año anterior al mismo corte' value={pct(variacion(tA.neta, tY.neta))} trend={variacion(tA.neta, tY.neta)} sub={`Año anterior: ${mm(tY.neta)}`} />
           <Kpi label='Venta del último día' value={mm(ultimoDia?.actual ?? 0)} sub={ultimoDia ? `Día ${ultimoDia.dia}` : 'Sin facturación'} tone='b' />
         </div>
       )}
@@ -595,8 +621,8 @@ export default function TableroComercialPage() {
           <div className={s.kpis}>
             <Kpi label='Venta neta del periodo' value={mm(tA.neta)} sub={money(tA.neta)} tone='a' />
             <Kpi label='Presupuesto' value='—' sub='Pendiente: cargar el presupuesto' />
-            <Kpi label='Vs. mismo periodo mes anterior' value={<Var v={variacion(tA.neta, tP.neta)} />} sub={mm(tP.neta)} tone='b' />
-            <Kpi label='Vs. mismo periodo año anterior' value={<Var v={variacion(tA.neta, tY.neta)} />} sub={mm(tY.neta)} tone='b' />
+            <Kpi label='Vs. mismo periodo mes anterior' value={pct(variacion(tA.neta, tP.neta))} trend={variacion(tA.neta, tP.neta)} sub={mm(tP.neta)} />
+            <Kpi label='Vs. mismo periodo año anterior' value={pct(variacion(tA.neta, tY.neta))} trend={variacion(tA.neta, tY.neta)} sub={mm(tY.neta)} />
             <Kpi label='Clientes con compra' value={num(tA.clientes)} sub={`Año anterior: ${num(tY.clientes)}`} />
             <Kpi label='Notas crédito' value={mm(Math.abs(tA.notas))} sub={`Año anterior: ${mm(Math.abs(tY.notas))}`} />
           </div>
@@ -646,8 +672,8 @@ export default function TableroComercialPage() {
         <div className={s.kpis}>
           <Kpi label='Venta neta' value={mm(tA.neta)} sub={money(tA.neta)} tone='a' />
           <Kpi label='Presupuesto' value='—' sub='Pendiente: cargar el presupuesto' />
-          <Kpi label='Vs. mes anterior' value={<Var v={variacion(tA.neta, tP.neta)} />} sub={mm(tP.neta)} tone='b' />
-          <Kpi label='Vs. mismo mes año anterior' value={<Var v={variacion(tA.neta, tY.neta)} />} sub={mm(tY.neta)} tone='b' />
+          <Kpi label='Vs. mes anterior' value={pct(variacion(tA.neta, tP.neta))} trend={variacion(tA.neta, tP.neta)} sub={mm(tP.neta)} />
+          <Kpi label='Vs. mismo mes año anterior' value={pct(variacion(tA.neta, tY.neta))} trend={variacion(tA.neta, tY.neta)} sub={mm(tY.neta)} />
           <Kpi label='Días con facturación' value={num(tA.diasConVenta)} sub={`${habM} días hábiles`} />
           <Kpi label='Promedio por factura' value={mm(tA.facturas ? tA.bruta / tA.facturas : 0)} />
         </div>
@@ -796,14 +822,18 @@ export default function TableroComercialPage() {
   };
 
   const fichaHeader = (eyebrow: string, titulo: string, sub: string) => (
-    <div className={s.ficha}>
-      <div>
-        <p className={s.eyebrow2}>{eyebrow}</p>
-        <h2>{titulo}</h2>
-        <p>{sub}</p>
-      </div>
-      <button type='button' className={s.fichaBtn} onClick={() => setFicha(null)}>← Volver al listado</button>
-    </div>
+    <Paper withBorder radius='md' p='md' shadow='sm'>
+      <Group justify='space-between' align='flex-end' wrap='wrap' gap='sm'>
+        <Stack gap={2} style={{ minWidth: 0 }}>
+          <Text size='xs' tt='uppercase' fw={600} c='dimmed'>{eyebrow}</Text>
+          <Title order={3}>{titulo}</Title>
+          <Text size='sm' c='dimmed'>{sub}</Text>
+        </Stack>
+        <Button variant='light' leftSection={<IconArrowLeft size={16} />} onClick={() => setFicha(null)}>
+          Volver al listado
+        </Button>
+      </Group>
+    </Paper>
   );
 
   const pClientes = () => {
@@ -821,8 +851,8 @@ export default function TableroComercialPage() {
           {fichaHeader('Ficha del cliente', info?.cn ?? cc, `Código ${cc} · NIT ${info?.nit || '—'} · Vendedor ${vendedorDe.get(cc) ?? '—'}`)}
           <div className={s.kpis}>
             <Kpi label='Venta del periodo' value={mm(t.neta)} sub={money(t.neta)} tone='a' />
-            <Kpi label='Vs. mes anterior' value={<Var v={variacion(t.neta, prev)} />} sub={mm(prev)} tone='b' />
-            <Kpi label='Vs. año anterior' value={<Var v={variacion(t.neta, anio)} />} sub={mm(anio)} tone='b' />
+            <Kpi label='Vs. mes anterior' value={pct(variacion(t.neta, prev))} trend={variacion(t.neta, prev)} sub={mm(prev)} />
+            <Kpi label='Vs. año anterior' value={pct(variacion(t.neta, anio))} trend={variacion(t.neta, anio)} sub={mm(anio)} />
             <Kpi label='Última compra' value={fecha(u)} sub={u && data ? `${num(Math.max(0, diasEntre(u, data.corte)))} días al corte` : '—'} />
             <Kpi label='Promedio por factura' value={mm(t.facturas ? t.bruta / t.facturas : 0)} sub={`${num(t.facturas)} facturas`} />
             <Kpi label='Margen' value={mm(t.margen)} sub={t.neta ? pct(t.margen / t.neta, false) : '—'} />
@@ -879,7 +909,7 @@ export default function TableroComercialPage() {
             <Kpi label='Unidades' value={num(t.unidades)} />
             <Kpi label='Precio promedio' value={money(t.unidades ? t.neta / t.unidades : 0)} sub='Venta neta ÷ unidades' />
             <Kpi label='Clientes que compraron' value={num(t.clientes)} />
-            <Kpi label='Vs. año anterior' value={<Var v={variacion(t.neta, anio)} />} sub={mm(anio)} tone='b' />
+            <Kpi label='Vs. año anterior' value={pct(variacion(t.neta, anio))} trend={variacion(t.neta, anio)} sub={mm(anio)} />
             <Kpi label='Margen' value={mm(t.margen)} sub={t.neta ? pct(t.margen / t.neta, false) : '—'} />
           </div>
           <div className={cx(s.grid, s.three)}>
@@ -986,8 +1016,8 @@ export default function TableroComercialPage() {
           <div className={s.kpis}>
             <Kpi label='Venta del periodo' value={mm(t.neta)} sub={money(t.neta)} tone='a' />
             <Kpi label='Meta del periodo' value='—' sub='Pendiente: cargar el presupuesto' />
-            <Kpi label='Vs. mes anterior' value={<Var v={variacion(t.neta, prev)} />} sub={mm(prev)} tone='b' />
-            <Kpi label='Vs. año anterior' value={<Var v={variacion(t.neta, anio)} />} sub={mm(anio)} tone='b' />
+            <Kpi label='Vs. mes anterior' value={pct(variacion(t.neta, prev))} trend={variacion(t.neta, prev)} sub={mm(prev)} />
+            <Kpi label='Vs. año anterior' value={pct(variacion(t.neta, anio))} trend={variacion(t.neta, anio)} sub={mm(anio)} />
             <Kpi label='Clientes atendidos' value={num(t.clientes)} />
             <Kpi label='Productos vendidos' value={num(new Set(filas.map((r) => r.pc)).size)} />
           </div>
@@ -1056,11 +1086,19 @@ export default function TableroComercialPage() {
         <>
           {fichaHeader('Pedido', `Orden de compra ${oc}`, `${num(filas.length)} líneas · ${num(facs.length)} documento(s)`)}
           <div className={s.kpis}>
-            <Kpi label='Cliente' value={<span style={{ fontSize: 15 }}>{filas[0]?.cn ?? '—'}</span>} sub={`NIT ${filas[0]?.nit || '—'}`} />
-            <Kpi label='Vendedor' value={<span style={{ fontSize: 15 }}>{filas[0]?.v ?? '—'}</span>} sub={filas[0]?.ciu ?? ''} />
-            <Kpi label='Fechas de facturación' value={<span style={{ fontSize: 15 }}>{fecha(fechas[0])} – {fecha(fechas[fechas.length - 1])}</span>} sub='Primera y última' />
             <Kpi label='Valor facturado' value={mm(t.neta)} sub={money(t.neta)} tone='a' />
-            <Kpi label='Documentos asociados' value={<span style={{ fontSize: 15 }}>{facs.join(', ') || '—'}</span>} />
+            <Kpi label='Unidades' value={num(t.unidades)} sub={`${num(filas.length)} líneas`} />
+            <Kpi label='Documentos asociados' value={num(facs.length)} sub={facs.join(', ') || '—'} />
+            <Kpi label='Primera factura' value={fecha(fechas[0])} sub={`Última: ${fecha(fechas[fechas.length - 1])}`} />
+          </div>
+          <div className={cx(s.grid)}>
+            <Card title='Cliente'>
+              <button type='button' className={s.lnk} onClick={() => filas[0] && abrirCliente(filas[0].cc)}>{filas[0]?.cn ?? '—'}</button>
+              <span className={s.note}>NIT {filas[0]?.nit || '—'} · {filas[0]?.ciu ?? ''}</span>
+            </Card>
+            <Card title='Vendedor'>
+              <button type='button' className={s.lnk} onClick={() => filas[0] && abrirVendedor(filas[0].v)}>{filas[0]?.v ?? '—'}</button>
+            </Card>
           </div>
           <h2 className={s.h2}>Composición</h2>
           <div className={s.tw}>
@@ -1165,9 +1203,9 @@ export default function TableroComercialPage() {
         </div>
         <div className={cx(s.kpis, s.kpisSm)}>
           <Kpi label='Registros' value={num(detalleFilas.length)} />
-          <Kpi label='Venta bruta' value={mm(t.bruta)} sub='Líneas de factura' selected={med === 'bruta'} onClick={() => setMed('bruta')} />
-          <Kpi label='Notas crédito' value={mm(Math.abs(t.notas))} tone='b' selected={med === 'notas'} onClick={() => setMed('notas')} />
-          <Kpi label='Venta neta' value={mm(t.neta)} sub='Bruta menos notas crédito' tone='a' selected={med === 'neta'} onClick={() => setMed('neta')} />
+          <Kpi label='Venta bruta' value={mm(t.bruta)} sub='Líneas de factura' />
+          <Kpi label='Notas crédito' value={mm(Math.abs(t.notas))} sub='Restan de la venta' tone='b' />
+          <Kpi label='Venta neta' value={mm(t.neta)} sub='Bruta menos notas crédito' tone='a' />
           <Kpi label='Unidades' value={num(t.unidades)} />
         </div>
         <div className={cx(s.tw, s.nocopy)} style={{ maxHeight: 640 }}>
@@ -1224,192 +1262,144 @@ export default function TableroComercialPage() {
   }
 
   const enc = ENCABEZADO[pagina];
-  const modulo = MENU.find((m) => m.key === pagina)?.label ?? '';
-  const cliSel = filtros.cliente ? catClientes.find((c) => c.cc === filtros.cliente) : null;
-  const cliRes = cliQ.trim().length >= 2
-    ? catClientes.filter((c) => `${c.cn} ${c.nit} ${c.cc}`.toLowerCase().includes(cliQ.trim().toLowerCase())).slice(0, 10)
-    : [];
+  const cliData = catClientes.map((c) => ({ value: c.cc, label: `${c.cn} · NIT ${c.nit || '—'}` }));
+
+  const toolbar = (
+    <Group align='flex-end' gap='sm' wrap='wrap'>
+      {empresas && empresas.length > 1 && (
+        <Select
+          label='Empresa'
+          data={empresas.map((e) => ({ value: String(e.id), label: e.nombre }))}
+          value={companyId}
+          onChange={(v) => {
+            if (!v) return;
+            setCompanyId(v);
+            setFiltros(FILTROS_VACIOS);
+          }}
+          allowDeselect={false}
+          w={200}
+        />
+      )}
+      <Select label='Vendedor' placeholder='Todos' data={opVendedores} value={filtros.vendedor} onChange={(v) => setF('vendedor', v)} clearable searchable w={210} />
+      <Select label='Línea terapéutica' placeholder='Todas' data={opLineas} value={filtros.linea} onChange={(v) => setF('linea', v)} clearable searchable w={210} />
+      <Select label='Ciudad' placeholder='Todas' data={opCiudades} value={filtros.ciudad} onChange={(v) => setF('ciudad', v)} clearable searchable w={170} />
+      <Select label='Cliente' placeholder='Nombre o NIT' data={cliData} value={filtros.cliente} onChange={(v) => setF('cliente', v)} clearable searchable limit={30} w={240} nothingFoundMessage='Sin coincidencias' />
+      <Stack gap={4}>
+        <Text size='sm' fw={500}>Tipo de venta</Text>
+        <SegmentedControl
+          value={med}
+          onChange={(v) => setMed(v as Medida)}
+          data={[
+            { value: 'neta', label: 'Neta' },
+            { value: 'bruta', label: 'Bruta' },
+            { value: 'notas', label: 'Solo notas' },
+          ]}
+        />
+      </Stack>
+      {hayFiltros && (
+        <Button variant='subtle' onClick={() => { setFiltros(FILTROS_VACIOS); setMed('neta'); }}>
+          Limpiar filtros
+        </Button>
+      )}
+    </Group>
+  );
 
   return (
-    <div className={cx(s.root, isDark && s.dark)}>
-      {menu && <div className={s.scrim} onClick={() => setMenu(false)} />}
-      {menu && (
-        <nav className={s.side} aria-label='Menú del tablero'>
-          <div className={s.sideH}>
-            <span className={s.logo}><Icono name='chart' size={20} /></span>
-            <div><b>Tablero Comercial</b><small>ONE LATAM PHARMA</small></div>
-          </div>
-          {MENU.map((m) => (
-            <div key={m.key} style={{ display: 'contents' }}>
-              {m.sep && <div className={s.miSep}>{m.sep}</div>}
-              <button type='button' className={cx(s.mi, pagina === m.key && s.miOn)} onClick={() => ir(m.key)}>
-                <span className={s.miI}><Icono name={m.icon} /></span>
-                <span className={s.miN}>{m.label}</span>
-                <span className={s.miD}>{m.desc}</span>
-              </button>
-            </div>
-          ))}
-          <div className={s.sideF}><Icono name='shield' size={15} />Datos en vivo de SAP (solo lectura)</div>
-        </nav>
-      )}
-
-      <header className={s.top}>
-        <button type='button' className={s.ib} onClick={() => setMenu(true)} aria-label='Abrir menú'><Icono name='menu' /></button>
-        <div className={s.brand}>
-          <span className={s.logo}><Icono name='chart' size={20} /></span>
-          <div><p className={s.eyebrow}>ONE LATAM PHARMA</p><h1 className={s.title}>Tablero Comercial</h1></div>
-        </div>
-        <div className={s.topMod}><i />{modulo}</div>
-        <div className={s.meta}>
-          {empresas && empresas.length > 1 && (
-            <select
-              value={companyId ?? ''}
-              onChange={(e) => { setCompanyId(e.currentTarget.value); setFiltros(FILTROS_VACIOS); }}
-              style={{ background: 'transparent', color: '#fff', border: '1px solid rgba(255,255,255,.25)', borderRadius: 8, padding: '4px 8px' }}
-            >
-              {empresas.map((e) => <option key={e.id} value={String(e.id)} style={{ color: '#000' }}>{e.nombre}</option>)}
-            </select>
-          )}
-          <span>Corte <b>{fecha(data?.corte)}</b></span>
-          <span>Actualizado <b>{data ? new Date(data.actualizado).toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Bogota' }) : '—'}</b></span>
-        </div>
-        <div className={s.topActs}>
-          <button type='button' className={cx(s.ib, insOn && s.ibOn)} onClick={() => setInsOn((v) => !v)} aria-pressed={insOn}>
-            <Icono name='spark' /><span>Insights</span><span className={s.cnt}>{hallazgos.length}</span>
-          </button>
-          <button type='button' className={cx(s.ib, focus && s.ibOn)} onClick={() => setFocus((v) => !v)} aria-pressed={focus}>
-            <Icono name='focus' /><span>Enfoque</span>
-          </button>
-        </div>
-      </header>
-
+    <DashboardPageShell
+      title='Dashboard de gestión comercial'
+      description='Seguimiento diario, resumen, cierre, clientes, productos, vendedores, pedidos y detalle de ventas, en vivo desde SAP.'
+      toolbar={empresas && empresas.length > 0 ? toolbar : undefined}
+    >
       {empresas === null || (loading && !data) ? (
-        <div className={s.loading}><Loader size='md' /><div>Cargando información de SAP…</div></div>
+        <Group justify='center' py='xl'><Loader /></Group>
       ) : empresas.length === 0 ? (
-        <div className={s.loading}>No hay empresas disponibles para este tablero.</div>
+        <Alert color='yellow' title='Sin empresas'>No hay empresas disponibles para este tablero.</Alert>
       ) : (
-        <div className={cx(s.shell, (!insOn || focus) && s.shellFull)}>
-          <main className={s.main}>
-            <div className={s.gbar}>
-              <label className={s.fld}>
-                Vendedor
-                <select value={filtros.vendedor ?? ''} onChange={(e) => setF('vendedor', e.currentTarget.value)}>
-                  <option value=''>Todos</option>
-                  {opVendedores.map((v) => <option key={v} value={v}>{v}</option>)}
-                </select>
-              </label>
-              <label className={s.fld}>
-                Línea terapéutica
-                <select value={filtros.linea ?? ''} onChange={(e) => setF('linea', e.currentTarget.value)}>
-                  <option value=''>Todas</option>
-                  {opLineas.map((v) => <option key={v} value={v}>{v}</option>)}
-                </select>
-              </label>
-              <label className={s.fld}>
-                Ciudad
-                <select value={filtros.ciudad ?? ''} onChange={(e) => setF('ciudad', e.currentTarget.value)}>
-                  <option value=''>Todas</option>
-                  {opCiudades.map((v) => <option key={v} value={v}>{v}</option>)}
-                </select>
-              </label>
-              <div className={s.fld} style={{ position: 'relative' }}>
-                <span>Cliente</span>
-                {cliSel ? (
-                  <button type='button' className={cx(s.btn, s.btnSm)} onClick={() => setF('cliente', null)} title='Quitar cliente'>
-                    {cliSel.cn.slice(0, 28)} ×
-                  </button>
-                ) : (
-                  <input type='search' placeholder='Nombre o NIT' value={cliQ} onChange={(e) => setCliQ(e.currentTarget.value)} autoComplete='off' />
-                )}
-                {!cliSel && cliRes.length > 0 && (
-                  <div className={s.sres} style={{ width: 'min(420px, 90vw)' }}>
-                    {cliRes.map((c) => (
-                      <button key={c.cc} type='button' className={s.sr} onClick={() => { setF('cliente', c.cc); setCliQ(''); }}>
-                        <b>{c.cn}</b><span>NIT {c.nit || '—'} · {c.cc}</span>
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-              <span className={s.fld}>
-                <span>Tipo de venta</span>
-                <span className={s.segbtns}>
-                  <button type='button' className={med === 'neta' ? s.segOn : undefined} onClick={() => setMed('neta')}>Neta</button>
-                  <button type='button' className={med === 'bruta' ? s.segOn : undefined} onClick={() => setMed('bruta')}>Bruta</button>
-                  <button type='button' className={med === 'notas' ? s.segOnN : undefined} onClick={() => setMed('notas')}>Solo notas</button>
-                </span>
-              </span>
-              <span className={s.gsp} />
-              {hayFiltros && (
-                <button type='button' className={s.btn} onClick={() => { setFiltros(FILTROS_VACIOS); setMed('neta'); }}>
-                  Limpiar filtros
-                </button>
-              )}
-            </div>
+        <Stack gap='md'>
+          <Tabs value={pagina} onChange={(v) => v && ir(v as Pagina)} keepMounted={false}>
+            <Tabs.List>
+              {MENU.map((m) => {
+                const Ico = m.icon;
+                return (
+                  <Tabs.Tab key={m.key} value={m.key} leftSection={<Ico size={16} />}>
+                    {m.label}
+                  </Tabs.Tab>
+                );
+              })}
+            </Tabs.List>
+          </Tabs>
 
-            <div className={s.ph}>
-              <div>
-                <p className={s.eyebrow3}>{enc.e}</p>
-                <h2>{enc.t}</h2>
-                {!focus && <p>{enc.d}</p>}
-              </div>
+          <Group justify='space-between' align='flex-end' wrap='wrap' gap='sm'>
+            <Stack gap={2}>
+              <Title order={3}>{enc.t}</Title>
+              <Text size='sm' c='dimmed'>{enc.d}</Text>
+            </Stack>
+            <Group gap='xs'>
               {data && (
-                <span className={s.pill}>
-                  <Icono name='cal' size={15} />
+                <Badge variant='light' size='lg' leftSection={<IconCalendarStats size={14} />}>
                   {fecha(data.actual.desde)} – {fecha(data.actual.hasta)}
-                </span>
+                </Badge>
               )}
-            </div>
+              {data && (
+                <Badge variant='light' color='gray' size='lg'>
+                  Actualizado {new Date(data.actualizado).toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Bogota' })}
+                </Badge>
+              )}
+              <Button
+                variant={insOn ? 'light' : 'default'}
+                size='xs'
+                leftSection={<IconBulb size={16} />}
+                rightSection={<Badge size='xs' circle>{hallazgos.length}</Badge>}
+                onClick={() => setInsOn((v) => !v)}
+              >
+                Insights
+              </Button>
+            </Group>
+          </Group>
 
-            {error && <Alert color='red' title='No se pudo cargar'>{error}</Alert>}
-            {data?.avisos.map((a) => <div key={a} className={s.aviso}>{a}</div>)}
-            {loading && data && <div className={s.note}>Actualizando…</div>}
+          {error && <Alert color='red' title='No se pudo cargar'>{error}</Alert>}
+          {data?.avisos.map((a) => <Alert key={a} color='yellow' variant='light' className={s.aviso}>{a}</Alert>)}
+          {loading && data && <Text size='xs' c='dimmed'>Actualizando…</Text>}
 
-            {data && (
-              <section className={s.page} key={`${pagina}-${ficha?.clave ?? ''}`}>
-                {pagina === 'diario' && pDiario()}
-                {pagina === 'resumen' && pResumen()}
-                {pagina === 'cierre' && pCierre()}
-                {pagina === 'clientes' && pClientes()}
-                {pagina === 'productos' && pProductos()}
-                {pagina === 'vendedores' && pVendedores()}
-                {pagina === 'pedidos' && pPedidos()}
-                {pagina === 'detalle' && pDetalle()}
-              </section>
-            )}
-          </main>
-
-          {insOn && !focus && (
-            <aside className={s.ins}>
-              <div className={s.insIn}>
-                <div className={s.insH}><h4>Insights y alertas</h4><span className={s.cnt}>{hallazgos.length}</span></div>
-                {hallazgos.map((h) => (
-                  <div key={h.titulo} className={cx(s.insItem, h.tono === 'warn' && s.insWarn, h.tono === 'crit' && s.insCrit, h.tono === 'info' && s.insInfo)}>
-                    <b>{h.titulo}</b>
-                    <p>{h.texto}</p>
-                  </div>
-                ))}
-                {!hallazgos.length && <div className={s.empty}>Sin hallazgos con los filtros actuales.</div>}
-                <div className={cx(s.insItem, s.insWarn)}>
-                  <b>Pendiente de fuente</b>
-                  <p>Meta / presupuesto, canal, segmento, regional y proveedor no vienen en SAP. Se activan cuando se defina su origen.</p>
-                </div>
-              </div>
-            </aside>
+          {insOn && data && (
+            <SimpleGrid cols={{ base: 1, sm: 2, lg: 4 }} spacing='sm'>
+              {hallazgos.map((h) => (
+                <Alert
+                  key={h.titulo}
+                  variant='light'
+                  color={h.tono === 'ok' ? 'teal' : h.tono === 'warn' ? 'yellow' : h.tono === 'crit' ? 'red' : 'blue'}
+                  title={h.titulo}
+                >
+                  <Text size='xs'>{h.texto}</Text>
+                </Alert>
+              ))}
+              <Alert variant='light' color='gray' title='Pendiente de fuente'>
+                <Text size='xs'>Meta / presupuesto, canal, segmento, regional y proveedor no vienen en SAP. Se activan cuando se defina su origen.</Text>
+              </Alert>
+            </SimpleGrid>
           )}
-        </div>
-      )}
 
-      <div className={s.cert}>
-        <Icono name='shield' size={20} />
-        <div>
-          <b>Fuente: SAP Business One · vista OLP_IND_VentasB1SLQuery</b>
-          <p>
-            Venta neta = líneas de factura menos notas crédito, sin IVA. Comparativos al mismo corte del mes anterior y del año anterior.
-            Proyección = promedio por día hábil × días hábiles del mes. Cifras en pesos colombianos; fechas en hora de Colombia.
-          </p>
-        </div>
-      </div>
-    </div>
+          {data && (
+            <section className={s.page} key={`${pagina}-${ficha?.clave ?? ''}`}>
+              {pagina === 'diario' && pDiario()}
+              {pagina === 'resumen' && pResumen()}
+              {pagina === 'cierre' && pCierre()}
+              {pagina === 'clientes' && pClientes()}
+              {pagina === 'productos' && pProductos()}
+              {pagina === 'vendedores' && pVendedores()}
+              {pagina === 'pedidos' && pPedidos()}
+              {pagina === 'detalle' && pDetalle()}
+            </section>
+          )}
+
+          <Text size='xs' c='dimmed'>
+            Fuente: SAP Business One, vista OLP_IND_VentasB1SLQuery, en vivo y de solo lectura. Venta neta = líneas de factura menos notas
+            crédito, sin IVA. Comparativos al mismo corte del mes anterior y del año anterior. Proyección = promedio por día hábil × días
+            hábiles del mes. Cifras en pesos colombianos; fechas en hora de Colombia.
+          </Text>
+        </Stack>
+      )}
+    </DashboardPageShell>
   );
 }
+

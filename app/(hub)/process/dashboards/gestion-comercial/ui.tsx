@@ -1,11 +1,19 @@
 'use client';
 
 /**
- * Piezas visuales del Tablero Comercial (tema «Insight»). Son propias de este
- * tablero y viven en su carpeta: no se comparten ni reemplazan componentes del
- * sistema. Las gráficas usan el ChartBox compartido.
+ * Utilidades de presentación del tablero comercial. Las tarjetas y listas usan
+ * los componentes de SynerLink (KpiStatCard, ChartCard) y Mantine, para quedar
+ * dentro del esquema de diseño de la app (claro y oscuro).
  */
 import type { ReactNode } from 'react';
+import { Badge, Group, Paper, Progress, Stack, Text, UnstyledButton } from '@mantine/core';
+import {
+  IconCash,
+  IconChartBar,
+  IconTrendingDown,
+  IconTrendingUp,
+} from '@tabler/icons-react';
+import { ChartCard, KpiStatCard } from '../../../../../components/dashboard/actividades/ActividadesUi';
 import s from './tablero.module.css';
 
 export const cx = (...c: Array<string | false | null | undefined>) => c.filter(Boolean).join(' ');
@@ -45,38 +53,45 @@ export function Var({ v }: { v: number | null }) {
   return <span className={v >= 0 ? s.up : s.down}>{v >= 0 ? '▲' : '▼'} {pct(v)}</span>;
 }
 
+const AZUL = 'var(--mantine-color-blue-6)';
+const MORADO = 'var(--mantine-color-grape-6)';
+const VERDE = 'var(--mantine-color-teal-6)';
+const ROJO = 'var(--mantine-color-red-6)';
+
+/**
+ * KPI del tablero = KpiStatCard de SynerLink. `trend` colorea en verde/rojo
+ * (variaciones); `tone` elige azul (venta) o morado (comparativo).
+ */
 export function Kpi({
   label,
   value,
   sub,
   tone,
   progress,
-  selected,
-  onClick,
+  trend,
+  loading,
 }: {
   label: string;
-  value: ReactNode;
-  sub?: ReactNode;
+  value: string;
+  sub?: string;
   tone?: 'a' | 'b';
   progress?: number | null;
-  selected?: boolean;
-  onClick?: () => void;
+  trend?: number | null;
+  loading?: boolean;
 }) {
+  const conTrend = trend !== undefined;
+  const color = conTrend ? (trend == null ? AZUL : trend >= 0 ? VERDE : ROJO) : tone === 'b' ? MORADO : AZUL;
+  const icon = conTrend ? (trend != null && trend < 0 ? IconTrendingDown : IconTrendingUp) : tone === 'a' ? IconCash : IconChartBar;
   return (
-    <div
-      className={cx(s.kpi, tone === 'a' && s.kpiA, tone === 'b' && s.kpiB, selected && s.kpiSel)}
-      onClick={onClick}
-      role={onClick ? 'button' : undefined}
-    >
-      <span className={s.kpiL}>{label}</span>
-      <span className={s.kpiV}>{value}</span>
-      {progress != null && (
-        <div className={s.prog}>
-          <i style={{ width: `${Math.max(0, Math.min(100, progress * 100))}%` }} />
-        </div>
-      )}
-      {sub != null && <span className={s.kpiS}>{sub}</span>}
-    </div>
+    <KpiStatCard
+      label={label}
+      value={value}
+      hint={sub ?? ''}
+      color={color}
+      icon={icon}
+      sharePercent={progress != null ? progress * 100 : undefined}
+      refreshing={loading}
+    />
   );
 }
 
@@ -86,6 +101,7 @@ export interface BarItem {
   value: number;
 }
 
+/** Lista con barra (mismo aspecto que RankedListCard), con clic opcional. */
 export function HBars({
   items,
   format = mm,
@@ -99,36 +115,53 @@ export function HBars({
   onPick?: (key: string) => void;
   empty?: string;
 }) {
-  if (!items.length) return <div className={s.empty}>{empty}</div>;
+  if (!items.length) {
+    return (
+      <Text size='sm' c='dimmed' ta='center' py='md'>
+        {empty}
+      </Text>
+    );
+  }
   const max = Math.max(...items.map((i) => Math.abs(i.value)), 1);
   return (
-    <div className={s.hb}>
-      {items.map((i) => (
-        <button
-          key={i.key}
-          type='button'
-          className={cx(s.hbRow, onPick && s.hbClick)}
-          onClick={onPick ? () => onPick(i.key) : undefined}
-          title={i.name}
-        >
-          <span className={s.hbN}>{i.name}</span>
-          <span className={s.hbV}>{format(i.value)}</span>
-          <span className={cx(s.hbBar, notas && s.hbBarN)}>
-            <i style={{ width: `${(Math.abs(i.value) / max) * 100}%` }} />
-          </span>
-        </button>
-      ))}
-    </div>
+    <Stack gap='xs'>
+      {items.map((i, idx) => {
+        const fila = (
+          <Paper p='xs' withBorder radius='md'>
+            <Group justify='space-between' mb={6} wrap='nowrap'>
+              <Group gap='xs' wrap='nowrap' style={{ flex: 1, minWidth: 0 }}>
+                <Badge variant='filled' color={notas ? 'grape' : 'blue'} size='sm' circle>
+                  {idx + 1}
+                </Badge>
+                <Text size='sm' fw={500} truncate='end' c={onPick ? 'blue' : undefined}>
+                  {i.name}
+                </Text>
+              </Group>
+              <Badge variant='light' color={notas ? 'grape' : 'blue'}>
+                {format(i.value)}
+              </Badge>
+            </Group>
+            <Progress value={(Math.abs(i.value) / max) * 100} size='sm' radius='xl' color={notas ? 'grape' : 'blue'} />
+          </Paper>
+        );
+        return onPick ? (
+          <UnstyledButton key={i.key} onClick={() => onPick(i.key)} title={i.name}>
+            {fila}
+          </UnstyledButton>
+        ) : (
+          <div key={i.key}>{fila}</div>
+        );
+      })}
+    </Stack>
   );
 }
 
+/** Tarjeta de sección = ChartCard de SynerLink. */
 export function Card({ title, note, children }: { title: string; note?: string; children: ReactNode }) {
   return (
-    <div className={s.card}>
-      <h3>{title}</h3>
-      {note && <p className={s.note}>{note}</p>}
+    <ChartCard title={title} description={note} height='auto'>
       {children}
-    </div>
+    </ChartCard>
   );
 }
 
@@ -155,28 +188,4 @@ export function descargarCsv(nombre: string, encabezados: string[], filas: Array
   a.click();
   a.remove();
   URL.revokeObjectURL(url);
-}
-
-export function Icono({ name, size = 18 }: { name: string; size?: number }) {
-  const p: Record<string, ReactNode> = {
-    pulse: <path d='M3 12h4l3-8 4 16 3-8h4' />,
-    grid: <path d='M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z' />,
-    flag: <path d='M5 21V4h11l-2 4 2 4H5' />,
-    users: <path d='M16 19v-1a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v1M9 10a3 3 0 1 0 0-6 3 3 0 0 0 0 6M22 19v-1a4 4 0 0 0-3-3.9M16 4.1a3 3 0 0 1 0 5.8' />,
-    box: <path d='M21 8 12 3 3 8v8l9 5 9-5zM3 8l9 5 9-5M12 13v8' />,
-    user: <path d='M20 21v-1a5 5 0 0 0-5-5H9a5 5 0 0 0-5 5v1M12 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8' />,
-    truck: <path d='M3 6h11v10H3zM14 10h4l3 3v3h-7M7 19a2 2 0 1 0 0-4 2 2 0 0 0 0 4M17 19a2 2 0 1 0 0-4 2 2 0 0 0 0 4' />,
-    table: <path d='M3 5h18v14H3zM3 10h18M3 15h18M9 5v14' />,
-    menu: <path d='M4 6h16M4 12h16M4 18h16' />,
-    spark: <path d='M12 3v4M12 17v4M3 12h4M17 12h4M6 6l2.5 2.5M15.5 15.5 18 18M6 18l2.5-2.5M15.5 8.5 18 6' />,
-    focus: <path d='M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5' />,
-    shield: <path d='M12 3 4 6v6c0 5 3.5 8 8 9 4.5-1 8-4 8-9V6z M9 12l2 2 4-4' />,
-    chart: <path d='M4 19V9M10 19V5M16 19v-7M22 19H2' />,
-    cal: <path d='M4 5h16v15H4zM4 9h16M8 3v4M16 3v4' />,
-  };
-  return (
-    <svg width={size} height={size} viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth={2} strokeLinecap='round' strokeLinejoin='round' aria-hidden='true'>
-      {p[name] ?? null}
-    </svg>
-  );
 }
