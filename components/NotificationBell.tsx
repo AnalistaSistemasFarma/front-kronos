@@ -374,10 +374,16 @@ export default function NotificationBell() {
             <ActionIcon
               variant='subtle'
               color='gray'
+              className={unreadCount > 0 && !opened ? 'notification-bell-button--ringing' : undefined}
               onClick={() => setOpened((o) => !o)}
-              aria-label='Notificaciones'
+              aria-label={unreadCount > 0 ? `Notificaciones: ${unreadCount} sin leer` : 'Notificaciones'}
             >
-              {unreadCount > 0 ? <IconBellRinging size={18} /> : <IconBell size={18} />}
+              {/* Se mueve solo con notificaciones sin leer y con la lista cerrada (globals.css). */}
+              {unreadCount > 0 ? (
+                <IconBellRinging size={18} className={opened ? undefined : 'notification-bell-icon--ringing'} />
+              ) : (
+                <IconBell size={18} />
+              )}
             </ActionIcon>
           </Tooltip>
         </Indicator>
