@@ -146,6 +146,26 @@ export async function getFieldSizes(
 }
 
 /**
+ * Valida el largo de los campos de texto contra su tamaño en SAP (EditSize).
+ * Devuelve un mensaje claro con el primer campo que se pasa, o null si todo
+ * cabe. Así no se trunca ni falla el POST/PATCH con un 400 críptico de SAP.
+ */
+export function validarLargos(
+  record: HealthRecordInput,
+  sizes: Record<string, number>
+): string | null {
+  const rec = record as Record<string, string | undefined>;
+  for (const [field, max] of Object.entries(sizes)) {
+    const len = rec[field]?.length ?? 0;
+    if (max > 0 && len > max) {
+      const label = FIELD_LABELS[field] ?? field;
+      return `El campo "${label}" admite máximo ${max} caracteres en SAP para esta empresa (tiene ${len}). Abrévielo antes de guardar.`;
+    }
+  }
+  return null;
+}
+
+/**
  * Normaliza un nombre para comparar variantes: sin tildes/diacríticos, en
  * mayúsculas, con espacios colapsados. Así "LABORATORIOS LA SANTÉ S.A." y
  * "LABORATORIOS LA SANTE S.A." se consideran el mismo nombre.
