@@ -952,6 +952,15 @@ function UserManagement() {
       })
       .filter((c) => c.gains > 0 || c.loses > 0);
 
+  /**
+   * Empresas donde hoy no tiene vínculo: al guardar se crea y el usuario gana acceso a esa
+   * empresa (syncUserCompanySubprocesses crea el company_user).
+   */
+  const getNewAccessCompanies = () =>
+    getCompanyChanges().filter(
+      (c) => c.gains > 0 && !assignedSubprocesses.some((a) => a.companyId.toString() === c.id)
+    );
+
   const getOtherCompanyAssignments = () =>
     assignedSubprocesses.filter(
       (assignment) =>
@@ -989,63 +998,96 @@ function UserManagement() {
       return;
     }
 
+    setSubprocessLoading(true);
+    const result = { added: 0, removed: 0 };
+    const saved: typeof toSave = [];
+    const failed: { name: string; error: string }[] = [];
     try {
-      setSubprocessLoading(true);
-      const result = { added: 0, removed: 0 };
+      // Se intentan todas las empresas aunque una falle, para saber exactamente qué quedó.
       for (const c of toSave) {
-        const response = await fetch(`/api/users/${selectedUser.id}/subprocesses`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ companyIds: [parseInt(c.id, 10)], subprocessIds: c.finalIds }),
-        });
-        if (!response.ok) {
-          const errorData = await response.json().catch(() => ({}));
-          throw new Error(
-            `${c.name}: ${errorData.error || 'No se pudieron guardar los subprocesos'}`
-          );
+        try {
+          const response = await fetch(`/api/users/${selectedUser.id}/subprocesses`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ companyIds: [parseInt(c.id, 10)], subprocessIds: c.finalIds }),
+          });
+          const data = await response.json().catch(() => ({}));
+          if (!response.ok) {
+            failed.push({ name: c.name, error: data.error || 'No se pudo guardar' });
+            continue;
+          }
+          saved.push(c);
+          result.added += Number(data.added) || 0;
+          result.removed += Number(data.removed) || 0;
+        } catch (err) {
+          failed.push({
+            name: c.name,
+            error: err instanceof Error ? err.message : 'Error de conexión',
+          });
         }
-        const data = await response.json();
-        result.added += Number(data.added) || 0;
-        result.removed += Number(data.removed) || 0;
       }
 
-      // Persist authorization types (per-user). Empty array clears them when Autorización is no
-      // longer assigned in any company.
-      const authTypesResponse = await fetch(
-        `/api/users/${selectedUser.id}/authorization-types`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            typeIds: authAssignedAfterSave ? selectedAuthorizationTypeIds.map(Number) : [],
-          }),
+      if (saved.length > 0) {
+        // Tipos de autorización (por usuario) según lo que de verdad quedó guardado: las empresas
+        // que fallaron conservan lo que tenían. Vacío los borra si ya no hay Autorización.
+        const realFinal = new Map<string, number[]>(
+          assignedSubprocesses.map((a) => [
+            a.companyId.toString(),
+            a.subprocesses.map((s) => s.subprocessId),
+          ])
+        );
+        for (const c of saved) realFinal.set(c.id, c.finalIds);
+        const authReallyAssigned =
+          authSubprocessId !== null &&
+          [...realFinal.values()].some((ids) => ids.includes(authSubprocessId));
+        const authTypesResponse = await fetch(
+          `/api/users/${selectedUser.id}/authorization-types`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              typeIds: authReallyAssigned ? selectedAuthorizationTypeIds.map(Number) : [],
+            }),
+          }
+        ).catch(() => null);
+        if (!authTypesResponse?.ok) {
+          toast.error('Subprocesos guardados, pero no se pudieron guardar los tipos de autorización');
         }
-      );
-      if (!authTypesResponse.ok) {
-        toast.error('Subprocesos guardados, pero no se pudieron guardar los tipos de autorización');
+        notifySubprocessAssignmentsChanged();
       }
 
-      toast.success(
-        `Subprocesos actualizados${
-          toSave.length > 1 ? ` en ${toSave.length} empresas` : ''
-        }: ${result.added} agregados, ${result.removed} removidos`
-      );
-      setSubprocessDelta({ added: [], removed: [] });
-
-      const assignedResponse = await fetch(`/api/users/${selectedUser.id}/subprocesses`, {
-        cache: 'no-store',
-      });
-      if (assignedResponse.ok) {
-        const { assignedSubprocesses: assigned } = await assignedResponse.json();
-        setAssignedSubprocesses(assigned);
+      const names = (list: { name: string }[]) => list.map((c) => c.name).join(', ');
+      if (failed.length === 0) {
+        toast.success(
+          `Subprocesos actualizados${
+            saved.length > 1 ? ` en ${saved.length} empresas` : ''
+          }: ${result.added} agregados, ${result.removed} removidos`
+        );
+        setSubprocessDelta({ added: [], removed: [] });
+        setSubprocessModalOpened(false);
+      } else {
+        // Los cambios se conservan: al reintentar, las ya guardadas no tienen nada pendiente y
+        // solo se vuelven a mandar las que fallaron.
+        toast.error(
+          saved.length > 0
+            ? `Guardado en ${names(saved)}; falló en ${names(failed)}. Toque Guardar para reintentar.`
+            : `No se pudo guardar en ${names(failed)}: ${failed[0].error}`,
+          { duration: 8000 }
+        );
       }
-
-      notifySubprocessAssignmentsChanged();
-      setSubprocessModalOpened(false);
-    } catch (error) {
-      console.error('Error saving subprocesses:', error);
-      toast.error(error instanceof Error ? error.message : 'Error al guardar subprocesos');
     } finally {
+      // Siempre se refresca, para que la pantalla muestre lo que de verdad quedó.
+      try {
+        const assignedResponse = await fetch(`/api/users/${selectedUser.id}/subprocesses`, {
+          cache: 'no-store',
+        });
+        if (assignedResponse.ok) {
+          const { assignedSubprocesses: assigned } = await assignedResponse.json();
+          setAssignedSubprocesses(assigned);
+        }
+      } catch {
+        /* si falla, queda la lista anterior */
+      }
       setSubprocessLoading(false);
     }
   };
@@ -2821,7 +2863,12 @@ function UserManagement() {
                   <Alert
                     variant='light'
                     radius='md'
-                    color={getCompanyChanges().some((c) => c.loses > 0) ? 'yellow' : 'blue'}
+                    color={
+                      getCompanyChanges().some((c) => c.loses > 0) ||
+                      getNewAccessCompanies().length > 0
+                        ? 'yellow'
+                        : 'blue'
+                    }
                     icon={<IconAlertCircle size={18} />}
                     title='Al guardar'
                   >
@@ -2833,6 +2880,14 @@ function UserManagement() {
                           {c.loses > 0 ? ` · pierde ${c.loses}` : ''}
                         </Text>
                       ))}
+                      {getNewAccessCompanies().length > 0 && (
+                        <Text size='sm' mt={4}>
+                          <strong>Acceso nuevo:</strong>{' '}
+                          {selectedUser?.name || selectedUser?.email || 'El usuario'} tendrá
+                          acceso a {getNewAccessCompanies().map((c) => c.name).join(', ')}, donde
+                          hoy no está.
+                        </Text>
+                      )}
                     </Stack>
                   </Alert>
                 )}
@@ -2866,11 +2921,11 @@ function UserManagement() {
               <Text
                 size='xs'
                 c={
-                  getCompanyChanges().some((c) => c.loses > 0)
+                  getCompanyChanges().some((c) => c.loses > 0) ||
+                  getNewAccessCompanies().length > 0 ||
+                  selectedCompanyIds.length === 0
                     ? 'orange'
-                    : selectedCompanyIds.length === 0
-                      ? 'orange'
-                      : 'dimmed'
+                    : 'dimmed'
                 }
               >
                 {selectedCompanyIds.length === 0
@@ -2880,11 +2935,15 @@ function UserManagement() {
                         .filter((c) => c.loses > 0)
                         .map((c) => `${c.name} (${c.loses})`)
                         .join(', ')}`
-                    : getCompanyChanges().length > 0
-                      ? 'Cambios sin guardar'
-                      : selectedSubprocessIds.length === 0
-                        ? 'Sin acceso aún'
-                        : 'Al día'}
+                    : getNewAccessCompanies().length > 0
+                      ? `Dará acceso nuevo a: ${getNewAccessCompanies()
+                          .map((c) => c.name)
+                          .join(', ')}`
+                      : getCompanyChanges().length > 0
+                        ? 'Cambios sin guardar'
+                        : selectedSubprocessIds.length === 0
+                          ? 'Sin acceso aún'
+                          : 'Al día'}
               </Text>
               <Group gap='xs'>
                 <Button

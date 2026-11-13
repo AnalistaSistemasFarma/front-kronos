@@ -39,6 +39,9 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   }
 }
 
+/** Tope de empresas por guardado (evita abusos con listas enormes). */
+const MAX_COMPANIES_PER_REQUEST = 50;
+
 // POST /api/users/[id]/subprocesses - Assign subprocesses to user
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -69,6 +72,12 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     ) {
       return NextResponse.json({ error: 'Company ID is required' }, { status: 400 });
     }
+    if (companyIds.length > MAX_COMPANIES_PER_REQUEST) {
+      return NextResponse.json(
+        { error: `Máximo ${MAX_COMPANIES_PER_REQUEST} empresas por guardado` },
+        { status: 400 }
+      );
+    }
 
     const user = await prisma.user.findUnique({
       where: { id: userId },
@@ -80,39 +89,56 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
     let added = 0;
     let removed = 0;
-    const details: string[] = [];
-    // En serie: cada empresa consolida los company_user del mismo usuario.
+    const savedCompanyIds: number[] = [];
+    // En serie: cada empresa consolida los company_user del mismo usuario. La auditoría va por
+    // empresa dentro del ciclo: si una falla a mitad, las ya guardadas quedan registradas.
     for (const companyId of companyIds) {
-      const result = await syncUserCompanySubprocesses({
-        userId,
-        companyId,
-        subprocessIds: desiredSubprocessIds,
-        mode: 'replace',
-      });
-      added += result.added;
-      removed += result.removed;
-      details.push(
-        `Company ${companyId}: assigned ${result.added}, removed ${result.removed}. Final: [${result.finalIds.join(', ')}]`
-      );
+      try {
+        const result = await syncUserCompanySubprocesses({
+          userId,
+          companyId,
+          subprocessIds: desiredSubprocessIds,
+          mode: 'replace',
+        });
+        added += result.added;
+        removed += result.removed;
+        savedCompanyIds.push(companyId);
+        try {
+          await prisma.userAuditLog.create({
+            data: {
+              user_id: userId,
+              action: 'UPDATE_SUBPROCESSES',
+              performed_by: session.user.email,
+              details: `Company ${companyId}: assigned ${result.added}, removed ${result.removed}. Final: [${result.finalIds.join(', ')}]`,
+            },
+          });
+        } catch (auditError) {
+          // El cambio ya quedó aplicado; no se revierte por la auditoría.
+          console.error(`Error auditing subprocesses (company ${companyId}):`, auditError);
+        }
+      } catch (error) {
+        console.error(`Error assigning subprocesses (company ${companyId}):`, error);
+        if (savedCompanyIds.length > 0) invalidateChatAccessCache();
+        return NextResponse.json(
+          {
+            error: 'No se pudieron guardar los subprocesos en una de las empresas',
+            savedCompanyIds,
+            failedCompanyId: companyId,
+          },
+          { status: 500 }
+        );
+      }
     }
 
     // Los permisos del chat van en caché unos segundos (lib/chat/access.ts).
     invalidateChatAccessCache();
-
-    await prisma.userAuditLog.create({
-      data: {
-        user_id: userId,
-        action: 'UPDATE_SUBPROCESSES',
-        performed_by: session.user.email,
-        details: details.join(' | '),
-      },
-    });
 
     return NextResponse.json({
       message: 'Subprocesses updated successfully',
       added,
       removed,
       companies: companyIds.length,
+      savedCompanyIds,
     });
   } catch (error) {
     console.error('Error assigning subprocesses:', error);
