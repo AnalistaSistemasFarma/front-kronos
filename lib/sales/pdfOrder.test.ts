@@ -83,3 +83,16 @@ describe('orden de las líneas', () => {
     expect(m.lineas.map((x) => x.row)).toEqual([1, 2, 3]);
   });
 });
+
+import { agentOrderInstruction, agentReplyJson } from './pdfOrder';
+describe('montar con agente', () => {
+  it('la instrucción pide solo JSON y prohíbe acciones', () => {
+    const t = agentOrderInstruction('OLP', 'oc.pdf');
+    expect(t).toContain('```json');
+    expect(t).toMatch(/No consultes ni modifiques SAP/);
+  });
+  it('toma el bloque json de la respuesta del agente', () => {
+    const body = 'Listo, aquí está:\n```json\n{"numeroOrdenCompra":"OC-7","nitCliente":"900","fechaEntrega":"","lineas":[{"codigo":"A","descripcion":"X","cantidad":2,"precioUnitario":10}]}\n```\nSaludos {no}';
+    expect(parsePdfOrder(agentReplyJson(body)).numeroOrdenCompra).toBe('OC-7');
+  });
+});

@@ -137,6 +137,32 @@ export interface ChatAttachmentContent {
  * jamás sale del servidor — que es justo lo que se quiere: si se le devolviera
  * al navegador, cualquiera con ese enlace bajaría el archivo sin sesión.
  */
+/** Esperas entre intentos de descarga (ms): 3 intentos en total. */
+export const ESPERAS_REINTENTO_MS = [400, 1200];
+
+/**
+ * Corre `pedir` y lo repite si falla la red (excepción) o Microsoft responde
+ * 429/5xx. Devuelve la última respuesta; si el último intento lanza, relanza.
+ */
+export async function conReintento(
+  pedir: () => Promise<Response>,
+  esperas: number[] = ESPERAS_REINTENTO_MS,
+  dormir: (ms: number) => Promise<void> = (ms) => new Promise((r) => setTimeout(r, ms))
+): Promise<Response> {
+  for (let intento = 0; ; intento++) {
+    const ultimo = intento >= esperas.length;
+    try {
+      const res = await pedir();
+      if (ultimo || !(res.status === 429 || res.status >= 500)) return res;
+      await res.body?.cancel().catch(() => undefined);
+    } catch (error) {
+      if (ultimo) throw error;
+    }
+    console.warn(`[chat/attachments] reintento ${intento + 1} de descarga desde OneDrive`);
+    await dormir(esperas[intento]);
+  }
+}
+
 export async function downloadChatAttachment(
   onedriveItemId: string,
   /**
@@ -152,12 +178,23 @@ export async function downloadChatAttachment(
     return null;
   }
 
-  const token = await getMicrosoftToken();
-  if (!token) return null;
-
-  const response = await fetch(`${graphBase}items/${encodeURIComponent(onedriveItemId)}/content`, {
-    headers: range ? { Authorization: `Bearer ${token}`, Range: range } : { Authorization: `Bearer ${token}` },
-  });
+  // Reintento (2026-11-12): serfarma05 pierde a ratos la conexión con
+  // Microsoft (ConnectTimeoutError a 150.171.4x.10:443 → «fetch failed») y la
+  // ruta respondía 500. Ahora se reintenta y, si igual falla, se devuelve null
+  // para que la ruta conteste 502 («no se pudo recuperar el archivo»).
+  let response: Response;
+  try {
+    response = await conReintento(async () => {
+      const token = await getMicrosoftToken();
+      if (!token) throw new Error('sin token de Microsoft Graph');
+      return fetch(`${graphBase}items/${encodeURIComponent(onedriveItemId)}/content`, {
+        headers: range ? { Authorization: `Bearer ${token}`, Range: range } : { Authorization: `Bearer ${token}` },
+      });
+    });
+  } catch (error) {
+    console.error(`[chat/attachments] OneDrive no respondió al descargar el item ${onedriveItemId}:`, error);
+    return null;
+  }
 
   if (!response.ok) {
     console.error(
