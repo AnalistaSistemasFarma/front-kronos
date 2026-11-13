@@ -3643,7 +3643,10 @@ button.chat-galeria__archivo {
   background-color: transparent;
 }
 
-.chat-visor__contenido--doc {
+/* Doble clase (2026-11-12): con una sola, el `display: block` del Paper de
+   Mantine (misma especificidad, carga después) le ganaba; el cuerpo no se
+   estiraba y en el iPhone la imagen del visor quedaba en blanco. */
+.chat-visor__contenido.chat-visor__contenido--doc {
   display: flex;
   flex-direction: column;
 }
@@ -3651,6 +3654,12 @@ button.chat-galeria__archivo {
 .chat-visor__contenido--doc .chat-visor__cuerpo {
   flex: 1;
   min-height: 0;
+}
+
+/* Base `auto`: el área toma su altura definida (no el 0 % del `flex: 1`),
+   así la imagen se ajusta a la pantalla en vez de salir a tamaño natural. */
+.chat-visor__contenido--doc .chat-visor__area {
+  flex: 1 1 auto;
 }
 
 .chat-visor__area {
