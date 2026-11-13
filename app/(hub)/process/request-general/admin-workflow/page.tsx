@@ -1,6 +1,6 @@
 'use client';
 
-import { Suspense, useDeferredValue, useEffect, useMemo, useState } from 'react';
+import { Suspense, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { useSession } from 'next-auth/react';
 import {
@@ -72,6 +72,16 @@ import {
   buildCronFromPreset,
   describeCron,
 } from '../../../../../lib/scheduler/presets';
+
+/** Texto comparable de un campo del flujo (sin espacios sobrantes). */
+const cleanText = (value: string | null | undefined) => String(value ?? '').trim();
+
+/** Opciones únicas y ordenadas (valor = texto) para los filtros de la tabla. */
+function uniqueSortedOptions(values: (string | null | undefined)[]) {
+  return [...new Set(values.map(cleanText).filter(Boolean))]
+    .sort((a, b) => a.localeCompare(b, 'es'))
+    .map((v) => ({ value: v, label: v }));
+}
 
 interface WorkFlow {
   id: number;
@@ -189,10 +199,54 @@ function RequestBoard() {
   // Buscador libre (empresa, categoría, proceso, asignado…) sobre la lista ya cargada.
   const [searchInput, setSearchInput] = useState('');
   const deferredSearch = useDeferredValue(searchInput);
-  const visibleWorkFlows = useMemo(
-    () => filterWorkflows(workFlows, deferredSearch),
-    [workFlows, deferredSearch]
+  // Filtros (2026-11-13): se aplican aquí sobre la lista completa, al instante y por valor exacto
+  // (antes iban al servidor con LIKE: «Compra» traía también «Compra urgente»).
+  const filteredBySelects = useMemo(
+    () =>
+      workFlows.filter(
+        (wf) =>
+          (!filters.company || cleanText(wf.company) === filters.company) &&
+          (!filters.category || cleanText(wf.category) === filters.category) &&
+          (!filters.process || cleanText(wf.process) === filters.process) &&
+          (!filters.active || Number(wf.active) === Number(filters.active)) &&
+          (!filters.status || String(wf.id_status_process) === filters.status)
+      ),
+    [workFlows, filters]
   );
+  const visibleWorkFlows = useMemo(
+    () => filterWorkflows(filteredBySelects, deferredSearch),
+    [filteredBySelects, deferredSearch]
+  );
+  // Opciones de los filtros sacadas de los mismos flujos (incluye inactivos) y encadenadas:
+  // la categoría depende de la empresa y el proceso de ambas.
+  const filterCompanyOptions = useMemo(
+    () => uniqueSortedOptions(workFlows.map((wf) => wf.company)),
+    [workFlows]
+  );
+  const filterCategoryOptions = useMemo(
+    () =>
+      uniqueSortedOptions(
+        workFlows
+          .filter((wf) => !filters.company || cleanText(wf.company) === filters.company)
+          .map((wf) => wf.category)
+      ),
+    [workFlows, filters.company]
+  );
+  const filterProcessOptions = useMemo(
+    () =>
+      uniqueSortedOptions(
+        workFlows
+          .filter(
+            (wf) =>
+              (!filters.company || cleanText(wf.company) === filters.company) &&
+              (!filters.category || cleanText(wf.category) === filters.category)
+          )
+          .map((wf) => wf.process)
+      ),
+    [workFlows, filters.company, filters.category]
+  );
+  // Evita que una respuesta vieja pise una más nueva si se piden varias seguidas.
+  const workflowsFetchSeqRef = useRef(0);
   const [refreshing, setRefreshing] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
 
@@ -769,27 +823,19 @@ function RequestBoard() {
     filtersToUse?: typeof filters,
     silent = false
   ) => {
+    // Los filtros se aplican en pantalla (filteredBySelects): aquí siempre la lista completa.
+    void filtersToUse;
+    const seq = ++workflowsFetchSeqRef.current;
     try {
       if (silent) setRefreshing(true);
       else setLoading(true);
 
-      const params = new URLSearchParams();
-
-      if (filtersToUse) {
-        if (filtersToUse.status) params.append('status', filtersToUse.status);
-        if (filtersToUse.company) params.append('company', filtersToUse.company);
-        if (filtersToUse.category) params.append('category', filtersToUse.category);
-        if (filtersToUse.process) params.append('process', filtersToUse.process);
-        if (filtersToUse.active) params.append('active', filtersToUse.active);
-      }
-
-      const url = `/api/requests-general/workflow-administration?${params.toString()}`;
-
-      const response = await fetch(url);
+      const response = await fetch('/api/requests-general/workflow-administration');
 
       if (!response.ok) throw new Error('Failed to fetch assigned workflows');
 
       const data = await response.json();
+      if (seq !== workflowsFetchSeqRef.current) return;
       console.log(
         'fetchWorkFlowsWithUserId: Flujos de trabajo asignados recibidos:',
         data.length,
@@ -1110,11 +1156,34 @@ function RequestBoard() {
     }
   };
 
-  // Al elegir un filtro la tabla se actualiza sola (sin "Aplicar Filtros").
+  // Al elegir un filtro la tabla se actualiza al instante (se filtra en pantalla). Si la categoría
+  // o el proceso ya no existen en la empresa/categoría elegida, se limpian.
   const handleFilterChange = (field: string, value: string) => {
-    const next = { ...filters, [field]: value };
-    setFilters(next);
-    if (userId) void fetchWorkFlowsWithUserId(userId, next, true);
+    setFilters((prev) => {
+      const next = { ...prev, [field]: value };
+      const inScope = (wf: WorkFlow) =>
+        (!next.company || cleanText(wf.company) === next.company) &&
+        (!next.category || cleanText(wf.category) === next.category);
+      if (
+        field === 'company' &&
+        next.category &&
+        !workFlows.some(
+          (wf) =>
+            (!next.company || cleanText(wf.company) === next.company) &&
+            cleanText(wf.category) === next.category
+        )
+      ) {
+        next.category = '';
+      }
+      if (
+        (field === 'company' || field === 'category') &&
+        next.process &&
+        !workFlows.some((wf) => inScope(wf) && cleanText(wf.process) === next.process)
+      ) {
+        next.process = '';
+      }
+      return next;
+    });
   };
 
   if (status === 'loading' || loading) {
@@ -1259,7 +1328,7 @@ function RequestBoard() {
                       Total de Flujos de Trabajo
                     </Text>
                     <Text size='lg' fw={600}>
-                      {workFlows.length}
+                      {visibleWorkFlows.length}
                     </Text>
                   </div>
                 </Group>
@@ -1275,7 +1344,7 @@ function RequestBoard() {
                     </Text>
                     <Text size='lg' fw={600}>
                       {
-                        workFlows.filter((t) => t.status_process?.toLowerCase() === 'en borrador')
+                        visibleWorkFlows.filter((t) => t.status_process?.toLowerCase() === 'en borrador')
                           .length
                       }
                     </Text>
@@ -1293,7 +1362,7 @@ function RequestBoard() {
                     </Text>
                     <Text size='lg' fw={600}>
                       {
-                        workFlows.filter((t) => t.status_process?.toLowerCase() === 'por autorizar')
+                        visibleWorkFlows.filter((t) => t.status_process?.toLowerCase() === 'por autorizar')
                           .length
                       }
                     </Text>
@@ -1311,7 +1380,7 @@ function RequestBoard() {
                     </Text>
                     <Text size='lg' fw={600}>
                       {
-                        workFlows.filter((t) => t.status_process?.toLowerCase() === 'abierto')
+                        visibleWorkFlows.filter((t) => t.status_process?.toLowerCase() === 'abierto')
                           .length
                       }
                     </Text>
@@ -1323,7 +1392,7 @@ function RequestBoard() {
         </Card>
 
         {/* Indicador de automejora de procesos (2026-11-09): solo con permiso de flujos y empresas habilitadas. */}
-        <IndicadorAutomejora from='admin-workflow' />
+        <IndicadorAutomejora from='admin-workflow' inicialAbierto={false} />
 
         {error && (
           <Alert
@@ -1360,8 +1429,10 @@ function RequestBoard() {
                     label='Empresa'
                     placeholder='Todas las empresas'
                     clearable
-                    data={companies}
-                    value={filters.company}
+                    searchable
+                    nothingFoundMessage='Sin coincidencias'
+                    data={filterCompanyOptions}
+                    value={filters.company || null}
                     onChange={(value) => handleFilterChange('company', value || '')}
                     leftSection={<IconBuilding size={16} />}
                     size='md'
@@ -1373,11 +1444,13 @@ function RequestBoard() {
                 </Grid.Col>
                 <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
                   <Select
-                    label='Categoria'
-                    placeholder='Todas las categorias'
+                    label='Categoría'
+                    placeholder='Todas las categorías'
                     clearable
-                    data={categories}
-                    value={filters.category}
+                    searchable
+                    nothingFoundMessage='Sin coincidencias'
+                    data={filterCategoryOptions}
+                    value={filters.category || null}
                     onChange={(value) => handleFilterChange('category', value || '')}
                     leftSection={<IconBuilding size={16} />}
                     size='md'
@@ -1390,10 +1463,12 @@ function RequestBoard() {
                 <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
                   <Select
                     label='Proceso'
-                    placeholder='Todas los procesos'
+                    placeholder='Todos los procesos'
                     clearable
-                    data={processes}
-                    value={filters.process}
+                    searchable
+                    nothingFoundMessage='Sin coincidencias'
+                    data={filterProcessOptions}
+                    value={filters.process || null}
                     onChange={(value) => handleFilterChange('process', value || '')}
                     leftSection={<IconBuilding size={16} />}
                     size='md'
@@ -1412,7 +1487,7 @@ function RequestBoard() {
                       { value: '1', label: 'Activo' },
                       { value: '0', label: 'Inactivo' },
                     ]}
-                    value={filters.active}
+                    value={filters.active || null}
                     onChange={(value) => handleFilterChange('active', value || '')}
                     leftSection={<IconFlag size={16} />}
                     size='md'
@@ -1445,8 +1520,9 @@ function RequestBoard() {
                 >
                   Limpiar Filtros
                 </Button>
+                {/* Los filtros se aplican al instante; esto solo vuelve a traer la lista. */}
                 <Button onClick={fetchWorkFlows} leftSection={<IconRefresh size={16} />}>
-                  Aplicar Filtros
+                  Actualizar lista
                 </Button>
               </Group>
             </Box>
@@ -1472,7 +1548,7 @@ function RequestBoard() {
               ariaLabel='Buscar flujos'
               meta={
                 searchInput.trim()
-                  ? `${visibleWorkFlows.length} de ${workFlows.length} flujo(s)`
+                  ? `${visibleWorkFlows.length} de ${filteredBySelects.length} flujo(s)`
                   : 'Una o varias palabras; no importan tildes ni mayúsculas'
               }
             />
@@ -1508,9 +1584,11 @@ function RequestBoard() {
                     </Table.Td>
                   </Table.Tr>
                 ) : (
-                  visibleWorkFlows.map((workflow) => (
+                  visibleWorkFlows.map((workflow, rowIndex) => (
                     <Table.Tr
-                      key={workflow.id}
+                      // El mismo flujo llega en varias filas (una por empresa y asignado): con
+                      // key={id} repetida React dejaba filas viejas al filtrar.
+                      key={`${workflow.id}-${workflow.company}-${workflow.assigned_process_category}-${rowIndex}`}
                       className='cursor-pointer transition-colors'
                       onClick={() => {
                         sessionStorage.setItem('selectedRequest', JSON.stringify(workflow));

@@ -2176,12 +2176,17 @@ function ViewRequestPage() {
         : orionFileIdParam
           ? 'sign'
           : null;
-    if (raw !== 'sign' || !deepLinkFileId || !currentUserEmailNorm) return raw;
+    if ((raw !== 'sign' && raw !== 'view') || !deepLinkFileId || !currentUserEmailNorm) return raw;
     const doc =
       orionDocuments[deepLinkFileId] ||
       orionInitialDocuments[deepLinkFileId] ||
       {};
+    // Ya firmó (o el documento terminó): volver desde Autorizaciones no reabre la ventana de firma.
     if (allSlotsCompletedForEmail(doc.signers, currentUserEmailNorm)) return null;
+    if (raw === 'view') {
+      const stView = String(doc.status || '').toUpperCase();
+      return stView === 'FIRMADO' || stView === 'RECHAZADO' ? null : raw;
+    }
     const pending = getCurrentPendingSigner(doc.signers);
     if (
       pending &&
@@ -2999,6 +3004,11 @@ function ViewRequestPage() {
                           autoOpenReview={
                             orionActionParam === 'review' &&
                             String(orionFileIdParam || '') === fileId
+                          }
+                          focusFromLink={
+                            from === 'authorization' &&
+                            Boolean(orionFileIdParam) &&
+                            String(orionFileIdParam) === fileId
                           }
                           processName={request?.process || request?.category || null}
                           requesterName={request?.requester || null}

@@ -115,7 +115,8 @@ export async function eliminarRegistro(
 
 /**
  * Tamaños máximos (EditSize) de los campos de texto del UDO de registros
- * sanitarios, leídos de la metadata de SAP (UserFieldsMD). Sirve para validar
+ * sanitarios (solo db_Alpha; los db_Memo no tienen tope), leídos de la
+ * metadata de SAP (UserFieldsMD). Sirve para validar
  * el largo ANTES de crear (así la simulación detecta "valor demasiado largo"
  * sin tener que intentar el POST). Devuelve un mapa { U_Campo: maxLargo }.
  */
@@ -136,8 +137,10 @@ export async function getFieldSizes(
       `UserFieldsMD?$filter=TableName eq '@${table}'&$select=Name,Type,EditSize&$top=200`
     );
     for (const f of data.value ?? []) {
-      // Solo campos de texto (alfanuméricos / memo) tienen límite relevante.
-      if (f.Type === 'db_Alpha' || f.Type === 'db_Memo') sizes[`U_${f.Name}`] = f.EditSize;
+      // Solo los alfanuméricos (db_Alpha) tienen tope real en SAP. Los memo
+      // (db_Memo, p. ej. U_SEND_Link con SubType st_Link) no tienen límite: su
+      // EditSize (254) es solo el tamaño de pantalla, así que no se registran.
+      if (f.Type === 'db_Alpha') sizes[`U_${f.Name}`] = f.EditSize;
     }
   } catch {
     // Si no se puede leer la metadata, no se valida el largo (no bloquea).

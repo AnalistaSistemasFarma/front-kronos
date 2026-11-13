@@ -327,6 +327,55 @@ html.dark .bg-red-50,
   box-shadow: inset 3px 0 0 var(--mantine-color-teal-6);
 }
 
+/* Documento al que se llegó desde Autorizaciones (2026-11-13): un brillo suave y una franja fina. */
+.doc-row--focus > td:first-child {
+  box-shadow: inset 2px 0 0 var(--mantine-color-blue-filled);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .doc-table .mantine-Table-tbody tr.doc-row--focus {
+    animation: docRowBreathe 1.6s ease-in-out 0.7s 2;
+  }
+}
+
+@keyframes docRowBreathe {
+  0%,
+  100% {
+    background: transparent;
+  }
+  50% {
+    background: color-mix(in srgb, var(--mantine-color-blue-light) 60%, transparent);
+  }
+}
+
+/* Distintivo «Firma» en adjuntos (2026-11-13): punto verde que titila. */
+.doc-sign-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--mantine-color-green-filled);
+  box-shadow: 0 0 0 0 color-mix(in srgb, var(--mantine-color-green-filled) 60%, transparent);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .doc-sign-dot {
+    animation: docSignBlink 1.6s ease-in-out infinite;
+  }
+}
+
+@keyframes docSignBlink {
+  0%,
+  100% {
+    opacity: 1;
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--mantine-color-green-filled) 60%, transparent);
+  }
+  50% {
+    opacity: 0.45;
+    box-shadow: 0 0 0 4px color-mix(in srgb, var(--mantine-color-green-filled) 0%, transparent);
+  }
+}
+
 .doc-cell--mono {
   font-family: var(--font-mono);
 }
@@ -465,6 +514,16 @@ html.dark .bg-red-50,
   }
 
   .doc-row--closed > td:first-child {
+    box-shadow: none;
+  }
+
+  .doc-table .mantine-Table-tr.doc-row--focus {
+    box-shadow:
+      inset 2px 0 0 var(--mantine-color-blue-filled),
+      0 1px 2px color-mix(in srgb, #000 4%, transparent);
+  }
+
+  .doc-row--focus > td:first-child {
     box-shadow: none;
   }
 
