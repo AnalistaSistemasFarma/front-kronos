@@ -18,7 +18,7 @@ import { capabilitiesFor, MAX_PROJECT_CONVERSATIONS } from '../chat/projects-rul
 import { assertAgentProjectConversation, designableAgents, type ProjectAccess, type ProjectUser } from '../chat/projects';
 import { serializeAttachment, type ChatAttachmentPayload } from '../chat/conversations';
 import { politicaGuardadaConCodigo } from './permisos-agentes';
-import { mensajeSoloDesarrollo } from './agentes-desarrollo-rules';
+import { avisoSinCodigo } from './agentes-desarrollo-rules';
 import { ProyectoError } from './acciones';
 import {
   archivosParaAgente,
@@ -466,7 +466,11 @@ export async function candidatosMesa(user: ProjectUser, project: ProjectAccess):
 }
 
 /** Crea una mesa: una conversación del proyecto (principal = moderador) + reglas + participantes. */
-export async function crearMesa(user: ProjectUser, project: ProjectAccess, entrada: Record<string, unknown>): Promise<{ idMesa: number; idConversation: number }> {
+export async function crearMesa(
+  user: ProjectUser,
+  project: ProjectAccess,
+  entrada: Record<string, unknown>
+): Promise<{ idMesa: number; idConversation: number; avisos: string[] }> {
   exigirEscritura(project);
   const candidatos = await candidatosMesa(user, project);
   const v = validarMesa(
@@ -482,8 +486,9 @@ export async function crearMesa(user: ProjectUser, project: ProjectAccess, entra
   const mesa = v.value;
 
   // Los que no están en el proyecto se designan al crear la mesa: solo el dueño
-  // (la misma regla de «Agregar asistentes»), y en un proyecto con acceso a
-  // código, solo agentes de desarrollo (regla del 2026-10-27).
+  // (la misma regla de «Agregar asistentes»). La mesa NO depende de que el
+  // proyecto sea de desarrollo (2026-11-11, Nicolás Rivera): un agente de negocio
+  // participa sin acceso al código (el puente le entrega «ninguno» y sin repos).
   const nuevos = mesa.participantes
     .map((p) => candidatos.find((c) => c.idAgent === p.idAgent)!)
     .filter((c) => !c.designado);
@@ -491,14 +496,11 @@ export async function crearMesa(user: ProjectUser, project: ProjectAccess, entra
     if (!capabilitiesFor(project.role).manageAgents) {
       throw new ProyectoError('Solo el dueño del proyecto puede sumar a la mesa agentes que todavía no están en el proyecto.', 403);
     }
-    const negocio = nuevos.filter((c) => !c.esDesarrollo);
-    if (negocio.length > 0 && (await politicaGuardadaConCodigo(project.idProject))) {
-      throw new ProyectoError(
-        `${mensajeSoloDesarrollo(negocio.map((c) => c.nombre))} Para agregarlo, primero deje los permisos del proyecto en «Ninguno».`,
-        400
-      );
-    }
   }
+  // Aviso informativo (no bloquea) si el proyecto tiene código y hay agentes de negocio en la mesa.
+  const negocio = mesa.participantes.map((p) => candidatos.find((c) => c.idAgent === p.idAgent)!).filter((c) => !c.esDesarrollo);
+  const avisos =
+    negocio.length > 0 && (await politicaGuardadaConCodigo(project.idProject).catch(() => false)) ? [avisoSinCodigo(negocio.map((c) => c.nombre))] : [];
   const activas = await prisma.chatConversation.count({ where: { id_project: project.idProject, archived: false } });
   if (activas >= MAX_PROJECT_CONVERSATIONS) {
     throw new ProyectoError(`El proyecto ya tiene ${MAX_PROJECT_CONVERSATIONS} conversaciones activas.`, 409);
@@ -579,7 +581,7 @@ export async function crearMesa(user: ProjectUser, project: ProjectAccess, entra
   // Primera ronda de una vez si está dentro del horario.
   const m = await cargarMesa({ id_mesa: creada.idMesa });
   if (m) await aplicarDecision(m, decidirTick(aEstadoMotor(m), now), now);
-  return creada;
+  return { ...creada, avisos };
 }
 
 async function mesaDelProyecto(project: ProjectAccess, idMesa: number): Promise<MesaFila> {

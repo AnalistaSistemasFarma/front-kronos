@@ -317,6 +317,36 @@ export async function openNextOrionSignerAuthorization(
   return result;
 }
 
+/**
+ * ¿Tiene (o tuvo) una autorización Orion en esta solicitud?
+ * Sirve para ver el flujo sin ser preparador de toda la empresa.
+ */
+export async function userHasOrionTaskOnRequest(
+  pool: SqlPool,
+  params: { requestId: number; userId: string; fileId?: string | null }
+): Promise<boolean> {
+  const uid = String(params.userId || '').trim();
+  if (!uid || !Number.isInteger(params.requestId) || params.requestId <= 0) return false;
+  const fileId = String(params.fileId || '').trim();
+  const result = await pool
+    .request()
+    .input('id_request', sql.Int, params.requestId)
+    .input('id_user', sql.NVarChar(255), uid)
+    .query(`
+      SELECT trg.resolution
+      FROM task_request_general trg
+      INNER JOIN task_process_category tpc ON tpc.id = trg.id_task
+      WHERE trg.id_request_general = @id_request
+        AND trg.id_assigned = @id_user
+        AND tpc.is_authorization = 1
+        AND CHARINDEX(N'[orionAuth]', ISNULL(trg.resolution, N'')) > 0
+    `);
+  const rows = result.recordset as Array<{ resolution?: string | null }>;
+  if (!rows.length) return false;
+  if (!fileId) return true;
+  return rows.some((row) => parseOrionFileIdFromResolution(row.resolution) === fileId);
+}
+
 /** ¿El usuario tiene autorización FIRMA pendiente para este fileId? */
 export async function userHasPendingOrionSignerAuth(
   pool: SqlPool,

@@ -22,6 +22,8 @@ import {
   IconChevronRight,
   IconClipboardList,
   IconListCheck,
+  IconShieldCheck,
+  IconSignature,
   IconTicket,
 } from '@tabler/icons-react';
 import { useSession } from 'next-auth/react';
@@ -34,6 +36,7 @@ import {
   inferNotificationPath,
   isExternalNotificationPath,
 } from '../lib/notifications/resolveNotificationTarget';
+import { notificationKind, type NotificationKind } from '../lib/notifications/notificationKind';
 
 interface Notification {
   id: number;
@@ -74,16 +77,14 @@ async function apiFetch(input: string, init?: RequestInit): Promise<Response> {
   });
 }
 
-function pickNotificationIcon(path: string | null, title: string) {
-  const text = `${path ?? ''} ${title}`.toLowerCase();
-  if (text.includes('ticket') || text.includes('view-ticket') || text.includes('mesa de ayuda')) {
-    return IconTicket;
-  }
-  if (text.includes('actividad') || text.includes('view-activities')) {
-    return IconListCheck;
-  }
-  return IconClipboardList;
-}
+/** Ícono por tipo (2026-11-11): firma y validación con distintivo propio (lib/notifications/notificationKind.ts). */
+const KIND_ICON: Record<NotificationKind, typeof IconClipboardList> = {
+  validacion: IconShieldCheck,
+  firma: IconSignature,
+  ticket: IconTicket,
+  actividad: IconListCheck,
+  general: IconClipboardList,
+};
 
 export default function NotificationBell() {
   const { data: session, status } = useSession();
@@ -97,6 +98,13 @@ export default function NotificationBell() {
   // Lista de NO leídas: es la que alimenta el polling recurrente y el badge.
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
+  // Sube cuando aumentan las no leídas: la campana vuelve a repicar (key del contenedor).
+  const [ringKey, setRingKey] = useState(0);
+  const prevUnreadRef = useRef(0);
+  useEffect(() => {
+    if (unreadCount > prevUnreadRef.current) setRingKey((k) => k + 1);
+    prevUnreadRef.current = unreadCount;
+  }, [unreadCount]);
   const [fetching, setFetching] = useState(false);
   const [mounted, setMounted] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
@@ -369,16 +377,31 @@ export default function NotificationBell() {
           color='red'
           offset={4}
         >
-          <Tooltip label='Notificaciones' withArrow>
-            <ActionIcon
-              variant='subtle'
-              color='gray'
-              onClick={() => setOpened((o) => !o)}
-              aria-label='Notificaciones'
-            >
-              {unreadCount > 0 ? <IconBellRinging size={18} /> : <IconBell size={18} />}
-            </ActionIcon>
-          </Tooltip>
+          {/* Repica 3 veces al cargar y cada vez que llega una nueva (ringKey reinicia la animación);
+              luego queda quieta con el número rojo. Ondas en spans propios, fuera del botón
+              (ActionIcon recorta con overflow:hidden y usa ::before). Estilos en globals.css. */}
+          <span key={ringKey} className='notification-bell-wrap'>
+            {unreadCount > 0 ? (
+              <>
+                <span className='notification-bell-wave' aria-hidden />
+                <span className='notification-bell-wave notification-bell-wave--late' aria-hidden />
+              </>
+            ) : null}
+            <Tooltip label='Notificaciones' withArrow>
+              <ActionIcon
+                variant='subtle'
+                color='gray'
+                onClick={() => setOpened((o) => !o)}
+                aria-label={unreadCount > 0 ? `Notificaciones: ${unreadCount} sin leer` : 'Notificaciones'}
+              >
+                {unreadCount > 0 ? (
+                  <IconBellRinging size={18} className='notification-bell-icon--ringing' />
+                ) : (
+                  <IconBell size={18} />
+                )}
+              </ActionIcon>
+            </Tooltip>
+          </span>
         </Indicator>
       </Popover.Target>
       <Popover.Dropdown p={0} className='notification-bell-dropdown'>
@@ -491,8 +514,11 @@ function NotificationRow({
 }) {
   const detailPath = inferNotificationPath(n);
   const actionLabel = getNotificationActionLabel(detailPath, n.title);
-  const Icon = pickNotificationIcon(detailPath, n.title);
+  const kind = notificationKind(n.title, detailPath);
+  const Icon = KIND_ICON[kind.kind];
   const isUnread = !n.read_at;
+  // Firma y validación conservan su color aunque estén leídas; las demás, gris al leerlas (como antes).
+  const hasOwnColor = kind.label !== null;
   const hasLink = Boolean(detailPath);
 
   return (
@@ -534,8 +560,9 @@ function NotificationRow({
           <ThemeIcon
             size={36}
             radius='md'
-            variant={isUnread ? 'light' : 'default'}
-            color={isUnread ? 'blue' : 'gray'}
+            variant={isUnread || hasOwnColor ? 'light' : 'default'}
+            color={isUnread || hasOwnColor ? kind.color : 'gray'}
+            aria-hidden
             style={{ flexShrink: 0 }}
           >
             <Icon size={18} />
@@ -562,6 +589,11 @@ function NotificationRow({
               {n.body}
             </Text>
             <Group gap={6} mt={6} wrap='nowrap'>
+              {kind.label ? (
+                <Badge size='xs' variant='light' color={kind.color} radius='xl' style={{ flexShrink: 0 }}>
+                  {kind.label}
+                </Badge>
+              ) : null}
               <Text size='xs' className='notification-bell-text-muted'>
                 {formatRelative(n.created_at)}
               </Text>

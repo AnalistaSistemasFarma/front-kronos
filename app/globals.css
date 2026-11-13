@@ -1230,6 +1230,60 @@ button.ios-process-card__head {
   animation-fill-mode: forwards;
 }
 
+/* ─── Campana de notificaciones: repica si hay sin leer (2026-11-12) ───
+   Repique rápido y notorio, 3 veces (~6 s) y luego quieta con el número rojo (WCAG 2.2.2:
+   nada se mueve más de 5 s sin parar). Vuelve a sonar solo cuando llega una nueva
+   (NotificationBell cambia el key). Solo transform/opacity; sin will-change permanente. */
+@keyframes notificationBellRing {
+  0% { transform: rotate(0deg) scale(1); }
+  5% { transform: rotate(26deg) scale(1.18); }
+  10% { transform: rotate(-24deg) scale(1.18); }
+  15% { transform: rotate(22deg) scale(1.15); }
+  20% { transform: rotate(-20deg) scale(1.12); }
+  25% { transform: rotate(16deg) scale(1.1); }
+  30% { transform: rotate(-12deg) scale(1.06); }
+  35% { transform: rotate(8deg) scale(1.03); }
+  40% { transform: rotate(-4deg) scale(1); }
+  45%, 100% { transform: rotate(0deg) scale(1); }
+}
+
+.notification-bell-icon--ringing {
+  transform-origin: 50% 10%;
+  animation: notificationBellRing 2s ease-in-out 0.3s 3;
+}
+
+/* Ondas pequeñas alrededor del botón (dos anillos desfasados), al ritmo del repique. */
+@keyframes notificationBellWave {
+  0% { transform: scale(0.7); opacity: 0.55; }
+  70%, 100% { transform: scale(1.45); opacity: 0; }
+}
+
+.notification-bell-wrap {
+  position: relative;
+  display: inline-flex;
+}
+
+.notification-bell-wave {
+  position: absolute;
+  inset: 0;
+  border-radius: 999px;
+  border: 2px solid var(--mantine-color-red-filled);
+  opacity: 0;
+  pointer-events: none;
+  animation: notificationBellWave 2s ease-out 0.3s 3;
+}
+
+.notification-bell-wave--late {
+  animation-delay: 0.7s;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .notification-bell-icon--ringing,
+  .notification-bell-wave {
+    animation: none;
+  }
+}
+
 /* ─── Campana de notificaciones (tema claro / oscuro) ─── */
 .notification-bell-dropdown.mantine-Popover-dropdown {
   background-color: var(--app-surface, var(--surface)) !important;
@@ -3643,7 +3697,10 @@ button.chat-galeria__archivo {
   background-color: transparent;
 }
 
-.chat-visor__contenido--doc {
+/* Doble clase (2026-11-12): con una sola, el `display: block` del Paper de
+   Mantine (misma especificidad, carga después) le ganaba; el cuerpo no se
+   estiraba y en el iPhone la imagen del visor quedaba en blanco. */
+.chat-visor__contenido.chat-visor__contenido--doc {
   display: flex;
   flex-direction: column;
 }
@@ -3651,6 +3708,12 @@ button.chat-galeria__archivo {
 .chat-visor__contenido--doc .chat-visor__cuerpo {
   flex: 1;
   min-height: 0;
+}
+
+/* Base `auto`: el área toma su altura definida (no el 0 % del `flex: 1`),
+   así la imagen se ajusta a la pantalla en vez de salir a tamaño natural. */
+.chat-visor__contenido--doc .chat-visor__area {
+  flex: 1 1 auto;
 }
 
 .chat-visor__area {
