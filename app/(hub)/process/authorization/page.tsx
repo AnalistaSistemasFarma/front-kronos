@@ -50,13 +50,12 @@ import {
   IconFileText,
   IconEye,
   IconNotes,
-  IconRoute,
   IconListDetails,
   IconProgress,
 } from '@tabler/icons-react';
 import toast from 'react-hot-toast';
 import AuthorizationDetailModal from './AuthorizationDetailModal';
-import DocumentFlowModal, { type DocumentFlowTarget } from '../../../../components/orion/DocumentFlowModal';
+import type { DocumentFlowTarget } from '../../../../components/orion/DocumentFlowModal';
 import { StatFilterTile } from '../../../../components/request-general/list/RequestListUi';
 import { panelStyles as ps } from '../../../../components/ui/panel/Panel';
 import requestListStyles from '../../../../components/request-general/list/requestList.module.css';
@@ -70,6 +69,10 @@ import {
 } from '../../../../lib/orion/signerAuthMarkers';
 import { prefetchDocumentFlow } from '../../../../lib/orion/documentFlowClient';
 import { prefetchAuthorizationDetail } from '../../../../lib/authorization/detailPrefetch';
+import {
+  authorizationPreviewPdfUrl,
+  warmAuthorizationPreviewPdf,
+} from '../../../../lib/authorization/previewPdf';
 import { formatDbDateTime } from '../../../../lib/dbDate';
 
 interface AuthorizationRequest {
@@ -231,10 +234,10 @@ function AuthorizationBoard() {
     const [requests, setRequests] = useState<AuthorizationRequest[]>([]);
     const [companyOptions, setCompanyOptions] = useState<{ value: string; label: string }[]>([]);
 
-    // Por defecto Pendiente: «Todos» carga el historial completo y se siente muy lento.
+    // Por defecto «Todos» (pedido de Juan, 2026-11-13): se ve el historial completo al entrar.
     const [filters, setFilters] = useState({
         id: '',
-        status: '4',
+        status: '0',
         company: '',
         date_from: '',
         date_to: '',
@@ -262,6 +265,14 @@ function AuthorizationBoard() {
           prefetchAuthorizationDetail(requestId, withNotes, session?.user?.email);
           const flow = flowTargetOf(req);
           if (flow) prefetchDocumentFlow(flow.requestId, flow.fileId);
+          // El PDF de la vista previa: el servidor lo deja armado para cuando se abra el detalle.
+          warmAuthorizationPreviewPdf(
+            authorizationPreviewPdfUrl({
+              requestId: requestId,
+              resolution: req.resolution,
+              isFirma: isFirmaAuthorizationRow(req),
+            })
+          );
         }, 180);
     };
 
@@ -271,8 +282,8 @@ function AuthorizationBoard() {
         setDetailModalOpened(true);
     };
 
-    // «Ver flujo» (2026-11-11): recorrido del documento de una autorización de firma o validación.
-    const [flowTarget, setFlowTarget] = useState<DocumentFlowTarget | null>(null);
+    // Documento de una autorización de firma o validación: su recorrido se precarga para el final
+    // de «Ver detalle» (el botón «Ver flujo» se quitó el 2026-11-13).
     const flowTargetOf = (req: AuthorizationRequest): DocumentFlowTarget | null => {
         const isReview = isOrionReviewResolution(req.resolution);
         const fileId = isReview ? parseOrionReviewFileId(req.resolution) : parseOrionFileIdFromAuthResolution(req.resolution);
@@ -394,7 +405,7 @@ function AuthorizationBoard() {
         try {
             // El servidor toma el usuario de la sesión; `id` solo indica que ya se resolvió.
             const params = new URLSearchParams();
-            params.set('status', f.status || '4');
+            params.set('status', f.status || '0');
             if (f.id) params.set('id', f.id);
             if (f.company) params.set('company', f.company);
             if (f.date_from) params.set('date_from', f.date_from);
@@ -472,7 +483,7 @@ function AuthorizationBoard() {
     };
 
     const clearFilters = () => {
-        const empty = { id: '', status: '4', company: '', date_from: '', date_to: '' };
+        const empty = { id: '', status: '0', company: '', date_from: '', date_to: '' };
         setFilters(empty);
         setSelectedIds(new Set());
         if (userId) {
@@ -683,7 +694,7 @@ function AuthorizationBoard() {
 
     /**
      * ¿El 👁 solo abriría la misma ventana de «Ver detalle»? (firma pendiente o validación de PDF).
-     * En ese caso el botón 👁 de Acciones no se muestra: quedan «Ver detalle» y «Ver flujo» (2026-11-11).
+     * Solo cambia la etiqueta del 👁 («Ver solicitud»); el 👁 vuelve a mostrarse siempre (2026-11-13).
      * El enlace «#número» de la solicitud sí se mantiene.
      */
     const opensPreview = (req: AuthorizationRequest) =>
@@ -1065,7 +1076,7 @@ function AuthorizationBoard() {
               onFocusCapture={() => prefetchAcciones(req)}
             >
             <Group gap='xs' wrap='nowrap'>
-                {isLinked && !opensPreview(req) ? (
+                {isLinked ? (
                 <Tooltip label={relatedLinkLabel(req)}>
                 <ActionIcon
                     variant='light'
@@ -1087,22 +1098,6 @@ function AuthorizationBoard() {
                     <IconNotes size={16} />
                 </ActionIcon>
                 </Tooltip>
-                {flowTargetOf(req) ? (
-                <Tooltip label='Ver flujo del documento'>
-                <ActionIcon
-                    variant='light'
-                    color='violet'
-                    onClick={() => {
-                      const t = flowTargetOf(req);
-                      if (t) prefetchDocumentFlow(t.requestId, t.fileId);
-                      setFlowTarget(t);
-                    }}
-                    aria-label='Ver flujo del documento'
-                >
-                    <IconRoute size={16} />
-                </ActionIcon>
-                </Tooltip>
-                ) : null}
                 {isPending && (
                 <>
                     <Tooltip label='Autorizar'>
@@ -1223,7 +1218,7 @@ function AuthorizationBoard() {
                 </Text>
             </Group>
 
-            {isLinked && !opensPreview(req) ? (
+            {isLinked ? (
             <Button
                 size='xs'
                 variant='light'
@@ -1249,26 +1244,6 @@ function AuthorizationBoard() {
             >
                 Ver detalle
             </Button>
-            {flowTargetOf(req) ? (
-            <Button
-                size='xs'
-                variant='light'
-                color='violet'
-                fullWidth
-                mt={6}
-                leftSection={<IconRoute size={14} />}
-                onMouseEnter={() => prefetchAcciones(req)}
-                onFocus={() => prefetchAcciones(req)}
-                onClick={() => {
-                  const t = flowTargetOf(req);
-                  if (t) prefetchDocumentFlow(t.requestId, t.fileId);
-                  setFlowTarget(t);
-                }}
-            >
-                Ver flujo
-            </Button>
-            ) : null}
-
             {isPending && (
                 <Group grow mt='xs'>
                 <Button
@@ -1708,7 +1683,6 @@ function AuthorizationBoard() {
             onClose={() => setDetailModalOpened(false)}
             request={detailRequest}
         />
-        <DocumentFlowModal target={flowTarget} onClose={() => setFlowTarget(null)} />
         </div>
     );
     }

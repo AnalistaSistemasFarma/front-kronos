@@ -24,6 +24,8 @@ import {
 } from '@mantine/core';
 import { useMediaQuery } from '@mantine/hooks';
 import PurchaseRequestDetail from '../purchases/PurchaseRequestDetail';
+import DocumentFlowCompact from '@/components/orion/DocumentFlowCompact';
+import { authorizationPreviewPdfUrl } from '../../../../lib/authorization/previewPdf';
 import SalesOfferDetail from '../sales/SalesOfferDetail';
 import {
   IconBuilding,
@@ -223,8 +225,8 @@ export default function AuthorizationDetailModal({ opened, onClose, request }: P
   const [isSale, setIsSale] = useState(false);
   useEffect(() => setIsPurchase(false), [idReqGen]);
   const isFirmaAuth = isFirmaAuthorizationRequest(request);
-  // En firma: sin adjuntos ni notas. El recorrido del documento va aparte, en el botón «Ver flujo»
-  // de Acciones (DocumentFlowModal: nombres, estado y fecha; decisión de Juan del 2026-11-11).
+  // En firma: sin adjuntos ni notas. El recorrido del documento va al final del detalle en versión
+  // corta (DocumentFlowCompact, 2026-11-13); «Ver flujo» en Acciones abre la versión completa.
   const hideSensitiveFirmaContext = isFirmaAuth;
 
   useEffect(() => {
@@ -318,21 +320,19 @@ export default function AuthorizationDetailModal({ opened, onClose, request }: P
   const isReview = isOrionReviewResolution(request?.resolution);
   const reviewDocName = isReview ? parseOrionReviewFileName(request?.resolution) : null;
   const reviewFileId = isReview ? parseOrionReviewFileId(request?.resolution) : null;
-  const reviewPdfUrl =
-    reviewFileId && idReqGen
-      ? `/api/requests-general/attachment-file?requestId=${idReqGen}&fileId=${encodeURIComponent(reviewFileId)}`
-      : null;
-  // Firma pendiente: el firmante debe poder ver el documento que va a autorizar (solo ese
-  // archivo; los demás adjuntos siguen ocultos). signed-file entrega la última versión con
-  // las firmas previas o, si aún no hay firmas, redirige al PDF original de la solicitud.
-  // watermark/annotations=0: preview más rápida (sin sellos pdf-lib).
+  // Firma: el firmante ve solo el documento a autorizar (los demás adjuntos siguen ocultos).
+  // signed-file entrega la última versión con las firmas hechas (o el original si aún no hay)
+  // y no se guarda en el navegador, así que al volver se ve lo último firmado. Misma URL que
+  // la precarga al pasar el mouse (lib/authorization/previewPdf) para aprovecharla.
   const firmaFileId = isFirmaAuth ? parseOrionFileIdFromAuthResolution(request?.resolution) : null;
-  const firmaPdfUrl =
-    firmaFileId && idReqGen
-      ? `/api/integrations/orion/signed-file?requestId=${idReqGen}&fileId=${encodeURIComponent(firmaFileId)}&watermark=0&annotations=0`
-      : null;
-  const previewPdfUrl = reviewPdfUrl ?? firmaPdfUrl;
-  const previewDocName = reviewPdfUrl ? reviewDocName : firmaDocName;
+  const previewPdfUrl = authorizationPreviewPdfUrl({
+    requestId: idReqGen,
+    resolution: request?.resolution,
+    isFirma: isFirmaAuth,
+  });
+  /** Documento cuyo recorrido se muestra al final del detalle. */
+  const flowFileId = firmaFileId ?? reviewFileId;
+  const previewDocName = isReview ? reviewDocName : firmaDocName;
 
   return (
     <Modal
@@ -375,7 +375,16 @@ export default function AuthorizationDetailModal({ opened, onClose, request }: P
                 </Badge>
               )}
               {isFirmaAuth && firmaDocName ? (
-                <Alert color='violet' variant='light' mt='sm' title='Documento a firmar'>
+                <Alert
+                  color='violet'
+                  variant='light'
+                  mt='sm'
+                  title={
+                    request?.status === 'pendiente'
+                      ? 'Documento a firmar'
+                      : 'Documento (se muestra la última versión firmada)'
+                  }
+                >
                   <Text size='sm' fw={600} style={{ wordBreak: 'break-word' }}>
                     {firmaDocName}
                   </Text>
@@ -397,42 +406,7 @@ export default function AuthorizationDetailModal({ opened, onClose, request }: P
               ) : null}
             </div>
 
-            {loading ? (
-              <Stack gap='md' aria-busy aria-label='Cargando detalle de la solicitud'>
-                {previewPdfUrl ? <Skeleton height={isMobile ? 220 : 280} radius='md' /> : null}
-                <Grid>
-                  {Array.from({ length: 4 }).map((_, i) => (
-                    <Grid.Col span={{ base: 12, sm: 6 }} key={`sk-meta-${i}`}>
-                      <Skeleton height={12} width='40%' mb={8} radius='sm' />
-                      <Skeleton height={18} width='72%' radius='sm' />
-                    </Grid.Col>
-                  ))}
-                </Grid>
-                <Skeleton height={64} radius='md' />
-                <Grid>
-                  {Array.from({ length: 4 }).map((_, i) => (
-                    <Grid.Col span={{ base: 12, sm: 6 }} key={`sk-card-${i}`}>
-                      <Skeleton height={72} radius='md' />
-                    </Grid.Col>
-                  ))}
-                </Grid>
-                {!hideSensitiveFirmaContext ? (
-                  <>
-                    <Skeleton height={20} width={120} radius='sm' />
-                    <Skeleton height={88} radius='md' />
-                  </>
-                ) : (
-                  <Skeleton height={56} radius='md' />
-                )}
-              </Stack>
-            ) : (
-              <>
-            {/* Compras: si esta autorización es de una solicitud de compra, se muestra con el diseño de SAPSEND. */}
-            {idReqGen ? <PurchaseRequestDetail requestId={idReqGen} onLoaded={setIsPurchase} /> : null}
-
-            {/* Ventas: oferta en SAP con cupo, % de extracupo y cartera por edades para decidir. */}
-            {idReqGen ? <SalesOfferDetail requestId={idReqGen} onLoaded={setIsSale} /> : null}
-
+            {/* El documento sale apenas se abre: no espera a que cargue el resto del detalle. */}
             {previewPdfUrl ? (
               <Card withBorder radius='md' p={0} style={{ overflow: 'hidden' }}>
                 <Group justify='space-between' px='sm' py={6} wrap='nowrap'>
@@ -467,6 +441,41 @@ export default function AuthorizationDetailModal({ opened, onClose, request }: P
                 />
               </Card>
             ) : null}
+
+            {loading ? (
+              <Stack gap='md' aria-busy aria-label='Cargando detalle de la solicitud'>
+                <Grid>
+                  {Array.from({ length: 4 }).map((_, i) => (
+                    <Grid.Col span={{ base: 12, sm: 6 }} key={`sk-meta-${i}`}>
+                      <Skeleton height={12} width='40%' mb={8} radius='sm' />
+                      <Skeleton height={18} width='72%' radius='sm' />
+                    </Grid.Col>
+                  ))}
+                </Grid>
+                <Skeleton height={64} radius='md' />
+                <Grid>
+                  {Array.from({ length: 4 }).map((_, i) => (
+                    <Grid.Col span={{ base: 12, sm: 6 }} key={`sk-card-${i}`}>
+                      <Skeleton height={72} radius='md' />
+                    </Grid.Col>
+                  ))}
+                </Grid>
+                {!hideSensitiveFirmaContext ? (
+                  <>
+                    <Skeleton height={20} width={120} radius='sm' />
+                    <Skeleton height={88} radius='md' />
+                  </>
+                ) : (
+                  <Skeleton height={56} radius='md' />
+                )}
+              </Stack>
+            ) : (
+              <>
+            {/* Compras: si esta autorización es de una solicitud de compra, se muestra con el diseño de SAPSEND. */}
+            {idReqGen ? <PurchaseRequestDetail requestId={idReqGen} onLoaded={setIsPurchase} /> : null}
+
+            {/* Ventas: oferta en SAP con cupo, % de extracupo y cartera por edades para decidir. */}
+            {idReqGen ? <SalesOfferDetail requestId={idReqGen} onLoaded={setIsSale} /> : null}
 
             <Divider />
 
@@ -613,8 +622,8 @@ export default function AuthorizationDetailModal({ opened, onClose, request }: P
 
             {hideSensitiveFirmaContext ? (
               <Alert color='blue' variant='light' icon={<IconAlertCircle size={16} />}>
-                Por privacidad, en esta autorización no se muestran adjuntos, firmantes ni el
-                avance del proceso de firma.
+                Por privacidad, en esta autorización no se muestran los demás adjuntos ni las
+                notas de la solicitud.
                 {request?.status === 'pendiente'
                   ? ' Autorice en el listado para poder firmar su parte.'
                   : ' Abra la solicitud para firmar su parte.'}
@@ -714,8 +723,18 @@ export default function AuthorizationDetailModal({ opened, onClose, request }: P
                 </div>
               </>
             )}
+
               </>
             )}
+
+            {/* Recorrido del documento (firma o validación), versión corta y sin animaciones.
+                Fuera de la espera del detalle: se pide apenas se abre (o ya viene precargado). */}
+            {flowFileId && idReqGen ? (
+              <>
+                <Divider />
+                <DocumentFlowCompact requestId={idReqGen} fileId={flowFileId} />
+              </>
+            ) : null}
           </Stack>
         )}
       </Box>

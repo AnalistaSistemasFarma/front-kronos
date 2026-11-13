@@ -21,7 +21,7 @@ import {
   IconTrash,
   IconUsers,
 } from '@tabler/icons-react';
-import { useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import type { OrionSignatureState } from '../../lib/orion/types';
 import OrionSignatureFlow from './OrionSignatureFlow';
 import {
@@ -43,6 +43,11 @@ import DocStageTrack from './DocStageTrack';
 import ViewOnlineButton from './ViewOnlineButton';
 import OrionAnnotationsModal from './OrionAnnotationsModal';
 import { emailHasSigned } from '../../lib/orion/annotations';
+import {
+  allSlotsCompletedForEmail,
+  getCurrentPendingSigner,
+  signersForEmail,
+} from '../../lib/orion/signerStatus';
 
 type RowProps = OrionAttachmentSignActionsProps & {
   rowNumber?: number | string;
@@ -59,6 +64,11 @@ type RowProps = OrionAttachmentSignActionsProps & {
   autoOpenReview?: boolean;
   /** PDF que salió de un Word en preparación: se muestra como sub-fila debajo de ese Word. */
   nestedUnderWord?: boolean;
+  /**
+   * Llegó desde Autorizaciones por este documento (2026-11-13): la página baja hasta la fila,
+   * que brilla suave dos veces y queda con una franja azul fina.
+   */
+  focusFromLink?: boolean;
 };
 
 /** Etapas del PDF para firmar (su validación es independiente de la del Word del que salió). */
@@ -131,10 +141,44 @@ export default function OrionAttachmentTableRow({
   testDeleteSlot,
   autoOpenReview = false,
   nestedUnderWord = false,
+  focusFromLink = false,
   ...props
 }: RowProps) {
   void previewUrl; // OneDrive webUrl no se usa: Ver en línea va por proxy SynerLink.
   const d = useOrionAttachmentDerived(props);
+  const rowRef = useRef<HTMLTableRowElement>(null);
+  const scrolledRef = useRef(false);
+
+  useEffect(() => {
+    if (!focusFromLink || scrolledRef.current) return;
+    scrolledRef.current = true;
+    // Espera a que la tabla termine de pintarse antes de bajar hasta la fila.
+    const timer = window.setTimeout(() => {
+      const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+      rowRef.current?.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'center' });
+    }, 350);
+    return () => window.clearTimeout(timer);
+  }, [focusFromLink]);
+
+  /** Documento de firma electrónica (tiene firmantes o ya se creó en Orion): distintivo verde que titila. */
+  const isSignDoc = d.signers.length > 0 || Boolean(d.state.orionDocumentId);
+
+  /** Etiqueta de la firma del usuario en este documento (ayuda a distinguirlo entre muchos adjuntos). */
+  const myEmail = String(props.currentUserEmail || '').trim().toLowerCase();
+  const isMySignDoc = Boolean(
+    myEmail && signersForEmail(d.state.signers, myEmail).length > 0
+  );
+  const mySignTag: { label: string; color: string } | null = !isMySignDoc
+    ? null
+    : allSlotsCompletedForEmail(d.state.signers, myEmail)
+      ? { label: 'Usted firmó', color: 'teal' }
+      : String(d.state.status || '').toUpperCase() === 'RECHAZADO'
+        ? null
+        : String(getCurrentPendingSigner(d.state.signers)?.email || '')
+              .trim()
+              .toLowerCase() === myEmail
+          ? { label: 'Le toca firmar', color: 'blue' }
+          : null;
   const [extensionLoading, setExtensionLoading] = useState(false);
   const [renewLoading, setRenewLoading] = useState(false);
   const [deleteLoading, setDeleteLoading] = useState(false);
@@ -292,7 +336,15 @@ export default function OrionAttachmentTableRow({
   return (
     <>
     <Table.Tr
-      className={isClosed ? 'doc-row doc-row--closed' : 'doc-row'}
+      ref={rowRef}
+      className={[
+        'doc-row',
+        isClosed ? 'doc-row--closed' : '',
+        focusFromLink ? 'doc-row--focus' : '',
+      ]
+        .filter(Boolean)
+        .join(' ')}
+      aria-current={focusFromLink ? 'true' : undefined}
       style={
         nestedUnderWord
           ? { background: 'color-mix(in srgb, var(--mantine-color-teal-light) 45%, transparent)' }
@@ -321,6 +373,27 @@ export default function OrionAttachmentTableRow({
               <Text size='xs' c='dimmed' mt={2}>
                 {fileSizeLabel}
               </Text>
+            ) : null}
+            {isSignDoc ? (
+              <Group gap={6} mt={4} wrap='wrap'>
+                <Tooltip label='Este documento es de firma electrónica' withArrow>
+                  <Badge
+                    size='sm'
+                    variant='light'
+                    color='green'
+                    leftSection={<span className='doc-sign-dot' aria-hidden />}
+                    styles={{ label: { textTransform: 'none' } }}
+                  >
+                    Firma
+                  </Badge>
+                </Tooltip>
+                {mySignTag ? (
+                  <Text size='xs' c={mySignTag.color} className='flex items-center gap-1'>
+                    <IconSignature size={12} aria-hidden />
+                    {mySignTag.label}
+                  </Text>
+                ) : null}
+              </Group>
             ) : null}
             {d.state.sourceDraftFileId ? (
               <Tooltip
