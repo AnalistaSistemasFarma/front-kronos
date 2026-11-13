@@ -54,10 +54,19 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
     const { id: userId } = await params;
     const body = await request.json();
-    const companyId = Number(body.companyId);
+    // Varias empresas a la vez (companyIds) con el mismo conjunto de subprocesos;
+    // companyId sigue aceptándose para una sola empresa.
+    const rawCompanyIds: unknown[] = Array.isArray(body.companyIds)
+      ? body.companyIds
+      : [body.companyId];
+    const parsedCompanyIds = rawCompanyIds.map(Number);
+    const companyIds = [...new Set(parsedCompanyIds)];
     const desiredSubprocessIds = normalizeSubprocessIds(body.subprocessIds);
 
-    if (!Number.isFinite(companyId)) {
+    if (
+      companyIds.length === 0 ||
+      !parsedCompanyIds.every((id) => Number.isInteger(id) && id > 0)
+    ) {
       return NextResponse.json({ error: 'Company ID is required' }, { status: 400 });
     }
 
@@ -69,12 +78,23 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       return NextResponse.json({ error: 'User not found' }, { status: 404 });
     }
 
-    const result = await syncUserCompanySubprocesses({
-      userId,
-      companyId,
-      subprocessIds: desiredSubprocessIds,
-      mode: 'replace',
-    });
+    let added = 0;
+    let removed = 0;
+    const details: string[] = [];
+    // En serie: cada empresa consolida los company_user del mismo usuario.
+    for (const companyId of companyIds) {
+      const result = await syncUserCompanySubprocesses({
+        userId,
+        companyId,
+        subprocessIds: desiredSubprocessIds,
+        mode: 'replace',
+      });
+      added += result.added;
+      removed += result.removed;
+      details.push(
+        `Company ${companyId}: assigned ${result.added}, removed ${result.removed}. Final: [${result.finalIds.join(', ')}]`
+      );
+    }
 
     // Los permisos del chat van en caché unos segundos (lib/chat/access.ts).
     invalidateChatAccessCache();
@@ -84,14 +104,15 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
         user_id: userId,
         action: 'UPDATE_SUBPROCESSES',
         performed_by: session.user.email,
-        details: `Company ${companyId}: assigned ${result.added}, removed ${result.removed}. Final: [${result.finalIds.join(', ')}]`,
+        details: details.join(' | '),
       },
     });
 
     return NextResponse.json({
       message: 'Subprocesses updated successfully',
-      added: result.added,
-      removed: result.removed,
+      added,
+      removed,
+      companies: companyIds.length,
     });
   } catch (error) {
     console.error('Error assigning subprocesses:', error);
