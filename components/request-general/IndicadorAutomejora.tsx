@@ -29,13 +29,14 @@ interface Respuesta {
 
 const MAX_FILAS = 8;
 
-export default function IndicadorAutomejora(_props: { from?: string }) {
+/** inicialAbierto=false: arranca plegado (Administración de flujos, 2026-11-13). */
+export default function IndicadorAutomejora({ inicialAbierto = true }: { from?: string; inicialAbierto?: boolean }) {
   const [datos, setDatos] = useState<Respuesta | null>(null);
   const [oculto, setOculto] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [empresa, setEmpresa] = useState<string | null>(null);
   const [cargando, setCargando] = useState(false);
-  const [abierto, setAbierto] = useState(true);
+  const [abierto, setAbierto] = useState(inicialAbierto);
   const [todos, setTodos] = useState(false);
 
   const cargar = useCallback(async (idEmpresa: string | null, refrescar = false) => {

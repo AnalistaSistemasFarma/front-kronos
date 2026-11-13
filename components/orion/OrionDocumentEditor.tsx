@@ -1122,8 +1122,8 @@ export default function OrionDocumentEditor({
 
         {editorStep === 1 && !assignmentsEditable && (
           <Alert color='gray' variant='light' mb='md'>
-            Solo el creador puede editar firmantes y posiciones mientras la solicitud esté abierta y
-            nadie haya firmado.
+            Solo un preparador documento del flujo (con permiso Preparar firma) puede editar
+            firmantes y posiciones mientras la solicitud esté abierta y nadie haya firmado.
           </Alert>
         )}
 

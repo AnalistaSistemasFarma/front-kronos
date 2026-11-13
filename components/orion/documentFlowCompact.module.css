@@ -1,0 +1,276 @@
+/* Recorrido corto (2026-11-13): pasos numerados unidos por una línea que se rellena hacia abajo. */
+
+.steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.step {
+  position: relative;
+  display: flex;
+  gap: 12px;
+  padding-bottom: 14px;
+}
+
+.step:last-child {
+  padding-bottom: 0;
+}
+
+/* Línea entre un número y el siguiente. */
+.step:not(:last-child)::before {
+  content: '';
+  position: absolute;
+  left: 13px;
+  top: 30px;
+  bottom: 2px;
+  width: 2px;
+  border-radius: 2px;
+  background: var(--mantine-color-default-border);
+}
+
+.rail {
+  position: absolute;
+  left: 13px;
+  top: 30px;
+  bottom: 2px;
+  width: 2px;
+  border-radius: 2px;
+  background: var(--mantine-color-green-filled);
+  transform-origin: top;
+  z-index: 1;
+}
+
+/* Del paso en curso al siguiente: línea punteada azul que «camina» hacia abajo. */
+.railNext {
+  position: absolute;
+  left: 13px;
+  top: 30px;
+  bottom: 2px;
+  width: 2px;
+  z-index: 1;
+  background-image: linear-gradient(
+    to bottom,
+    var(--mantine-color-blue-filled) 50%,
+    transparent 50%
+  );
+  background-size: 2px 8px;
+}
+
+/* Al pasar el mouse por un paso: su línea se ensancha y el número crece un poco. */
+.rail,
+.railNext,
+.step:not(:last-child)::before {
+  transition:
+    width 160ms ease,
+    left 160ms ease,
+    box-shadow 160ms ease;
+}
+
+.step:hover .rail,
+.step:hover .railNext,
+.step:not(:last-child):hover::before {
+  width: 4px;
+  left: 12px;
+}
+
+.step:hover .rail {
+  box-shadow: 0 0 8px var(--mantine-color-green-filled);
+}
+
+.step:hover .railNext {
+  background-size: 4px 8px;
+}
+
+.dot {
+  transition: transform 160ms ease;
+}
+
+.step:hover .dot {
+  transform: scale(1.12);
+}
+
+.dot {
+  position: relative;
+  z-index: 2;
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1;
+  border: 2px solid transparent;
+}
+
+.dot[data-status='hecho'] {
+  background: var(--mantine-color-green-filled);
+  color: var(--mantine-color-white);
+}
+.dot[data-status='actual'] {
+  background: var(--mantine-color-blue-filled);
+  color: var(--mantine-color-white);
+}
+.dot[data-status='pendiente'] {
+  background: var(--mantine-color-body);
+  border-color: var(--mantine-color-default-border);
+  color: var(--mantine-color-dimmed);
+}
+.dot[data-status='devuelto'] {
+  background: var(--mantine-color-orange-filled);
+  color: var(--mantine-color-white);
+}
+.dot[data-status='rechazado'] {
+  background: var(--mantine-color-red-filled);
+  color: var(--mantine-color-white);
+}
+
+/* Iconito de estado en la esquina del número (el estado no depende solo del color). */
+.badge {
+  position: absolute;
+  right: -5px;
+  bottom: -5px;
+  width: 15px;
+  height: 15px;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  background: var(--mantine-color-body);
+  color: inherit;
+  box-shadow: 0 0 0 1px var(--mantine-color-default-border);
+}
+.dot[data-status='hecho'] .badge {
+  color: var(--mantine-color-green-filled);
+}
+.dot[data-status='actual'] .badge {
+  color: var(--mantine-color-blue-filled);
+}
+.dot[data-status='devuelto'] .badge {
+  color: var(--mantine-color-orange-filled);
+}
+.dot[data-status='rechazado'] .badge {
+  color: var(--mantine-color-red-filled);
+}
+
+.body {
+  flex: 1;
+  min-width: 0;
+  padding-top: 4px;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  /* Los pasos aparecen uno tras otro, de arriba hacia abajo. */
+  .step {
+    animation: stepIn 320ms ease-out both;
+    animation-delay: calc(var(--i, 0) * 110ms);
+  }
+
+  /* La línea verde se rellena hacia el siguiente paso. */
+  .rail {
+    animation: railFill 380ms ease-out both;
+    animation-delay: calc(var(--i, 0) * 110ms + 180ms);
+  }
+
+  /* Un destello recorre la línea verde de arriba hacia abajo: indica el sentido del recorrido. */
+  .rail {
+    overflow: hidden;
+  }
+  .rail::after {
+    content: '';
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: -40%;
+    height: 40%;
+    border-radius: 2px;
+    background: linear-gradient(
+      to bottom,
+      transparent,
+      rgba(255, 255, 255, 0.95),
+      transparent
+    );
+    animation: railFlow 1.8s ease-in-out infinite;
+    animation-delay: calc(var(--i, 0) * 250ms + 700ms);
+  }
+
+  .railNext {
+    animation:
+      stepIn 320ms ease-out both,
+      railWalk 900ms linear infinite;
+    animation-delay: calc(var(--i, 0) * 110ms + 180ms), 0ms;
+  }
+
+  /* El paso en curso late suave para que se ubique de un vistazo. */
+  .dot[data-status='actual']::after {
+    content: '';
+    position: absolute;
+    inset: -2px;
+    border-radius: 999px;
+    border: 2px solid var(--mantine-color-blue-filled);
+    animation: pulse 1.8s ease-out infinite;
+    animation-delay: calc(var(--i, 0) * 110ms + 300ms);
+  }
+}
+
+@keyframes stepIn {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes railFill {
+  from {
+    transform: scaleY(0);
+  }
+  to {
+    transform: scaleY(1);
+  }
+}
+
+@keyframes railFlow {
+  from {
+    top: -40%;
+  }
+  to {
+    top: 100%;
+  }
+}
+
+@keyframes railWalk {
+  from {
+    background-position: 0 0;
+  }
+  to {
+    background-position: 0 8px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rail,
+  .railNext,
+  .dot,
+  .step:not(:last-child)::before {
+    transition: none;
+  }
+  .step:hover .dot {
+    transform: none;
+  }
+}
+
+@keyframes pulse {
+  0% {
+    opacity: 0.7;
+    transform: scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.6);
+  }
+}
