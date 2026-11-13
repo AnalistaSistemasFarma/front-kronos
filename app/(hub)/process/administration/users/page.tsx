@@ -36,6 +36,7 @@ import {
   ScrollArea,
   SegmentedControl,
   Tabs,
+  UnstyledButton,
 } from '@mantine/core';
 import { useMediaQuery } from '@mantine/hooks';
 import {
@@ -48,12 +49,15 @@ import {
   IconDownload,
   IconSettings,
   IconDatabase,
-  IconCheck,
-  IconX,
   IconUsers,
   IconShield,
   IconUsersGroup,
   IconLogin2,
+  IconCheck,
+  IconBuilding,
+  IconLayoutGrid,
+  IconListCheck,
+  IconMinus,
 } from '@tabler/icons-react';
 import toast from 'react-hot-toast';
 import { notifySubprocessAssignmentsChanged } from '@/lib/process/subprocessAssignmentsEvents';
@@ -140,6 +144,46 @@ interface AssignedSubprocess {
   }[];
 }
 
+/** Atajos del modal de subprocesos (suman o quitan su grupo). */
+type SubprocessPreset = 'firma' | 'solicitudes' | 'admin' | 'todos' | 'ninguno';
+
+/** Explicación corta de los subprocesos que son permisos (no aparecen como pantalla en Procesos). */
+function getSubprocessHint(subprocess: Subprocess): string | null {
+  if (!isHubHiddenRequestDashboardSubprocess(subprocess)) return null;
+  const url = subprocess.subprocess_url ?? '';
+  if (isPermisosAgentesMarkerSubprocess(subprocess)) return PERMISOS_AGENTES_MARKER_DESCRIPTION;
+  if (isLoginAuditMarkerSubprocess(subprocess)) return LOGIN_AUDIT_MARKER_DESCRIPTION;
+  if (isProjectsConfigMarkerSubprocess(subprocess)) return PROJECTS_CONFIG_MARKER_DESCRIPTION;
+  if (isSgcPermissionMarkerSubprocess(subprocess)) {
+    return describeSgcPermissionMarker(subprocess.subprocess_url);
+  }
+  if (isOtPermissionMarkerSubprocess(subprocess)) {
+    return describeOtPermissionMarker(subprocess.subprocess_url);
+  }
+  if (isValentineWallSubprocess(subprocess)) {
+    return 'Permiso OLP: corazón en el header (muro Dosis de Amor)';
+  }
+  if (isOrionFirmaPrepareSubprocess(subprocess)) {
+    return 'Permiso: preparar PDF, firmantes y enviar a firma';
+  }
+  if (isOrionFirmaSignSubprocess(subprocess)) {
+    return 'Permiso obligatorio para firmar (aunque esté como firmante)';
+  }
+  if (isDeleteAttachmentsSubprocess(subprocess)) {
+    return 'Permiso: eliminar archivos adjuntos de solicitudes';
+  }
+  if (isTeamTasksSubprocess(subprocess)) {
+    return 'Líder de solicitudes: ve la carga de su equipo (por departamento) y reasigna sus tareas en esta empresa';
+  }
+  if (url === DASHBOARD_SOLICITADO_URL || url.includes('dashboard-solicitado')) {
+    return 'Da acceso a Dashboard personal en el menú';
+  }
+  if (url === DASHBOARD_SOLICITANTE_URL || url.includes('dashboard-solicitante')) {
+    return 'Da acceso a Dashboard solicitudes en el menú';
+  }
+  return 'Da acceso al dashboard en el menú';
+}
+
 function UserManagement() {
   const { data: session, status } = useSession();
   const router = useRouter();
@@ -180,11 +224,27 @@ function UserManagement() {
   // Subprocess management states
   const [allSubprocesses, setAllSubprocesses] = useState<Subprocess[]>([]);
   const [companies, setCompanies] = useState<Company[]>([]);
-  const [selectedCompany, setSelectedCompany] = useState<string>('');
+  // Empresas marcadas: todas reciben el mismo conjunto de subprocesos al guardar.
+  const [selectedCompanyIds, setSelectedCompanyIds] = useState<string[]>([]);
   const [assignedSubprocesses, setAssignedSubprocesses] = useState<AssignedSubprocess[]>([]);
-  const [selectedSubprocessIds, setSelectedSubprocessIds] = useState<number[]>([]);
+  // Solo los cambios hechos en esta edición: al guardar se agregan/quitan esos subprocesos en las
+  // empresas marcadas y todo lo demás que ya tiene cada empresa se conserva.
+  const [subprocessDelta, setSubprocessDelta] = useState<{ added: number[]; removed: number[] }>({
+    added: [],
+    removed: [],
+  });
   const [subprocessSearch, setSubprocessSearch] = useState('');
   const [subprocessLoading, setSubprocessLoading] = useState(false);
+  /** Misma UX que Orion: primero procesos, luego empresas. */
+  const [subprocessModalTab, setSubprocessModalTab] = useState<'procesos' | 'empresas'>(
+    'procesos'
+  );
+  const [multiCompany, setMultiCompany] = useState(true);
+  // «Ver asignados»: foto de lo marcado al activarlo (null = apagado); así una tarjeta que se
+  // desmarca sigue a la vista en vez de desaparecer.
+  const [assignedSnapshot, setAssignedSnapshot] = useState<number[] | null>(null);
+  // Botones que quitan todo: piden un segundo toque para confirmar.
+  const [confirmClear, setConfirmClear] = useState<'quitar' | 'ninguno' | null>(null);
 
   const [updateMessage, setUpdateMessage] = useState<{
     type: 'success' | 'error';
@@ -611,9 +671,13 @@ function UserManagement() {
     setSelectedUser(user);
     setSubprocessModalOpened(true);
     setSubprocessLoading(true);
-    setSelectedCompany('');
-    setSelectedSubprocessIds([]);
+    setSelectedCompanyIds([]);
+    setSubprocessDelta({ added: [], removed: [] });
     setSubprocessSearch('');
+    setSubprocessModalTab('procesos');
+    setMultiCompany(true);
+    setAssignedSnapshot(null);
+    setConfirmClear(null);
     setSelectedAuthorizationTypeIds([]);
 
     try {
@@ -659,17 +723,33 @@ function UserManagement() {
         const { assignedSubprocesses: assigned } = await assignedResponse.json();
         setAssignedSubprocesses(assigned);
 
-        if (assigned.length > 0) {
-          const defaultCompany = assigned[0];
-          setSelectedCompany(defaultCompany.companyId.toString());
-          setSelectedSubprocessIds(
-            defaultCompany.subprocesses.map((s: { subprocessId: number }) => s.subprocessId)
-          );
-        } else if (companiesData.length > 0) {
-          setSelectedCompany(companiesData[0].id.toString());
+        // Arranca con la empresa que más subprocesos tenga hoy; las demás se marcan solo si ya
+        // tienen exactamente ese mismo conjunto (así lo que se ve es lo que hay).
+        const withSubs = assigned.filter(
+          (a: AssignedSubprocess) => a.subprocesses.length > 0
+        ) as AssignedSubprocess[];
+        if (withSubs.length > 0) {
+          const template = [...withSubs].sort(
+            (a, b) => b.subprocesses.length - a.subprocesses.length
+          )[0]!;
+          const templateIds = template.subprocesses.map((s) => s.subprocessId);
+          const templateSet = new Set(templateIds);
+          const matchingCompanies = withSubs
+            .filter((a) => {
+              const ids = a.subprocesses.map((s) => s.subprocessId);
+              return (
+                ids.length === templateSet.size && ids.every((id) => templateSet.has(id))
+              );
+            })
+            .map((a) => a.companyId.toString());
+          setSelectedCompanyIds(matchingCompanies);
+          setMultiCompany(matchingCompanies.length !== 1);
+        } else {
+          setSelectedCompanyIds([]);
+          setMultiCompany(true);
         }
-      } else if (companiesData.length > 0) {
-        setSelectedCompany(companiesData[0].id.toString());
+      } else {
+        setSelectedCompanyIds([]);
       }
     } catch (error) {
       console.error('Error loading subprocess data:', error);
@@ -679,155 +759,335 @@ function UserManagement() {
     }
   };
 
-  const handleCompanyChange = (companyId: string) => {
-    setSelectedCompany(companyId);
+  const getCompanySubprocessIds = (companyId: string) =>
+    assignedSubprocesses
+      .find((a) => a.companyId === parseInt(companyId, 10))
+      ?.subprocesses.map((s) => s.subprocessId) ?? [];
 
-    // Load assigned subprocesses for this company
-    const companyAssignments = assignedSubprocesses.find(
-      (a) => a.companyId === parseInt(companyId)
-    );
+  // Lo que ya tienen hoy las empresas marcadas: «en alguna» (union) y «en todas» (all).
+  const baseSubprocessSets = selectedCompanyIds.map((id) => new Set(getCompanySubprocessIds(id)));
+  const baseUnion = new Set<number>(baseSubprocessSets.flatMap((s) => [...s]));
+  const baseAll = new Set<number>(
+    [...baseUnion].filter((id) => baseSubprocessSets.every((s) => s.has(id)))
+  );
+  const deltaAdded = new Set(subprocessDelta.added);
+  const deltaRemoved = new Set(subprocessDelta.removed);
+  /** Lo que se ve marcado: lo que ya tienen + lo agregado ahora − lo quitado ahora. */
+  const selectedSubprocessIds = [...new Set([...baseUnion, ...deltaAdded])].filter(
+    (id) => !deltaRemoved.has(id)
+  );
+  /** Marcado solo en algunas de las empresas elegidas (y sin tocar en esta edición). */
+  const isPartialSubprocess = (id: number) =>
+    baseUnion.has(id) && !baseAll.has(id) && !deltaAdded.has(id) && !deltaRemoved.has(id);
 
-    if (companyAssignments) {
-      setSelectedSubprocessIds(companyAssignments.subprocesses.map((s) => s.subprocessId));
-    } else {
-      setSelectedSubprocessIds([]);
+  /**
+   * Registra cambios puntuales. Encender = agregar en todas las empresas marcadas; apagar =
+   * quitar de todas. Lo que no se toca no cambia en ninguna empresa.
+   */
+  const changeSubprocesses = (turnOn: number[], turnOff: number[]) => {
+    if (
+      authSubprocessId !== null &&
+      turnOn.includes(authSubprocessId) &&
+      !selectedSubprocessIds.includes(authSubprocessId)
+    ) {
+      setAuthTypeModalOpened(true);
     }
-  };
-
-  const handleSubprocessToggle = (subprocessId: number) => {
-    setSelectedSubprocessIds((prev) => {
-      const isSelected = prev.includes(subprocessId);
-      // When the "Autorización" subprocess is turned ON, open the types submodal
-      if (!isSelected && subprocessId === authSubprocessId) {
-        setAuthTypeModalOpened(true);
+    setSubprocessDelta((prev) => {
+      const added = new Set(prev.added);
+      const removed = new Set(prev.removed);
+      for (const id of turnOff) {
+        added.delete(id);
+        if (baseUnion.has(id)) removed.add(id);
       }
-      return isSelected ? prev.filter((id) => id !== subprocessId) : [...prev, subprocessId];
+      for (const id of turnOn) {
+        removed.delete(id);
+        if (!baseAll.has(id)) added.add(id);
+      }
+      return { added: [...added], removed: [...removed] };
     });
   };
 
-  const handleSelectAll = () => {
-    const filteredSubprocesses = getFilteredSubprocesses();
-    const allIds = filteredSubprocesses.map((s) => s.id_subprocess);
-    setSelectedSubprocessIds(allIds);
+  /** Empresas donde se aplicarán los cambios. Los cambios hechos se conservan al cambiarlas. */
+  const handleCompanyIdsChange = (next: string[]) => {
+    setSelectedCompanyIds(multiCompany ? next : next.slice(0, 1));
+    setAssignedSnapshot(null);
   };
 
-  const handleDeselectAll = () => {
-    setSelectedSubprocessIds([]);
+  /** «Varias»: los cambios van a todas las marcadas. «Una»: solo a esa empresa. */
+  const handleToggleCompany = (companyId: string) => {
+    if (!multiCompany) {
+      handleCompanyIdsChange(selectedCompanyIds[0] === companyId ? [] : [companyId]);
+      return;
+    }
+    handleCompanyIdsChange(
+      selectedCompanyIds.includes(companyId)
+        ? selectedCompanyIds.filter((id) => id !== companyId)
+        : [...selectedCompanyIds, companyId]
+    );
+  };
+
+  const handleSetMultiCompany = (enabled: boolean) => {
+    if (enabled === multiCompany) return;
+    setMultiCompany(enabled);
+    if (!enabled) {
+      setSelectedCompanyIds(selectedCompanyIds[0] ? [selectedCompanyIds[0]] : []);
+    }
+  };
+
+  /** Deja marcado exactamente lo que el usuario tiene hoy en otra empresa. */
+  const handleLoadSubprocessesFromCompany = (companyId: string) => {
+    if (!companyId) return;
+    const target = getCompanySubprocessIds(companyId);
+    changeSubprocesses(
+      target,
+      selectedSubprocessIds.filter((id) => !target.includes(id))
+    );
+  };
+
+  /**
+   * «Quitar todos» (arriba) y «Ninguno» (atajo) desmarcan todo: el primer toque pide
+   * confirmación y el segundo, dentro de 4 s, lo hace.
+   */
+  const confirmThenClear = (kind: 'quitar' | 'ninguno', clear: () => void) => {
+    if (confirmClear !== kind) {
+      setConfirmClear(kind);
+      window.setTimeout(() => setConfirmClear((c) => (c === kind ? null : c)), 4000);
+      return;
+    }
+    setConfirmClear(null);
+    clear();
+  };
+
+  /** Atajos: suman su grupo; si ya está todo el grupo marcado, lo quitan. */
+  const getPresetIds = (kind: Exclude<SubprocessPreset, 'ninguno'>) =>
+    allSubprocesses
+      .filter((s) => {
+        if (kind === 'todos') return true;
+        const url = (s.subprocess_url || '').toLowerCase();
+        const name = `${s.subprocess} ${s.process.process}`.toLowerCase();
+        if (kind === 'firma') {
+          return (
+            url.includes('orion') ||
+            url.includes('authorization') ||
+            url.includes('firma') ||
+            name.includes('firma') ||
+            name.includes('autoriz')
+          );
+        }
+        if (kind === 'solicitudes') {
+          return (
+            url.includes('request-general') ||
+            url.includes('solicitudes') ||
+            name.includes('solicitud')
+          );
+        }
+        return (
+          url.includes('administration') ||
+          url.includes('users') ||
+          name.includes('admin') ||
+          name.includes('usuario')
+        );
+      })
+      .map((s) => s.id_subprocess);
+
+  /** ¿Todo el grupo del atajo ya está marcado en todas las empresas? (para pintarlo activo). */
+  const isPresetActive = (kind: Exclude<SubprocessPreset, 'ninguno'>) => {
+    const ids = getPresetIds(kind);
+    return (
+      ids.length > 0 &&
+      ids.every((id) => selectedSubprocessIds.includes(id) && !isPartialSubprocess(id))
+    );
+  };
+
+  const applySubprocessPreset = (kind: SubprocessPreset) => {
+    if (kind === 'ninguno') {
+      confirmThenClear('ninguno', () => changeSubprocesses([], selectedSubprocessIds));
+      return;
+    }
+    const ids = getPresetIds(kind);
+    if (isPresetActive(kind)) changeSubprocesses([], ids);
+    else changeSubprocesses(ids, []);
+  };
+
+  const handleSubprocessToggle = (subprocessId: number) => {
+    // Solo en algunas empresas → se da en todas las marcadas (completar). Marcado en todas → se
+    // quita de todas. Sin marcar → se agrega en todas.
+    if (isPartialSubprocess(subprocessId)) changeSubprocesses([subprocessId], []);
+    else if (selectedSubprocessIds.includes(subprocessId)) changeSubprocesses([], [subprocessId]);
+    else changeSubprocesses([subprocessId], []);
   };
 
   const getFilteredSubprocesses = () => {
-    if (!subprocessSearch) return allSubprocesses;
-
+    const base = assignedSnapshot
+      ? allSubprocesses.filter((s) => assignedSnapshot.includes(s.id_subprocess))
+      : allSubprocesses;
+    if (!subprocessSearch) return base;
     const searchLower = subprocessSearch.toLowerCase();
-    return allSubprocesses.filter(
+    return base.filter(
       (s) =>
         s.subprocess.toLowerCase().includes(searchLower) ||
         s.process.process.toLowerCase().includes(searchLower)
     );
   };
 
-  const getTotalAssignedSubprocessCount = () => {
-    const uniqueIds = new Set<number>();
-    for (const company of assignedSubprocesses) {
-      for (const subprocess of company.subprocesses) {
-        uniqueIds.add(subprocess.subprocessId);
-      }
-    }
-    return uniqueIds.size;
-  };
-
-  const getOtherCompanyAssignments = () => {
-    if (!selectedCompany) return [];
-    const companyId = parseInt(selectedCompany, 10);
-    return assignedSubprocesses.filter(
-      (assignment) => assignment.companyId !== companyId && assignment.subprocesses.length > 0
+  /** Lo que quedará en una empresa: lo que ya tiene + lo agregado − lo quitado. */
+  const getFinalCompanySubprocessIds = (companyId: string) =>
+    [...new Set([...getCompanySubprocessIds(companyId), ...subprocessDelta.added])].filter(
+      (id) => !deltaRemoved.has(id)
     );
-  };
+
+  /** Qué gana y qué pierde cada empresa marcada al guardar (solo las que cambian). */
+  const getCompanyChanges = () =>
+    selectedCompanyIds
+      .map((id) => {
+        const current = getCompanySubprocessIds(id);
+        const finalIds = getFinalCompanySubprocessIds(id);
+        return {
+          id,
+          finalIds,
+          name: companies.find((c) => c.id.toString() === id)?.name ?? `Empresa ${id}`,
+          gains: finalIds.filter((s) => !current.includes(s)).length,
+          loses: current.filter((s) => !finalIds.includes(s)).length,
+        };
+      })
+      .filter((c) => c.gains > 0 || c.loses > 0);
+
+  /**
+   * Empresas donde hoy no tiene vínculo: al guardar se crea y el usuario gana acceso a esa
+   * empresa (syncUserCompanySubprocesses crea el company_user).
+   */
+  const getNewAccessCompanies = () =>
+    getCompanyChanges().filter(
+      (c) => c.gains > 0 && !assignedSubprocesses.some((a) => a.companyId.toString() === c.id)
+    );
+
+  const getOtherCompanyAssignments = () =>
+    assignedSubprocesses.filter(
+      (assignment) =>
+        !selectedCompanyIds.includes(assignment.companyId.toString()) &&
+        assignment.subprocesses.length > 0
+    );
 
   const handleSaveSubprocesses = async () => {
-    if (!selectedUser || !selectedCompany) {
-      toast.error('Por favor seleccione una empresa');
+    if (!selectedUser || selectedCompanyIds.length === 0) {
+      toast.error('Seleccione al menos una empresa');
+      return;
+    }
+    // Cada empresa se guarda con lo suyo + los cambios; las que no cambian no se tocan.
+    const toSave = getCompanyChanges();
+    if (toSave.length === 0) {
+      toast.success('No hay cambios para guardar');
+      setSubprocessModalOpened(false);
       return;
     }
 
-    // Determine whether the "Autorización" subprocess will remain assigned to the user (global,
-    // per-user rule): either it's selected for the current company, or it's already assigned in
-    // another company.
-    const currentHasAuth = authSubprocessId !== null && selectedSubprocessIds.includes(authSubprocessId);
-    const otherHasAuth = assignedSubprocesses.some(
-      (a) =>
-        a.companyId !== parseInt(selectedCompany, 10) &&
-        a.subprocesses.some((s) => s.subprocessUrl === '/process/authorization')
+    // «Autorización» es por usuario: sigue asignada si queda en alguna empresa después de guardar.
+    const finalSets = new Map<string, number[]>(
+      assignedSubprocesses.map((a) => [
+        a.companyId.toString(),
+        a.subprocesses.map((s) => s.subprocessId),
+      ])
     );
-    const authAssignedAfterSave = currentHasAuth || otherHasAuth;
+    for (const c of toSave) finalSets.set(c.id, c.finalIds);
+    const authAssignedAfterSave =
+      authSubprocessId !== null &&
+      [...finalSets.values()].some((ids) => ids.includes(authSubprocessId));
 
     if (authAssignedAfterSave && selectedAuthorizationTypeIds.length === 0) {
       toast.error('Debe seleccionar al menos un tipo de autorización');
       return;
     }
 
+    setSubprocessLoading(true);
+    const result = { added: 0, removed: 0 };
+    const saved: typeof toSave = [];
+    const failed: { name: string; error: string }[] = [];
     try {
-      setSubprocessLoading(true);
-      const response = await fetch(`/api/users/${selectedUser.id}/subprocesses`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          companyId: parseInt(selectedCompany),
-          subprocessIds: selectedSubprocessIds,
-        }),
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || 'Failed to update subprocesses');
-      }
-
-      const result = await response.json();
-
-      // Persist authorization types (per-user). Empty array clears them when Autorización is no
-      // longer assigned in any company.
-      const authTypesResponse = await fetch(
-        `/api/users/${selectedUser.id}/authorization-types`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            typeIds: authAssignedAfterSave ? selectedAuthorizationTypeIds.map(Number) : [],
-          }),
+      // Se intentan todas las empresas aunque una falle, para saber exactamente qué quedó.
+      for (const c of toSave) {
+        try {
+          const response = await fetch(`/api/users/${selectedUser.id}/subprocesses`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ companyIds: [parseInt(c.id, 10)], subprocessIds: c.finalIds }),
+          });
+          const data = await response.json().catch(() => ({}));
+          if (!response.ok) {
+            failed.push({ name: c.name, error: data.error || 'No se pudo guardar' });
+            continue;
+          }
+          saved.push(c);
+          result.added += Number(data.added) || 0;
+          result.removed += Number(data.removed) || 0;
+        } catch (err) {
+          failed.push({
+            name: c.name,
+            error: err instanceof Error ? err.message : 'Error de conexión',
+          });
         }
-      );
-      if (!authTypesResponse.ok) {
-        toast.error('Subprocesos guardados, pero no se pudieron guardar los tipos de autorización');
       }
 
-      toast.success(
-        `Subprocesos actualizados: ${result.added} agregados, ${result.removed} removidos`
-      );
-
-      const assignedResponse = await fetch(`/api/users/${selectedUser.id}/subprocesses`, {
-        cache: 'no-store',
-      });
-      if (assignedResponse.ok) {
-        const { assignedSubprocesses: assigned } = await assignedResponse.json();
-        setAssignedSubprocesses(assigned);
-        const companyAssignments = assigned.find(
-          (a: AssignedSubprocess) => a.companyId === parseInt(selectedCompany, 10)
+      if (saved.length > 0) {
+        // Tipos de autorización (por usuario) según lo que de verdad quedó guardado: las empresas
+        // que fallaron conservan lo que tenían. Vacío los borra si ya no hay Autorización.
+        const realFinal = new Map<string, number[]>(
+          assignedSubprocesses.map((a) => [
+            a.companyId.toString(),
+            a.subprocesses.map((s) => s.subprocessId),
+          ])
         );
-        setSelectedSubprocessIds(
-          companyAssignments?.subprocesses.map(
-            (s: AssignedSubprocess['subprocesses'][number]) => s.subprocessId
-          ) ?? []
-        );
+        for (const c of saved) realFinal.set(c.id, c.finalIds);
+        const authReallyAssigned =
+          authSubprocessId !== null &&
+          [...realFinal.values()].some((ids) => ids.includes(authSubprocessId));
+        const authTypesResponse = await fetch(
+          `/api/users/${selectedUser.id}/authorization-types`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              typeIds: authReallyAssigned ? selectedAuthorizationTypeIds.map(Number) : [],
+            }),
+          }
+        ).catch(() => null);
+        if (!authTypesResponse?.ok) {
+          toast.error('Subprocesos guardados, pero no se pudieron guardar los tipos de autorización');
+        }
+        notifySubprocessAssignmentsChanged();
       }
 
-      notifySubprocessAssignmentsChanged();
-      setSubprocessModalOpened(false);
-    } catch (error) {
-      console.error('Error saving subprocesses:', error);
-      toast.error(error instanceof Error ? error.message : 'Error al guardar subprocesos');
+      const names = (list: { name: string }[]) => list.map((c) => c.name).join(', ');
+      if (failed.length === 0) {
+        toast.success(
+          `Subprocesos actualizados${
+            saved.length > 1 ? ` en ${saved.length} empresas` : ''
+          }: ${result.added} agregados, ${result.removed} removidos`
+        );
+        setSubprocessDelta({ added: [], removed: [] });
+        setSubprocessModalOpened(false);
+      } else {
+        // Los cambios se conservan: al reintentar, las ya guardadas no tienen nada pendiente y
+        // solo se vuelven a mandar las que fallaron.
+        toast.error(
+          saved.length > 0
+            ? `Guardado en ${names(saved)}; falló en ${names(failed)}. Toque Guardar para reintentar.`
+            : `No se pudo guardar en ${names(failed)}: ${failed[0].error}`,
+          { duration: 8000 }
+        );
+      }
     } finally {
+      // Siempre se refresca, para que la pantalla muestre lo que de verdad quedó.
+      try {
+        const assignedResponse = await fetch(`/api/users/${selectedUser.id}/subprocesses`, {
+          cache: 'no-store',
+        });
+        if (assignedResponse.ok) {
+          const { assignedSubprocesses: assigned } = await assignedResponse.json();
+          setAssignedSubprocesses(assigned);
+        }
+      } catch {
+        /* si falla, queda la lista anterior */
+      }
       setSubprocessLoading(false);
     }
   };
@@ -2138,228 +2398,576 @@ function UserManagement() {
         </Stack>
       </Modal>
 
-      {/* Subprocess Assignment Modal */}
+      {/* Subprocess Assignment Modal — estilo Orion/iOS: Procesos → Empresas */}
       <Modal
         opened={subprocessModalOpened}
         onClose={() => setSubprocessModalOpened(false)}
-        title={`Asignar Subprocesos - ${selectedUser?.name || selectedUser?.email}`}
         size='xl'
-      >
-        <Stack>
-          {subprocessLoading ? (
-            <div className='flex justify-center py-8'>
-              <Loader size='lg' />
+        radius='lg'
+        title={
+          <Group gap='sm' wrap='nowrap'>
+            <ThemeIcon variant='light' size={40} radius='md'>
+              <IconLayoutGrid size={22} />
+            </ThemeIcon>
+            <div>
+              <Text fw={600}>
+                Subprocesos — {selectedUser?.name || selectedUser?.email || 'usuario'}
+              </Text>
+              <Text size='sm' c='dimmed'>
+                Primero los subprocesos, luego en qué empresas aplican. Toque una tarjeta para
+                activarla.
+              </Text>
             </div>
-          ) : (
-            <>
-              <Select
-                label='Empresa'
-                placeholder='Seleccione una empresa'
-                data={companies.map((c) => {
-                  const assignment = assignedSubprocesses.find((a) => a.companyId === c.id);
-                  const count = assignment?.subprocesses.length ?? 0;
-                  return {
-                    value: c.id.toString(),
-                    label: count > 0 ? `${c.name} (${count} asignados)` : c.name,
-                  };
-                })}
-                value={selectedCompany}
-                onChange={(value) => handleCompanyChange(value || '')}
-                required
-                disabled={companies.length === 0}
-              />
+          </Group>
+        }
+      >
+        {subprocessLoading ? (
+          <div className='flex justify-center py-8'>
+            <Loader size='lg' />
+          </div>
+        ) : companies.length === 0 ? (
+          <Alert color='yellow' variant='light'>
+            No hay empresas disponibles. Asegúrese de que el usuario esté asociado a al menos una
+            empresa.
+          </Alert>
+        ) : (
+          <Stack gap='lg'>
+            {selectedSubprocessIds.length === 0 ? (
+              <Text size='sm' c='dimmed' ta='center' py={4}>
+                Este usuario aún no tiene subprocesos. Toque una tarjeta para activarlo.
+              </Text>
+            ) : (
+              <Group justify='space-between' align='center' wrap='wrap' gap='xs'>
+                <Group gap={6}>
+                  <Badge variant='light' radius='xl' size='lg' style={{ fontWeight: 500 }}>
+                    {selectedSubprocessIds.length} subproceso
+                    {selectedSubprocessIds.length === 1 ? '' : 's'}
+                  </Badge>
+                  {selectedCompanyIds.length > 0 && (
+                    <Badge variant='dot' radius='xl' size='lg' color='gray'>
+                      {selectedCompanyIds
+                        .map((id) => companies.find((c) => c.id.toString() === id)?.name ?? id)
+                        .join(', ')}
+                    </Badge>
+                  )}
+                  {multiCompany && selectedCompanyIds.length > 1 && (
+                    <Text size='xs' c='dimmed'>
+                      multiempresa
+                    </Text>
+                  )}
+                </Group>
+                <Button
+                  size='compact-sm'
+                  variant={confirmClear === 'quitar' ? 'filled' : 'subtle'}
+                  color='red'
+                  radius='xl'
+                  onClick={() =>
+                    // Quita todos los subprocesos de las empresas marcadas (al guardar).
+                    confirmThenClear('quitar', () => changeSubprocesses([], selectedSubprocessIds))
+                  }
+                >
+                  {confirmClear === 'quitar' ? '¿Seguro? Toque otra vez' : 'Quitar todos'}
+                </Button>
+              </Group>
+            )}
 
-              {getTotalAssignedSubprocessCount() > 0 && (
-                <Alert color='gray' variant='light'>
-                  <div className='text-sm'>
-                    Este usuario tiene <strong>{getTotalAssignedSubprocessCount()}</strong>{' '}
-                    subproceso(s) en total en la página de Procesos (suma de todas las empresas).
-                  </div>
-                </Alert>
-              )}
+            <SegmentedControl
+              fullWidth
+              radius='xl'
+              size='sm'
+              value={subprocessModalTab}
+              onChange={(v) => setSubprocessModalTab(v === 'empresas' ? 'empresas' : 'procesos')}
+              data={[
+                {
+                  value: 'procesos',
+                  label: `Subprocesos${selectedSubprocessIds.length ? ` · ${selectedSubprocessIds.length}` : ''}`,
+                },
+                {
+                  value: 'empresas',
+                  label: `Empresas${selectedCompanyIds.length ? ` · ${selectedCompanyIds.length}` : ''}`,
+                },
+              ]}
+            />
 
-              {getOtherCompanyAssignments().length > 0 && (
-                <Alert color='yellow' variant='light'>
-                  <div className='text-sm'>
-                    <strong>Atención:</strong> también tiene asignaciones en otras empresas:{' '}
-                    {getOtherCompanyAssignments()
-                      .map(
-                        (assignment) =>
-                          `${assignment.companyName} (${assignment.subprocesses.length})`
-                      )
-                      .join(', ')}
-                    . Cambie de empresa arriba para revisarlas o quitarlas.
-                  </div>
-                </Alert>
-              )}
-
-              {companies.length === 0 && (
-                <Alert color='yellow' variant='light'>
-                  No hay empresas disponibles. Por favor, asegúrese de que el usuario esté asociado
-                  a al menos una empresa.
-                </Alert>
-              )}
-
-              {selectedCompany && (
-                <>
+            {subprocessModalTab === 'procesos' ? (
+              <Stack gap='sm'>
+                {/* Modo «Una»: elegir qué empresa se edita sin cambiar de pestaña. */}
+                {!multiCompany && (
+                  <Select
+                    label='Empresa que está editando'
+                    placeholder='Elija una empresa'
+                    size='sm'
+                    radius='xl'
+                    value={selectedCompanyIds[0] ?? null}
+                    data={companies.map((c) => {
+                      const id = c.id.toString();
+                      const count = getCompanySubprocessIds(id).length;
+                      return {
+                        value: id,
+                        label: `${c.name}${count > 0 ? ` (${count})` : ''}`,
+                      };
+                    })}
+                    onChange={(value) => handleCompanyIdsChange(value ? [value] : [])}
+                    leftSection={<IconBuilding size={16} />}
+                    comboboxProps={{ withinPortal: true }}
+                    allowDeselect={false}
+                  />
+                )}
+                <Group gap='xs' wrap='nowrap'>
                   <TextInput
-                    label='Buscar subprocesos'
-                    placeholder='Buscar por nombre de subproceso o proceso'
+                    style={{ flex: 1 }}
+                    placeholder='Buscar'
                     leftSection={<IconSearch size={16} />}
                     value={subprocessSearch}
                     onChange={(e) => setSubprocessSearch(e.target.value)}
+                    aria-label='Buscar subprocesos'
+                    radius='xl'
+                    variant='filled'
                   />
+                  <Button
+                    radius='xl'
+                    size='sm'
+                    variant={assignedSnapshot ? 'filled' : 'light'}
+                    leftSection={<IconListCheck size={16} />}
+                    onClick={() =>
+                      setAssignedSnapshot((prev) => (prev ? null : [...selectedSubprocessIds]))
+                    }
+                    aria-pressed={Boolean(assignedSnapshot)}
+                  >
+                    {assignedSnapshot
+                      ? 'Ver todos'
+                      : `Ver asignados · ${selectedSubprocessIds.length}`}
+                  </Button>
+                </Group>
+                <Group gap={6} wrap='wrap'>
+                  {(
+                    [
+                      ['firma', 'Firma'],
+                      ['solicitudes', 'Solicitudes'],
+                      ['admin', 'Admin'],
+                      ['todos', 'Todos'],
+                      ['ninguno', 'Ninguno'],
+                    ] as const
+                  ).map(([kind, label]) => {
+                    const active = kind !== 'ninguno' && isPresetActive(kind);
+                    return (
+                      <Button
+                        key={kind}
+                        size='compact-sm'
+                        radius='xl'
+                        variant={
+                          kind === 'ninguno'
+                            ? confirmClear === 'ninguno'
+                              ? 'filled'
+                              : 'subtle'
+                            : active
+                              ? 'filled'
+                              : 'light'
+                        }
+                        color={
+                          kind === 'ninguno'
+                            ? confirmClear === 'ninguno'
+                              ? 'red'
+                              : 'gray'
+                            : undefined
+                        }
+                        leftSection={active ? <IconCheck size={12} /> : null}
+                        onClick={() => applySubprocessPreset(kind)}
+                      >
+                        {kind === 'ninguno' && confirmClear === 'ninguno'
+                          ? '¿Quitar todos? Toque otra vez'
+                          : label}
+                      </Button>
+                    );
+                  })}
+                  {assignedSubprocesses.some((a) => a.subprocesses.length > 0) && (
+                    <Select
+                      placeholder='Desde empresa…'
+                      clearable
+                      searchable
+                      size='xs'
+                      radius='xl'
+                      w={180}
+                      value={null}
+                      data={assignedSubprocesses
+                        .filter((a) => a.subprocesses.length > 0)
+                        .map((a) => ({
+                          value: a.companyId.toString(),
+                          label: `${a.companyName} (${a.subprocesses.length})`,
+                        }))}
+                      onChange={(value) => {
+                        if (value) handleLoadSubprocessesFromCompany(value);
+                      }}
+                      comboboxProps={{ withinPortal: true }}
+                    />
+                  )}
+                </Group>
 
-                  <Group justify='space-between'>
-                    <div>
-                      <Badge color='blue' variant='light'>
-                        {selectedSubprocessIds.length} seleccionados
-                      </Badge>
+                <ScrollArea.Autosize mah={360} offsetScrollbars type='hover'>
+                  {getFilteredSubprocesses().length === 0 ? (
+                    <Text size='sm' c='dimmed' ta='center' py='xl'>
+                      {assignedSnapshot && !subprocessSearch
+                        ? 'Este usuario no tiene subprocesos asignados todavía.'
+                        : 'Sin resultados'}
+                    </Text>
+                  ) : (
+                    <SimpleGrid cols={{ base: 1, sm: 2 }} spacing={10}>
+                      {getFilteredSubprocesses().map((subprocess) => {
+                        const checked = selectedSubprocessIds.includes(subprocess.id_subprocess);
+                        // Con varias empresas: avisar si hoy solo lo tiene en algunas.
+                        const partialIn = isPartialSubprocess(subprocess.id_subprocess)
+                          ? selectedCompanyIds
+                              .filter((id) =>
+                                getCompanySubprocessIds(id).includes(subprocess.id_subprocess)
+                              )
+                              .map(
+                                (id) => companies.find((c) => c.id.toString() === id)?.name ?? id
+                              )
+                          : null;
+                        const hint = partialIn
+                          ? `Solo en ${partialIn.join(', ')} · tóquelo para darlo en todas`
+                          : getSubprocessHint(subprocess) || subprocess.process.process;
+                        return (
+                          <UnstyledButton
+                            key={subprocess.id_subprocess}
+                            component='div'
+                            role='button'
+                            tabIndex={0}
+                            onClick={() => handleSubprocessToggle(subprocess.id_subprocess)}
+                            onKeyDown={(e: React.KeyboardEvent<HTMLDivElement>) => {
+                              if (e.target !== e.currentTarget) return;
+                              if (e.key === 'Enter' || e.key === ' ') {
+                                e.preventDefault();
+                                handleSubprocessToggle(subprocess.id_subprocess);
+                              }
+                            }}
+                            aria-pressed={checked}
+                            style={{
+                              border: checked
+                                ? '1.5px solid var(--mantine-primary-color-filled)'
+                                : '1px solid transparent',
+                              background: checked
+                                ? 'color-mix(in srgb, var(--mantine-primary-color-filled) 14%, transparent)'
+                                : 'var(--mantine-color-default)',
+                              borderRadius: 16,
+                              padding: '14px 14px',
+                              textAlign: 'left',
+                              height: '100%',
+                              transition: 'background 120ms ease, border-color 120ms ease',
+                            }}
+                          >
+                            <Group gap={12} wrap='nowrap' align='flex-start'>
+                              <Box
+                                style={{
+                                  width: 36,
+                                  height: 36,
+                                  borderRadius: 10,
+                                  display: 'grid',
+                                  placeItems: 'center',
+                                  flexShrink: 0,
+                                  background: checked
+                                    ? 'var(--mantine-primary-color-filled)'
+                                    : 'color-mix(in srgb, var(--mantine-color-dimmed) 16%, transparent)',
+                                  color: checked
+                                    ? 'var(--mantine-color-white)'
+                                    : 'var(--mantine-color-dimmed)',
+                                }}
+                              >
+                                <IconLayoutGrid size={18} />
+                              </Box>
+                              <div style={{ flex: 1, minWidth: 0 }}>
+                                <Group justify='space-between' gap={8} wrap='nowrap'>
+                                  <Text size='sm' fw={600} lineClamp={1}>
+                                    {subprocess.subprocess}
+                                  </Text>
+                                  <Box
+                                    style={{
+                                      width: 20,
+                                      height: 20,
+                                      borderRadius: 999,
+                                      flexShrink: 0,
+                                      display: 'grid',
+                                      placeItems: 'center',
+                                      // A medias (solo en algunas empresas): borde de color y guion.
+                                      border: partialIn
+                                        ? '1.5px solid var(--mantine-primary-color-filled)'
+                                        : checked
+                                          ? 'none'
+                                          : '1.5px solid var(--mantine-color-dimmed)',
+                                      background:
+                                        checked && !partialIn
+                                          ? 'var(--mantine-primary-color-filled)'
+                                          : 'transparent',
+                                      color: partialIn
+                                        ? 'var(--mantine-primary-color-filled)'
+                                        : 'var(--mantine-color-white)',
+                                    }}
+                                    aria-label={partialIn ? 'Solo en algunas empresas' : undefined}
+                                  >
+                                    {partialIn ? (
+                                      <IconMinus size={12} stroke={3} />
+                                    ) : checked ? (
+                                      <IconCheck size={12} stroke={3} />
+                                    ) : null}
+                                  </Box>
+                                </Group>
+                                <Text size='xs' c='dimmed' lineClamp={2} mt={3}>
+                                  {hint}
+                                </Text>
+                                {subprocess.id_subprocess === authSubprocessId && checked && (
+                                  <Button
+                                    size='compact-xs'
+                                    variant='light'
+                                    radius='xl'
+                                    mt={8}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setAuthTypeModalOpened(true);
+                                    }}
+                                  >
+                                    Tipos de autorización
+                                    {selectedAuthorizationTypeIds.length > 0 &&
+                                      ` (${selectedAuthorizationTypeIds.length})`}
+                                  </Button>
+                                )}
+                              </div>
+                            </Group>
+                          </UnstyledButton>
+                        );
+                      })}
+                    </SimpleGrid>
+                  )}
+                </ScrollArea.Autosize>
+              </Stack>
+            ) : (
+              <Stack gap='md'>
+                <Paper
+                  radius={16}
+                  p='md'
+                  style={{
+                    background: 'var(--mantine-color-default)',
+                    border: 'none',
+                  }}
+                >
+                  <Group justify='space-between' align='center' gap='md' wrap='wrap'>
+                    <div style={{ flex: 1, minWidth: 180 }}>
+                      <Text size='sm' fw={600}>
+                        Multiempresa
+                      </Text>
+                      <Text size='xs' c='dimmed' mt={2}>
+                        {multiCompany
+                          ? 'Varias: lo que marque o desmarque se aplica en todas las marcadas; cada una conserva lo demás.'
+                          : 'Una: lo que marque o desmarque se aplica solo en esa empresa.'}
+                      </Text>
                     </div>
-                    <Group gap='xs'>
-                      <Button
-                        size='xs'
-                        variant='light'
-                        leftSection={<IconCheck size={14} />}
-                        onClick={handleSelectAll}
-                      >
-                        Seleccionar Todos
-                      </Button>
-                      <Button
-                        size='xs'
-                        variant='light'
-                        color='red'
-                        leftSection={<IconX size={14} />}
-                        onClick={handleDeselectAll}
-                      >
-                        Deseleccionar Todos
-                      </Button>
-                    </Group>
+                    <SegmentedControl
+                      size='xs'
+                      radius='xl'
+                      value={multiCompany ? 'multi' : 'una'}
+                      onChange={(v) => handleSetMultiCompany(v === 'multi')}
+                      data={[
+                        { value: 'una', label: 'Una' },
+                        { value: 'multi', label: 'Varias' },
+                      ]}
+                    />
                   </Group>
 
-                  <Paper withBorder p='md' style={{ maxHeight: '400px', overflowY: 'auto' }}>
-                    <Stack gap='xs'>
-                      {getFilteredSubprocesses().length === 0 ? (
-                        <div className='text-center py-4 text-gray-500'>
-                          No se encontraron subprocesos
-                        </div>
-                      ) : (
-                        getFilteredSubprocesses().map((subprocess) => (
-                          <Paper
-                            key={subprocess.id_subprocess}
-                            p='sm'
-                            withBorder
-                            style={{
-                              cursor: 'pointer',
-                              backgroundColor: selectedSubprocessIds.includes(
-                                subprocess.id_subprocess
-                              )
-                                ? 'rgba(102, 126, 234, 0.1)'
-                                : 'transparent',
-                            }}
-                            onClick={() => handleSubprocessToggle(subprocess.id_subprocess)}
-                          >
-                            <Group justify='space-between'>
-                              <div>
-                                <div className='font-medium'>{subprocess.subprocess}</div>
-                                <div className='text-sm text-gray-600'>
-                                  Proceso: {subprocess.process.process}
-                                </div>
-                                {subprocess.subprocess_url && (
-                                  <div className='text-xs text-gray-500'>
-                                    URL: {subprocess.subprocess_url}
-                                  </div>
-                                )}
-                                {isHubHiddenRequestDashboardSubprocess(subprocess) ? (
-                                  <Badge size='xs' variant='light' color='teal' mt={4}>
-                                    {isPermisosAgentesMarkerSubprocess(subprocess)
-                                      ? PERMISOS_AGENTES_MARKER_DESCRIPTION
-                                      : isLoginAuditMarkerSubprocess(subprocess)
-                                      ? LOGIN_AUDIT_MARKER_DESCRIPTION
-                                      : isProjectsConfigMarkerSubprocess(subprocess)
-                                      ? PROJECTS_CONFIG_MARKER_DESCRIPTION
-                                      : isSgcPermissionMarkerSubprocess(subprocess)
-                                      ? describeSgcPermissionMarker(subprocess.subprocess_url)
-                                      : isOtPermissionMarkerSubprocess(subprocess)
-                                      ? describeOtPermissionMarker(subprocess.subprocess_url)
-                                      : isValentineWallSubprocess(subprocess)
-                                      ? 'Permiso OLP: corazón en el header (muro Dosis de Amor)'
-                                      : isOrionFirmaPrepareSubprocess(subprocess)
-                                        ? 'Permiso: preparar PDF, firmantes y enviar a firma'
-                                        : isOrionFirmaSignSubprocess(subprocess)
-                                          ? 'Permiso obligatorio para firmar (aunque esté como firmante)'
-                                          : isDeleteAttachmentsSubprocess(subprocess)
-                                            ? 'Permiso: eliminar archivos adjuntos de solicitudes'
-                                            : isTeamTasksSubprocess(subprocess)
-                                            ? 'Líder de solicitudes: ve la carga de su equipo (por departamento) y reasigna sus tareas en esta empresa'
-                                            : subprocess.subprocess_url ===
-                                                  DASHBOARD_SOLICITADO_URL ||
-                                                (subprocess.subprocess_url ?? '').includes(
-                                                  'dashboard-solicitado'
-                                                )
-                                              ? 'Da acceso a Dashboard personal en el menú'
-                                              : subprocess.subprocess_url ===
-                                                    DASHBOARD_SOLICITANTE_URL ||
-                                                  (subprocess.subprocess_url ?? '').includes(
-                                                    'dashboard-solicitante'
-                                                  )
-                                                ? 'Da acceso a Dashboard solicitudes en el menú'
-                                                : 'Da acceso al dashboard en el menú'}
-                                  </Badge>
-                                ) : null}
-                              </div>
-                              <Group gap='xs'>
-                                {subprocess.id_subprocess === authSubprocessId &&
-                                  selectedSubprocessIds.includes(subprocess.id_subprocess) && (
-                                    <Button
-                                      size='xs'
-                                      variant='light'
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        setAuthTypeModalOpened(true);
-                                      }}
-                                    >
-                                      Configurar tipos
-                                      {selectedAuthorizationTypeIds.length > 0 &&
-                                        ` (${selectedAuthorizationTypeIds.length})`}
-                                    </Button>
-                                  )}
-                                {selectedSubprocessIds.includes(subprocess.id_subprocess) && (
-                                  <IconCheck size={20} color='#113562' />
-                                )}
-                              </Group>
-                            </Group>
-                          </Paper>
-                        ))
+                  <Text size='xs' c='dimmed' mt='md' mb={8}>
+                    {multiCompany ? 'Empresas' : 'Empresa'}
+                  </Text>
+                  <Group gap={8}>
+                    {companies.map((c) => {
+                      const active = selectedCompanyIds.includes(c.id.toString());
+                      const count = getCompanySubprocessIds(c.id.toString()).length;
+                      return (
+                        <UnstyledButton
+                          key={c.id}
+                          onClick={() => handleToggleCompany(c.id.toString())}
+                          aria-pressed={active}
+                          style={{
+                            border: active
+                              ? '1.5px solid var(--mantine-primary-color-filled)'
+                              : '1px solid transparent',
+                            background: active
+                              ? 'color-mix(in srgb, var(--mantine-primary-color-filled) 16%, transparent)'
+                              : 'color-mix(in srgb, var(--mantine-color-dimmed) 10%, transparent)',
+                            borderRadius: 999,
+                            padding: '8px 14px',
+                            transition: 'background 120ms ease, border-color 120ms ease',
+                          }}
+                        >
+                          <Group gap={6} wrap='nowrap'>
+                            <IconBuilding size={14} />
+                            <Text size='sm' fw={active ? 600 : 400}>
+                              {count > 0 ? `${c.name} (${count})` : c.name}
+                            </Text>
+                            {active && <IconCheck size={14} />}
+                          </Group>
+                        </UnstyledButton>
+                      );
+                    })}
+                  </Group>
+                  <Group gap={6} mt='sm'>
+                    {multiCompany && (
+                      <>
+                        <Button
+                          size='compact-xs'
+                          variant='subtle'
+                          radius='xl'
+                          onClick={() => {
+                            handleSetMultiCompany(true);
+                            handleCompanyIdsChange(
+                              assignedSubprocesses
+                                .filter((a) => a.subprocesses.length > 0)
+                                .map((a) => a.companyId.toString())
+                            );
+                          }}
+                        >
+                          Las que ya tiene
+                        </Button>
+                        <Button
+                          size='compact-xs'
+                          variant='subtle'
+                          radius='xl'
+                          onClick={() =>
+                            handleCompanyIdsChange(companies.map((c) => c.id.toString()))
+                          }
+                        >
+                          Todas
+                        </Button>
+                      </>
+                    )}
+                    <Button
+                      size='compact-xs'
+                      variant='subtle'
+                      color='gray'
+                      radius='xl'
+                      onClick={() => handleCompanyIdsChange([])}
+                    >
+                      Ninguna
+                    </Button>
+                  </Group>
+                </Paper>
+
+                {getOtherCompanyAssignments().length > 0 && (
+                  <Text size='xs' c='dimmed'>
+                    Sin marcar (no se modifican):{' '}
+                    {getOtherCompanyAssignments()
+                      .map((a) => `${a.companyName} (${a.subprocesses.length})`)
+                      .join(', ')}
+                    .
+                  </Text>
+                )}
+
+                {selectedCompanyIds.length > 0 && getCompanyChanges().length > 0 && (
+                  <Alert
+                    variant='light'
+                    radius='md'
+                    color={
+                      getCompanyChanges().some((c) => c.loses > 0) ||
+                      getNewAccessCompanies().length > 0
+                        ? 'yellow'
+                        : 'blue'
+                    }
+                    icon={<IconAlertCircle size={18} />}
+                    title='Al guardar'
+                  >
+                    <Stack gap={2}>
+                      {getCompanyChanges().map((c) => (
+                        <Text key={c.id} size='sm'>
+                          <strong>{c.name}</strong>
+                          {c.gains > 0 ? ` · gana ${c.gains}` : ''}
+                          {c.loses > 0 ? ` · pierde ${c.loses}` : ''}
+                        </Text>
+                      ))}
+                      {getNewAccessCompanies().length > 0 && (
+                        <Text size='sm' mt={4}>
+                          <strong>Acceso nuevo:</strong>{' '}
+                          {selectedUser?.name || selectedUser?.email || 'El usuario'} tendrá
+                          acceso a {getNewAccessCompanies().map((c) => c.name).join(', ')}, donde
+                          hoy no está.
+                        </Text>
                       )}
                     </Stack>
-                  </Paper>
-
-                  <Alert color='blue' variant='light'>
-                    <div className='text-sm'>
-                      <strong>Nota:</strong> Los subprocesos seleccionados serán asignados al
-                      usuario para la empresa seleccionada. Los cambios se guardarán al hacer clic
-                      en &quot;Guardar Cambios&quot;.
-                    </div>
                   </Alert>
-                </>
-              )}
+                )}
 
-              <Group justify='flex-end'>
-                <Button variant='default' onClick={() => setSubprocessModalOpened(false)}>
+                <Text
+                  size='xs'
+                  c={selectedCompanyIds.length === 0 ? 'orange' : 'dimmed'}
+                  ta='center'
+                >
+                  {selectedCompanyIds.length === 0
+                    ? 'Elija al menos una empresa'
+                    : selectedSubprocessIds.length === 0
+                      ? 'Sin subprocesos en la pestaña Subprocesos'
+                      : `${selectedSubprocessIds.length} subproceso(s) → ${selectedCompanyIds
+                          .map((id) => companies.find((c) => c.id.toString() === id)?.name ?? id)
+                          .join(', ')}`}
+                </Text>
+              </Stack>
+            )}
+
+            <Group
+              justify='space-between'
+              align='center'
+              pt='xs'
+              style={{
+                borderTop:
+                  '1px solid color-mix(in srgb, var(--mantine-color-dimmed) 18%, transparent)',
+              }}
+            >
+              {/* Visible en ambas pestañas: avisa qué empresa perdería subprocesos al guardar. */}
+              <Text
+                size='xs'
+                c={
+                  getCompanyChanges().some((c) => c.loses > 0) ||
+                  getNewAccessCompanies().length > 0 ||
+                  selectedCompanyIds.length === 0
+                    ? 'orange'
+                    : 'dimmed'
+                }
+              >
+                {selectedCompanyIds.length === 0
+                  ? 'Falta la empresa'
+                  : getCompanyChanges().some((c) => c.loses > 0)
+                    ? `Al guardar pierde: ${getCompanyChanges()
+                        .filter((c) => c.loses > 0)
+                        .map((c) => `${c.name} (${c.loses})`)
+                        .join(', ')}`
+                    : getNewAccessCompanies().length > 0
+                      ? `Dará acceso nuevo a: ${getNewAccessCompanies()
+                          .map((c) => c.name)
+                          .join(', ')}`
+                      : getCompanyChanges().length > 0
+                        ? 'Cambios sin guardar'
+                        : selectedSubprocessIds.length === 0
+                          ? 'Sin acceso aún'
+                          : 'Al día'}
+              </Text>
+              <Group gap='xs'>
+                <Button
+                  variant='subtle'
+                  color='gray'
+                  radius='xl'
+                  onClick={() => setSubprocessModalOpened(false)}
+                >
                   Cancelar
                 </Button>
                 <Button
+                  radius='xl'
                   onClick={handleSaveSubprocesses}
                   loading={subprocessLoading}
-                  disabled={!selectedCompany}
+                  disabled={selectedCompanyIds.length === 0}
                 >
-                  Guardar Cambios
+                  {getCompanyChanges().length > 1
+                    ? `Guardar en ${getCompanyChanges().length} empresas`
+                    : 'Guardar'}
                 </Button>
               </Group>
-            </>
-          )}
-        </Stack>
+            </Group>
+          </Stack>
+        )}
       </Modal>
 
       {/* Authorization Types Submodal */}
