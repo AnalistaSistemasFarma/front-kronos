@@ -77,6 +77,7 @@ export default function SalesInlineForm({ companyId, onDone, editDocEntry, initi
   const [pickRemark, setPickRemark] = useState('');
   const [opts, setOpts] = useState<CompanyOptions>({ pedidoDirecto: false, descripcionEditable: false, exigeOc: true });
   const [importing, setImporting] = useState(false);
+  const [companyName, setCompanyName] = useState('');
   /** Avisos de la oferta montada desde el PDF (lo que no se pudo y lo que hay que revisar). */
   const [pdfAvisos, setPdfAvisos] = useState<string[] | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -103,6 +104,7 @@ export default function SalesInlineForm({ companyId, onDone, editDocEntry, initi
         if (cancelled) return;
         const c = (d.companies ?? []).find((x: { idCompany: number }) => String(x.idCompany) === companyId);
         if (c?.options) setOpts(c.options);
+        if (c?.companyName) setCompanyName(String(c.companyName).trim());
         if (!c?.canWrite) setReadiness('no-write');
         else if (!c.ready) setReadiness('no-sap');
         else setReadiness('ready');
@@ -348,8 +350,8 @@ export default function SalesInlineForm({ companyId, onDone, editDocEntry, initi
   return (
     <Stack gap="md">
       <Group justify="space-between" wrap="wrap" gap="xs">
-        <Text size="sm" c="dimmed">¿Tiene la orden de compra del cliente en PDF? La IA de su navegador la lee y monta la oferta.</Text>
-        <SalesPdfImport companyId={companyId} cardCode={editing ? cardCode : undefined} onLoaded={loadFromPdf} />
+        <Text size="sm" c="dimmed">¿Tiene la orden de compra del cliente en PDF? La IA (de su navegador o su agente) la lee y monta la oferta.</Text>
+        <SalesPdfImport companyId={companyId} companyName={companyName} cardCode={editing ? cardCode : undefined} onLoaded={loadFromPdf} />
       </Group>
       {pdfAvisos && (
         <Alert color="violet" variant="light" withCloseButton onClose={() => setPdfAvisos(null)} title="Revise antes de crear">

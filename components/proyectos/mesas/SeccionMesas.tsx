@@ -26,6 +26,7 @@ import {
   IconClock,
   IconMessages,
   IconMessageCircle,
+  IconPaperclip,
   IconPlayerPause,
   IconPlayerPlay,
   IconPlayerSkipForward,
@@ -35,6 +36,7 @@ import {
 } from '@tabler/icons-react';
 import AgentAvatar from '../../chat/AgentAvatar';
 import type { ProyectoDetalleDto } from '../../../lib/proyectos/tipos';
+import { avisoSinCodigo } from '../../../lib/proyectos/agentes-desarrollo-rules';
 import { apiGet, apiSend } from '../api';
 import { ConfirmarModal } from '../modales';
 import type { Aviso } from '../ui';
@@ -98,9 +100,21 @@ interface EventoDto {
   createdAt: string;
 }
 
+interface ArchivoDto {
+  idAttachment: number;
+  nombre: string;
+  idAgent: number;
+  agente: string;
+  ronda: number | null;
+  downloadUrl: string;
+  createdAt: string;
+}
+
 interface DetalleDto extends MesaDto {
   estadosAgentes: { idAgent: number; state: string; label: string | null; updatedAt: string }[];
   eventos: EventoDto[];
+  /** Archivos que se pasaron los agentes (lo más reciente primero). */
+  archivos?: ArchivoDto[];
 }
 
 const REFRESCO_MS = 10_000;
@@ -158,6 +172,7 @@ const ICONO_EVENTO: Record<string, React.ReactNode> = {
   reanudada: <IconPlayerPlay size={14} />,
   cerrada: <IconPlayerStop size={14} />,
   ronda_ahora: <IconPlayerSkipForward size={14} />,
+  archivo_compartido: <IconPaperclip size={14} />,
 };
 
 function textoEvento(e: EventoDto, mesa: MesaDto): { titulo: string; texto: string | null } {
@@ -173,6 +188,8 @@ function textoEvento(e: EventoDto, mesa: MesaDto): { titulo: string; texto: stri
       return { titulo: `${nombre} no respondió a tiempo`, texto: 'La mesa siguió con el turno siguiente.' };
     case 'tope':
       return { titulo: 'Se llegó al máximo de turnos del día', texto: 'La mesa sigue mañana.' };
+    case 'archivo_compartido':
+      return { titulo: e.detalle ?? `${nombre} compartió un archivo`, texto: null };
     default:
       return { titulo: e.detalle ?? e.tipo, texto: null };
   }
@@ -360,6 +377,30 @@ export default function SeccionMesas({
               )}
             </Group>
 
+            {detalle && (detalle.archivos?.length ?? 0) > 0 && (
+              <>
+                <Text fw={600} size='sm' mt='xs'>
+                  Archivos compartidos
+                </Text>
+                <Stack gap={4} data-testid='mesa-archivos'>
+                  {detalle.archivos!.map((a) => (
+                    <Group key={a.idAttachment} gap={6} wrap='nowrap'>
+                      <IconPaperclip size={14} style={{ flexShrink: 0 }} />
+                      <Text size='sm' style={{ minWidth: 0, overflowWrap: 'anywhere' }}>
+                        <a href={a.downloadUrl} target='_blank' rel='noopener noreferrer'>
+                          {a.nombre}
+                        </a>{' '}
+                        <Text span size='xs' c='dimmed'>
+                          · lo compartió {a.agente}
+                          {a.ronda ? ` en la ronda ${a.ronda}` : ''} · {hora(a.createdAt)}
+                        </Text>
+                      </Text>
+                    </Group>
+                  ))}
+                </Stack>
+              </>
+            )}
+
             <Text fw={600} size='sm' mt='xs'>
               Lo que ha pasado
             </Text>
@@ -443,10 +484,14 @@ function NuevaMesaModal({
   // elegir todos los agentes que quiera»): los del proyecto y los demás que tiene
   // asignados en la empresa. Los que no están en el proyecto se suman al crear la mesa.
   const [disponibles, setDisponibles] = useState<CandidatoDto[] | null>(null);
+  // El proyecto tiene acceso a código: los agentes de negocio participan sin él (aviso, no bloqueo).
+  const [conCodigo, setConCodigo] = useState(false);
   useEffect(() => {
-    void apiGet<{ candidatos: CandidatoDto[] }>(`${base}?candidatos=1`, 'No se pudieron cargar los agentes.').then((r) => {
-      if (r.ok) setDisponibles(r.data.candidatos);
-      else {
+    void apiGet<{ candidatos: CandidatoDto[]; conCodigo?: boolean }>(`${base}?candidatos=1`, 'No se pudieron cargar los agentes.').then((r) => {
+      if (r.ok) {
+        setDisponibles(r.data.candidatos);
+        setConCodigo(r.data.conCodigo === true);
+      } else {
         setDisponibles([]);
         if (r.error) setError(r.error);
       }
@@ -469,6 +514,7 @@ function NuevaMesaModal({
     .map((a) => ({ value: String(a.idAgent), label: a.nombre }));
   const seleccionables = (disponibles ?? []).filter((a) => a.designado || esDueno);
   const todosMarcados = seleccionables.length > 0 && seleccionables.every((a) => a.idAgent in elegidos);
+  const avisoNegocio = conCodigo ? avisoSinCodigo((disponibles ?? []).filter((a) => ids.includes(a.idAgent) && !a.esDesarrollo).map((a) => a.nombre)) : '';
 
   const crear = async () => {
     setError(null);
@@ -578,6 +624,11 @@ function NuevaMesaModal({
             })}
           </Stack>
         </div>
+        {avisoNegocio && (
+          <Alert color='blue' variant='light' data-testid='mesa-negocio-sin-codigo'>
+            {avisoNegocio}
+          </Alert>
+        )}
         <Select
           label='Moderador'
           description='Hace un resumen cada cierto número de rondas.'

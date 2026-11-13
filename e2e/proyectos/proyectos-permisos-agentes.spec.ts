@@ -277,7 +277,7 @@ test.describe('Proyectos · permisos de los agentes', () => {
     });
   });
 
-  test('«Nuevo proyecto» con Play (agente de negocio): ni nivel ni repos; el POST no lleva permisos', async ({ page }) => {
+  test('«Nuevo proyecto» con Play (agente de negocio): se escoge el código igual, con aviso informativo', async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 900 });
     const api = await simular(page, { canEdit: true, editables: [8], soloPlay: true });
     await page.goto('/process/proyectos?nuevo=1');
@@ -286,15 +286,18 @@ test.describe('Proyectos · permisos de los agentes', () => {
     await modal.getByLabel('Nombre').fill('Comercio Exterior LATAM');
     await modal.getByRole('textbox', { name: 'Empresa' }).click();
     await page.getByRole('option', { name: 'GSS' }).click();
-    await expect(modal.getByTestId('permisos-solo-desarrollo')).toContainText('Play no es agente de desarrollo');
-    await expect(modal.getByTestId('permisos-formulario')).toHaveCount(0);
-    await expect(modal.getByTestId('permisos-nivel-lectura')).toHaveCount(0);
-    await expect(modal.getByTestId('permisos-repo-front-kronos')).toHaveCount(0);
+    const form = modal.getByTestId('permisos-formulario');
+    await expect(form).toBeVisible();
+    // En «Ninguno» no hay aviso; al pedir código, aparece (no bloquea).
+    await expect(modal.getByTestId('permisos-negocio-sin-codigo')).toHaveCount(0);
+    await form.getByTestId('permisos-nivel-lectura').click();
+    await form.getByTestId('permisos-repo-front-kronos').click();
+    await expect(modal.getByTestId('permisos-negocio-sin-codigo')).toContainText('Play no es agente de desarrollo: participa sin acceso al código.');
+    await modal.getByTestId('proyectos-permisos-motivo').fill('Orus revisa el código; Play aporta el negocio.');
     await capturar(page, 'escritorio-nuevo-proyecto-agente-negocio');
     await page.getByTestId('proyectos-crear').click();
     await expect.poll(() => api.escrituras.length).toBe(1);
-    expect(api.escrituras[0].body).toMatchObject({ idCompany: 8, agentCodes: ['play'] });
-    expect(api.escrituras[0].body).not.toHaveProperty('agentPolicy');
+    expect(api.escrituras[0].body).toMatchObject({ idCompany: 8, agentCodes: ['play'], agentPolicy: { codeLevel: 'lectura', repos: ['front-kronos'] } });
   });
 
   test('«Nuevo proyecto» sin permiso: el POST no lleva permisos (queda en «Ninguno»)', async ({ page }) => {

@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { Alert, Button, Checkbox, Divider, Group, Modal, Stack, Text, TextInput, Textarea } from '@mantine/core';
+import { Alert, Button, Checkbox, Divider, Group, Modal, SegmentedControl, Stack, Text, TextInput, Textarea } from '@mantine/core';
 import { useMediaQuery } from '@mantine/hooks';
 import { IconAlertCircle, IconFolderPlus, IconInfoCircle, IconShieldLock } from '@tabler/icons-react';
 import SgcSelect from '../sgc/SgcSelect';
@@ -19,7 +19,7 @@ import type { OpcionesPermisosDto } from '../../lib/proyectos/permisos-agentes-t
 import { MAX_MOTIVO, MIN_MOTIVO } from '../../lib/proyectos/permisos-agentes-rules';
 import { BadgeNivel, PERMISOS_POR_DEFECTO, permisosListos, type ValorPermisos } from './permisos/FormPermisosAgentes';
 import PermisosSegunAgentes from './permisos/PermisosSegunAgentes';
-import { agentesDeNegocio, codigoPermitido } from '../../lib/proyectos/agentes-desarrollo-rules';
+import { agentesDeNegocio } from '../../lib/proyectos/agentes-desarrollo-rules';
 import css from './proyectos.module.css';
 
 /**
@@ -27,6 +27,11 @@ import css from './proyectos.module.css';
  * que la persona tiene en esa empresa y con el módulo habilitado) y el perfil
  * de conectores debe ser uno que admitan TODOS los asistentes escogidos. El
  * servidor vuelve a validar todo; esto solo evita ofrecer lo que no va a pasar.
+ *
+ * DOS CAMINOS (2026-11-10, Nicolás Rivera: «que existan los 2 caminos y que se
+ * puedan añadir después más agentes»): «Con asistentes» (lo de siempre) o «Sin
+ * asistentes» (solo personas: miembros, tareas, archivos y vínculos). Los
+ * asistentes se agregan después en «Detalles» → «Agregar asistente».
  */
 export default function NuevoProyectoModal({
   opened,
@@ -43,6 +48,7 @@ export default function NuevoProyectoModal({
   const [nombre, setNombre] = useState('');
   const [empresa, setEmpresa] = useState<string | null>(null);
   const [descripcion, setDescripcion] = useState('');
+  const [camino, setCamino] = useState<'con' | 'sin'>('con');
   const [agentes, setAgentes] = useState<string[]>([]);
   const [perfil, setPerfil] = useState<string | null>(null);
   const [instrucciones, setInstrucciones] = useState('');
@@ -55,10 +61,10 @@ export default function NuevoProyectoModal({
   const [enviando, setEnviando] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Al abrir: la primera empresa con asistentes, y el formulario en blanco.
+  // Al abrir: la primera empresa con asistentes (o la primera, si no tiene ninguno), y el formulario en blanco.
   useEffect(() => {
     if (!opened) return;
-    const primera = datos.companies.find((c) => (datos.designables[String(c.idCompany)] ?? []).length > 0);
+    const primera = datos.companies.find((c) => (datos.designables[String(c.idCompany)] ?? []).length > 0) ?? datos.companies[0];
     setNombre('');
     setDescripcion('');
     setInstrucciones('');
@@ -70,6 +76,11 @@ export default function NuevoProyectoModal({
   }, [opened, datos]);
 
   const designables = useMemo(() => (empresa ? datos.designables[empresa] ?? [] : []), [datos, empresa]);
+  // Sin asistentes en la empresa, el único camino es «Sin asistentes».
+  useEffect(() => {
+    setCamino(designables.length > 0 ? 'con' : 'sin');
+  }, [designables]);
+  const conAgentes = camino === 'con';
 
   // Quién puede escoger los permisos y en qué empresas (la reja real está en el servidor).
   useEffect(() => {
@@ -86,20 +97,14 @@ export default function NuevoProyectoModal({
     setPermisos(PERMISOS_POR_DEFECTO);
     setMotivoPermisos('');
   }, [empresa]);
-  // Código y repos SOLO si todos los asistentes escogidos son de desarrollo (regla del 2026-10-27).
+  // Agentes mixtos (2026-11-11): el código se puede escoger igual; los asistentes de negocio
+  // participan sin acceso al código (aviso informativo; el puente les entrega «ninguno»).
   const marcados = useMemo(
     () => designables.filter((a) => agentes.includes(a.code)).map((a) => ({ displayName: a.displayName, esDesarrollo: a.esDesarrollo === true })),
     [designables, agentes]
   );
-  const codigoOk = codigoPermitido(marcados);
-  // Si deja de poder tener código (agregó un agente de negocio), vuelve al valor seguro.
-  useEffect(() => {
-    if (codigoOk) return;
-    setPermisos(PERMISOS_POR_DEFECTO);
-    setMotivoPermisos('');
-  }, [codigoOk]);
-  const conCodigo = puedeEscogerPermisos && codigoOk && permisos.codeLevel !== 'ninguno';
-  const permisosOk = !puedeEscogerPermisos || !codigoOk || (permisosListos(permisos) && (!conCodigo || motivoPermisos.trim().length >= MIN_MOTIVO));
+  const conCodigo = puedeEscogerPermisos && permisos.codeLevel !== 'ninguno';
+  const permisosOk = !puedeEscogerPermisos || (permisosListos(permisos) && (!conCodigo || motivoPermisos.trim().length >= MIN_MOTIVO));
 
   // Al cambiar de empresa se reinicia la elección: un asistente de otra empresa no sirve.
   useEffect(() => {
@@ -116,10 +121,10 @@ export default function NuevoProyectoModal({
     setPerfil((actual) => (actual && perfilesComunes.some((p) => p.key === actual) ? actual : perfilesComunes[0]?.key ?? null));
   }, [perfilesComunes]);
 
-  const listo = nombre.trim().length > 0 && empresa !== null && agentes.length > 0 && perfil !== null && permisosOk;
+  const listo = nombre.trim().length > 0 && empresa !== null && (!conAgentes || (agentes.length > 0 && perfil !== null && permisosOk));
 
   const crear = async () => {
-    if (!listo || !empresa || !perfil) return;
+    if (!listo || !empresa) return;
     setEnviando(true);
     setError(null);
     const r = await apiSend<{ idProject: number; teamRequested?: boolean }>(
@@ -129,13 +134,17 @@ export default function NuevoProyectoModal({
         name: nombre,
         idCompany: Number(empresa),
         description: descripcion,
-        agentCodes: agentes,
-        profile: perfil,
         instructions: instrucciones,
-        suggestTeam: sugerirEquipo,
-        // Solo quien puede escogerlos los envía; los demás quedan en «ninguno».
-        // Con algún agente de negocio no se envía nada: el proyecto queda en «ninguno».
-        ...(puedeEscogerPermisos && codigoOk ? { agentPolicy: { ...permisos, reason: conCodigo ? motivoPermisos : undefined } } : {}),
+        // Sin asistentes: lista vacía; el servidor deja el perfil «sin-conectores».
+        ...(conAgentes
+          ? {
+              agentCodes: agentes,
+              profile: perfil,
+              suggestTeam: sugerirEquipo,
+              // Solo quien puede escogerlos los envía; los demás quedan en «ninguno».
+              ...(puedeEscogerPermisos ? { agentPolicy: { ...permisos, reason: conCodigo ? motivoPermisos : undefined } } : {}),
+            }
+          : { agentCodes: [] }),
       },
       'No se pudo crear el proyecto.'
     );
@@ -200,50 +209,80 @@ export default function NuevoProyectoModal({
         />
         <Stack gap={6}>
           <Text size='sm' fw={500}>
-            Asistentes del proyecto <span style={{ color: 'var(--mantine-color-error)' }}>*</span>
+            Asistentes del proyecto
           </Text>
-          <Text size='xs' c='dimmed'>
-            Puede escoger hasta {MAX_PROJECT_AGENTS}. Cada conversación usa la cuenta y el plan de su asistente.
-          </Text>
-          {designables.length === 0 ? (
-            <Text size='sm' c='dimmed'>
-              No tiene asistentes con proyectos habilitados en esta empresa.
-            </Text>
-          ) : (
-            <Checkbox.Group value={agentes} onChange={setAgentes}>
-              <Stack gap={6}>
-                {designables.map((a) => (
-                  <Checkbox.Card key={a.code} value={a.code} className={css.opcion} data-checked={agentes.includes(a.code) ? 'true' : 'false'} radius='md'>
-                    <Group wrap='nowrap' gap='sm'>
-                      <Checkbox.Indicator />
-                      <AgentAvatar code={a.code} displayName={a.displayName} avatarUrl={a.avatarUrl} avatarVersion={a.avatarVersion} size={30} showStatus={false} withTooltip={false} />
-                      <div style={{ minWidth: 0 }}>
-                        <Text size='sm' fw={600} lineClamp={1}>
-                          {a.displayName}
-                        </Text>
-                        {a.handle && (
-                          <Text size='xs' c='dimmed' lineClamp={1}>
-                            {a.handle}
-                          </Text>
-                        )}
-                      </div>
-                    </Group>
-                  </Checkbox.Card>
-                ))}
-              </Stack>
-            </Checkbox.Group>
+          <SegmentedControl
+            value={camino}
+            onChange={(v) => setCamino(v === 'sin' ? 'sin' : 'con')}
+            data={[
+              { value: 'con', label: 'Con asistentes', disabled: designables.length === 0 },
+              { value: 'sin', label: 'Sin asistentes' },
+            ]}
+            fullWidth
+            radius='md'
+            data-testid='proyectos-camino-agentes'
+          />
+          {!conAgentes && (
+            <Alert color='blue' radius='md' icon={<IconInfoCircle size={18} />} py={8} data-testid='proyectos-sin-asistentes'>
+              <Text size='sm'>
+                El proyecto queda para las personas: miembros, tareas, archivos, correos y solicitudes vinculados. Puede agregar asistentes después, en
+                «Detalles» → «Agregar asistente».
+              </Text>
+              {designables.length === 0 && (
+                <Text size='xs' c='dimmed' mt={4}>
+                  No tiene asistentes con proyectos habilitados en esta empresa.
+                </Text>
+              )}
+            </Alert>
           )}
         </Stack>
-        <SgcSelect
-          label='Conectores (perfil)'
-          description={perfilElegido?.description ?? 'Escoja primero los asistentes: solo se ofrecen los perfiles que admiten todos.'}
-          data={perfilesComunes.map((p) => ({ value: p.key, label: p.label }))}
-          value={perfil}
-          onChange={setPerfil}
-          allowDeselect={false}
-          disabled={perfilesComunes.length === 0}
-          required
-        />
+        {conAgentes && (
+          <Stack gap={6}>
+            <Text size='xs' c='dimmed'>
+              Puede escoger hasta {MAX_PROJECT_AGENTS}. Cada conversación usa la cuenta y el plan de su asistente.
+            </Text>
+            {designables.length === 0 ? (
+              <Text size='sm' c='dimmed'>
+                No tiene asistentes con proyectos habilitados en esta empresa.
+              </Text>
+            ) : (
+              <Checkbox.Group value={agentes} onChange={setAgentes}>
+                <Stack gap={6}>
+                  {designables.map((a) => (
+                    <Checkbox.Card key={a.code} value={a.code} className={css.opcion} data-checked={agentes.includes(a.code) ? 'true' : 'false'} radius='md'>
+                      <Group wrap='nowrap' gap='sm'>
+                        <Checkbox.Indicator />
+                        <AgentAvatar code={a.code} displayName={a.displayName} avatarUrl={a.avatarUrl} avatarVersion={a.avatarVersion} size={30} showStatus={false} withTooltip={false} />
+                        <div style={{ minWidth: 0 }}>
+                          <Text size='sm' fw={600} lineClamp={1}>
+                            {a.displayName}
+                          </Text>
+                          {a.handle && (
+                            <Text size='xs' c='dimmed' lineClamp={1}>
+                              {a.handle}
+                            </Text>
+                          )}
+                        </div>
+                      </Group>
+                    </Checkbox.Card>
+                  ))}
+                </Stack>
+              </Checkbox.Group>
+            )}
+          </Stack>
+        )}
+        {conAgentes && (
+          <SgcSelect
+            label='Conectores (perfil)'
+            description={perfilElegido?.description ?? 'Escoja primero los asistentes: solo se ofrecen los perfiles que admiten todos.'}
+            data={perfilesComunes.map((p) => ({ value: p.key, label: p.label }))}
+            value={perfil}
+            onChange={setPerfil}
+            allowDeselect={false}
+            disabled={perfilesComunes.length === 0}
+            required
+          />
+        )}
         <Textarea
           label='Instrucciones para los asistentes'
           description='Qué papel cumplen aquí y de qué temas se ocupan. Las leen en cada respuesta del proyecto.'
@@ -254,60 +293,62 @@ export default function NuevoProyectoModal({
           minRows={3}
           maxRows={8}
         />
-        <Checkbox
-          checked={sugerirEquipo}
-          onChange={(e) => setSugerirEquipo(e.currentTarget.checked)}
-          label='Pedir al asistente que sugiera un equipo de subagentes'
-          description='Propondrá de 3 a 6 especialistas para las actividades del proyecto. Usted los aprueba, edita o descarta en la sección «Equipo»; nada trabaja sin su aprobación.'
-          data-testid='proyectos-sugerir-equipo'
-        />
-        <Divider my={4} />
-        <Stack gap='sm' data-testid='proyectos-permisos-agentes'>
-          <Group gap={8}>
-            <IconShieldLock size={18} />
-            <Text fw={600} size='sm'>
-              Permisos de los agentes
-            </Text>
-          </Group>
-          {puedeEscogerPermisos && opcionesPermisos ? (
-            <>
-              <PermisosSegunAgentes
-                codigoPermitido={codigoOk}
-                sinAgentes={marcados.length === 0}
-                agentesNegocio={agentesDeNegocio(marcados).map((a) => a.displayName)}
-                valor={permisos}
-                onChange={setPermisos}
-                catalogo={opcionesPermisos.catalog}
-                operadores={opcionesPermisos.operators}
-              />
-              {conCodigo && (
-                <Textarea
-                  label='Motivo'
-                  description='Por qué los agentes de este proyecto necesitan este acceso. Queda en el registro de cambios.'
-                  value={motivoPermisos}
-                  onChange={(e) => setMotivoPermisos(e.currentTarget.value)}
-                  maxLength={MAX_MOTIVO}
-                  autosize
-                  minRows={2}
-                  maxRows={4}
-                  required
-                  data-testid='proyectos-permisos-motivo'
-                />
-              )}
-            </>
-          ) : (
-            <Alert color='gray' radius='md' icon={<IconInfoCircle size={18} />} py={8} data-testid='proyectos-permisos-solo-lectura'>
-              <Group gap={8} wrap='wrap' mb={4}>
-                <BadgeNivel nivel='ninguno' />
-                <Text size='sm'>Solo conversación e información del proyecto.</Text>
-              </Group>
-              <Text size='xs' c='dimmed'>
-                El acceso a código lo da la administración de SynerLink o quien tenga el permiso «Permisos de agentes en Proyectos» en esta empresa. Se puede
-                cambiar después, en la sección «Permisos» del proyecto.
+        {conAgentes && (
+          <>
+          <Checkbox
+            checked={sugerirEquipo}
+            onChange={(e) => setSugerirEquipo(e.currentTarget.checked)}
+            label='Pedir al asistente que sugiera un equipo de subagentes'
+            description='Propondrá de 3 a 6 especialistas para las actividades del proyecto. Usted los aprueba, edita o descarta en la sección «Equipo»; nada trabaja sin su aprobación.'
+            data-testid='proyectos-sugerir-equipo'
+          />
+          <Divider my={4} />
+          <Stack gap='sm' data-testid='proyectos-permisos-agentes'>
+            <Group gap={8}>
+              <IconShieldLock size={18} />
+              <Text fw={600} size='sm'>
+                Permisos de los agentes
               </Text>
-            </Alert>
-          )}
-        </Stack>
+            </Group>
+            {puedeEscogerPermisos && opcionesPermisos ? (
+              <>
+                <PermisosSegunAgentes
+                  agentesNegocio={agentesDeNegocio(marcados).map((a) => a.displayName)}
+                  valor={permisos}
+                  onChange={setPermisos}
+                  catalogo={opcionesPermisos.catalog}
+                  operadores={opcionesPermisos.operators}
+                />
+                {conCodigo && (
+                  <Textarea
+                    label='Motivo'
+                    description='Por qué los agentes de este proyecto necesitan este acceso. Queda en el registro de cambios.'
+                    value={motivoPermisos}
+                    onChange={(e) => setMotivoPermisos(e.currentTarget.value)}
+                    maxLength={MAX_MOTIVO}
+                    autosize
+                    minRows={2}
+                    maxRows={4}
+                    required
+                    data-testid='proyectos-permisos-motivo'
+                  />
+                )}
+              </>
+            ) : (
+              <Alert color='gray' radius='md' icon={<IconInfoCircle size={18} />} py={8} data-testid='proyectos-permisos-solo-lectura'>
+                <Group gap={8} wrap='wrap' mb={4}>
+                  <BadgeNivel nivel='ninguno' />
+                  <Text size='sm'>Solo conversación e información del proyecto.</Text>
+                </Group>
+                <Text size='xs' c='dimmed'>
+                  El acceso a código lo da la administración de SynerLink o quien tenga el permiso «Permisos de agentes en Proyectos» en esta empresa. Se puede
+                  cambiar después, en la sección «Permisos» del proyecto.
+                </Text>
+              </Alert>
+            )}
+          </Stack>
+          </>
+        )}
         <Group justify='flex-end' gap='sm' className={escritorio ? undefined : css.pieModal}>
           <Button variant='default' onClick={onClose}>
             Cancelar

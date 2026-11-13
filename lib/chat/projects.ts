@@ -241,6 +241,8 @@ export async function assertAgentProjectConversation(
   idAgentPrincipal: number;
   /** Perfil de conectores con el que trabaja ESTE agente en la conversación. */
   perfil: string;
+  /** La conversación es una mesa de discusión (los turnos los reparte el motor). */
+  esMesa: boolean;
 } | null> {
   if (!esIdValido(conversationId) || !esIdValido(idAgent)) return null;
 
@@ -293,6 +295,7 @@ export async function assertAgentProjectConversation(
     invitado: conv.id_agent !== idAgent,
     idAgentPrincipal: conv.id_agent,
     perfil,
+    esMesa: Boolean(conv.mesa),
   };
 }
 
@@ -335,6 +338,32 @@ export async function mencionablesDelHilo(
     idAgentPrincipal
   );
   return { principal, mencionables };
+}
+
+/**
+ * Asistentes a los que un ASISTENTE puede despertar con @ en un hilo de
+ * proyecto (2026-11-12, menciones entre asistentes): los mismos que podría
+ * mencionar la PERSONA que escribió por última vez en el hilo (`idUserOrigen`)
+ * —designados, vigentes, con Proyectos habilitado y asignados a ella—, más el
+ * principal del hilo si sigue designado. Sin persona de origen, o si ella ya
+ * no puede escribir en el proyecto, nadie. El autor nunca se incluye.
+ */
+export async function mencionablesParaAgente(opciones: {
+  idProject: number;
+  idAgentPrincipal: number;
+  idAgentAutor: number;
+  idUserOrigen: string | null;
+}): Promise<AgenteMencionable[]> {
+  const { idProject, idAgentPrincipal, idAgentAutor, idUserOrigen } = opciones;
+  if (!idUserOrigen) return [];
+  const persona = await prisma.user.findUnique({ where: { id: idUserOrigen }, select: { id: true, email: true, isActive: true } });
+  if (!persona || !persona.isActive || !persona.email) return [];
+  const usuario = { id: persona.id, email: persona.email };
+  const acceso = await resolveProjectForUser(usuario, idProject);
+  if (!acceso || acceso.archived) return [];
+  const { principal, mencionables } = await mencionablesDelHilo(usuario, idProject, acceso.role, idAgentPrincipal);
+  const todos = [...(principal ? [principal] : []), ...mencionables];
+  return todos.filter((a) => a.idAgent !== idAgentAutor);
 }
 
 /** Filtro Prisma de «proyecto activo donde el agente está designado» (bandeja, archivos). */
@@ -655,7 +684,8 @@ export async function getProjectDetail(user: ProjectUser, acceso: ProjectAccess,
     company: { idCompany: p.company.id_company, companyName: p.company.company.trim() },
     myRole: acceso.role,
     archived: p.archived,
-    capabilities: p.archived ? { ...capabilitiesFor(null), archive: caps.archive } : caps,
+    // Agregar y retirar asistentes (2026-11-10): también la administración de SynerLink.
+    capabilities: p.archived ? { ...capabilitiesFor(null), archive: caps.archive } : { ...caps, manageAgents: caps.manageAgents || opciones.esAdmin === true },
     createdAt: p.created_at.toISOString(),
     updatedAt: p.updated_at.toISOString(),
     agents: p.agents.map((x) => {

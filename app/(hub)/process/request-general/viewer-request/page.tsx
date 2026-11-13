@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useMemo, useDeferredValue, Suspense } from 'react';
+import { useState, useEffect, useMemo, useDeferredValue, useRef, Suspense } from 'react';
 import { useSession } from 'next-auth/react';
 import { useRouter } from 'next/navigation';
 import toast from 'react-hot-toast';
@@ -47,11 +47,18 @@ import { RequestListFilters } from '../../../../../components/request-general/li
 import AutoRefreshNote from '../../../../../components/ui/AutoRefreshNote';
 import IosSearchField from '../../../../../components/ui/IosSearchField';
 import { useAutoRefresh } from '../../../../../components/ui/useAutoRefresh';
+import { useRequestListPersistence } from '../../../../../components/request-general/list/useRequestListPersistence';
+import {
+  loadLastViewed,
+  pageOfItem,
+  saveRequestListNav,
+} from '../../../../../lib/requests-general/requestListNav';
 import { filterByText, requestSearchParts } from '../../../../../lib/requests-general/textSearch';
 import {
   EMPTY_LIST_FILTERS,
   buildListOptions,
   countByStatusGroup,
+  REQUEST_STATE_OPTIONS,
   describeListFilters,
   matchesListFilters,
   splitPeople,
@@ -119,9 +126,8 @@ function ViewerRequestGeneralPage() {
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
-  // Filtros extra de observadores: categoría (en el navegador) y departamento del solicitante
-  // (en el servidor: cambia el conjunto que se trae).
-  const [categoryFilter, setCategoryFilter] = useState('');
+  // Filtros extra de observadores: categoría (en el navegador, dentro de `filters`) y
+  // departamento del solicitante (en el servidor: cambia el conjunto que se trae).
   const [departmentFilter, setDepartmentFilter] = useState('');
   const [departmentOptions, setDepartmentOptions] = useState<{ value: string; label: string }[]>(
     []
@@ -141,6 +147,8 @@ function ViewerRequestGeneralPage() {
         row: {
           requestId: t.id,
           group: statusGroupOf(t.id_status_case, t.status),
+          statusId: t.id_status_case,
+          category: t.category,
           companyId: String(t.id_company ?? ''),
           company: t.company,
           process: t.process ?? '',
@@ -150,8 +158,6 @@ function ViewerRequestGeneralPage() {
       })),
     [tickets]
   );
-  const listOptions = useMemo(() => buildListOptions(ticketRows.map((x) => x.row)), [ticketRows]);
-  // Búsqueda + filtros del panel; el estado se aplica aparte para que las tarjetas no cambien.
   const categoryOptions = useMemo(
     () =>
       [...new Set(tickets.map((t) => t.category).filter(Boolean))]
@@ -159,14 +165,22 @@ function ViewerRequestGeneralPage() {
         .map((c) => ({ value: c, label: c })),
     [tickets]
   );
+  // «Estado» exacto y «Categoría» van en el mismo panel (los filtros que había antes del panel).
+  const listOptions = useMemo(
+    () => ({
+      ...buildListOptions(ticketRows.map((x) => x.row)),
+      categories: categoryOptions,
+      states: REQUEST_STATE_OPTIONS,
+    }),
+    [ticketRows, categoryOptions]
+  );
+  // Búsqueda + filtros del panel; el estado se aplica aparte para que las tarjetas no cambien.
   const matchingRows = useMemo(
     () =>
-      filterByText(ticketRows, deferredSearch, (x) => requestSearchParts(x.ticket)).filter(
-        (x) =>
-          (!categoryFilter || x.ticket.category === categoryFilter) &&
-          matchesListFilters(x.row, filters, { ignoreStatus: true })
+      filterByText(ticketRows, deferredSearch, (x) => requestSearchParts(x.ticket)).filter((x) =>
+        matchesListFilters(x.row, filters, { ignoreStatus: true })
       ),
-    [ticketRows, deferredSearch, filters, categoryFilter]
+    [ticketRows, deferredSearch, filters]
   );
   const statusCounts = useMemo(() => countByStatusGroup(matchingRows.map((x) => x.row)), [matchingRows]);
   const visibleTickets = useMemo(
@@ -177,7 +191,7 @@ function ViewerRequestGeneralPage() {
   // Paginación en cliente: al cambiar filtros o búsqueda vuelve a la página 1.
   useEffect(() => {
     setCurrentPage(1);
-  }, [filters, deferredSearch, tickets, categoryFilter]);
+  }, [filters, deferredSearch, tickets]);
 
   const totalPages = Math.max(1, Math.ceil(visibleTickets.length / ITEMS_PER_PAGE));
   const pageItems = visibleTickets.slice(
@@ -185,10 +199,34 @@ function ViewerRequestGeneralPage() {
     currentPage * ITEMS_PER_PAGE
   );
 
+  // Orden exacto en pantalla para «Anterior / Siguiente» del detalle.
+  const visibleNavItems = useMemo(
+    () => visibleTickets.map((t) => ({ kind: 'request' as const, id: Number(t.id) })),
+    [visibleTickets]
+  );
+  // Filtros, búsqueda y página se conservan al volver del detalle (breadcrumb o atrás).
+  const pendingPageRef = useRef<number | null>(null);
+  const { hydrated: listHydrated } = useRequestListPersistence(
+    'viewer-request',
+    { filters, search: searchInput, page: currentPage },
+    (saved) => {
+      setFilters(saved.filters);
+      setSearchInput(saved.search);
+      pendingPageRef.current = saved.page ?? null;
+    },
+    !loading
+  );
+  useEffect(() => {
+    if (!listHydrated || loading || pendingPageRef.current === null) return;
+    const page =
+      pageOfItem(visibleNavItems, loadLastViewed('viewer-request'), ITEMS_PER_PAGE) ?? pendingPageRef.current;
+    pendingPageRef.current = null;
+    setCurrentPage(Math.min(page, totalPages));
+  }, [listHydrated, loading, visibleNavItems, totalPages]);
+
   const clearListFilters = () => {
     setFilters(EMPTY_LIST_FILTERS);
     setSearchInput('');
-    setCategoryFilter('');
     if (departmentFilter) {
       setDepartmentFilter('');
       void fetchTickets(false, '');
@@ -376,7 +414,6 @@ function ViewerRequestGeneralPage() {
         module: 'Mis solicitudes',
         filters: [
           ...describeListFilters(filters, listOptions),
-          { label: 'Categoría', value: categoryFilter || 'Todas' },
           { label: 'Departamento del solicitante', value: departmentLabel(departmentFilter) },
           { label: 'Búsqueda', value: searchInput.trim() || 'Ninguna' },
         ],
@@ -433,40 +470,27 @@ function ViewerRequestGeneralPage() {
         onChange={setFilters}
         onClear={clearListFilters}
         counts={statusCounts}
+        showReturned
         options={listOptions}
         progress={globalProgress}
+        extraActiveCount={departmentFilter ? 1 : 0}
+        extraFields={
+          <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
+            <Select
+              label='Departamento del solicitante'
+              placeholder='Todos'
+              clearable
+              searchable
+              data={departmentOptions}
+              value={departmentFilter || null}
+              onChange={(value) => changeDepartment(value || '')}
+              leftSection={<IconBuilding size={16} />}
+              nothingFoundMessage='Sin coincidencias'
+              data-testid='department-filter'
+            />
+          </Grid.Col>
+        }
       />
-
-      <Grid mt='sm'>
-        <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
-          <Select
-            label='Categoría'
-            placeholder='Todas las categorías'
-            clearable
-            searchable
-            data={categoryOptions}
-            value={categoryFilter || null}
-            onChange={(value) => setCategoryFilter(value || '')}
-            leftSection={<IconFileDescription size={16} />}
-            nothingFoundMessage='Sin coincidencias'
-            data-testid='category-filter'
-          />
-        </Grid.Col>
-        <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
-          <Select
-            label='Departamento del solicitante'
-            placeholder='Todos'
-            clearable
-            searchable
-            data={departmentOptions}
-            value={departmentFilter || null}
-            onChange={(value) => changeDepartment(value || '')}
-            leftSection={<IconBuilding size={16} />}
-            nothingFoundMessage='Sin coincidencias'
-            data-testid='department-filter'
-          />
-        </Grid.Col>
-      </Grid>
 
       {error && (
         <Alert icon={<IconAlertCircle size={20} />} title='Error' color='red' radius='lg' mt='md'>
@@ -535,6 +559,10 @@ function ViewerRequestGeneralPage() {
                     className='cursor-pointer transition-colors'
                     onClick={() => {
                       sessionStorage.setItem('selectedRequest', JSON.stringify(ticket));
+                      saveRequestListNav('viewer-request', visibleNavItems, {
+                        kind: 'request',
+                        id: Number(ticket.id),
+                      });
                       window.open(
                         `/process/request-general/view-request?id=${ticket.id}&from=viewer-request`
                       );

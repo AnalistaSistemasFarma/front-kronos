@@ -110,23 +110,31 @@ export function StatFilterTile({
   );
 }
 
-/** Avance con anillo (estilo de los anillos del Monitor). */
 export function ProgressRingTile({
   label,
   done,
   total,
   percent,
+  hint,
+  onClick,
 }: {
   label: string;
   done: number;
   total: number;
   percent: number;
+  hint?: ReactNode;
+  onClick?: () => void;
 }) {
   const r = 20;
   const c = 2 * Math.PI * r;
   const tone: StatusTone = total === 0 ? 'idle' : percent === 100 ? 'ok' : 'info';
+  const interactive = Boolean(onClick);
+  const Root = interactive ? 'button' : 'div';
   return (
-    <div className={`${styles.statTile} ${styles.statStatic} ${toneClass(tone)}`}>
+    <Root
+      {...(interactive ? { type: 'button' as const, onClick, 'aria-label': `${label}: ver el detalle de las tareas` } : {})}
+      className={`${styles.statTile} ${interactive ? '' : styles.statStatic} ${toneClass(tone)}`}
+    >
       <svg className={styles.ringSvg} viewBox='0 0 48 48' role='img' aria-label={`${label}: ${percent} %`}>
         <circle className={styles.ringTrack} cx='24' cy='24' r={r} fill='none' strokeWidth='5' />
         <circle
@@ -152,8 +160,9 @@ export function ProgressRingTile({
         <span className={styles.statValue} style={{ display: 'block' }}>
           {done}/{total}
         </span>
+        {hint ? <span className={styles.statHint}>{hint}</span> : null}
       </span>
-    </div>
+    </Root>
   );
 }
 

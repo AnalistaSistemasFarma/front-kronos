@@ -3,10 +3,13 @@
 import { useState, type ReactNode } from 'react';
 import { Badge, Box, Button, Collapse, Grid, Group, Select, Text, TextInput } from '@mantine/core';
 import {
+  IconArrowBackUp,
   IconBuilding,
   IconCalendarEvent,
   IconCheck,
+  IconFileDescription,
   IconFilter,
+  IconFlag,
   IconHash,
   IconListDetails,
   IconProgress,
@@ -18,6 +21,7 @@ import { FilterPanel, ProgressRingTile, StatFilterTile } from './RequestListUi';
 import styles from './requestList.module.css';
 import {
   activeFilterCount,
+  stateGroup,
   type ListFilters,
   type ListOptions,
   type StatusCounts,
@@ -39,6 +43,11 @@ export function RequestListFilters({
   options,
   progress,
   progressLabel = 'Avance de tareas',
+  progressHint,
+  onProgressClick,
+  extraFields,
+  extraActiveCount = 0,
+  showReturned = false,
 }: {
   filters: ListFilters;
   onChange: (next: ListFilters) => void;
@@ -50,17 +59,39 @@ export function RequestListFilters({
   options: ListOptions;
   progress: { done: number; total: number; percent: number };
   progressLabel?: string;
+  progressHint?: ReactNode;
+  onProgressClick?: () => void;
+  extraFields?: ReactNode;
+  extraActiveCount?: number;
+  showReturned?: boolean;
 }) {
   const [expanded, setExpanded] = useState(false);
   const set = <K extends keyof ListFilters>(key: K, value: ListFilters[K]) =>
     onChange({ ...filters, [key]: value });
-  const pickStatus = (status: StatusGroup) =>
-    set('status', filters.status === status && status !== 'all' ? 'all' : status);
-  const active = activeFilterCount(filters);
+  const groupOfState = (state: string): StatusGroup => {
+    const group = stateGroup(state);
+    return group === 'returned' && !showReturned ? 'pending' : group;
+  };
+  const pickStatus = (status: StatusGroup) => {
+    const next = filters.status === status && status !== 'all' ? 'all' : status;
+    const keepState = filters.state && next !== 'all' && groupOfState(filters.state) === next;
+    onChange({ ...filters, status: next, state: keepState ? filters.state : '' });
+  };
+  const pickState = (state: string) =>
+    onChange({ ...filters, state, status: state ? groupOfState(state) : filters.status });
+  const active = activeFilterCount(filters) + extraActiveCount;
 
-  const tiles: Array<{ key: StatusGroup; label: string; icon: ReactNode; tone: 'info' | 'warning' | 'ok' | 'critical' }> = [
+  const tiles: Array<{
+    key: StatusGroup;
+    label: string;
+    icon: ReactNode;
+    tone: 'info' | 'warning' | 'ok' | 'critical' | 'violet';
+  }> = [
     { key: 'all', label: 'Total', icon: <IconListDetails size={20} />, tone: 'info' },
     { key: 'pending', label: 'Pendientes', icon: <IconProgress size={20} />, tone: 'warning' },
+    ...(showReturned
+      ? [{ key: 'returned' as const, label: 'Devueltas', icon: <IconArrowBackUp size={20} />, tone: 'violet' as const }]
+      : []),
     { key: 'done', label: 'Completadas', icon: <IconCheck size={20} />, tone: 'ok' },
     { key: 'cancelled', label: 'Canceladas', icon: <IconX size={20} />, tone: 'critical' },
   ];
@@ -86,6 +117,8 @@ export function RequestListFilters({
           done={progress.done}
           total={progress.total}
           percent={progress.percent}
+          hint={progressHint}
+          onClick={onProgressClick}
         />
       </div>
 
@@ -113,6 +146,20 @@ export function RequestListFilters({
                   data-testid='id-filter'
                 />
               </Grid.Col>
+              {options.states ? (
+                <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
+                  <Select
+                    label='Estado'
+                    placeholder='Todos los estados'
+                    clearable
+                    data={options.states}
+                    value={filters.state || null}
+                    onChange={(value) => pickState(value || '')}
+                    leftSection={<IconFlag size={16} />}
+                    data-testid='status-filter'
+                  />
+                </Grid.Col>
+              ) : null}
               <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
                 <Select
                   label='Empresa'
@@ -127,6 +174,22 @@ export function RequestListFilters({
                   data-testid='company-filter'
                 />
               </Grid.Col>
+              {options.categories ? (
+                <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
+                  <Select
+                    label='Categoría'
+                    placeholder='Todas las categorías'
+                    clearable
+                    searchable
+                    data={options.categories}
+                    value={filters.category || null}
+                    onChange={(value) => set('category', value || '')}
+                    leftSection={<IconFileDescription size={16} />}
+                    nothingFoundMessage='Sin coincidencias'
+                    data-testid='category-filter'
+                  />
+                </Grid.Col>
+              ) : null}
               <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
                 <Select
                   label='Proceso'
@@ -175,6 +238,7 @@ export function RequestListFilters({
                   data-testid='date_to-filter'
                 />
               </Grid.Col>
+              {extraFields}
             </Grid>
 
             <Group justify='space-between' mt='md' wrap='wrap' gap='sm'>

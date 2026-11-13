@@ -104,8 +104,11 @@ import IosSearchField from '../../../../../components/ui/IosSearchField';
 import { useAutoRefresh } from '../../../../../components/ui/useAutoRefresh';
 import { filterByText, requestSearchParts } from '../../../../../lib/requests-general/textSearch';
 import { RequestListFilters } from '../../../../../components/request-general/list/RequestListFilters';
+import { useRequestListPersistence } from '../../../../../components/request-general/list/useRequestListPersistence';
+import { saveRequestListNav } from '../../../../../lib/requests-general/requestListNav';
 import {
   EMPTY_LIST_FILTERS,
+  REQUEST_STATE_OPTIONS,
   buildListOptions,
   countByStatusGroup,
   describeListFilters,
@@ -307,6 +310,7 @@ function RequestBoard() {
         row: {
           requestId: t.id,
           group: statusGroupOf(t.id_status_case, t.status),
+          statusId: t.id_status_case,
           companyId: String(t.id_company ?? ''),
           company: t.company,
           process: t.process,
@@ -316,7 +320,11 @@ function RequestBoard() {
       })),
     [tickets]
   );
-  const listOptions = useMemo(() => buildListOptions(ticketRows.map((x) => x.row)), [ticketRows]);
+  // «Estado» exacto (Abierto, Cancelado, Resuelto, Devuelta): el filtro que había antes del panel.
+  const listOptions = useMemo(
+    () => ({ ...buildListOptions(ticketRows.map((x) => x.row)), states: REQUEST_STATE_OPTIONS }),
+    [ticketRows]
+  );
   // Búsqueda + filtros del panel; el estado se aplica aparte para que las tarjetas no cambien.
   const matchingRows = useMemo(
     () =>
@@ -334,6 +342,16 @@ function RequestBoard() {
     setFilters(EMPTY_LIST_FILTERS);
     setSearchInput('');
   };
+  // Filtros y búsqueda se conservan al volver del detalle (breadcrumb o atrás).
+  useRequestListPersistence(
+    'create-request',
+    { filters, search: searchInput },
+    (saved) => {
+      setFilters(saved.filters);
+      setSearchInput(saved.search);
+    },
+    !loading
+  );
   const [refreshing, setRefreshing] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
 
@@ -1521,6 +1539,7 @@ function RequestBoard() {
         onChange={setFilters}
         onClear={clearListFilters}
         counts={statusCounts}
+        showReturned
         options={listOptions}
         progress={globalProgress}
       />
@@ -1593,6 +1612,11 @@ function RequestBoard() {
                       className='cursor-pointer transition-colors'
                       onClick={() => {
                         sessionStorage.setItem('selectedRequest', JSON.stringify(ticket));
+                        saveRequestListNav(
+                          'create-request',
+                          visibleTickets.map((t) => ({ kind: 'request' as const, id: Number(t.id) })),
+                          { kind: 'request', id: Number(ticket.id) }
+                        );
                         window.open(
                           `/process/request-general/view-request?id=${ticket.id}&from=create-request`
                         );
