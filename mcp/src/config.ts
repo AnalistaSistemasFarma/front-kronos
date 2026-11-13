@@ -112,6 +112,12 @@ export interface McpConfig {
   defaultPageSize: number;
   /** Ruta del archivo de auditoría de respaldo (si no se usa UserAuditLog). */
   auditLogFile: string;
+  /**
+   * Leer también las llaves de la base (Permisos API, 2026-11-09). Por defecto
+   * encendido en loadConfig(); MCP_DB_KEYS=false lo apaga. Sin el campo (pruebas)
+   * queda apagado.
+   */
+  dbKeysEnabled?: boolean;
 }
 
 function loadApiKeysRaw(env: NodeJS.ProcessEnv): unknown {
@@ -158,5 +164,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): McpConfig {
     maxPageSize: Number.isFinite(maxPageSize) ? maxPageSize : 200,
     defaultPageSize: Number.isFinite(defaultPageSize) ? defaultPageSize : 50,
     auditLogFile: env.MCP_AUDIT_LOG_FILE ?? 'kronos-mcp-audit.log',
+    dbKeysEnabled: !/^(false|off|0|no)$/i.test((env.MCP_DB_KEYS ?? '').trim()),
   };
 }
