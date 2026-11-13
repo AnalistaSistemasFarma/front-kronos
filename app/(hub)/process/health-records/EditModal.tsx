@@ -15,6 +15,7 @@ import {
   OBSERVATION_MAX_LENGTH,
   type HealthRecordLog,
 } from '../../../../lib/health-records/fields';
+import NameCombobox from './NameCombobox';
 
 export interface HealthRecord {
   companyId: number;
@@ -57,6 +58,14 @@ const FIELDS = [
   'U_Obsoleto',
   'U_SEND_Link',
 ] as const;
+
+interface NameOptions {
+  titulares: string[];
+  fabricantes: string[];
+  sizes: Record<string, number>;
+}
+
+const EMPTY_OPTIONS: NameOptions = { titulares: [], fabricantes: [], sizes: {} };
 
 type FormState = Record<string, string>;
 
@@ -148,6 +157,23 @@ export default function EditModal({ record, canWrite, onClose, onUpdated }: Prop
   };
 
   const set = (field: string, value: string) => setForm((r) => ({ ...r, [field]: value }));
+
+  // Listas de Titular/Fabricante (valores ya usados en SAP) y largo máximo de
+  // los campos según la empresa del registro. Solo si puede editar.
+  const companyId = record?.companyId;
+  const [nameOptions, setNameOptions] = useState<NameOptions>(EMPTY_OPTIONS);
+  const [loadingOptions, setLoadingOptions] = useState(false);
+  useEffect(() => {
+    if (!companyId || !canWrite) return;
+    let cancel = false;
+    setLoadingOptions(true);
+    fetch(`/api/health-records/options?companyId=${companyId}`)
+      .then((r) => (r.ok ? r.json() : EMPTY_OPTIONS))
+      .then((d) => { if (!cancel) setNameOptions({ ...EMPTY_OPTIONS, ...d }); })
+      .catch(() => { if (!cancel) setNameOptions(EMPTY_OPTIONS); })
+      .finally(() => { if (!cancel) setLoadingOptions(false); });
+    return () => { cancel = true; };
+  }, [companyId, canWrite]);
 
   const logs = [...(record?.logs ?? [])].reverse();
 
@@ -274,8 +300,8 @@ export default function EditModal({ record, canWrite, onClose, onUpdated }: Prop
             <TextInput label="Fecha vencimiento" type="date" value={form.U_Fecha_Vencimiento ?? ''} onChange={(e) => set('U_Fecha_Vencimiento', e.currentTarget.value)} disabled={!canWrite} />
             <TextInput label="Codigo CUM" value={form.U_Codigo_CUM ?? ''} onChange={(e) => set('U_Codigo_CUM', e.currentTarget.value)} disabled={!canWrite} />
             <TextInput label="Codigo IUM" value={form.U_Codigo_IUM ?? ''} onChange={(e) => set('U_Codigo_IUM', e.currentTarget.value)} disabled={!canWrite} />
-            <TextInput label="Titular" value={form.U_Titular ?? ''} onChange={(e) => set('U_Titular', e.currentTarget.value)} disabled={!canWrite} />
-            <TextInput label="Fabricante" value={form.U_Fabricante ?? ''} onChange={(e) => set('U_Fabricante', e.currentTarget.value)} disabled={!canWrite} />
+            <NameCombobox label="Titular" value={form.U_Titular ?? ''} onChange={(v) => set('U_Titular', v)} options={nameOptions.titulares} maxLength={nameOptions.sizes.U_Titular} loading={loadingOptions} disabled={!canWrite} />
+            <NameCombobox label="Fabricante" value={form.U_Fabricante ?? ''} onChange={(v) => set('U_Fabricante', v)} options={nameOptions.fabricantes} maxLength={nameOptions.sizes.U_Fabricante} loading={loadingOptions} disabled={!canWrite} />
             <Select label="Estado entrada" data={ESTADOS} value={form.U_Estado_Entrada ?? ''} onChange={(v) => set('U_Estado_Entrada', v ?? '')} disabled={!canWrite} />
             <Select label="Estado comercializacion" data={ESTADOS} value={form.U_Estado_Comercializacion ?? ''} onChange={(v) => set('U_Estado_Comercializacion', v ?? '')} disabled={!canWrite} />
             <Select label="Obsoleto" data={OBSOLETO} value={form.U_Obsoleto ?? ''} onChange={(v) => set('U_Obsoleto', v ?? '')} disabled={!canWrite} />
