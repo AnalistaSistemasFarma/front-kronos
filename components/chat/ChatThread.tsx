@@ -738,7 +738,14 @@ export default function ChatThread({
   active = true,
   height,
   idConversacion,
+  ocultarMetricas = false,
 }: {
+  /**
+   * Celular (2026-11-14): la franja de métricas del asistente queda guardada
+   * tras el botón «Herramientas» de la cabecera, para que el hilo tenga más
+   * espacio. Con `true` no se pinta.
+   */
+  ocultarMetricas?: boolean;
   /** Hilo DIRECTO: el agente con el que se habla. */
   agent?: ChatAgentDto;
   /**
@@ -1336,7 +1343,7 @@ export default function ChatThread({
         </Box>
       )}
       {enPersonas && <AvisoPrivacidadPersonas />}
-      {esHiloDirecto && <AgentMetricsBar metrics={thread.metrics} />}
+      {esHiloDirecto && !ocultarMetricas && <AgentMetricsBar metrics={thread.metrics} />}
       <ScrollArea
         className='chat-thread__scroll'
         viewportRef={viewportRef}
