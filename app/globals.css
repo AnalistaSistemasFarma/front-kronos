@@ -1733,6 +1733,13 @@ body.chat-inmersivo.con-chat-rail .chat-escritorio {
   background-color: var(--app-surface-raised, var(--surface-muted));
 }
 
+/* Celular: fila desplegable de «Herramientas» bajo la cabecera del hilo. */
+.chat-panel__herramientas {
+  border-bottom: 1px solid var(--app-border, var(--border-subtle));
+  background-color: var(--app-surface-raised, var(--surface-muted));
+  overflow-x: auto;
+}
+
 /* ── Hilo ── */
 .chat-thread {
   display: flex;

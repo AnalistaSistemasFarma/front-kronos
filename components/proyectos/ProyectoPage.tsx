@@ -463,14 +463,15 @@ export default function ProyectoPage({ idProject }: { idProject: number }) {
   };
 
   const cabeceraHilo = conversacion && agenteConversacion && proyecto && (
-    <Group justify='space-between' p='sm' className='chat-panel__header' wrap='nowrap'>
-      <Group gap='sm' wrap='nowrap' style={{ minWidth: 0 }}>
+    // Celular (2026-11-14): cabecera de UNA fila compacta, como el chat interno.
+    <Group justify='space-between' p={escritorio ? 'sm' : 'xs'} className='chat-panel__header' wrap='nowrap'>
+      <Group gap={escritorio ? 'sm' : 'xs'} wrap='nowrap' style={{ minWidth: 0 }}>
         {!escritorio && (
           <ActionIcon variant='subtle' color='gray' size={44} onClick={() => setIdConversacion(null)} aria-label='Volver al proyecto'>
             <IconArrowLeft size={20} />
           </ActionIcon>
         )}
-        <AgentAvatar code={agenteConversacion.code} displayName={agenteConversacion.displayName} avatarUrl={agenteConversacion.avatarUrl} avatarVersion={agenteConversacion.avatarVersion} size={36} showStatus={false} withTooltip={false} />
+        <AgentAvatar code={agenteConversacion.code} displayName={agenteConversacion.displayName} avatarUrl={agenteConversacion.avatarUrl} avatarVersion={agenteConversacion.avatarVersion} size={escritorio ? 36 : 30} showStatus={false} withTooltip={false} />
         <Box style={{ minWidth: 0 }}>
           <Text fw={600} size='sm' className={css.truncar}>
             {conversacion.title ?? 'Conversación'}
