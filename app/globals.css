@@ -7387,3 +7387,30 @@ a.portal-th__contactos-boton--enlace:focus-visible {
     white-space: nowrap;
   }
 }
+
+/* ─────────── Sensación de app nativa (2026-11-14, «PWA nativa») ───────────
+   - Sin el recuadro gris que el navegador móvil pinta al tocar un enlace o
+     botón (las apps nativas no lo tienen; el componente ya da su respuesta).
+   - `touch-action: manipulation` en lo que se toca: el navegador no espera a
+     ver si es un doble toque de zoom antes de disparar el clic.
+   - Instalada (standalone): sin el rebote ni el «jalar para recargar» de toda
+     la página, que en una app se siente a página web. Los paneles con scroll
+     propio conservan el suyo. */
+html {
+  -webkit-tap-highlight-color: transparent;
+}
+a,
+button,
+[role='button'],
+[role='tab'],
+[role='menuitem'],
+label,
+summary {
+  touch-action: manipulation;
+}
+@media (display-mode: standalone) {
+  html,
+  body {
+    overscroll-behavior-y: none;
+  }
+}

@@ -186,13 +186,19 @@ export function avisarMensajeEntrante(idConversation: number): void {
   if (ahora - momentoUltimoZumbido() < SONIDO_ANTIRREBOTE_MS) return;
   const ctx = contextoAudio(false);
   // Sin gesto previo el navegador no deja sonar: se falla en silencio.
-  if (!ctx || ctx.state !== 'running') return;
+  if (!ctx) return;
   ultimoSonidoAt = ahora;
-  try {
-    tocar(ctx, tono);
-  } catch {
-    /* adorno */
-  }
+  const sonarYa = () => {
+    try {
+      tocar(ctx, tono);
+    } catch {
+      /* adorno */
+    }
+  };
+  // Recién creado (fuera de Apple se crea al primer sonido) puede arrancar
+  // suspendido un instante: se reanuda y suena.
+  if (ctx.state === 'running') sonarYa();
+  else void ctx.resume().then(() => { if (ctx.state === 'running') sonarYa(); }, () => undefined);
 }
 
 /* ───────────────────── No leídos de la bandeja ──────────────────────── */
