@@ -238,3 +238,13 @@ test('fusión a testing (Kepler): solo `pr merge <n> --merge --admin` y con toda
   assert.throws(() => leerAlcance('/x', () => JSON.stringify({ rutas: R, mergePruebas: true })), /exige checksRequeridos/);
   assert.match(textoCodigoOpenclaw({ worktrees: [], guardia: { git: 'g', gh: 'h' }, tokenListo: true, rutasPermitidas: R, mergePruebas: true }), /--merge --admin.*Nicolás Rivera y Horus/s);
 });
+
+test('guardia gh: sin esperas bloqueantes (--watch, run watch); la consulta simple sí', () => {
+  const o = { repos: REPOS, repoCwd: Object.keys(REPOS)[0] };
+  assert.equal(validarGh(['pr', 'checks', '932'], o).ok, true);
+  for (const a of [['pr', 'checks', '932', '--watch'], ['pr', 'checks', '932', '--watch', '--interval', '25'], ['pr', 'checks', '932', '--watch=true'], ['run', 'watch', '123']]) {
+    const v = validarGh(a, o);
+    assert.equal(v.ok, false, a.join(' '));
+    assert.match(v.motivo, /sin --watch/);
+  }
+});

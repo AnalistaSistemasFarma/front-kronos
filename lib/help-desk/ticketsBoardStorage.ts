@@ -30,20 +30,46 @@ export const DEFAULT_TICKETS_BOARD_FILTERS: TicketsBoardFilters = {
   company: '',
 };
 
+/**
+ * Los casos van en una llave aparte: el listado puede pesar varios MB y antes se volvía a
+ * leer y escribir completo en cada evento de scroll y al abrir/cerrar filtros, lo que
+ * congelaba la pantalla unos segundos. Filtros y scroll (pocos bytes) se guardan solos.
+ */
+const TICKETS_STORAGE_KEY = `${STORAGE_KEY}:tickets`;
+
+type BoardMeta = Omit<TicketsBoardPersistedState, 'tickets'>;
+
+function loadBoardMeta(): BoardMeta | null {
+  const raw = sessionStorage.getItem(STORAGE_KEY);
+  if (!raw) return null;
+  const parsed = JSON.parse(raw) as BoardMeta;
+  return parsed?.filters ? parsed : null;
+}
+
 export function loadTicketsBoardState(): TicketsBoardPersistedState | null {
   if (typeof window === 'undefined') return null;
 
   try {
-    const raw = sessionStorage.getItem(STORAGE_KEY);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as TicketsBoardPersistedState;
-    if (!parsed?.filters) return null;
-    return parsed;
+    const meta = loadBoardMeta();
+    if (!meta) return null;
+    let tickets: HelpDeskCaseListItem[] | undefined;
+    try {
+      const rawTickets = sessionStorage.getItem(TICKETS_STORAGE_KEY);
+      const parsedTickets = rawTickets ? JSON.parse(rawTickets) : undefined;
+      tickets = Array.isArray(parsedTickets) ? parsedTickets : undefined;
+    } catch {
+      tickets = undefined;
+    }
+    return { ...meta, tickets };
   } catch {
     return null;
   }
 }
 
+/**
+ * Guarda filtros/scroll. Los casos SOLO se reescriben cuando se pasan en `partial.tickets`;
+ * si no, se conservan los ya guardados sin leerlos ni volver a serializarlos.
+ */
 export function saveTicketsBoardState(
   partial: Partial<TicketsBoardPersistedState> & {
     filters: TicketsBoardFilters;
@@ -53,24 +79,37 @@ export function saveTicketsBoardState(
   if (typeof window === 'undefined') return;
 
   try {
-    const current = loadTicketsBoardState();
-    const next: TicketsBoardPersistedState = {
+    let currentScroll = 0;
+    if (partial.scrollY === undefined) {
+      try {
+        currentScroll = loadBoardMeta()?.scrollY ?? 0;
+      } catch {
+        currentScroll = 0;
+      }
+    }
+    const meta: BoardMeta = {
       filters: partial.filters,
       filtersExpanded: partial.filtersExpanded,
-      scrollY: partial.scrollY ?? current?.scrollY ?? 0,
-      tickets: partial.tickets ?? current?.tickets,
+      scrollY: partial.scrollY ?? currentScroll,
       savedAt: Date.now(),
     };
-    try {
-      sessionStorage.setItem(STORAGE_KEY, JSON.stringify(next));
-    } catch {
-      // Con "Todos" el listado completo puede pasar la cuota de sessionStorage
-      // (~5 MB por origen): se guardan al menos filtros y scroll; los casos se
-      // vuelven a pedir al regresar.
-      sessionStorage.setItem(STORAGE_KEY, JSON.stringify({ ...next, tickets: undefined }));
-    }
+    sessionStorage.setItem(STORAGE_KEY, JSON.stringify(meta));
   } catch {
     /* ignore quota / private mode */
+  }
+
+  if (partial.tickets === undefined) return;
+  try {
+    sessionStorage.setItem(TICKETS_STORAGE_KEY, JSON.stringify(partial.tickets));
+  } catch {
+    // Con "Todos" el listado completo puede pasar la cuota de sessionStorage
+    // (~5 MB por origen): se guardan al menos filtros y scroll; los casos se
+    // vuelven a pedir al regresar.
+    try {
+      sessionStorage.removeItem(TICKETS_STORAGE_KEY);
+    } catch {
+      /* ignore */
+    }
   }
 }
 

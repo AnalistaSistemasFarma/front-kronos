@@ -19,7 +19,7 @@
 //    (Estos dos archivos ya se bifurcaron una vez y quedaron con
 //    comportamientos distintos en `notificationclick`.)
 //
-// Espejo de public/sw.js con SW_VERSION = '2026-10-22.1' (menú Compartir de
+// Espejo de public/sw.js con SW_VERSION = '2026-11-14.1' (menú Compartir de
 // Android, share_target; antes: vibración del
 // zumbido del chat entre personas tomada del payload).
 //
@@ -210,4 +210,98 @@ self.addEventListener('fetch', (event) => {
   const url = new URL(req.url);
   if (url.origin !== self.location.origin || url.pathname !== SHARE_TARGET_ACTION) return;
   event.respondWith(recibirCompartido(req));
+});
+
+// =============================================================================
+// CACHÉ DE ARCHIVOS FIJOS (2026-11-14, «PWA nativa»)
+// =============================================================================
+// Para que la app instalada abra como una nativa: el JavaScript, los estilos,
+// las fuentes, los íconos y los stickers quedan guardados en el teléfono y no
+// se vuelven a descargar en cada apertura (iOS borra la caché HTTP con
+// frecuencia; esta caché del service worker dura más).
+//
+// SOLO archivos públicos e inmutables o casi: NUNCA páginas (HTML), ni /api,
+// ni nada que dependa de la sesión. Así no hay riesgo de mostrar datos de otra
+// persona ni una versión vieja de una pantalla.
+//   - /_next/static/*  → caché primero (cada archivo lleva su huella en el
+//                        nombre: si cambia el código, cambia el nombre).
+//   - íconos, stickers y fuentes → caché primero y se refresca por detrás.
+const CACHE_FIJOS = 'synerlink-fijos-v1';
+const CACHE_ACTIVOS = 'synerlink-activos-v1';
+const CACHES_VIGENTES = [CACHE_FIJOS, CACHE_ACTIVOS];
+// Cada despliegue trae archivos nuevos: se conservan los más recientes.
+const MAX_FIJOS = 400;
+const MAX_ACTIVOS = 300;
+
+function esFijo(url) {
+  return url.pathname.startsWith('/_next/static/');
+}
+
+function esActivo(url) {
+  return (
+    url.pathname.startsWith('/icons/') ||
+    url.pathname.startsWith('/chat/stickers/') ||
+    /\.(woff2?|ttf|otf)$/i.test(url.pathname)
+  );
+}
+
+async function recortar(nombre, maximo) {
+  const cache = await caches.open(nombre);
+  const llaves = await cache.keys();
+  // Las llaves salen en orden de inserción: se borran las más viejas.
+  for (let i = 0; i < llaves.length - maximo; i += 1) await cache.delete(llaves[i]);
+}
+
+async function guardarSiSirve(nombre, req, res, maximo) {
+  if (!res || !res.ok || res.type !== 'basic') return;
+  const cache = await caches.open(nombre);
+  await cache.put(req, res);
+  await recortar(nombre, maximo);
+}
+
+async function cachePrimero(event, nombre, maximo, refrescar) {
+  const cache = await caches.open(nombre);
+  const guardada = await cache.match(event.request);
+  const deRed = () =>
+    fetch(event.request).then((res) => {
+      event.waitUntil(guardarSiSirve(nombre, event.request, res.clone(), maximo).catch(() => undefined));
+      return res;
+    });
+  if (guardada) {
+    // Los de /_next/static no cambian nunca: no hace falta ir a la red.
+    if (refrescar) event.waitUntil(deRed().catch(() => undefined));
+    return guardada;
+  }
+  return deRed();
+}
+
+self.addEventListener('activate', (event) => {
+  // Borra cachés propias de versiones anteriores (no toca la bandeja de
+  // «Compartir», que va en IndexedDB).
+  event.waitUntil(
+    caches
+      .keys()
+      .then((nombres) =>
+        Promise.all(
+          nombres
+            .filter((n) => n.startsWith('synerlink-') && !CACHES_VIGENTES.includes(n))
+            .map((n) => caches.delete(n))
+        )
+      )
+      .catch(() => undefined)
+  );
+});
+
+self.addEventListener('fetch', (event) => {
+  const req = event.request;
+  if (req.method !== 'GET') return;
+  // Rangos (video/audio) y peticiones con credenciales raras: a la red tal cual.
+  if (req.headers.has('range')) return;
+  const url = new URL(req.url);
+  if (url.origin !== self.location.origin) return;
+  if (esFijo(url)) {
+    event.respondWith(cachePrimero(event, CACHE_FIJOS, MAX_FIJOS, false));
+  } else if (esActivo(url)) {
+    event.respondWith(cachePrimero(event, CACHE_ACTIVOS, MAX_ACTIVOS, true));
+  }
 });

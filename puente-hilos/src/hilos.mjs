@@ -466,11 +466,67 @@ export function escribirContexto({ rutas, agente, contexto, perfil, instruccione
   writeFileSync(rutas.mcp, JSON.stringify({ mcpServers: perfil.mcpServers }, null, 2), { mode: MODO_ARCHIVO });
 }
 
+/** Espera antes del único reintento de una descarga (archivo del proyecto o adjunto). */
+export const ESPERA_REINTENTO_DESCARGA_MS = 2000;
+
+const dormir = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/** ¿Vale la pena reintentar? Errores de red (sin status), 5xx, 408 y 429 sí; 404/413/403 no. */
+function descargaReintentable(e) {
+  const s = e?.status;
+  if (!s) return true;
+  return s >= 500 || s === 408 || s === 429;
+}
+
+/** Motivo corto y sin detalle técnico para el aviso al modelo. */
+export function motivoFalloDescarga(e) {
+  const s = e?.status;
+  if (s === 413) return 'archivo demasiado grande';
+  if (s === 404) return 'ya no está disponible';
+  if (s === 429) return 'servidor ocupado';
+  if (s >= 500) return 'error del servidor';
+  if (s) return `HTTP ${s}`;
+  return 'error de conexión';
+}
+
+/**
+ * Descarga con UN reintento corto (2 s) si el error es transitorio.
+ * (2026-11-12: un `fetch failed` de OneDrive en SynerLink devolvía 500 y tumbaba el turno.)
+ */
+export async function descargarConReintento(descargar, url, { esperaMs = ESPERA_REINTENTO_DESCARGA_MS, dormirImpl = dormir } = {}) {
+  try {
+    return await descargar(url);
+  } catch (e) {
+    if (!descargaReintentable(e)) throw e;
+    await dormirImpl(esperaMs);
+    return descargar(url);
+  }
+}
+
+/** Nombre de archivo apto para una línea del prompt (es dato del usuario: sin saltos ni comillas angulares). */
+function nombreParaAviso(nombre) {
+  const limpio = String(nombre ?? '').replace(/[\u0000-\u001f\u007f«»]+/g, ' ').replace(/\s+/g, ' ').trim();
+  return (limpio || 'archivo sin nombre').slice(0, 200);
+}
+
+/**
+ * Aviso al modelo de los archivos que no se pudieron bajar en este turno. Vacío si no hubo fallas.
+ * @param {{ nombre: string, motivo: string }[]} fallos
+ */
+export function textoFallosDescarga(fallos = []) {
+  if (!fallos.length) return '';
+  return `${fallos.map((f) => `No se pudo descargar «${nombreParaAviso(f.nombre)}» (${f.motivo}); trabaje con lo demás.`).join('\n')}\n\n`;
+}
+
 /**
  * Sincroniza los archivos del proyecto si cambió la versión: baja los que
  * faltan y borra los que ya no están en el proyecto.
+ *
+ * Tolerante (2026-11-12): si un archivo no se puede bajar (tras un reintento),
+ * se salta, se registra en `log`, se agrega a `fallos` y el turno sigue. La
+ * versión NO se marca, así el próximo turno lo vuelve a intentar.
  */
-export async function sincronizarArchivos({ rutas, contexto, estado, descargar }) {
+export async function sincronizarArchivos({ rutas, contexto, estado, descargar, log = () => {}, fallos = [], esperaMs = ESPERA_REINTENTO_DESCARGA_MS, dormirImpl = dormir }) {
   const p = contexto.project;
   if (estado.versionArchivos(p.idProject) === p.version && existsSync(rutas.archivos)) return false;
 
@@ -478,26 +534,42 @@ export async function sincronizarArchivos({ rutas, contexto, estado, descargar }
   for (const actual of readdirSync(rutas.archivos)) {
     if (!esperados.has(actual)) rmSync(path.join(rutas.archivos, actual), { force: true });
   }
+  let fallaron = 0;
   for (const [nombre, f] of esperados) {
     const destino = path.join(rutas.archivos, nombre);
     if (existsSync(destino)) continue;
-    const buf = await descargar(f.downloadUrl);
-    writeFileSync(destino, buf, { mode: MODO_ARCHIVO });
+    try {
+      const buf = await descargarConReintento(descargar, f.downloadUrl, { esperaMs, dormirImpl });
+      writeFileSync(destino, buf, { mode: MODO_ARCHIVO });
+    } catch (e) {
+      fallaron += 1;
+      fallos.push({ nombre: f.fileName, motivo: motivoFalloDescarga(e), origen: 'proyecto' });
+      log(`no se pudo descargar el archivo del proyecto «${f.fileName}» (${f.downloadUrl}); se salta: ${e?.message ?? e}`);
+    }
   }
-  estado.marcarVersion(p.idProject, p.version);
+  if (fallaron === 0) estado.marcarVersion(p.idProject, p.version);
   return true;
 }
 
-/** Baja los adjuntos de los mensajes del lote a ./adjuntos. Devuelve las rutas relativas. */
-export async function bajarAdjuntos({ rutas, mensajes, descargar }) {
+/**
+ * Baja los adjuntos de los mensajes del lote a ./adjuntos. Devuelve las rutas relativas.
+ * Tolerante (2026-11-12): un adjunto que no baja (tras un reintento) se salta y queda en `fallos`.
+ */
+export async function bajarAdjuntos({ rutas, mensajes, descargar, log = () => {}, fallos = [], esperaMs = ESPERA_REINTENTO_DESCARGA_MS, dormirImpl = dormir }) {
   const rutasRel = [];
   for (const m of mensajes) {
     for (const a of m.attachments ?? []) {
       const nombre = nombreSeguro(a.fileName, `${m.id}-`);
       const destino = path.join(rutas.adjuntos, nombre);
       if (!existsSync(destino)) {
-        const buf = await descargar(a.downloadUrl);
-        writeFileSync(destino, buf, { mode: MODO_ARCHIVO });
+        try {
+          const buf = await descargarConReintento(descargar, a.downloadUrl, { esperaMs, dormirImpl });
+          writeFileSync(destino, buf, { mode: MODO_ARCHIVO });
+        } catch (e) {
+          fallos.push({ nombre: a.fileName, motivo: motivoFalloDescarga(e), origen: 'adjunto' });
+          log(`no se pudo descargar el adjunto «${a.fileName}» (${a.downloadUrl}); se salta: ${e?.message ?? e}`);
+          continue;
+        }
       }
       rutasRel.push(`./adjuntos/${nombre}`);
     }

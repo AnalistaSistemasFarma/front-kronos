@@ -119,6 +119,10 @@ export function buildOrionSignedFileProxyUrl(params: {
   fileId: string;
   versionId?: string | null;
   download?: boolean;
+  /** false = PDF limpio sin sello SYNERLINK VALIDADO (más rápido al firmar/previsualizar). */
+  watermark?: boolean;
+  /** false = sin datos/sellos posteriores (el overlay los dibuja aparte). */
+  annotations?: boolean;
 }): string {
   const qs = new URLSearchParams({
     requestId: String(params.requestId),
@@ -126,6 +130,8 @@ export function buildOrionSignedFileProxyUrl(params: {
   });
   if (params.versionId) qs.set('versionId', params.versionId);
   if (params.download) qs.set('download', '1');
+  if (params.watermark === false) qs.set('watermark', '0');
+  if (params.annotations === false) qs.set('annotations', '0');
   return `/api/integrations/orion/signed-file?${qs.toString()}`;
 }
 
@@ -158,13 +164,20 @@ export function orionDocumentHasSignedCopy(
 export function resolveOrionPdfAccessUrl(
   state: OrionSignatureState | undefined | null,
   originalUrl: string | null | undefined,
-  ctx: { requestId: number; fileId: string } | null
+  ctx: {
+    requestId: number;
+    fileId: string;
+    /** Vista de firma/preview: omitir sellos pesados de pdf-lib. */
+    light?: boolean;
+  } | null
 ): string | null {
+  const lightOpts = ctx?.light ? ({ watermark: false, annotations: false } as const) : {};
   if (ctx && state?.orionDocumentId) {
     if (orionDocumentHasSignedCopy(state)) {
       return buildOrionSignedFileProxyUrl({
         requestId: ctx.requestId,
         fileId: ctx.fileId,
+        ...lightOpts,
       });
     }
     return null;
@@ -188,6 +201,7 @@ export function resolveOrionPdfAccessUrl(
   return buildOrionSignedFileProxyUrl({
     requestId: ctx.requestId,
     fileId: ctx.fileId,
+    ...lightOpts,
   });
 }
 

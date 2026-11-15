@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import Link from 'next/link';
 import dynamic from 'next/dynamic';
 import { useSearchParams } from 'next/navigation';
@@ -42,6 +42,7 @@ import {
   IconMessageCircle,
   IconPhoto,
   IconX,
+  IconDots,
 } from '@tabler/icons-react';
 import AgentAvatar from './AgentAvatar';
 import { EsqueletoPantallaChat } from './ChatSkeletons';
@@ -490,6 +491,18 @@ export default function ChatWorkspace({
   // endpoint: esconder un botón no protege nada.
   const [masivoAbierto, setMasivoAbierto] = useState(false);
   const [mediaAbierto, setMediaAbierto] = useState(false);
+  // Celular (2026-11-14, pedido de Nicolás: «el chat se ve muy poco»): los
+  // botones de la cabecera y la franja de métricas quedan guardados tras un
+  // solo botón «Herramientas»; la cabecera es UNA fila compacta y el hilo gana
+  // el espacio. En escritorio todo sigue a la vista.
+  const [herramientasAbiertas, setHerramientasAbiertas] = useState(false);
+  const claveHerramientas = `${selectedCode ?? ''}|${selectedGroupId ?? ''}|${selectedPersonaId ?? ''}`;
+  const [claveHerramientasVista, setClaveHerramientasVista] = useState(claveHerramientas);
+  if (claveHerramientasVista !== claveHerramientas) {
+    // Al cambiar de conversación se vuelven a guardar.
+    setClaveHerramientasVista(claveHerramientas);
+    setHerramientasAbiertas(false);
+  }
 
   const [expandido, setExpandido] = useState(false);
   useEffect(() => {
@@ -1316,8 +1329,10 @@ export default function ChatWorkspace({
   // Los dos botones de la derecha del encabezado. Iguales para el hilo de un
   // asistente y para el de un grupo: un encabezado que cambia de botones según
   // lo que uno abrió se siente como dos pantallas distintas.
-  const botonesDelEncabezado = (
-    <Group gap={4} wrap='nowrap'>
+  // Los de la derecha que NO son «volver»: memoria, multimedia, sonido y
+  // pantalla completa.
+  const botonesExtra = (
+    <>
       {/* Memoria del agente (2026-10-29): abre en otra pestaña lo que ESTE
           agente ha aprendido. La API decide si se puede ver (dueño, auditoría
           u operador del agente). */}
@@ -1369,18 +1384,48 @@ export default function ChatWorkspace({
           </ActionIcon>
         </Tooltip>
       )}
+    </>
+  );
+  const botonVolver = (
       <Tooltip label='Volver a las carpetas' withArrow>
-        <ActionIcon
-          variant='subtle'
-          color='gray'
-          onClick={cerrarConversacion}
-          aria-label='Cerrar la conversación'
-        >
-          <IconArrowLeft size={18} />
-        </ActionIcon>
-      </Tooltip>
+      <ActionIcon
+        variant='subtle'
+        color='gray'
+        onClick={cerrarConversacion}
+        aria-label='Cerrar la conversación'
+      >
+        <IconArrowLeft size={18} />
+      </ActionIcon>
+    </Tooltip>
+  );
+  // En el celular los extras van tras «Herramientas» (ver herramientasAbiertas).
+  const botonHerramientas = (
+    <Tooltip label={herramientasAbiertas ? 'Ocultar herramientas' : 'Herramientas'} withArrow>
+      <ActionIcon
+        variant={herramientasAbiertas ? 'light' : 'subtle'}
+        color='gray'
+        onClick={() => setHerramientasAbiertas((v) => !v)}
+        aria-label={herramientasAbiertas ? 'Ocultar las herramientas de la conversación' : 'Ver las herramientas de la conversación'}
+        aria-expanded={herramientasAbiertas}
+      >
+        <IconDots size={18} />
+      </ActionIcon>
+    </Tooltip>
+  );
+  const botonesDelEncabezado = (
+    <Group gap={4} wrap='nowrap'>
+      {modoEscritorio ? botonesExtra : botonHerramientas}
+      {botonVolver}
     </Group>
   );
+  /** Fila desplegable del celular, debajo de la cabecera. */
+  const filaHerramientas = (antes?: ReactNode) =>
+    !modoEscritorio && herramientasAbiertas ? (
+      <Group gap={4} wrap='nowrap' justify='flex-end' px='xs' py={4} className='chat-panel__herramientas'>
+        {antes}
+        {botonesExtra}
+      </Group>
+    ) : null;
 
   /**
    * El hilo de un GRUPO, con el mismo marco que el de un asistente.
@@ -1433,6 +1478,7 @@ export default function ChatWorkspace({
             {botonesDelEncabezado}
           </Group>
         </Group>
+        {filaHerramientas()}
 
         <ChatThread
           group={{
@@ -1487,6 +1533,7 @@ export default function ChatWorkspace({
             {botonesDelEncabezado}
           </Group>
         </Group>
+        {filaHerramientas()}
 
         <ChatThread
           person={{
@@ -1503,6 +1550,15 @@ export default function ChatWorkspace({
 
   // El hilo con su encabezado. `clase` decide si va como tarjeta (la rejilla de
   // siempre) o como panel de borde a borde (escritorio y pantalla completa).
+  const botonConsumo = selectedAgent ? (
+    <ChatConsumoBoton
+      key={selectedAgent.code}
+      code={selectedAgent.code}
+      displayName={selectedAgent.displayName}
+      idConversacion={overview.conversationByAgent.get(selectedAgent.idAgent)?.id ?? null}
+    />
+  ) : null;
+
   const renderConversacion = (clase: string) =>
     selectedPersona ? (
       renderPersona(clase)
@@ -1510,7 +1566,7 @@ export default function ChatWorkspace({
       renderGrupo(clase)
     ) : selectedAgent ? (
       <Box className={clase}>
-        <Group justify='space-between' p='sm' className='chat-panel__header' wrap='nowrap'>
+        <Group justify='space-between' p={modoEscritorio ? 'sm' : 'xs'} className='chat-panel__header' wrap='nowrap'>
           <UnstyledButton
             onClick={() => setDetalleAbierto(true)}
             style={{ minWidth: 0, flex: 1 }}
@@ -1524,7 +1580,7 @@ export default function ChatWorkspace({
                 avatarUrl={selectedAgent.avatarUrl}
                 avatarVersion={selectedAgent.avatarVersion}
                 status={overview.statusByAgent.get(selectedAgent.idAgent) ?? null}
-                size={36}
+                size={modoEscritorio ? 36 : 30}
                 withTooltip={false}
               />
               <Box style={{ minWidth: 0 }}>
@@ -1539,21 +1595,19 @@ export default function ChatWorkspace({
           </UnstyledButton>
           <Group gap={4} wrap='nowrap'>
             {/* Consumo de Anthropic del agente (2026-10-22) y contexto de su sesión (2026-10-29):
-                solo si el agente publica alguno de los dos. */}
-            <ChatConsumoBoton
-              key={selectedAgent.code}
-              code={selectedAgent.code}
-              displayName={selectedAgent.displayName}
-              idConversacion={overview.conversationByAgent.get(selectedAgent.idAgent)?.id ?? null}
-            />
+                solo si el agente publica alguno de los dos. En el celular va
+                dentro de «Herramientas». */}
+            {modoEscritorio && botonConsumo}
             {botonesDelEncabezado}
           </Group>
         </Group>
+        {filaHerramientas(botonConsumo)}
 
         {/* Sin `height`: el alto lo acota el contenedor, y dentro del hilo solo
             scrollea la lista de mensajes — el compositor queda fijo abajo. */}
         <ChatThread
           agent={agenteHilo ?? selectedAgent}
+          ocultarMetricas={!modoEscritorio && !herramientasAbiertas}
           idConversacion={overview.conversationByAgent.get(selectedAgent.idAgent)?.id ?? null}
           active
         />

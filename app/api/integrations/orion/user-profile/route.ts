@@ -16,22 +16,32 @@ import {
  * nombre, cédula y cargo (`user-signature`), huella (`user-fingerprint`) y
  * consentimientos (`user-consent`). SynerLink solo sugiere lo que falte en Orion.
  */
-export async function GET() {
+export async function GET(req: Request) {
   try {
     const session = await getServerSession(authOptions);
     const email = String(session?.user?.email || '').trim().toLowerCase();
     if (!email) return NextResponse.json({ error: 'No autorizado' }, { status: 401 });
 
     const enabled = getOrionConfig().enabled;
+    const withFingerprint = new URL(req.url).searchParams.get('fingerprint') !== '0';
+    // Tope corto: si Orion no responde, igual devolvemos sugerencias de SynerLink
+    // para no dejar el modal en «Consultando su perfil…» 15–20 s.
+    const orionBudgetMs = 8_000;
+    const withBudget = <T,>(p: Promise<T>): Promise<T | null> =>
+      Promise.race([
+        p.catch(() => null),
+        new Promise<null>((resolve) => setTimeout(() => resolve(null), orionBudgetMs)),
+      ]);
+
     const [preview, fingerprint, consent, local] = await Promise.all([
-      enabled ? getOrionSignerPreview(email).catch(() => null) : Promise.resolve(null),
-      enabled ? getOrionUserFingerprint(email).catch(() => null) : Promise.resolve(null),
-      enabled ? getOrionPersonConsent(email).catch(() => null) : Promise.resolve(null),
+      enabled ? withBudget(getOrionSignerPreview(email)) : Promise.resolve(null),
+      enabled && withFingerprint ? withBudget(getOrionUserFingerprint(email)) : Promise.resolve(null),
+      enabled ? withBudget(getOrionPersonConsent(email)) : Promise.resolve(null),
       withMssqlPool(async (pool) => {
         const result = await pool
           .request()
           .input('email', sql.NVarChar(255), email)
-          .query(`SELECT TOP 1 name, identification FROM [user] WHERE LOWER(email) = @email`);
+          .query(`SELECT TOP 1 name, identification FROM [user] WHERE LOWER(LTRIM(RTRIM(email))) = @email`);
         return result.recordset[0] as { name?: string | null; identification?: string | null } | undefined;
       }).catch(() => undefined),
     ]);

@@ -615,6 +615,23 @@ export function allOrionDocumentsFullySigned(bag: OrionSignatureBagBag): boolean
   return entries.every((doc) => String(doc.status || '').toUpperCase() === 'FIRMADO');
 }
 
+/**
+ * ¿Ya quedó firmado todo lo que se preparó para firma? (decisión de Juan, 2026-11-12)
+ * - Solo se omiten los adjuntos SIN PREPARAR: nunca entraron al proceso de firma, así que no
+ *   están en el bag.
+ * - Todo documento preparado cuenta, incluso en BORRADOR (p. ej. el preparador lo envía mañana):
+ *   todos deben estar FIRMADOS. Uno en borrador, en firma, devuelto o rechazado impide el cierre.
+ * - Un Word iniciado que aún no pasó a PDF (en elaboración, validación o cliente) también lo impide.
+ */
+export function allPreparedOrionDocumentsSigned(bag: OrionSignatureBagBag): boolean {
+  const prepared = Object.values(bag.documents ?? {});
+  if (prepared.length === 0) return false;
+  if (!prepared.every((doc) => String(doc.status || '').toUpperCase() === 'FIRMADO')) return false;
+  return Object.values(bag.drafts ?? {}).every(
+    (draft) => String(draft.status || '').toUpperCase() === 'CONVERTIDO_PDF'
+  );
+}
+
 /** Lista signedFileUrl de todos los docs firmados (para chips de chat). */
 export function listSignedOrionDocuments(
   bag: OrionSignatureBagBag

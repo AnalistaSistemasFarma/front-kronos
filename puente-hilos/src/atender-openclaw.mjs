@@ -15,6 +15,7 @@ import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { prepararAdjuntos } from './adjuntos-salida.mjs';
 import { prepararCodigoOpenclaw } from './openclaw/codigo.mjs';
+import { copiarABandeja, dirBandeja, podarBandeja } from './openclaw/bandeja.mjs';
 import { jsonParaCodigo } from './politica.mjs';
 import { esNegocio } from './perfil-agente.mjs';
 import { analizarComando, AYUDA, LIMPIAR } from './comandos.mjs';
@@ -28,6 +29,7 @@ import {
   registrarConsumoLocal,
   rutasDelHilo,
   sincronizarArchivos,
+  textoFallosDescarga,
   textoCronograma,
   textoVinculados,
 } from './hilos.mjs';
@@ -50,7 +52,7 @@ import {
 } from './openclaw.mjs';
 import { textoDeMensaje } from './openclaw/seguimiento.mjs';
 import { convertirHtmlAPdf, convertirMarcasPdf, resolverChrome } from './pdf.mjs';
-import { archivosDelTurno, archivosModificadosDesde, crearSupervisor, duracionLegible, textoAvisoProgreso, textoCorte } from './progreso.mjs';
+import { archivosDelTurno, archivosModificadosDesde, crearSupervisor, duracionLegible, errorSinReintento, PROMPT_REINTENTO_ERROR, textoAvisoProgreso, textoCorte, TEXTO_ERROR_FINAL } from './progreso.mjs';
 
 const MAX_RESPUESTA = 40_000;
 
@@ -134,9 +136,16 @@ export function crearAtenderOpenclaw({
 
       const rutas = rutasDelHilo(cfg.areaDir ?? cfg.hilosDir, contexto.project.idProject, idConversation);
       asegurarCarpetas(rutas);
-      await sincronizarArchivos({ rutas, contexto, estado, descargar: (u) => synerlink.descargar(u) });
-      const adjuntosRel = await bajarAdjuntos({ rutas, mensajes: lote, descargar: (u) => synerlink.descargar(u) });
-      const adjuntos = adjuntosRel.map((r) => path.join(rutas.cwd, r));
+      // Descargas tolerantes (2026-11-12): un archivo que no baja se salta y se le avisa al modelo.
+      const fallosDescarga = [];
+      const logDescarga = (...partes) => log(`conversación ${idConversation}:`, ...partes);
+      await sincronizarArchivos({ rutas, contexto, estado, descargar: (u) => synerlink.descargar(u), log: logDescarga, fallos: fallosDescarga });
+      const adjuntosRel = await bajarAdjuntos({ rutas, mensajes: lote, descargar: (u) => synerlink.descargar(u), log: logDescarga, fallos: fallosDescarga });
+      // Bandeja en el workspace (2026-11-12): image/pdf de openclaw solo abren el workspace del agente;
+      // se copian ahí los adjuntos y los PDF llevan su texto extraído (openclaw/bandeja.mjs).
+      const bandeja = dirBandeja(oc.outbox, oc.prefijo);
+      try { podarBandeja(bandeja); } catch {}
+      const adjuntos = await copiarABandeja({ adjuntos: adjuntosRel.map((r) => path.join(rutas.cwd, r)), dir: bandeja, idConversation, binOpenclaw: oc.bin, log: (m) => log(`conversación ${idConversation}: ${m}`) });
       writeFileSync(rutas.vinculados, textoVinculados(contexto), { mode: 0o600 });
       writeFileSync(rutas.cronograma, textoCronograma(contexto), { mode: 0o600 });
       // Multiagente (2026-10-29): historial del hilo (también lo de otros asistentes).
@@ -180,12 +189,14 @@ export function crearAtenderOpenclaw({
         outbox: oc.outbox,
         bloquePdf: cfg.pdf?.habilitado ? textoPdfOpenclaw({ disponible: Boolean(chromePdf), recursos, trabajo: rutas.trabajo }) : '',        bloqueCodigo,
       });
+      const avisoDescargas = textoFallosDescarga(fallosDescarga).trim();
+      const encabezadoTurno = avisoDescargas ? `${encabezado}\n\n${avisoDescargas}` : encabezado;
       mkdirSync(rutas.puente, { recursive: true, mode: 0o700 });
       archivoMensaje = path.join(rutas.puente, `mensaje-${process.pid}-${idConversation}.txt`);
       // Recuperación al reiniciar: sesión NUEVA de un hilo que ya tenía mensajes (no tras /clear).
       const recuperacion = sesion.nueva && !sesion.sinRecuperar ? bloqueRecuperacion(contexto, ids, { rutaHilo: rutas.hilo }) : '';
       if (recuperacion) log(`conversación ${idConversation}: sesión nueva con historial previo; se inyecta la recuperación (${recuperacion.length} caracteres).`);
-      writeFileSync(archivoMensaje, armarMensajeOpenclaw({ encabezado: recuperacion ? `${encabezado}\n\n${recuperacion}` : encabezado, lote, adjuntos }), { mode: 0o600 });
+      writeFileSync(archivoMensaje, armarMensajeOpenclaw({ encabezado: recuperacion ? `${encabezadoTurno}\n\n${recuperacion}` : encabezadoTurno, lote, adjuntos }), { mode: 0o600 });
 
       // Indicador: lo que esté mostrando ahora (los avisos y el latido lo conservan).
       let indicador = { state: 'thinking', label: '🧠 Pensando su respuesta…' };
@@ -226,21 +237,39 @@ export function crearAtenderOpenclaw({
       } catch {}
       log(`conversación ${idConversation}: turno openclaw (${completa}${sesion.nueva ? ', sesión nueva' : ''}).`);
       observador?.armar?.();
-      let r;
-      try {
-        r = await correr({
+      const correrTurno = (timeoutMs) =>
+        correr({
           bin: oc.bin,
           args,
           env: entornoOpenclaw(process.env, oc.bin),
           cwd: rutas.cwd,
-          timeoutMs: cfg.timeoutTurnoMs,
+          timeoutMs,
           alAbortar: oc.local ? async () => {} : () => abortar({ bin: oc.bin, perfil: oc.perfil, clave: completa }),
         });
+      let r;
+      let s;
+      let abortado;
+      try {
+        r = await correrTurno(cfg.timeoutTurnoMs);
+        s = leerSalidaOpenclaw(r.salida);
+        abortado = r.abortado;
+        // Error del asistente (no corte por tiempo): UN reintento automático en la MISMA sesión, con
+        // una nota para retomar sin repetir la espera que lo tumbó (2026-11-10, Kepler, gh --watch →
+        // OPENCLAW_DIRECT_ABORT). Sin reintento si es credencial/cuota o si ya no queda tiempo.
+        const restanteMs = cfg.timeoutTurnoMs - (ahora() - inicio);
+        const detalle = `${s.error ?? ''} ${String(r.stderr ?? '').slice(-600)}`;
+        if (!abortado && (!s.ok || !r.salida) && !errorSinReintento(detalle) && restanteMs > 120000) {
+          log(`conversación ${idConversation}: turno con error (código ${r.codigo}; ${s.error ?? 'sin salida JSON'}; ${String(r.stderr ?? '').slice(-300).replace(/\s+/g, ' ')}); reintento automático (una vez).`);
+          await synerlink.avisar(idConversation, '🔁 Tuve un error del asistente mientras trabajaba en su pedido. Reintento automáticamente una vez desde donde quedé; no tiene que volver a escribir.', indicador.state, indicador.label).catch(() => null);
+          await new Promise((res) => setTimeout(res, cfg.reintentoEsperaMs ?? 15000));
+          writeFileSync(archivoMensaje, armarMensajeOpenclaw({ encabezado: `${encabezadoTurno}\n\n${PROMPT_REINTENTO_ERROR}`, lote, adjuntos }), { mode: 0o600 });
+          r = await correrTurno(Math.max(60000, cfg.timeoutTurnoMs - (ahora() - inicio)));
+          s = leerSalidaOpenclaw(r.salida);
+          abortado = r.abortado;
+        }
       } finally {
         await observador?.cerrar?.().catch?.(() => null);
       }
-      let s = leerSalidaOpenclaw(r.salida);
-      let abortado = r.abortado;
 
       // Cedió el turno a un sub-agente: se espera su resultado DENTRO de este turno.
       if (!abortado && s.ok && (s.cedio || (!s.texto && s.lanzo)) && leerSesionGateway && anunciosPendientes && !oc.local) {
@@ -277,7 +306,7 @@ export function crearAtenderOpenclaw({
         log(`conversación ${idConversation}: turno cortado por tiempo tras ${duracionLegible(transcurridoMs)}.`);
       } else if (!s.ok || !r.salida) {
         const lista = archivos();
-        cuerpo = s.texto || lista.length ? textoCorte({ motivo: 'error', transcurridoMs, ultimoTexto: s.texto || null, archivos: lista }) : 'No pude completar la respuesta por un error del asistente. Intente de nuevo en unos minutos.';
+        cuerpo = s.texto || lista.length ? textoCorte({ motivo: 'error', transcurridoMs, ultimoTexto: s.texto || null, archivos: lista }) : TEXTO_ERROR_FINAL;
         log(`conversación ${idConversation}: turno con error (código ${r.codigo}; ${s.error ?? 'sin salida JSON'}; ${String(r.stderr ?? '').slice(-300).replace(/\s+/g, ' ')}).`);
       } else {
         cuerpo = s.texto || '_(El asistente terminó sin texto.)_';

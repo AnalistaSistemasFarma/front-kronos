@@ -26,6 +26,28 @@ export const PROMPT_CONTINUACION =
   'Se cumplió el tiempo máximo del turno anterior y el proceso se detuvo antes de que usted terminara. Continúe desde donde quedó, sin repetir lo que ya está hecho (revise ./trabajo y su propio avance en esta sesión), y termine con la respuesta final para el hilo.';
 
 /**
+ * Reintento automático tras un ERROR del asistente (no corte por tiempo). 2026-11-10, Kepler:
+ * `gh pr checks --watch` dejó el exec bloqueado, openclaw abortó la corrida (OPENCLAW_DIRECT_ABORT)
+ * y la persona recibió «No pude completar…» dos veces. Nicolás: «esto no puede pasar con ningún
+ * agente». El puente reintenta UNA vez en la misma sesión con esta nota antes de rendirse.
+ */
+export const PROMPT_REINTENTO_ERROR =
+  'NOTA DEL PUENTE (reintento automático): su intento anterior de este mismo pedido se interrumpió por un error del asistente o de la plataforma (no fue culpa de la persona). Retome desde donde quedó, sin repetir lo que ya está hecho (revise ./trabajo y su avance en esta sesión). NO repita esperas largas ni comandos que se quedan esperando (`--watch`, `gh run watch`, `sleep`, `tail -f`, servidores en primer plano…): consulte el estado UNA vez y, si algo sigue en curso (por ejemplo el CI), dígale a la persona que está en curso y que lo revisa en el siguiente mensaje. Termine con la respuesta final para el hilo.';
+
+/** Regla común (encabezado de TODOS los turnos, Claude Code y openclaw): nada de esperas bloqueantes. */
+export const TEXTO_ESPERAS =
+  '- ESPERAS: NO ejecute comandos que se quedan esperando (`gh pr checks --watch`, `gh run watch`, `sleep` largos, `tail -f`, servidores o `npm run dev` en primer plano). Un comando sin salida por varios minutos hace que la plataforma aborte el turno y la persona recibe un error. Consulte el estado UNA vez (por ejemplo `gh pr checks <n>` sin --watch); si algo sigue en curso, dígalo en la respuesta y vuelva a consultarlo en el siguiente mensaje.';
+
+/** Errores en los que reintentar no sirve (credencial, cuota agotada); 429/sobrecarga sí se reintentan. */
+export function errorSinReintento(texto) {
+  return /\b401\b|unauthori[sz]ed|invalid (api key|x-api-key|bearer|token)|authentication_error|please run \/login|usage limit|quota exceeded|out of (extra )?usage/i.test(String(texto ?? ''));
+}
+
+/** Mensaje final cuando ni el reintento automático pudo responder. */
+export const TEXTO_ERROR_FINAL =
+  'No pude completar la respuesta por un error del asistente, ni siquiera al reintentarlo automáticamente. Tecnología quedó con el registro. Escríbame «continúa» en unos minutos y retomo desde donde quedé (no se pierde lo avanzado).';
+
+/**
  * Línea del encabezado de sistema: el tope del turno y cómo dejar el avance a salvo.
  * No menciona dinero (sin tope de gasto) ni promete continuación automática.
  */
@@ -34,6 +56,7 @@ export function textoTiempoTurno({ topeMs, avisoMs = 0 }) {
   return [
     `- TIEMPO: cada turno tiene un máximo de ${duracionLegible(topeMs)}; si se cumple, el puente detiene el proceso.${avisoMs ? ` Mientras trabaja, el puente le avisa a la persona en el hilo cada ${duracionLegible(avisoMs)} que usted sigue en ello (no lo haga usted).` : ''}`,
     '  En tareas grandes, guarde el avance en ./trabajo a medida que avanza (no todo al final) y escriba de vez en cuando una frase corta de lo que va haciendo: si el turno se corta, eso es lo que la persona ve, y la sesión conserva su avance para cuando escriba «continúa».',
+    TEXTO_ESPERAS,
   ].join('\n');
 }
 
