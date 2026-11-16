@@ -118,7 +118,9 @@ const nextConfig: NextConfig = {
     // autorizaciones, tesorería, compras) entran en la última fase.
     reactCompiler: {
       compilationMode: 'infer',
-      sources: carpetasReactCompiler(REACT_COMPILER_CARPETAS),
+      // `sources` es opción del compilador: Next 15.5 la pasa tal cual al
+      // plugin pero no la declara en sus tipos (ni en su validación, que solo avisa).
+      ...({ sources: carpetasReactCompiler(REACT_COMPILER_CARPETAS) } as object),
     },
   },
   // Solo variables que el cliente necesita (sin prefijo NEXT_PUBLIC_).
