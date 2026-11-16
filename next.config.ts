@@ -56,6 +56,13 @@ const rewritesPruebas: Pick<NextConfig, 'rewrites'> = esEntornoPruebas
  * con `/` y con `\\`: el compilador compara por texto dentro de la ruta y el
  * servidor de pruebas compila en Windows.
  *   Fase 1 (2026-11-16): chat, proyectos, correo y el armazón común.
+ *   Fase 2 (2026-11-16): pantallas operativas (solicitudes, tickets, mesa de
+ *     ayuda, tableros, BI, formación, portal TH, administración…) y los
+ *     componentes compartidos que usan.
+ *   Fase 3 (pendiente, la última): SGC, firmas, Orión, Bitácora de Proceso,
+ *     autorizaciones, tesorería, compras, ventas, artículos, socios, registros
+ *     sanitarios, transferencias, flujos SAP y aprobaciones (workflow).
+ *   Fuera a propósito: login, landing, portal de proveedores y formularios externos.
  */
 const REACT_COMPILER_CARPETAS = [
   'components/chat/',
@@ -68,6 +75,49 @@ const REACT_COMPILER_CARPETAS = [
   'app/(hub)/process/chat/',
   'app/(hub)/process/proyectos/',
   'app/(hub)/process/correo/',
+  // Fase 2
+  'components/attachments/',
+  'components/avatar/',
+  'components/charts/',
+  'components/dashboard/',
+  'components/email/',
+  'components/entorno/',
+  'components/errors/',
+  'components/formacion/',
+  'components/help-desk/',
+  'components/microsoft-365/',
+  'components/not-found/',
+  'components/portal/',
+  'components/process/',
+  'components/profile/',
+  'components/request-general/',
+  'components/system-metrics/',
+  'components/theme/',
+  'components/ui/',
+  'components/users/',
+  'components/utils/',
+  'components/valentine/',
+  'components/vitrina/',
+  'app/(hub)/process/page.tsx',
+  'app/(hub)/process/layout.tsx',
+  'app/(hub)/process/administration/',
+  'app/(hub)/process/bi/',
+  'app/(hub)/process/custom-views/',
+  'app/(hub)/process/dashboards/',
+  'app/(hub)/process/formacion/',
+  'app/(hub)/process/help-desk/',
+  'app/(hub)/process/organigrama/',
+  'app/(hub)/process/portal-th/',
+  'app/(hub)/process/predicciones/',
+  'app/(hub)/process/request-general/',
+  'app/(hub)/process/service-layer-metrics/',
+  'app/(hub)/process/system-metrics/',
+  'app/(hub)/process/tickets/',
+  'app/(hub)/process/vitrina/',
+  'app/home/',
+  'app/dashboard/',
+  'app/select-company/',
+  'app/portal/',
 ];
 
 function carpetasReactCompiler(carpetas: string[]): string[] {
