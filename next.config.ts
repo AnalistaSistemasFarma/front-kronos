@@ -51,6 +51,29 @@ const rewritesPruebas: Pick<NextConfig, 'rewrites'> = esEntornoPruebas
     }
   : {};
 
+/*
+ * Fases del React Compiler (ver `experimental.reactCompiler`). Cada carpeta va
+ * con `/` y con `\\`: el compilador compara por texto dentro de la ruta y el
+ * servidor de pruebas compila en Windows.
+ *   Fase 1 (2026-11-16): chat, proyectos, correo y el armazón común.
+ */
+const REACT_COMPILER_CARPETAS = [
+  'components/chat/',
+  'components/proyectos/',
+  'components/correo/',
+  'components/layout/',
+  'components/Header.tsx',
+  'components/NotificationBell.tsx',
+  'components/providers.tsx',
+  'app/(hub)/process/chat/',
+  'app/(hub)/process/proyectos/',
+  'app/(hub)/process/correo/',
+];
+
+function carpetasReactCompiler(carpetas: string[]): string[] {
+  return carpetas.flatMap((c) => [`/${c}`, `\\${c.replaceAll('/', '\\')}`]);
+}
+
 const nextConfig: NextConfig = {
   ...rewritesPruebas,
   generateBuildId: async () => appBuildId,
@@ -89,6 +112,16 @@ const nextConfig: NextConfig = {
     // Importar solo los componentes de Mantine que se usan, no el paquete entero
     // (miles de módulos por página en dev). @tabler/icons-react ya viene en la lista de Next.
     optimizePackageImports: ['@mantine/core', '@mantine/hooks'],
+    // REACT COMPILER POR FASES (2026-11-16, pedido de Nicolás). Optimiza solo
+    // (memo automático) los componentes de las carpetas de REACT_COMPILER_CARPETAS;
+    // lo demás compila igual que antes. Las pantallas críticas (SGC, firmas,
+    // autorizaciones, tesorería, compras) entran en la última fase.
+    reactCompiler: {
+      compilationMode: 'infer',
+      // `sources` es opción del compilador: Next 15.5 la pasa tal cual al
+      // plugin pero no la declara en sus tipos (ni en su validación, que solo avisa).
+      ...({ sources: carpetasReactCompiler(REACT_COMPILER_CARPETAS) } as object),
+    },
   },
   // Solo variables que el cliente necesita (sin prefijo NEXT_PUBLIC_).
   // Los secretos (p. ej. MICROSOFTCLIENTSECRET) deben quedar solo en .env y usarse en servidor.
