@@ -40,6 +40,19 @@ export interface Fila {
   oc: string;
   /** Ciudad de facturación */
   ciu: string;
+  /** Origen: ausente = OLP (SAP); 'P' = Pisa (ERP, base histórica cargada). */
+  o?: 'P';
+}
+
+/** Venta neta separada por origen (para el tooltip OLP / Pisa). */
+export function netaPorOrigen(filas: Fila[]): { olp: number; pisa: number } {
+  let olp = 0;
+  let pisa = 0;
+  for (const r of filas) {
+    if (r.o === 'P') pisa += r.val;
+    else olp += r.val;
+  }
+  return { olp, pisa };
 }
 
 export interface Rango {
