@@ -93,7 +93,7 @@ describe('catálogo api_permission (semilla) frente a las herramientas del MCP',
 
   it('la semilla (PRUEBAS y PROD) trae exactamente las herramientas registradas', () => {
     const conocidas = [...KNOWN_TOOLS].sort();
-    expect(conocidas).toHaveLength(53);
+    expect(conocidas).toHaveLength(58);
     expect(filas(sqlDe('2026-11-09-permisos-api-PRUEBAS.sql')).map((f) => f.code).sort()).toEqual(conocidas);
     expect(filas(sqlDe('2026-11-09-permisos-api-PROD.sql')).map((f) => f.code).sort()).toEqual(conocidas);
   });

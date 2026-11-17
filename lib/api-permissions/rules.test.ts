@@ -340,9 +340,9 @@ describe('catálogo y scripts SQL', () => {
     }));
   const seeded = (text: string) => seedRows(text).map((r) => r.code).sort();
 
-  it('la semilla trae exactamente las 53 herramientas del catálogo', () => {
-    expect(SYNERLINK_TOOL_PERMISSIONS).toHaveLength(53);
-    expect(new Set(SYNERLINK_TOOL_PERMISSIONS).size).toBe(53);
+  it('la semilla trae exactamente las 58 herramientas del catálogo', () => {
+    expect(SYNERLINK_TOOL_PERMISSIONS).toHaveLength(58);
+    expect(new Set(SYNERLINK_TOOL_PERMISSIONS).size).toBe(58);
     expect(seeded(pruebas)).toEqual([...SYNERLINK_TOOL_PERMISSIONS].sort());
     expect(seeded(prod)).toEqual(seeded(pruebas));
   });
@@ -358,7 +358,7 @@ describe('catálogo y scripts SQL', () => {
   });
 
   it('cada permiso del catálogo existe como herramienta en el MCP', () => {
-    const files = ['index.ts', 'iaAccess.ts', 'bitacoraProceso.ts', 'proyectos.ts', 'correoAgente.ts', 'usuarios.ts'];
+    const files = ['index.ts', 'iaAccess.ts', 'bitacoraProceso.ts', 'proyectos.ts', 'correoAgente.ts', 'usuarios.ts', 'sgcDocumentos.ts'];
     const tools = files.map((f) => readFileSync(new URL(`../../mcp/src/tools/${f}`, import.meta.url), 'utf8')).join('\n');
     for (const code of SYNERLINK_TOOL_PERMISSIONS) {
       expect(tools).toContain(`'${code}'`);

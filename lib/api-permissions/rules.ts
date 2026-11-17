@@ -40,7 +40,7 @@ export {
 /* ─────────────────────────────── Catálogo (fase 1) ─────────────────────────────── */
 
 /**
- * Las 53 herramientas del MCP de Kronos (mcp/src/tools/*.ts). La fuente de verdad
+ * Las 58 herramientas del MCP de Kronos (mcp/src/tools/*.ts). La fuente de verdad
  * es la tabla `api_permission` (semilla en prisma/manual/2026-11-09-permisos-api-*.sql);
  * esta lista sirve para las pruebas de coherencia y como documentación.
  */
@@ -100,6 +100,12 @@ export const SYNERLINK_TOOL_PERMISSIONS = [
   'teams_list_meetings',
   'teams_list_transcripts',
   'teams_get_transcript',
+  // Documentos SGC (mcp/src/tools/sgcDocumentos.ts): solo lectura, filtran por las empresas del cliente.
+  'sgc_list_documents',
+  'sgc_get_document',
+  'sgc_download_document',
+  'sgc_list_document_types',
+  'sgc_master_list',
   // Usuarios (mcp/src/tools/usuarios.ts): en la semilla con active = 0.
   'kronos_usuarios_consultar',
   'kronos_usuarios_crear',

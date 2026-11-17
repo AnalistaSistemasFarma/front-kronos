@@ -5,7 +5,7 @@ SynerLink es la **fuente única de permisos de los clientes de API**. Hay 5 tipo
 - **Sujeto** (a quién representa), elegido de una lista según el tipo; ver «Sujeto de cada cliente».
 
 - **Empresas** en las que puede actuar (o «Todas las empresas»).
-- **Permisos**: en la fase 1, las **53 herramientas** del servidor MCP de Kronos (catálogo en la tabla `api_permission`; ver «Catálogo» abajo). La fase 2 agregará módulos de la API SAP.
+- **Permisos**: en la fase 1, las **58 herramientas** del servidor MCP de Kronos (catálogo en la tabla `api_permission`; ver «Catálogo» abajo). La fase 2 agregará módulos de la API SAP.
 - **Llaves** `sk_syn_…`: la llave en claro se muestra **una sola vez**; la base guarda solo su SHA-256 y un prefijo visible.
 
 Tablas y semilla: `prisma/manual/2026-11-09-permisos-api-PRUEBAS.sql` / `-PROD.sql` (reversa: `-reversa.sql`). El tipo se limita en la base con el CHECK `api_client_client_type_ck`: si el script principal se corrió antes de existir el tipo SynerLink, aplique también `2026-11-09-permisos-api-tipo-synerlink-PRUEBAS.sql` / `-PROD.sql` (idempotente; solo reemplaza el CHECK). Código: `lib/api-permissions/` (inventario: `inventory.ts` + `inventory-rules.ts`), rutas `app/api/administration/api-clients/`, pantalla `components/administration/api-permissions/`, MCP `mcp/src/dbKeys.ts` y `mcp/src/auth.ts`.
@@ -78,7 +78,7 @@ Si falta alguna (o la URL no cumple), la pantalla muestra «Falta configurar la 
 
 ## Catálogo
 
-La semilla (`2026-11-09-permisos-api-PRUEBAS.sql` / `-PROD.sql`) trae las 53 herramientas del MCP. Se puede volver a correr: solo inserta los códigos que falten (no pisa etiquetas ni el «activo» que se hayan editado). Las pruebas (`lib/api-permissions/rules.test.ts` y `mcp/test/db-keys.test.ts`) fallan si el MCP registra una herramienta que no está en la semilla o al revés.
+La semilla (`2026-11-09-permisos-api-PRUEBAS.sql` / `-PROD.sql`) trae las 58 herramientas del MCP. Se puede volver a correr: solo inserta los códigos que falten (no pisa etiquetas ni el «activo» que se hayan editado). Las pruebas (`lib/api-permissions/rules.test.ts` y `mcp/test/db-keys.test.ts`) fallan si el MCP registra una herramienta que no está en la semilla o al revés.
 
 | Grupo | Herramientas | ¿Se otorga desde la base? | Qué exige |
 |---|---|---|---|
@@ -87,6 +87,7 @@ La semilla (`2026-11-09-permisos-api-PRUEBAS.sql` / `-PROD.sql`) trae las 53 her
 | Proyectos | `proyectos_listar`, `proyecto_detalle`, `proyecto_cronograma`, `proyecto_calendario`, `proyecto_historial`, `proyecto_prs` y los 6 `proyecto_proponer_*` | Sí, **con código de agente** | El acceso lo da la persona (concesión de 24 h o el turno del chat) y el agente debe estar designado en el proyecto. Las propuestas no ejecutan nada: la persona confirma en SynerLink. |
 | Correo | `correo_hilo_compartido`, `correo_adjunto_compartido`, `correo_proponer_respuesta`, `correo_crear_solicitud_desde_hilo`, `correo_agregar_nota` | Sí, **con código de agente** | Hilo compartido por la persona (24 h). Además el servidor debe tener `CORREO_AGENTE_HABILITADO=true`; si no, no se registran para nadie. |
 | Teams | `teams_list_meetings`, `teams_list_transcripts`, `teams_get_transcript` | Sí | Lee la cuenta de Microsoft configurada en el servidor (Graph). **No se filtra por empresa**: otórguelo con cuidado. |
+| Documentos SGC | `sgc_list_documents`, `sgc_get_document`, `sgc_download_document`, `sgc_list_document_types`, `sgc_master_list` | Sí | Solo lectura. Filtra por las empresas del cliente con el SGC activo y solo ve documentos vigentes de confidencialidad pública. |
 | Usuarios | `kronos_usuarios_consultar`, `kronos_usuarios_crear` | **No** (`active = 0`, se ven deshabilitados) | Exigen el bloque `usuarios` de la llave del archivo (solicitantes, empresas, departamentos, subprocesos, dominios y topes, `mcp/src/config.ts`), que `api_client` aún no guarda. Hoy solo por archivo. |
 
 **Lo que ve cada proveedor en el portal.** Los permisos reales de un proveedor o cliente (qué usuarios tiene y qué módulos ve en cada empresa: órdenes de compra, facturas, pagos…) viven en la base de la landing (`SupplierLink` + `SupplierLinkResource`), no en Kronos ni en la API SAP. Kronos los lee, **solo lectura**, de la API de la landing: `GET {PORTAL_TERCEROS_URL}/api/integraciones/terceros/accesos?nits=…` con `Authorization: Bearer PORTAL_TERCEROS_KEY` (la misma llave que la landing guarda como `INTEGRACION_SYNERLINK_KEY`, mínimo 32 caracteres). Puente en Kronos: `app/api/administration/api-clients/subjects/portal-terceros/accesos` → `fetchPortalAccess` (`lib/api-permissions/portal-terceros.ts`). En la lista, la fila del proveedor dice «Portal: 9 módulos · 2 usuarios» (o «Sin acceso al portal» / «Portal sin conexión»); en el modal, «Lo que ve en el portal de proveedores» muestra empresa → usuario → módulos. La búsqueda del proveedor sigue saliendo de la API SAP.

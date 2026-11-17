@@ -228,6 +228,11 @@ FROM (VALUES
   (N'teams_list_meetings',    N'Teams', N'Listar reuniones',       N'Reuniones de Teams de la cuenta de Microsoft configurada en el servidor. No se filtra por empresa.', 1, 1110),
   (N'teams_list_transcripts', N'Teams', N'Listar transcripciones', N'Transcripciones de una reunión de esa cuenta. No se filtra por empresa.', 1, 1120),
   (N'teams_get_transcript',   N'Teams', N'Leer una transcripción', N'Contenido de una transcripción de esa cuenta. No se filtra por empresa.', 1, 1130),
+  (N'sgc_list_documents',      N'Documentos SGC', N'Listar documentos',         N'Documentos controlados VIGENTES de confidencialidad pública de las empresas del cliente con el SGC activo.', 1, 1150),
+  (N'sgc_get_document',        N'Documentos SGC', N'Ver un documento',          N'Detalle de un documento vigente: versiones y firmas del flujo de aprobación.', 1, 1160),
+  (N'sgc_download_document',   N'Documentos SGC', N'Leer o descargar el PDF',    N'Texto (y opcionalmente el PDF) de la versión vigente, con huella SHA-256 verificada.', 1, 1170),
+  (N'sgc_list_document_types', N'Documentos SGC', N'Listar tipos documentales',  N'Tipos documentales del SGC (manual, procedimiento, instructivo, formato…).', 1, 1180),
+  (N'sgc_master_list',         N'Documentos SGC', N'Listado maestro',           N'Todos los documentos vigentes de confidencialidad pública de una empresa, en formato compacto.', 1, 1190),
   (N'kronos_usuarios_consultar', N'Usuarios', N'Consultar usuarios', N'No se puede otorgar todavía: requiere configuración adicional (solicitantes, empresas, departamentos, subprocesos, dominios y topes); hoy solo por archivo (bloque «usuarios»).', 0, 1210),
   (N'kronos_usuarios_crear',     N'Usuarios', N'Crear usuarios',     N'No se puede otorgar todavía: requiere configuración adicional (solicitantes, empresas, departamentos, subprocesos, dominios y topes); hoy solo por archivo (bloque «usuarios»).', 0, 1220)
 ) AS v(code, group_label, label, description, active, display_order)
