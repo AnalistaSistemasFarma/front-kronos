@@ -163,6 +163,12 @@ export default function CostosLicenciasPage() {
             <IconArrowLeft size={14} /> Auditoría de agentes
           </Group>
         </Link>
+        <Text size="xs" c="dimmed">
+          ·
+        </Text>
+        <Link href="/process/chat/auditoria/facturas" className="chat-text-muted" style={{ fontSize: 13 }}>
+          Facturas de IA
+        </Link>
       </Group>
       <Group justify="space-between" mb="xs" wrap="wrap">
         <Group gap="sm" wrap="nowrap">
