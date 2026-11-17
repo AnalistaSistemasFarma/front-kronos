@@ -56,7 +56,7 @@ export async function leerLicencias(): Promise<LicenciasDto> {
 
         SELECT huella, id_license, estado, notas FROM dbo.ai_license_token;
 
-        SELECT a.id_agent, a.code, a.display_name,
+        SELECT a.id_agent, a.code, a.display_name, a.avatar_url, a.avatar_updated_at,
                emp.id_company, RTRIM(emp.company) AS empresa,
                COALESCE(d.departamento, us.departamento) AS departamento,
                q.utilization_7d, q.reset_7d, q.utilization_5h, q.overage, q.measured_at, q.token_fp,
@@ -154,6 +154,10 @@ export async function leerLicencias(): Promise<LicenciasDto> {
         consumoMes: mes.get(Number(a.id_agent)) ?? consumoVacio(),
         consumoHoy: dia.get(Number(a.id_agent)) ?? consumoVacio(),
         ultimoTurno: ultimoPorAgente.get(Number(a.id_agent)) ?? null,
+        avatarUrl: txt(a.avatar_url),
+        avatarVersion: a.avatar_updated_at instanceof Date ? a.avatar_updated_at.getTime() : null,
+        participacion: null,
+        costoAsignado: null,
       };
     });
 
@@ -188,7 +192,7 @@ export async function leerLicencias(): Promise<LicenciasDto> {
           .map((t) => ({ huella: String(t.huella), estado: String(t.estado) })),
         agentes: delaLicencia,
         semanas: semPorLic.get(id) ?? [],
-      } satisfies Omit<LicenciaDto, "usoActual" | "promedio4" | "pico4" | "semaforo" | "costoPorAgente" | "alertas" | "consumoMes" | "consumoHoy" | "rendimiento">;
+      } satisfies Omit<LicenciaDto, "usoActual" | "uso5h" | "promedio4" | "pico4" | "semaforo" | "costoPorAgente" | "capacidadSinUsar" | "alertas" | "consumoMes" | "consumoHoy" | "rendimiento">;
     });
 
     const sinLicencia = ags.filter((a) => a.idLicencia === null && a.idLicenciaPorHuella === null);
@@ -202,6 +206,9 @@ export async function leerLicencias(): Promise<LicenciasDto> {
       const t = tk(u);
       const lic = a ? (a.idLicencia ?? a.idLicenciaPorHuella) : null;
       return {
+        code: a?.code ?? String(u.id_agent),
+        avatarUrl: a?.avatarUrl ?? null,
+        avatarVersion: a?.avatarVersion ?? null,
         agente: a?.nombre ?? `Agente ${String(u.id_agent)}`,
         empresa: a?.empresa ?? null,
         licencia: lic ? (codigoLic.get(lic) ?? null) : null,
@@ -339,7 +346,7 @@ export async function guardarLicencia(e: LicenciaEntrada, usuario: string): Prom
         BEGIN
           IF EXISTS (SELECT 1 FROM dbo.ai_license WHERE codigo = @codigo)
             THROW 51710, N'Ya existe una licencia con ese código.', 1;
-          INSERT dbo.ai_license (codigo, nombre, id_company, organizacion, plan, costo_mensual, moneda, renovacion, responsable, notas, activa, updated_by)
+          INSERT dbo.ai_license (codigo, nombre, id_company, organizacion, [plan], costo_mensual, moneda, renovacion, responsable, notas, activa, updated_by)
           VALUES (@codigo, @nombre, @emp, @org, @plan, @costo, ISNULL(@moneda, N'USD'), @renov, @resp, @notas, ISNULL(@activa, 1), @usr);
           SELECT CAST(SCOPE_IDENTITY() AS INT) AS id;
         END
@@ -349,7 +356,7 @@ export async function guardarLicencia(e: LicenciaEntrada, usuario: string): Prom
             id_company    = ISNULL(@emp, id_company),
             nombre        = CASE WHEN @set_nombre = 1 THEN @nombre ELSE nombre END,
             organizacion  = CASE WHEN @set_org = 1 THEN @org ELSE organizacion END,
-            plan          = CASE WHEN @set_plan = 1 THEN @plan ELSE plan END,
+            [plan]        = CASE WHEN @set_plan = 1 THEN @plan ELSE [plan] END,
             costo_mensual = CASE WHEN @set_costo = 1 THEN @costo ELSE costo_mensual END,
             moneda        = ISNULL(@moneda, moneda),
             renovacion    = CASE WHEN @set_renov = 1 THEN @renov ELSE renovacion END,

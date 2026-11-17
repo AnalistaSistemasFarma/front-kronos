@@ -25,6 +25,7 @@ import {
 } from "@mantine/core";
 import { IconAlertCircle, IconArrowLeft, IconPencil, IconPlus, IconReceipt2 } from "@tabler/icons-react";
 import type { AgenteLicenciaDto, LicenciaDto, LicenciasDto, Semaforo } from "../../../../../../lib/agent-audit/licencias";
+import AgentAvatar from "../../../../../../components/chat/AgentAvatar";
 
 /**
  * AUDITORÍA DE AGENTES → COSTOS Y LICENCIAS (Nicolás, 2026-11-17): qué licencias
@@ -162,6 +163,12 @@ export default function CostosLicenciasPage() {
             <IconArrowLeft size={14} /> Auditoría de agentes
           </Group>
         </Link>
+        <Text size="xs" c="dimmed">
+          ·
+        </Text>
+        <Link href="/process/chat/auditoria/facturas" className="chat-text-muted" style={{ fontSize: 13 }}>
+          Facturas de IA
+        </Link>
       </Group>
       <Group justify="space-between" mb="xs" wrap="wrap">
         <Group gap="sm" wrap="nowrap">
@@ -230,17 +237,18 @@ export default function CostosLicenciasPage() {
 
           <SimpleGrid cols={{ base: 1, sm: 3 }} mb="md">
             <Kpi
-              titulo="Consumo de hoy · valor equivalente en API"
-              valor={usd(datos.resumen.consumoHoy.valorApi)}
-              nota={`${datos.resumen.consumoHoy.turnos} turnos · ${tokens(datos.resumen.consumoHoy.tokens)} tokens`}
+              titulo="Aprovechamiento del cupo pagado"
+              valor={pct(datos.resumen.aprovechamiento)}
+              nota="Promedio de 4 semanas del cupo semanal usado, ponderado por costo"
+              color={datos.resumen.aprovechamiento === null ? undefined : COLOR[datos.resumen.aprovechamiento > 80 ? "rojo" : datos.resumen.aprovechamiento >= 60 ? "amarillo" : "verde"]}
             />
             <Kpi
-              titulo="Consumo del mes · valor equivalente en API"
-              valor={usd(datos.resumen.consumoMes.valorApi)}
+              titulo="Capacidad pagada sin usar (mes)"
+              valor={dinero(datos.resumen.capacidadSinUsar)}
               nota={
-                datos.resumen.costoMensual
-                  ? `Pagamos ${dinero(datos.resumen.costoMensual)} en licencias: rinden ${(datos.resumen.consumoMes.valorApi / datos.resumen.costoMensual).toFixed(1).replace(".", ",")} veces`
-                  : `${datos.resumen.consumoMes.turnos} turnos · ${tokens(datos.resumen.consumoMes.tokens)} tokens`
+                datos.resumen.licenciasSinCosto
+                  ? `Faltan costos en ${datos.resumen.licenciasSinCosto} licencias · ${datos.resumen.consumoHoy.turnos} turnos hoy`
+                  : `${datos.resumen.consumoHoy.turnos} turnos hoy · ${tokens(datos.resumen.consumoHoy.tokens)} tokens`
               }
             />
             <Kpi
@@ -275,10 +283,10 @@ export default function CostosLicenciasPage() {
                     <Table.Th>Paga</Table.Th>
                     <Table.Th>Plan y costo</Table.Th>
                     <Table.Th>Agentes que la comparten</Table.Th>
-                    <Table.Th ta="right">Uso actual</Table.Th>
+                    <Table.Th ta="right">Cupo semana</Table.Th>
+                    <Table.Th ta="right">Cupo 5 h</Table.Th>
                     <Table.Th>Promedio 4 semanas</Table.Th>
-                    <Table.Th ta="right">Costo por agente</Table.Th>
-                    <Table.Th ta="right">Consumo del mes</Table.Th>
+                    <Table.Th ta="right">Capacidad sin usar</Table.Th>
                     <Table.Th>Alertas</Table.Th>
                     <Table.Th />
                   </Table.Tr>
@@ -318,12 +326,26 @@ export default function CostosLicenciasPage() {
                                   key={a.idAgent}
                                   withArrow
                                   multiline
-                                  w={260}
-                                  label={`${a.empresa ?? "Sin empresa"} · ${a.departamento ?? "Sin departamento"} · uso ${pct(a.uso7d)}${a.medidoEn ? ` (${fechaCorta(a.medidoEn)})` : ""}${otra ? " · OTRA EMPRESA" : ""}`}
+                                  w={280}
+                                  label={`${a.nombre} · ${a.empresa ?? "Sin empresa"} · ${a.departamento ?? "Sin departamento"}${a.participacion !== null ? ` · usa el ${Math.round(a.participacion * 100)} % de la licencia` : ""}${a.costoAsignado !== null ? ` · le corresponden ${dinero(a.costoAsignado, l.moneda)}` : ""}${otra ? " · OTRA EMPRESA" : ""}`}
                                 >
-                                  <Badge size="sm" variant={otra ? "filled" : "light"} color={otra ? "red" : "gray"}>
-                                    {a.nombre}
-                                  </Badge>
+                                  <div
+                                    style={{
+                                      borderRadius: 999,
+                                      padding: 2,
+                                      boxShadow: otra ? "0 0 0 2px var(--mantine-color-red-6)" : undefined,
+                                    }}
+                                  >
+                                    <AgentAvatar
+                                      code={a.code}
+                                      displayName={a.nombre}
+                                      avatarUrl={a.avatarUrl}
+                                      avatarVersion={a.avatarVersion}
+                                      size={30}
+                                      showStatus={false}
+                                      withTooltip={false}
+                                    />
+                                  </div>
                                 </Tooltip>
                               );
                             })
@@ -332,6 +354,9 @@ export default function CostosLicenciasPage() {
                       </Table.Td>
                       <Table.Td ta="right">
                         <Text size="sm">{pct(l.usoActual)}</Text>
+                      </Table.Td>
+                      <Table.Td ta="right">
+                        <Text size="sm">{pct(l.uso5h)}</Text>
                       </Table.Td>
                       <Table.Td>
                         <Group gap={6} wrap="nowrap">
@@ -345,21 +370,13 @@ export default function CostosLicenciasPage() {
                         </Text>
                       </Table.Td>
                       <Table.Td ta="right">
-                        <Text size="sm">{dinero(l.costoPorAgente, l.moneda)}</Text>
-                      </Table.Td>
-                      <Table.Td ta="right">
                         <Tooltip
                           withArrow
                           multiline
-                          w={280}
-                          label={`Hoy: ${usd(l.consumoHoy.valorApi)} · ${l.consumoHoy.turnos} turnos. Mes: ${l.consumoMes.turnos} turnos · ${tokens(l.consumoMes.tokens)} tokens. Valor si se pagara por API.`}
+                          w={300}
+                          label={`Costo de la licencia × la parte del cupo que no se usó (promedio de 4 semanas). Mes: ${l.consumoMes.turnos} turnos · ${tokens(l.consumoMes.tokens)} tokens. Referencia: por API costaría ${usd(l.consumoMes.valorApi)}.`}
                         >
-                          <div>
-                            <Text size="sm">{usd(l.consumoMes.valorApi)}</Text>
-                            <Text size="xs" c="dimmed">
-                              {l.rendimiento !== null ? `rinde ${String(l.rendimiento).replace(".", ",")}×` : `${tokens(l.consumoMes.tokens)} tokens`}
-                            </Text>
-                          </div>
+                          <Text size="sm">{dinero(l.capacidadSinUsar, l.moneda)}</Text>
                         </Tooltip>
                       </Table.Td>
                       <Table.Td style={{ maxWidth: 300 }}>
@@ -406,7 +423,7 @@ export default function CostosLicenciasPage() {
                     <Table.Th ta="right">Licencias</Table.Th>
                     <Table.Th ta="right">Agentes</Table.Th>
                     <Table.Th ta="right">Costo mensual</Table.Th>
-                    <Table.Th ta="right">Valor API del mes</Table.Th>
+                    <Table.Th ta="right">Sin usar</Table.Th>
                   </Table.Tr>
                 </Table.Thead>
                 <Table.Tbody>
@@ -424,7 +441,7 @@ export default function CostosLicenciasPage() {
                           </Text>
                         ) : null}
                       </Table.Td>
-                      <Table.Td ta="right">{usd(e.consumoMes.valorApi)}</Table.Td>
+                      <Table.Td ta="right">{dinero(e.capacidadSinUsar)}</Table.Td>
                     </Table.Tr>
                   ))}
                 </Table.Tbody>
@@ -435,7 +452,7 @@ export default function CostosLicenciasPage() {
                 Costo mensual por departamento
               </Text>
               <Text size="xs" c="dimmed" mb="xs">
-                El costo de cada licencia se reparte por igual entre sus agentes.
+                El costo de cada licencia se reparte entre sus agentes según la parte de su uso (tokens del mes); sin consumo registrado, por igual.
               </Text>
               <ScrollArea h={260} type="auto">
                 <Table verticalSpacing={4}>
@@ -443,8 +460,8 @@ export default function CostosLicenciasPage() {
                     <Table.Tr>
                       <Table.Th>Departamento</Table.Th>
                       <Table.Th ta="right">Agentes</Table.Th>
-                      <Table.Th ta="right">Costo mensual</Table.Th>
-                      <Table.Th ta="right">Valor API del mes</Table.Th>
+                      <Table.Th ta="right">Costo asignado</Table.Th>
+                      <Table.Th ta="right">Tokens del mes</Table.Th>
                     </Table.Tr>
                   </Table.Thead>
                   <Table.Tbody>
@@ -453,7 +470,7 @@ export default function CostosLicenciasPage() {
                         <Table.Td>{d.departamento}</Table.Td>
                         <Table.Td ta="right">{d.agentes}</Table.Td>
                         <Table.Td ta="right">{dinero(d.costoMensual)}</Table.Td>
-                        <Table.Td ta="right">{usd(d.consumoMes.valorApi)}</Table.Td>
+                        <Table.Td ta="right">{tokens(d.consumoMes.tokens)}</Table.Td>
                       </Table.Tr>
                     ))}
                   </Table.Tbody>
@@ -468,7 +485,7 @@ export default function CostosLicenciasPage() {
                 Consumo en vivo · últimos turnos de la flota
               </Text>
               <Text size="xs" c="dimmed">
-                Valor equivalente en API (precio de lista): referencia, no lo que se paga
+                El consumo real es el cupo de cada licencia; los tokens muestran quién lo usa
               </Text>
             </Group>
             <ScrollArea h={280} type="auto" mt="xs">
@@ -481,7 +498,6 @@ export default function CostosLicenciasPage() {
                     <Table.Th>Licencia</Table.Th>
                     <Table.Th>Modelo</Table.Th>
                     <Table.Th ta="right">Tokens</Table.Th>
-                    <Table.Th ta="right">Valor API</Table.Th>
                   </Table.Tr>
                 </Table.Thead>
                 <Table.Tbody>
@@ -491,7 +507,10 @@ export default function CostosLicenciasPage() {
                         <Text size="xs">{haceSeg(u.fin, ahora)}</Text>
                       </Table.Td>
                       <Table.Td>
-                        <Text size="sm">{u.agente}</Text>
+                        <Group gap={6} wrap="nowrap">
+                          <AgentAvatar code={u.code} displayName={u.agente} avatarUrl={u.avatarUrl} avatarVersion={u.avatarVersion} size={22} showStatus={false} withTooltip={false} />
+                          <Text size="sm">{u.agente}</Text>
+                        </Group>
                       </Table.Td>
                       <Table.Td>
                         <Text size="xs">{u.empresa ?? "—"}</Text>
@@ -507,14 +526,12 @@ export default function CostosLicenciasPage() {
                       <Table.Td ta="right">
                         <Text size="xs">{tokens(u.tokens)}</Text>
                       </Table.Td>
-                      <Table.Td ta="right">
-                        <Text size="xs">{usd(u.valorApi)}</Text>
-                      </Table.Td>
+
                     </Table.Tr>
                   ))}
                   {datos.ultimosTurnos.length === 0 && (
                     <Table.Tr>
-                      <Table.Td colSpan={7}>
+                      <Table.Td colSpan={6}>
                         <Text size="xs" c="dimmed">
                           Sin turnos en los últimos 7 días.
                         </Text>
@@ -538,12 +555,15 @@ export default function CostosLicenciasPage() {
                 <Stack gap={6}>
                   {datos.sinLicencia.map((a) => (
                     <Group key={a.idAgent} justify="space-between" wrap="nowrap">
-                      <div>
-                        <Text size="sm">{a.nombre}</Text>
-                        <Text size="xs" c="dimmed">
-                          {a.empresa ?? "Sin empresa"} · {a.departamento ?? "Sin departamento"}
-                        </Text>
-                      </div>
+                      <Group gap={8} wrap="nowrap">
+                        <AgentAvatar code={a.code} displayName={a.nombre} avatarUrl={a.avatarUrl} avatarVersion={a.avatarVersion} size={30} showStatus={false} withTooltip={false} />
+                        <div>
+                          <Text size="sm">{a.nombre}</Text>
+                          <Text size="xs" c="dimmed">
+                            {a.empresa ?? "Sin empresa"} · {a.departamento ?? "Sin departamento"}
+                          </Text>
+                        </div>
+                      </Group>
                       <Select
                         size="xs"
                         w={200}
@@ -665,12 +685,16 @@ export default function CostosLicenciasPage() {
                 <Stack gap={6}>
                   {(edicion.agentes ?? []).map((a) => (
                     <Group key={a.idAgent} justify="space-between" wrap="nowrap">
-                      <Text size="sm">
-                        {a.nombre}{" "}
-                        <Text span size="xs" c="dimmed">
-                          · {a.empresa ?? "Sin empresa"}
+                      <Group gap={8} wrap="nowrap">
+                        <AgentAvatar code={a.code} displayName={a.nombre} avatarUrl={a.avatarUrl} avatarVersion={a.avatarVersion} size={26} showStatus={false} withTooltip={false} />
+                        <Text size="sm">
+                          {a.nombre}{" "}
+                          <Text span size="xs" c="dimmed">
+                            · {a.empresa ?? "Sin empresa"}
+                            {a.costoAsignado !== null ? ` · ${dinero(a.costoAsignado, edicion.moneda ?? "USD")}` : ""}
+                          </Text>
                         </Text>
-                      </Text>
+                      </Group>
                       <Select
                         size="xs"
                         w={220}

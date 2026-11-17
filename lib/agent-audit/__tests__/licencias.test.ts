@@ -28,6 +28,10 @@ const ag = (p: Partial<AgenteLicenciaDto>): AgenteLicenciaDto => ({
   consumoMes: { turnos: 0, tokens: 0, valorApi: 0 },
   consumoHoy: { turnos: 0, tokens: 0, valorApi: 0 },
   ultimoTurno: null,
+  avatarUrl: null,
+  avatarVersion: null,
+  participacion: null,
+  costoAsignado: null,
   ...p,
 });
 const base = (p: Record<string, unknown> = {}) => ({
@@ -89,6 +93,8 @@ describe('licencias de Anthropic', () => {
     expect(l.alertas.find((a) => a.nivel === 'rojo')?.texto).toMatch(/Cosmo \(ONELATAMPHARMA\).*paga GSS/);
     expect(t.resumen.mezclanEmpresas).toBe(1);
     expect(l.costoPorAgente).toBe(50);
+    // Sin consumo registrado, el costo se reparte por igual.
+    expect(l.agentes.map((a) => a.costoAsignado)).toEqual([50, 50]);
   });
 
   it('alerta de uso adicional pagado, de cupo alto y de costo faltante', () => {
@@ -139,5 +145,21 @@ describe('licencias de Anthropic', () => {
     expect(t.porEmpresa[0].consumoMes.valorApi).toBe(400);
     expect(t.resumen.consumoHoy.valorApi).toBe(30);
     expect(t.resumen).toMatchObject({ agentesConConsumo: 1, agentesActivos: 2 });
+  });
+
+  it('reparte el costo por la parte de uso de cada agente y calcula la capacidad pagada sin usar', () => {
+    const a1 = ag({ consumoMes: { turnos: 7, tokens: 700, valorApi: 0 } });
+    const a2 = ag({ idAgent: 2, departamento: 'CARTERA', consumoMes: { turnos: 3, tokens: 300, valorApi: 0 } });
+    const semanas = [10, 20, 30, 40].map((v, i) => ({ reinicio: `2026-10-0${i + 1}T00:00:00Z`, pico: v }));
+    const t = armarTablero([base({ costoMensual: 200, semanas, agentes: [a1, a2] })], [], [], [], AHORA, { agentesActivos: [a1, a2] });
+    const l = t.licencias[0];
+    expect(l.agentes.map((a) => [a.participacion, a.costoAsignado])).toEqual([
+      [0.7, 140],
+      [0.3, 60],
+    ]);
+    // Promedio 25 % → 75 % sin usar de 200.
+    expect(l.capacidadSinUsar).toBe(150);
+    expect(t.porDepartamento.find((d) => d.departamento === 'CARTERA')?.costoMensual).toBe(60);
+    expect(t.resumen).toMatchObject({ aprovechamiento: 25, capacidadSinUsar: 150 });
   });
 });
