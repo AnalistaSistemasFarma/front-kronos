@@ -6,7 +6,7 @@
  * dentro del esquema de diseño de la app (claro y oscuro).
  */
 import type { ReactNode } from 'react';
-import { Badge, Group, Paper, Progress, Stack, Text, UnstyledButton } from '@mantine/core';
+import { Badge, Box, Group, Paper, Progress, Stack, Text, Tooltip, UnstyledButton } from '@mantine/core';
 import {
   IconCash,
   IconChartBar,
@@ -70,6 +70,7 @@ export function Kpi({
   progress,
   trend,
   loading,
+  desglose,
 }: {
   label: string;
   value: string;
@@ -78,11 +79,13 @@ export function Kpi({
   progress?: number | null;
   trend?: number | null;
   loading?: boolean;
+  /** Texto del tooltip (p. ej. venta OLP SAP vs. Pisa ERP). */
+  desglose?: ReactNode;
 }) {
   const conTrend = trend !== undefined;
   const color = conTrend ? (trend == null ? AZUL : trend >= 0 ? VERDE : ROJO) : tone === 'b' ? MORADO : AZUL;
   const icon = conTrend ? (trend != null && trend < 0 ? IconTrendingDown : IconTrendingUp) : tone === 'a' ? IconCash : IconChartBar;
-  return (
+  const tarjeta = (
     <KpiStatCard
       label={label}
       value={value}
@@ -92,6 +95,24 @@ export function Kpi({
       sharePercent={progress != null ? progress * 100 : undefined}
       refreshing={loading}
     />
+  );
+  if (!desglose) return tarjeta;
+  return (
+    <Tooltip label={desglose} multiline w={280} withArrow position='bottom'>
+      <Box style={{ cursor: 'help' }}>{tarjeta}</Box>
+    </Tooltip>
+  );
+}
+
+/** Contenido del tooltip con la venta por origen (OLP en SAP / Pisa en su ERP). */
+export function DesgloseOrigen({ olp, pisa }: { olp: number; pisa: number }) {
+  return (
+    <Stack gap={2}>
+      <Text size='xs' fw={600}>Venta por origen</Text>
+      <Text size='xs'>OLP (SAP): {money(olp)}</Text>
+      <Text size='xs'>Pisa (ERP): {money(pisa)}</Text>
+      <Text size='xs' fw={600}>Total: {money(olp + pisa)}</Text>
+    </Stack>
   );
 }
 
