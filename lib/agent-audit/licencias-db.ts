@@ -346,7 +346,7 @@ export async function guardarLicencia(e: LicenciaEntrada, usuario: string): Prom
         BEGIN
           IF EXISTS (SELECT 1 FROM dbo.ai_license WHERE codigo = @codigo)
             THROW 51710, N'Ya existe una licencia con ese código.', 1;
-          INSERT dbo.ai_license (codigo, nombre, id_company, organizacion, plan, costo_mensual, moneda, renovacion, responsable, notas, activa, updated_by)
+          INSERT dbo.ai_license (codigo, nombre, id_company, organizacion, [plan], costo_mensual, moneda, renovacion, responsable, notas, activa, updated_by)
           VALUES (@codigo, @nombre, @emp, @org, @plan, @costo, ISNULL(@moneda, N'USD'), @renov, @resp, @notas, ISNULL(@activa, 1), @usr);
           SELECT CAST(SCOPE_IDENTITY() AS INT) AS id;
         END
@@ -356,7 +356,7 @@ export async function guardarLicencia(e: LicenciaEntrada, usuario: string): Prom
             id_company    = ISNULL(@emp, id_company),
             nombre        = CASE WHEN @set_nombre = 1 THEN @nombre ELSE nombre END,
             organizacion  = CASE WHEN @set_org = 1 THEN @org ELSE organizacion END,
-            plan          = CASE WHEN @set_plan = 1 THEN @plan ELSE plan END,
+            [plan]        = CASE WHEN @set_plan = 1 THEN @plan ELSE [plan] END,
             costo_mensual = CASE WHEN @set_costo = 1 THEN @costo ELSE costo_mensual END,
             moneda        = ISNULL(@moneda, moneda),
             renovacion    = CASE WHEN @set_renov = 1 THEN @renov ELSE renovacion END,
