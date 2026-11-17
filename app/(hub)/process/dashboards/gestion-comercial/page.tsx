@@ -174,7 +174,8 @@ export default function TableroComercialPage() {
         const d = await r.json().catch(() => ({}));
         const list = (d.empresas ?? []) as EmpresaGestionComercial[];
         setEmpresas(list);
-        const primera = list.find((e) => e.lista) ?? list[0];
+        // Default to ONELATAMPHARMA (id_company 3) when available; otherwise the first ready company.
+        const primera = list.find((e) => e.id === 3 && e.lista) ?? list.find((e) => e.lista) ?? list[0];
         if (primera) setCompanyId(String(primera.id));
       })
       .catch(() => setEmpresas([]));
