@@ -58,6 +58,7 @@ import {
   indice,
   insights,
   mesesCerrados,
+  netaPorOrigen,
   pedidos,
   porCiudad,
   porCliente,
@@ -79,6 +80,7 @@ import {
 import s from './tablero.module.css';
 import {
   Card,
+  DesgloseOrigen,
   EstadoCliente,
   HBars,
   Kpi,
@@ -217,6 +219,8 @@ export default function TableroComercialPage() {
   const fP = useMemo(() => (data ? filtrar(data.filasAnterior, filtros) : []), [data, filtros]);
   const fY = useMemo(() => (data ? filtrar(data.filasAnio, filtros) : []), [data, filtros]);
   const tA = useMemo(() => totales(fA), [fA]);
+  const origenA = useMemo(() => netaPorOrigen(fA), [fA]);
+  const desgloseA = <DesgloseOrigen olp={origenA.olp} pisa={origenA.pisa} />;
   const tP = useMemo(() => totales(fP), [fP]);
   const tY = useMemo(() => totales(fY), [fY]);
   const serie = useMemo(() => (data ? serieDiaria(fA, fP, fY, data, med) : []), [data, fA, fP, fY, med]);
@@ -524,7 +528,7 @@ export default function TableroComercialPage() {
       )}
       {!focus && (
         <div className={s.kpis}>
-          <Kpi label='Venta acumulada' value={mm(tA.neta)} sub={money(tA.neta)} tone='a' />
+          <Kpi label='Venta acumulada' value={mm(tA.neta)} sub={money(tA.neta)} tone='a' desglose={desgloseA} />
           <Kpi label='Meta del mes' value='—' sub='Pendiente: cargar el presupuesto' />
           <Kpi label='Proyección de cierre' value={mm(proyeccion)} sub={`Promedio por día hábil ${mm(promHabil)}`} tone='b' progress={habM ? habT / habM : null} />
           <Kpi label='Vs. mes anterior al mismo corte' value={pct(variacion(tA.neta, tP.neta))} trend={variacion(tA.neta, tP.neta)} sub={`Mes anterior: ${mm(tP.neta)}`} />
@@ -619,7 +623,7 @@ export default function TableroComercialPage() {
         )}
         {!focus && (
           <div className={s.kpis}>
-            <Kpi label='Venta neta del periodo' value={mm(tA.neta)} sub={money(tA.neta)} tone='a' />
+            <Kpi label='Venta neta del periodo' value={mm(tA.neta)} sub={money(tA.neta)} tone='a' desglose={desgloseA} />
             <Kpi label='Presupuesto' value='—' sub='Pendiente: cargar el presupuesto' />
             <Kpi label='Vs. mismo periodo mes anterior' value={pct(variacion(tA.neta, tP.neta))} trend={variacion(tA.neta, tP.neta)} sub={mm(tP.neta)} />
             <Kpi label='Vs. mismo periodo año anterior' value={pct(variacion(tA.neta, tY.neta))} trend={variacion(tA.neta, tY.neta)} sub={mm(tY.neta)} />
@@ -670,7 +674,7 @@ export default function TableroComercialPage() {
       )}
       {!focus && (
         <div className={s.kpis}>
-          <Kpi label='Venta neta' value={mm(tA.neta)} sub={money(tA.neta)} tone='a' />
+          <Kpi label='Venta neta' value={mm(tA.neta)} sub={money(tA.neta)} tone='a' desglose={desgloseA} />
           <Kpi label='Presupuesto' value='—' sub='Pendiente: cargar el presupuesto' />
           <Kpi label='Vs. mes anterior' value={pct(variacion(tA.neta, tP.neta))} trend={variacion(tA.neta, tP.neta)} sub={mm(tP.neta)} />
           <Kpi label='Vs. mismo mes año anterior' value={pct(variacion(tA.neta, tY.neta))} trend={variacion(tA.neta, tY.neta)} sub={mm(tY.neta)} />

@@ -23,6 +23,8 @@ import {
   type TableroDatos,
 } from '../../../../lib/dashboards/gestion-comercial/tablero';
 import { sapGet, sapLogin, sapLogout, SapError, type SapSession } from '../../../../lib/sap/serviceLayer';
+import { pisaEnRango } from '../../../../lib/dashboards/gestion-comercial/pisa';
+import { basePisa } from '../../../../lib/dashboards/gestion-comercial/pisaCarga';
 
 /**
  * Tablero comercial — datos en vivo de SAP, SOLO LECTURA (GET).
@@ -170,6 +172,30 @@ export async function GET(request: NextRequest) {
       }
     } finally {
       await sapLogout(sap);
+    }
+    // Base de ventas de Pisa (ERP de Pisa), foto cargada en el tablero. Se suma a
+    // la venta de SAP y se marca con origen 'P' (tooltip OLP / Pisa).
+    try {
+      const pisa = await basePisa();
+      if (!pisa) {
+        avisos.push(
+          'Aún no hay base de ventas de Pisa: suba «Historico Ventas Pisa.xlsx» a la pestaña Archivos del proyecto para sumarla. Se muestra solo la venta de OLP (SAP).'
+        );
+      } else {
+        filas = filas.concat(pisaEnRango(pisa.filas, r.actual.desde, r.actual.hasta));
+        filasAnterior = filasAnterior.concat(pisaEnRango(pisa.filas, r.anterior.desde, r.anterior.hasta));
+        filasAnio = filasAnio.concat(pisaEnRango(pisa.filas, r.anioAnterior.desde, r.anioAnterior.hasta));
+        avisos.push(
+          `Incluye la venta directa de Pisa (ERP) del archivo «${pisa.archivo}» (datos hasta el ${pisa.hasta}), sin lo facturado a ONE LATAM PHARMA. ` +
+            'Pase el cursor sobre la venta para ver el detalle OLP / Pisa.'
+        );
+        if (pisa.hasta && r.actual.hasta > pisa.hasta) {
+          avisos.push(`La base de Pisa llega hasta el ${pisa.hasta}: los días posteriores solo incluyen la venta de OLP (SAP).`);
+        }
+      }
+    } catch (e) {
+      console.error('Tablero comercial: base Pisa no disponible', e);
+      avisos.push('No se pudo leer la base de ventas de Pisa; se muestra solo la venta de OLP (SAP).');
     }
     avisos.push('El número de documento que se muestra es el del asiento contable: la vista de SAP no entrega hoy el número de factura de forma confiable.');
     if (esquema === 'viejo') {
