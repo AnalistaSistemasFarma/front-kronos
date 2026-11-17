@@ -18,7 +18,7 @@ import {
 import { useMediaQuery } from '@mantine/hooks';
 import { IconAlertTriangle, IconCalendarPlus, IconLock } from '@tabler/icons-react';
 import DayPicker from './DayPicker';
-import { addDays, addYears } from '../../lib/rooms/dates';
+import { addDays, addYears, formatTime12h, timeOptions } from '../../lib/rooms/dates';
 import type { RecurrenceType } from '../../lib/rooms/rules';
 
 export interface RoomOption {
@@ -55,6 +55,9 @@ const WEEK_DAYS = [
   { v: 6, l: 'Sáb' },
   { v: 0, l: 'Dom' },
 ];
+
+/** Times every 15 minutes, labeled in Colombian 12-hour format. */
+const TIME_OPTIONS = timeOptions(15);
 
 const EMAIL_RE = /^[^\s@,;<>"']{1,64}@[a-z0-9.-]{1,253}\.[a-z]{2,}$/i;
 
@@ -191,7 +194,7 @@ export default function BookingDrawer({
               <Stack gap={2} mt="xs">
                 {conflicts.slice(0, 20).map((c, i) => (
                   <Text key={i} size="sm">
-                    {c.date} · {c.startTime}–{c.endTime} · {c.subject}
+                    {c.date} · {formatTime12h(c.startTime)} – {formatTime12h(c.endTime)} · {c.subject}
                   </Text>
                 ))}
                 {conflicts.length > 20 && <Text size="sm">… y {conflicts.length - 20} más.</Text>}
@@ -219,20 +222,24 @@ export default function BookingDrawer({
           required
         />
         <Group grow>
-          <TextInput
+          <Select
             label="Inicio"
-            type="time"
-            step={900}
+            data={TIME_OPTIONS}
             value={startTime}
-            onChange={(e) => setStartTime(e.currentTarget.value)}
+            onChange={(v) => v && setStartTime(v)}
+            allowDeselect={false}
+            searchable
+            maxDropdownHeight={260}
             required
           />
-          <TextInput
+          <Select
             label="Fin"
-            type="time"
-            step={900}
+            data={TIME_OPTIONS}
             value={endTime}
-            onChange={(e) => setEndTime(e.currentTarget.value)}
+            onChange={(v) => v && setEndTime(v)}
+            allowDeselect={false}
+            searchable
+            maxDropdownHeight={260}
             required
           />
         </Group>

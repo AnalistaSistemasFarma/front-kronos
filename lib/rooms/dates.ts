@@ -34,6 +34,28 @@ function toText(d: Date): string {
   return d.toISOString().slice(0, 10);
 }
 
+/**
+ * Formats an `HH:mm` time in Colombian 12-hour style: `8:30 a. m.`, `12:00 p. m.`.
+ * `24:00` (end of day) is shown as `12:00 a. m.`. Invalid input is returned as is.
+ */
+export function formatTime12h(time: string): string {
+  const m = /^(\d{2}):(\d{2})$/.exec(time ?? '');
+  if (!m) return time;
+  const h = Number(m[1]) % 24;
+  const h12 = h % 12 === 0 ? 12 : h % 12;
+  return `${h12}:${m[2]} ${h < 12 ? 'a. m.' : 'p. m.'}`;
+}
+
+/** `HH:mm` options every `stepMinutes`, labeled in 12-hour format (for selects). */
+export function timeOptions(stepMinutes = 15): Array<{ value: string; label: string }> {
+  const options: Array<{ value: string; label: string }> = [];
+  for (let min = 0; min < 24 * 60; min += stepMinutes) {
+    const value = `${String(Math.floor(min / 60)).padStart(2, '0')}:${String(min % 60).padStart(2, '0')}`;
+    options.push({ value, label: formatTime12h(value) });
+  }
+  return options;
+}
+
 /** Adds (or subtracts) days to a `YYYY-MM-DD` date. */
 export function addDays(date: string, days: number): string {
   const d = utc(date);

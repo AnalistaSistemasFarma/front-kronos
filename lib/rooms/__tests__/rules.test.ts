@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { READ_ONLY_MESSAGE, isReadOnly, parseRooms, toPublicRooms } from '../config';
-import { addYears, bogotaMs, dayRange, isDate, todayBogota } from '../dates';
+import { addYears, bogotaMs, dayRange, formatTime12h, isDate, timeOptions, todayBogota } from '../dates';
 import { canCancel, isRoomsMarkerSubprocess, levelFromUrls } from '../permissions';
 import {
   BookingError,
@@ -41,6 +41,18 @@ describe('dates', () => {
       start: '2026-11-17T00:00:00-05:00',
       end: '2026-11-18T00:00:00-05:00',
     });
+  });
+  it('formats times in Colombian 12-hour style', () => {
+    expect(formatTime12h('08:30')).toBe('8:30 a. m.');
+    expect(formatTime12h('00:00')).toBe('12:00 a. m.');
+    expect(formatTime12h('12:00')).toBe('12:00 p. m.');
+    expect(formatTime12h('13:45')).toBe('1:45 p. m.');
+    expect(formatTime12h('24:00')).toBe('12:00 a. m.');
+  });
+  it('time options every 15 minutes keep HH:mm values with 12-hour labels', () => {
+    const options = timeOptions(15);
+    expect(options).toHaveLength(96);
+    expect(options[34]).toEqual({ value: '08:30', label: '8:30 a. m.' });
   });
   it('Feb 29 + 1 year becomes Feb 28', () => {
     expect(addYears('2028-02-29', 1)).toBe('2029-02-28');

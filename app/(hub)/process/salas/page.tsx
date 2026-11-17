@@ -35,6 +35,7 @@ import {
   IconTrash,
 } from '@tabler/icons-react';
 import BookingDrawer, { type RoomOption } from '../../../../components/rooms/BookingDrawer';
+import { formatTime12h } from '../../../../lib/rooms/dates';
 
 /**
  * Rooms module (/process/salas): daily occupancy of the meeting rooms,
@@ -334,7 +335,7 @@ export default function RoomsPage() {
                         <Group justify="space-between" wrap="nowrap" align="flex-start" gap="xs">
                           <div style={{ minWidth: 0 }}>
                             <Text size="sm" fw={600}>
-                              {e.startTime} – {e.endTime}
+                              {formatTime12h(e.startTime)} – {formatTime12h(e.endTime)}
                             </Text>
                             <Text size="sm" lineClamp={2} c={e.isPrivate ? 'dimmed' : undefined}>
                               {e.isPrivate && <IconLock size={12} style={{ marginRight: 4 }} />}
@@ -417,7 +418,8 @@ export default function RoomsPage() {
               </Alert>
             )}
             <Text size="sm">
-              {pendingCancel.room.name} · {pendingCancel.event.startTime}–{pendingCancel.event.endTime} ·{' '}
+              {pendingCancel.room.name} · {formatTime12h(pendingCancel.event.startTime)} –{' '}
+              {formatTime12h(pendingCancel.event.endTime)} ·{' '}
               {pendingCancel.event.subject}
             </Text>
             <Group justify="flex-end" gap="sm">
