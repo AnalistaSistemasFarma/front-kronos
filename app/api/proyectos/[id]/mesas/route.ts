@@ -3,6 +3,7 @@ import { jsonNoStore, readJsonBody, serverError } from '../../../../../lib/chat/
 import { guardProject } from '../../../../../lib/chat/projects-guard';
 import { errorDeProyecto } from '../../../../../lib/proyectos/acciones';
 import { candidatosMesa, crearMesa, listarMesas } from '../../../../../lib/proyectos/mesas';
+import { politicaGuardadaConCodigo } from '../../../../../lib/proyectos/permisos-agentes';
 
 export const dynamic = 'force-dynamic';
 
@@ -10,9 +11,13 @@ export const dynamic = 'force-dynamic';
  * MESAS DE DISCUSIÓN de un proyecto (2026-11-04, docs/proyectos-mesas-discusion.md).
  *
  *   GET                                   -> { mesas }      (cualquier miembro)
- *   GET ?candidatos=1                     -> { candidatos }  agentes que la persona puede poner en una mesa
+ *   GET ?candidatos=1                     -> { candidatos, conCodigo }  agentes que la persona puede poner
+ *                                            en una mesa; conCodigo = el proyecto tiene acceso a código
  *   POST { tema, participantes: [{ idAgent, rol }], idAgentModerador, reglas? }
- *                                         -> { idMesa, idConversation }   (dueño o editor)
+ *                                         -> { idMesa, idConversation, avisos }   (dueño o editor)
+ *
+ * La mesa NO depende de que el proyecto sea de desarrollo (2026-11-11): un agente de negocio
+ * participa sin acceso al código; `avisos` lo informa, no bloquea.
  */
 export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -20,7 +25,11 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     const guard = await guardProject(id, { allowArchived: true });
     if ('response' in guard) return guard.response;
     if (request.nextUrl.searchParams.get('candidatos') === '1') {
-      return jsonNoStore({ candidatos: await candidatosMesa(guard.user, guard.project) });
+      const [candidatos, conCodigo] = await Promise.all([
+        candidatosMesa(guard.user, guard.project),
+        politicaGuardadaConCodigo(guard.project.idProject).catch(() => false),
+      ]);
+      return jsonNoStore({ candidatos, conCodigo });
     }
     return jsonNoStore({ mesas: await listarMesas(guard.project) });
   } catch (error) {

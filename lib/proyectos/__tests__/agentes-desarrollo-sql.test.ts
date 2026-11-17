@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 vi.mock('../../prisma', () => ({ prisma: {} }));
-import { agentesDeNegocio, codigoPermitido, mensajeSoloDesarrollo, pideCodigo } from '../agentes-desarrollo-rules';
+import { agentesDeNegocio, avisoSinCodigo, pideCodigo } from '../agentes-desarrollo-rules';
 import { columnaNoExiste } from '../agentes-desarrollo';
 
 /*
@@ -33,21 +33,17 @@ describe('reglas puras', () => {
     expect(pideCodigo({ codeLevel: 'ninguno', repos: ['sapsend'] })).toBe(true);
   });
 
-  it('codigoPermitido: solo si hay agentes y TODOS son de desarrollo', () => {
+  it('agentesDeNegocio: los que no son de desarrollo, en orden', () => {
     const orus = { displayName: 'Orus', esDesarrollo: true };
     const play = { displayName: 'Play', esDesarrollo: false };
-    expect(codigoPermitido([])).toBe(false);
-    expect(codigoPermitido([orus])).toBe(true);
-    expect(codigoPermitido([orus, play])).toBe(false);
     expect(agentesDeNegocio([orus, play])).toEqual([play]);
+    expect(agentesDeNegocio([orus])).toEqual([]);
   });
 
-  it('mensaje claro, en singular y en plural', () => {
-    expect(mensajeSoloDesarrollo(['Play'])).toBe(
-      'El acceso a código y los repositorios solo se asignan a agentes de desarrollo. Play no es agente de desarrollo: el proyecto queda en «Ninguno» y sin repositorios.'
-    );
-    expect(mensajeSoloDesarrollo(['Play', 'Lexa', 'Nancy'])).toContain('Play, Lexa y Nancy no son agentes de desarrollo');
-    expect(mensajeSoloDesarrollo([])).toContain('Este proyecto no tiene agentes de desarrollo');
+  it('aviso informativo (2026-11-11), en singular y en plural; vacío sin agentes de negocio', () => {
+    expect(avisoSinCodigo(['Play'])).toBe('Play no es agente de desarrollo: participa sin acceso al código.');
+    expect(avisoSinCodigo(['Play', 'Lexa', 'Nancy'])).toBe('Play, Lexa y Nancy no son agentes de desarrollo: participan sin acceso al código.');
+    expect(avisoSinCodigo([])).toBe('');
   });
 
   it('reconoce «la columna es_desarrollo no existe» (código antes que el DDL)', () => {

@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Alert, Badge, Button, Card, Group, Stack, Text, ThemeIcon, Timeline } from '@mantine/core';
 import { IconBrandGithub, IconHistory, IconInfoCircle, IconPencil, IconShieldLock, IconUserCheck } from '@tabler/icons-react';
 import { NIVEL_INFO } from '../../../lib/proyectos/permisos-agentes-rules';
-import { mensajeSoloDesarrollo } from '../../../lib/proyectos/agentes-desarrollo-rules';
+import { avisoSinCodigo } from '../../../lib/proyectos/agentes-desarrollo-rules';
 import type { PermisosProyectoDto } from '../../../lib/proyectos/permisos-agentes-tipos';
 import type { ProyectoDetalleDto } from '../../../lib/proyectos/tipos';
 import { apiGet, fechaCorta } from '../api';
@@ -123,16 +123,10 @@ export default function SeccionPermisos({ proyecto, version, avisar }: { proyect
             </Stack>
           )}
 
-          {datos.codeAllowed === false && (
-            <Alert
-              color={p.codeLevel !== 'ninguno' || p.repos.length > 0 ? 'yellow' : 'gray'}
-              radius='md'
-              icon={<IconInfoCircle size={18} />}
-              py={8}
-              data-testid='permisos-solo-desarrollo-aviso'
-            >
-              {mensajeSoloDesarrollo(datos.nonDevAgents ?? [])}
-              {(p.codeLevel !== 'ninguno' || p.repos.length > 0) && ' Este proyecto todavía tiene acceso a código de antes de la regla: cámbielo a «Ninguno».'}
+          {(p.codeLevel !== 'ninguno' || p.repos.length > 0) && (datos.nonDevAgents ?? []).length > 0 && (
+            // Agentes de negocio en un proyecto con código (2026-11-11): informativo, no bloquea.
+            <Alert color='blue' variant='light' radius='md' icon={<IconInfoCircle size={18} />} py={8} data-testid='permisos-negocio-sin-codigo-aviso'>
+              {avisoSinCodigo(datos.nonDevAgents ?? [])}
             </Alert>
           )}
 

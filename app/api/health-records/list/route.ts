@@ -98,8 +98,12 @@ async function fetchCompanyRecords(
       `${ep.healthRecordsEntity}?${query.toString()}`
     );
 
+    // La coleccion de la bitacora se llama distinto por empresa; se expone
+    // normalizada como `logs` para que la UI no dependa del nombre.
+    const logCollection = ep.healthRecordsLogCollection;
     return (data.value ?? []).map((row) => ({
       ...row,
+      logs: logCollection && Array.isArray(row[logCollection]) ? row[logCollection] : [],
       companyId: access.idCompany,
       companyName: access.companyName,
     }));

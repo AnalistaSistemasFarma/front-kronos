@@ -123,18 +123,45 @@ export function useAltoVisible(alCambiar?: () => void) {
       fijarDocumento();
       actualizar();
     };
-    const alEnfocar = () => {
+    /*
+     * TOCAR LA CAJA NO ES DESPLAZAR (2026-11-15, Nicolás: «cuando toco el
+     * input del chat no se sube el mensaje hasta lo último, me toca hacer un
+     * mini scroll»). El toque que abre el teclado contaba como gesto de
+     * scroll: el teclado de iOS se abre dentro de la ventana de quietud
+     * (QUIETUD_MS) y todos sus `resize` se ignoraban, así que el hilo no
+     * volvía al fondo. Un toque que empieza en un campo de texto ya no marca
+     * interacción, y al enfocarlo se re-ancla otra vez cuando el teclado
+     * termina de abrir (red de seguridad por si el último `resize` se perdió).
+     */
+    let toqueEnCampo = false;
+    const esCampo = (t: EventTarget | null) =>
+      t instanceof Element && Boolean(t.closest('textarea, input, [contenteditable="true"]'));
+    let reanclas: number[] = [];
+    const alEnfocar = (e: FocusEvent) => {
       fijarDocumento();
       // Por si iOS desplaza el documento después del foco, antes del primer
       // `resize` del teclado.
       window.requestAnimationFrame(fijarDocumento);
+      if (!esCampo(e.target)) return;
+      reanclas.forEach((t) => window.clearTimeout(t));
+      reanclas = [350, 700].map((ms) =>
+        window.setTimeout(() => {
+          if (!usuarioInteractuando()) avisar.current?.();
+        }, ms)
+      );
     };
 
-    const alTocar = () => {
+    const alTocar = (e: TouchEvent) => {
+      toqueEnCampo = esCampo(e.target);
+      if (toqueEnCampo) return;
       tocando = true;
       ultimoScrollUsuario = Date.now();
     };
     const alSoltar = () => {
+      if (toqueEnCampo) {
+        toqueEnCampo = false;
+        return;
+      }
       tocando = false;
       ultimoScrollUsuario = Date.now();
     };
@@ -158,6 +185,7 @@ export function useAltoVisible(alCambiar?: () => void) {
 
     return () => {
       if (pendiente) window.cancelAnimationFrame(pendiente);
+      reanclas.forEach((t) => window.clearTimeout(t));
       vv.removeEventListener('resize', tactil ? alRedimensionar : actualizar);
       vv.removeEventListener('scroll', tactil ? alDesplazar : actualizar);
       if (tactil) {

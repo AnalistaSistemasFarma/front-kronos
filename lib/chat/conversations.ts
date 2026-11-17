@@ -36,6 +36,9 @@ export interface ChatAuthorPayload {
   id: string | number;
   name: string;
   avatarUrl: string | null;
+  /** Solo agentes: su código y la versión de la foto SUBIDA (ver `agentAvatarSrc`). */
+  code?: string;
+  avatarVersion?: number | null;
 }
 
 /**
@@ -172,7 +175,13 @@ type MessageRow = {
     size_bytes: number | null;
   }[];
   userAuthor?: { id: string; name: string | null; email: string; image: string | null } | null;
-  agentAuthor?: { id_agent: number; display_name: string; avatar_url: string | null } | null;
+  agentAuthor?: {
+    id_agent: number;
+    code: string;
+    display_name: string;
+    avatar_url: string | null;
+    avatar_updated_at: Date | null;
+  } | null;
   /** El mensaje citado, UN solo nivel (ver messageInclude). */
   replyTo?: {
     id: number;
@@ -191,7 +200,9 @@ type MessageRow = {
 export const messageInclude = {
   attachments: true,
   userAuthor: { select: { id: true, name: true, email: true, image: true } },
-  agentAuthor: { select: { id_agent: true, display_name: true, avatar_url: true } },
+  agentAuthor: {
+    select: { id_agent: true, code: true, display_name: true, avatar_url: true, avatar_updated_at: true },
+  },
   // El mensaje CITADO, un solo nivel. Sin recursión a propósito: si A cita a B
   // y B cita a C, la cita de A muestra a B y ahí se para. Traer la cadena
   // completa serían tantas consultas como saltos, y en pantalla no se pinta
@@ -215,6 +226,8 @@ export function serializeMessage(row: MessageRow): ChatMessagePayload {
       id: row.agentAuthor.id_agent,
       name: row.agentAuthor.display_name,
       avatarUrl: row.agentAuthor.avatar_url,
+      code: row.agentAuthor.code,
+      avatarVersion: row.agentAuthor.avatar_updated_at ? row.agentAuthor.avatar_updated_at.getTime() : null,
     };
   } else if (row.userAuthor) {
     author = {

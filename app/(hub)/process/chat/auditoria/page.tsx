@@ -462,6 +462,26 @@ export default function AuditoriaAgentesPage() {
           >
             Ver análisis de seguridad
           </Link>
+          <Text size='xs' c='dimmed'>
+            ·
+          </Text>
+          <Link
+            href='/process/chat/auditoria/licencias'
+            className='chat-text-muted'
+            style={{ fontSize: 13 }}
+          >
+            Ver costos y licencias
+          </Link>
+          <Text size='xs' c='dimmed'>
+            ·
+          </Text>
+          <Link
+            href='/process/chat/auditoria/facturas'
+            className='chat-text-muted'
+            style={{ fontSize: 13 }}
+          >
+            Ver facturas de IA
+          </Link>
         </Group>
 
         <Group justify='space-between' mb={2} wrap='wrap' gap='sm'>

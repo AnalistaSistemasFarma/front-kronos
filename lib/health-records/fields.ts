@@ -39,3 +39,18 @@ export const OBSOLETO = ['SI', 'NO'];
 
 /** Fechas que deben normalizarse a YYYY-MM-DD. */
 export const DATE_FIELDS = ['U_Fecha_Creacion', 'U_Fecha_Actualizacion', 'U_Fecha_Vencimiento'];
+
+export const FIELD_LABELS: Record<string, string> = {
+  ...Object.fromEntries(TEMPLATE_COLUMNS.map((c) => [c.field, c.header])),
+  U_Descripcion: 'Descripción',
+};
+
+export interface HealthRecordLog {
+  U_RegSan_Fec?: string;
+  U_RegSan_Nom?: string;
+  U_RegSan_Com?: string;
+}
+
+export const AUTO_LOG_PREFIX = 'Se ha modificado el campo';
+
+export const OBSERVATION_MAX_LENGTH = 230;

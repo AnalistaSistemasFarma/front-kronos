@@ -20,6 +20,7 @@ export async function PATCH(req) {
       equipment_cost,
       active,
       site,
+      id_company_asset,
       os,
       invoice,
       renewal,
@@ -62,6 +63,7 @@ export async function PATCH(req) {
           equipment_cost = @equipment_cost,
           active = @active,
           site = @site,
+          id_company_asset = COALESCE(@id_company_asset, id_company_asset),
           [so] = @os,
           invoice = @invoice,
           renovation = @renewal,
@@ -85,6 +87,13 @@ export async function PATCH(req) {
       updateAssetRequest.input('equipment_cost', sql.Decimal(10, 2), equipment_cost);
       updateAssetRequest.input('active', sql.Bit, active);
       updateAssetRequest.input('site', sql.NVarChar(255), site);
+      updateAssetRequest.input(
+        'id_company_asset',
+        sql.Int,
+        Number.isFinite(Number(id_company_asset)) && Number(id_company_asset) > 0
+          ? Number(id_company_asset)
+          : null
+      );
       updateAssetRequest.input('os', sql.NVarChar(255), os);
       updateAssetRequest.input('invoice', sql.NVarChar(255), invoice);
       updateAssetRequest.input('renewal', sql.Bit, renewal);

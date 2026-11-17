@@ -6,13 +6,15 @@ import {
   crearRegistro,
   registroExiste,
   sanitizeRecord,
+  getFieldSizes,
+  validarLargos,
 } from '../../../../lib/health-records/records';
+import { notifyCreated, toNotifyWarning } from '../../../../lib/health-records/notifications';
 import { sapLogin, sapLogout, SapError } from '../../../../lib/sap/serviceLayer';
 
 /**
  * Crea un registro sanitario en la base SAP de la empresa indicada.
  * El usuario debe tener permiso de ESCRITURA en esa empresa. El Login y la
- * creacion ocurren solo en el servidor.
  */
 export async function POST(request: NextRequest) {
   try {
@@ -49,6 +51,16 @@ export async function POST(request: NextRequest) {
     });
 
     try {
+      // Largo máximo de cada campo según SAP (varía por empresa: p. ej. Titular
+      // es de 20 caracteres en unas bases y de 254 en otras).
+      const largoError = validarLargos(
+        record,
+        await getFieldSizes(sap, company.endpoint.healthRecordsEntity!)
+      );
+      if (largoError) {
+        return NextResponse.json({ error: largoError }, { status: 400 });
+      }
+
       const existe = await registroExiste(
         sap,
         company.endpoint.healthRecordsEntity!,
@@ -62,15 +74,21 @@ export async function POST(request: NextRequest) {
         );
       }
 
-      const docNum = await crearRegistro(
-        sap,
-        company.endpoint,
-        record,
-        userName,
-        String(body.comentario ?? '').trim()
+      const comentario = String(body.comentario ?? '').trim();
+      const docNum = await crearRegistro(sap, company.endpoint, record, userName, comentario);
+
+      const notified = await notifyCreated(
+        { companyId, companyName: company.companyName },
+        [{ ...record, DocNum: docNum }],
+        comentario
       );
 
-      return NextResponse.json({ ok: true, docNum, companyId });
+      return NextResponse.json({
+        ok: true,
+        docNum,
+        companyId,
+        notifyWarning: toNotifyWarning(notified),
+      });
     } finally {
       await sapLogout(sap);
     }

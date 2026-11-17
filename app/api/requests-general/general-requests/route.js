@@ -6,6 +6,7 @@ import { requestSearchWhere } from '../../../../lib/requests-general/requestSear
 import { sqlDateRange } from '../../../../lib/requests-general/dateRangeSql';
 
 const MAX_PAGE_SIZE = 500;
+const MAX_TASKS = 20000;
 
 /**
  * Grupos generales de estado (mismos que `statusGroupOf` en lib/requests-general/listFilters.ts):
@@ -150,12 +151,45 @@ export async function GET(req) {
       ORDER BY rg.id DESC
     `;
 
+    const tasksMode = searchParams.get('tasks') === '1';
+
     const result = await withMssqlPool(async (pool) => {
       const bind = () => {
         const request = pool.request();
         for (const [name, type, value] of inputs) request.input(name, type, value);
         return request;
       };
+
+      if (tasksMode) {
+        const tasksRequest = bind();
+        tasksRequest.input('maxTasks', sql.Int, MAX_TASKS + 1);
+        const tasks = await tasksRequest.query(`
+          WITH filtered AS (
+            SELECT DISTINCT rg.id, rg.subject_request, c.company
+            ${from}
+            ${where}${statusClause}
+          )
+          SELECT TOP (@maxTasks)
+            f.id AS id_request_general,
+            f.subject_request AS subject,
+            f.company,
+            trg.id,
+            tpc.task,
+            trg.id_status,
+            sct.status AS status_task,
+            trg.resolution,
+            trg.date_resolution,
+            ua.name AS assigned
+          FROM filtered f
+          INNER JOIN task_request_general trg ON trg.id_request_general = f.id
+          INNER JOIN task_process_category tpc ON tpc.id = trg.id_task
+          INNER JOIN status_case sct ON sct.id_status_case = trg.id_status
+          LEFT JOIN [user] ua ON ua.id = trg.id_assigned
+          ORDER BY f.id DESC, trg.id ASC
+        `);
+        const rows = tasks.recordset;
+        return { tasks: rows.slice(0, MAX_TASKS), truncated: rows.length > MAX_TASKS };
+      }
 
       if (!paged) {
         const rows = await bind().query(selectRows);

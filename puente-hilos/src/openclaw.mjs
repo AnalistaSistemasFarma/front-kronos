@@ -403,6 +403,8 @@ export function nombreArchivoProyecto(f) {
 export function armarMensajeOpenclaw({ encabezado, lote, adjuntos = [], cerco = `MSG-${randomBytes(6).toString('hex')}` }) {
   const partes = lote.map((m) => {
     const autor = linea(m.author?.name) || linea(m.author?.email) || 'Una persona';
+    // Otro ASISTENTE del proyecto que lo mencionó (2026-11-12): no es una persona.
+    if (m.author?.kind === 'agent') return `De: ${autor} (otro asistente de IA del proyecto, no una persona)\n${m.body || '(sin texto)'}`;
     const correo = m.author?.email ? ` <${linea(m.author.email)}>` : '';
     return `De: ${autor}${correo} (identidad autenticada por SynerLink; miembro del proyecto)\n${m.body || '(sin texto)'}`;
   });

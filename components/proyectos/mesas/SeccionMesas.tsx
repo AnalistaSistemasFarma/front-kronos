@@ -36,6 +36,7 @@ import {
 } from '@tabler/icons-react';
 import AgentAvatar from '../../chat/AgentAvatar';
 import type { ProyectoDetalleDto } from '../../../lib/proyectos/tipos';
+import { avisoSinCodigo } from '../../../lib/proyectos/agentes-desarrollo-rules';
 import { apiGet, apiSend } from '../api';
 import { ConfirmarModal } from '../modales';
 import type { Aviso } from '../ui';
@@ -483,10 +484,14 @@ function NuevaMesaModal({
   // elegir todos los agentes que quiera»): los del proyecto y los demás que tiene
   // asignados en la empresa. Los que no están en el proyecto se suman al crear la mesa.
   const [disponibles, setDisponibles] = useState<CandidatoDto[] | null>(null);
+  // El proyecto tiene acceso a código: los agentes de negocio participan sin él (aviso, no bloqueo).
+  const [conCodigo, setConCodigo] = useState(false);
   useEffect(() => {
-    void apiGet<{ candidatos: CandidatoDto[] }>(`${base}?candidatos=1`, 'No se pudieron cargar los agentes.').then((r) => {
-      if (r.ok) setDisponibles(r.data.candidatos);
-      else {
+    void apiGet<{ candidatos: CandidatoDto[]; conCodigo?: boolean }>(`${base}?candidatos=1`, 'No se pudieron cargar los agentes.').then((r) => {
+      if (r.ok) {
+        setDisponibles(r.data.candidatos);
+        setConCodigo(r.data.conCodigo === true);
+      } else {
         setDisponibles([]);
         if (r.error) setError(r.error);
       }
@@ -509,6 +514,7 @@ function NuevaMesaModal({
     .map((a) => ({ value: String(a.idAgent), label: a.nombre }));
   const seleccionables = (disponibles ?? []).filter((a) => a.designado || esDueno);
   const todosMarcados = seleccionables.length > 0 && seleccionables.every((a) => a.idAgent in elegidos);
+  const avisoNegocio = conCodigo ? avisoSinCodigo((disponibles ?? []).filter((a) => ids.includes(a.idAgent) && !a.esDesarrollo).map((a) => a.nombre)) : '';
 
   const crear = async () => {
     setError(null);
@@ -618,6 +624,11 @@ function NuevaMesaModal({
             })}
           </Stack>
         </div>
+        {avisoNegocio && (
+          <Alert color='blue' variant='light' data-testid='mesa-negocio-sin-codigo'>
+            {avisoNegocio}
+          </Alert>
+        )}
         <Select
           label='Moderador'
           description='Hace un resumen cada cierto número de rondas.'

@@ -1,4 +1,4 @@
-import { EMPTY_LIST_FILTERS, type ListFilters, type StatusGroup } from './listFilters';
+import { EMPTY_LIST_FILTERS, STATUS_GROUP_OPTIONS, type ListFilters, type StatusGroup } from './listFilters';
 
 /**
  * «Anterior / Siguiente» en el detalle de solicitudes y tareas, igual que en Tickets
@@ -182,7 +182,8 @@ export type RequestListViewState = {
   scrollY?: number;
 };
 
-const STATUS_GROUPS: StatusGroup[] = ['all', 'pending', 'done', 'cancelled'];
+/** Mismos grupos que las tarjetas (incluye «Devueltas», #970). */
+const STATUS_GROUPS: StatusGroup[] = STATUS_GROUP_OPTIONS.map((o) => o.value);
 
 /** Valida lo leído de sessionStorage: solo pasan campos conocidos y del tipo esperado. */
 export function parseRequestListState(raw: string | null): RequestListViewState | null {

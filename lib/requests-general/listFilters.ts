@@ -1,17 +1,18 @@
 import { normalizeSearchText } from './textSearch';
 
 /**
- * Filtros de los listados de solicitudes (Mis solicitudes y Asignadas), iguales en las dos
- * pantallas. Todo se filtra en el navegador sobre la lista COMPLETA ya cargada (no por página),
- * y el estado es GENERAL: "Pendientes" trae solicitudes y tareas abiertas, sin empezar o
- * devueltas a la vez, sin importar el tipo.
+ * Filtros de los listados de solicitudes (Mis solicitudes, Asignadas y Observar), iguales en
+ * las pantallas. Todo se filtra en el navegador sobre la lista COMPLETA ya cargada (no por
+ * página), y el estado es GENERAL: "Pendientes" trae solicitudes y tareas abiertas o sin
+ * empezar, sin importar el tipo; las devueltas (estado 7) van aparte en "Devueltas".
  */
 
-export type StatusGroup = 'all' | 'pending' | 'done' | 'cancelled';
+export type StatusGroup = 'all' | 'pending' | 'returned' | 'done' | 'cancelled';
 
 export const STATUS_GROUP_OPTIONS: { value: StatusGroup; label: string }[] = [
   { value: 'all', label: 'Todos' },
   { value: 'pending', label: 'Pendientes' },
+  { value: 'returned', label: 'Devueltas' },
   { value: 'done', label: 'Completadas' },
   { value: 'cancelled', label: 'Canceladas' },
 ];
@@ -19,14 +20,13 @@ export const STATUS_GROUP_OPTIONS: { value: StatusGroup; label: string }[] = [
 export const STATUS_GROUP_LABEL: Record<StatusGroup, string> = {
   all: 'Todos',
   pending: 'Pendientes',
+  returned: 'Devueltas',
   done: 'Completadas',
   cancelled: 'Canceladas',
 };
 
 /**
  * Grupo general de un estado (status_case): 2 Resuelto → completada; 3 Cancelado → cancelada;
- * 1 Abierto, 4 Sin empezar y 7 Devuelta → pendiente. Si llega un id desconocido se decide
- * por el nombre; lo que no está terminado ni cancelado cuenta como pendiente.
  */
 export function statusGroupOf(
   statusId: number | string | null | undefined,
@@ -35,17 +35,17 @@ export function statusGroupOf(
   const id = Number(statusId);
   if (id === 2) return 'done';
   if (id === 3) return 'cancelled';
-  if (id === 1 || id === 4 || id === 7) return 'pending';
+  if (id === 7) return 'returned';
+  if (id === 1 || id === 4) return 'pending';
   const name = normalizeSearchText(statusName);
   if (name.includes('cancel')) return 'cancelled';
+  if (name.includes('devuelt')) return 'returned';
   if (['resuelt', 'complet', 'cerrad', 'finaliz'].some((w) => name.includes(w))) return 'done';
   return 'pending';
 }
 
 /**
  * Estado EXACTO (status_case), el filtro «Estado» que había antes del panel nuevo: refina el
- * estado general de las tarjetas (p. ej. «Devuelta» dentro de Pendientes). Mismas opciones que
- * tenía cada pantalla.
  */
 export const REQUEST_STATE_OPTIONS: Option[] = [
   { value: '1', label: 'Abierto' },
@@ -160,7 +160,7 @@ export function matchesListFilters(
 export type StatusCounts = Record<StatusGroup, number>;
 
 export function countByStatusGroup(rows: Array<Pick<ListRow, 'group'>>): StatusCounts {
-  const counts: StatusCounts = { all: rows.length, pending: 0, done: 0, cancelled: 0 };
+  const counts: StatusCounts = { all: rows.length, pending: 0, returned: 0, done: 0, cancelled: 0 };
   for (const row of rows) counts[row.group] += 1;
   return counts;
 }

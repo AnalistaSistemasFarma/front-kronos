@@ -118,11 +118,10 @@ export async function POST(request: NextRequest) {
           }
           const created = await sapPost<{ DocEntry: number }>(sap, 'Drafts', buildCreatePayload(g.header, g.lines, who.requester));
           const result: GroupResult = { ...base, ok: true, docEntry: created.DocEntry, sent: false };
-          if (send) {
-            const s = await sendToAuthorize({ sap, companyId, docEntry: created.DocEntry, userEmail: email });
-            if (s.ok) result.sent = true;
-            else result.error = `Borrador creado, pero no se envio a autorizar: ${s.error}`;
-          }
+          // Enviado o no, queda en Mis solicitudes: enviado a autorización o «En Borrador».
+          const s = await sendToAuthorize({ sap, companyId, docEntry: created.DocEntry, userEmail: email, asDraft: !send });
+          if (s.ok) result.sent = send;
+          else result.error = `Borrador creado, pero no quedó en Mis solicitudes: ${s.error}`;
           results.push(result);
         } catch (e) {
           results.push({ ...base, ok: false, error: e instanceof SapError ? e.friendly : 'Error inesperado' });

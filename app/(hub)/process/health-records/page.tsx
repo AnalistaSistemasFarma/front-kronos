@@ -7,6 +7,7 @@ import { IconSearch, IconAlertTriangle, IconPlus, IconUpload, IconEdit, IconEye,
 import CreateModal from './CreateModal';
 import BulkModal from './BulkModal';
 import EditModal from './EditModal';
+import type { HealthRecordLog } from '../../../../lib/health-records/fields';
 
 /**
  * Registros Sanitarios (multiempresa).
@@ -37,6 +38,7 @@ interface HealthRecord {
   U_Titular?: string;
   U_Fecha_Vencimiento?: string;
   U_Estado_Comercializacion?: string;
+  logs?: HealthRecordLog[];
   [key: string]: unknown;
 }
 
@@ -65,10 +67,16 @@ export default function HealthRecordsPage() {
   const [selected, setSelected] = useState<HealthRecord | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
   const [deletingKey, setDeletingKey] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
 
   useEffect(() => {
     if (session) loadData();
   }, [session]);
+
+  const refresh = (notifyWarning?: string) => {
+    setNotice(notifyWarning ?? null);
+    loadData();
+  };
 
   const loadData = async () => {
     try {
@@ -196,14 +204,28 @@ export default function HealthRecordsPage() {
         )}
       </Group>
 
-      <CreateModal opened={createOpen} onClose={() => setCreateOpen(false)} companies={writable} onCreated={loadData} />
+      <CreateModal opened={createOpen} onClose={() => setCreateOpen(false)} companies={writable} onCreated={refresh} />
       <BulkModal opened={bulkOpen} onClose={() => setBulkOpen(false)} companies={writable} onLoaded={loadData} />
       <EditModal
         record={selected}
         canWrite={selected ? canWriteFor(selected.companyId) : false}
         onClose={() => setSelected(null)}
-        onUpdated={loadData}
+        onUpdated={refresh}
       />
+
+      {notice && (
+        <Alert
+          color="yellow"
+          icon={<IconAlertTriangle size={16} />}
+          title="Guardado, pero sin notificación"
+          withCloseButton
+          onClose={() => setNotice(null)}
+          mt="sm"
+          mb="sm"
+        >
+          {notice}
+        </Alert>
+      )}
 
       {companyErrors.length > 0 && (
         <Alert color="yellow" icon={<IconAlertTriangle size={16} />} mt="sm" mb="sm">

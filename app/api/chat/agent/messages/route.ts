@@ -31,6 +31,15 @@ import {
 } from '../../../../../lib/chat/attachmentStorage';
 import { notifyAgentReply } from '../../../../../lib/chat/notifyAgentReply';
 import { alPublicarAgenteEnMesa } from '../../../../../lib/proyectos/mesas';
+import { mencionablesParaAgente } from '../../../../../lib/chat/projects';
+import type { AgenteMencionable } from '../../../../../lib/chat/groups';
+import {
+  AVISO_BUCLE_ASISTENTES,
+  MENSAJES_PARA_CONTEO,
+  VENTANA_RITMO_MS,
+  entregasDeAgenteEnHilo,
+  saltosDesdeUltimaPersona,
+} from '../../../../../lib/proyectos/menciones-agentes';
 
 export const dynamic = 'force-dynamic';
 
@@ -85,6 +94,12 @@ export const dynamic = 'force-dynamic';
  *      queda un mensaje de sistema en el grupo diciendo que se cortó. Se deja
  *      el aviso a propósito: un mensaje que desaparece en silencio es un
  *      misterio; uno que dice por qué se detuvo es información.
+ *
+ * EN UN HILO DE PROYECTO (2026-11-12): el asistente puede mencionar con @ a
+ * otro asistente del proyecto (el que la última persona del hilo podría
+ * mencionar), con frenos de profundidad, ritmo e ida y vuelta; al cortarse
+ * queda AVISO_BUCLE_ASISTENTES en el hilo. En las mesas no aplica. Ver
+ * lib/proyectos/menciones-agentes.ts.
  *
  * El conteo de turnos se hace DENTRO de la transacción, sobre los últimos
  * mensajes del grupo. Si se hiciera antes, dos agentes contestando a la vez
@@ -165,6 +180,31 @@ export async function POST(request: NextRequest) {
     // son un solo hecho ("el agente respondió"). Si se aplicaran por separado,
     // un fallo intermedio dejaría al usuario viendo "Pensando…" con la
     // respuesta ya publicada, o al revés.
+    // PROYECTO (2026-11-12, menciones entre asistentes): a quién podría
+    // despertar este asistente con @. Sale de la PERSONA que escribió por
+    // última vez en el hilo (lib/proyectos/menciones-agentes.ts). Se resuelve
+    // fuera de la transacción (consulta configuración y asignaciones); los
+    // FRENOS se cuentan dentro, como en los grupos.
+    let candidatosProyecto: AgenteMencionable[] = [];
+    if (
+      conversation.kind === 'project' &&
+      !conversation.esMesa &&
+      body.includes('@') &&
+      !body.trimStart().startsWith('/')
+    ) {
+      const ultimaPersona = await prisma.chatMessage.findFirst({
+        where: { id_conversation: conversation.id, role: 'user' },
+        orderBy: { id: 'desc' },
+        select: { id_user_author: true },
+      });
+      candidatosProyecto = await mencionablesParaAgente({
+        idProject: conversation.idProject,
+        idAgentPrincipal: conversation.idAgentPrincipal,
+        idAgentAutor: agent.idAgent,
+        idUserOrigen: ultimaPersona?.id_user_author ?? null,
+      });
+    }
+
     const { created: message, entregas } = await prisma.$transaction(async (tx) => {
       // A quién le pasa el turno este mensaje. Solo aplica en grupos; en un
       // hilo directo no hay nadie más a quien mencionar.
@@ -203,6 +243,49 @@ export async function POST(request: NextRequest) {
         });
       }
 
+      // PROYECTO: menciones entre asistentes con frenos (profundidad, ritmo,
+      // ida y vuelta). El conteo va DENTRO de la transacción por la misma
+      // razón que en los grupos.
+      let avisoProyecto: string | null = null;
+      if (conversation.kind === 'project' && candidatosProyecto.length > 0) {
+        const recientes = await tx.chatMessage.findMany({
+          where: { id_conversation: conversation.id },
+          orderBy: { id: 'desc' },
+          take: MENSAJES_PARA_CONTEO,
+          select: {
+            role: true,
+            body: true,
+            id_agent_author: true,
+            id_user_author: true,
+            deliveries: { select: { id_agent: true } },
+          },
+        });
+        const { saltos } = saltosDesdeUltimaPersona([...recientes].reverse());
+        const saltosUltimaHora = await tx.chatMessage.count({
+          where: {
+            id_conversation: conversation.id,
+            role: 'agent',
+            created_at: { gte: new Date(now.getTime() - VENTANA_RITMO_MS) },
+            deliveries: { some: {} },
+          },
+        });
+        const r = entregasDeAgenteEnHilo({
+          body,
+          idAgentAutor: agent.idAgent,
+          candidatos: candidatosProyecto,
+          esMesa: conversation.esMesa,
+          saltosDesdePersona: saltos,
+          saltosUltimaHora,
+        });
+        entregas = { idAgents: r.idAgents, cadenaCortada: r.freno !== null };
+        if (r.freno !== null) {
+          console.warn(`[proyectos] menciones entre asistentes frenadas (${r.freno}) en la conversación ${conversation.id}`);
+          avisoYaEstaba =
+            recientes.length > 0 && recientes[0].role === 'system' && recientes[0].body === AVISO_BUCLE_ASISTENTES;
+          avisoProyecto = AVISO_BUCLE_ASISTENTES;
+        }
+      }
+
       const created = await tx.chatMessage.create({
         data: {
           id_conversation: conversation.id,
@@ -236,7 +319,7 @@ export async function POST(request: NextRequest) {
           data: {
             id_conversation: conversation.id,
             role: 'system',
-            body: AVISO_CADENA_CORTADA,
+            body: avisoProyecto ?? AVISO_CADENA_CORTADA,
             created_at: new Date(now.getTime() + 1),
             delivered_at: now,
           },

@@ -48,11 +48,12 @@ export interface PermisosProyectoDto {
   /** ¿Puede ESTA persona cambiarlos? (administración o el subproceso en la empresa del proyecto). */
   canEdit: boolean;
   /**
-   * ¿Se le puede dar código? (2026-10-27) Solo si TODOS los agentes designados
-   * son de desarrollo. Opcional: una respuesta vieja no lo trae y vale `true`.
+   * @deprecated Desde el 2026-11-11 siempre `true`: el código se puede dar con
+   * agentes mixtos y solo lo reciben los de desarrollo. Se conserva por
+   * compatibilidad con clientes viejos.
    */
   codeAllowed?: boolean;
-  /** Nombres de los agentes designados que NO son de desarrollo. */
+  /** Nombres de los agentes designados que NO son de desarrollo (participan sin código). */
   nonDevAgents?: string[];
   /** Repos ACTIVOS que se pueden vincular (solo si canEdit). */
   catalog: RepoCatalogoDto[];

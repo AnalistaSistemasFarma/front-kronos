@@ -590,3 +590,13 @@ test('turno openclaw: sesión nueva en un hilo con historia → recuperación en
   assert.equal(mensajes.length, 3);
   assert.doesNotMatch(mensajes[2], /RECUPERACIÓN DE CONTEXTO/);
 });
+
+test('menciones entre asistentes: el mensaje de otro asistente no se presenta como de una persona', () => {
+  const t = armarMensajeOpenclaw({
+    encabezado: 'E',
+    cerco: 'MSG-x',
+    lote: [{ body: '@Duo ¿me confirma?', author: { kind: 'agent', name: 'Zoe (asistente)', email: null } }],
+  });
+  assert.match(t, /De: Zoe \(asistente\) \(otro asistente de IA del proyecto, no una persona\)/);
+  assert.doesNotMatch(t, /identidad autenticada/);
+});

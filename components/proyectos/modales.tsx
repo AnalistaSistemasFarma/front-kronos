@@ -16,10 +16,11 @@ import {
   UnstyledButton,
 } from '@mantine/core';
 import { useDebouncedValue, useMediaQuery } from '@mantine/hooks';
-import { IconAlertCircle, IconMail, IconMessagePlus, IconPencil, IconRobot, IconSearch, IconTicket, IconUserPlus } from '@tabler/icons-react';
+import { IconAlertCircle, IconInfoCircle, IconMail, IconMessagePlus, IconPencil, IconRobot, IconSearch, IconTicket, IconUserPlus } from '@tabler/icons-react';
 import AgentAvatar from '../chat/AgentAvatar';
 import SgcSelect from '../sgc/SgcSelect';
 import { MAX_LINK_SUMMARY_CHARS, type ProjectProfile } from '../../lib/chat/projects-rules';
+import { avisoSinCodigo } from '../../lib/proyectos/agentes-desarrollo-rules';
 
 /** Tope del nombre de una conversación (igual a MAX_TITULO_HILO_CHARS de lib/proyectos/hilos-rules.ts). */
 const MAX_TITULO_HILO = 120;
@@ -596,6 +597,8 @@ export function DesignarAgenteModal({
   // Proyecto creado SIN asistentes (2026-11-10): con el primero se escoge el perfil de conectores.
   const [perfiles, setPerfiles] = useState<ProjectProfile[] | null>(null);
   const [perfil, setPerfil] = useState<string | null>(null);
+  // El proyecto tiene acceso a código: los asistentes de negocio entran sin él (aviso, no bloqueo).
+  const [conCodigo, setConCodigo] = useState(false);
   const [enviando, setEnviando] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -606,12 +609,14 @@ export function DesignarAgenteModal({
     setCandidatos(null);
     setPerfiles(null);
     setPerfil(null);
-    void apiGet<{ agents: AgenteDesignableDto[]; eligePerfil?: boolean; profiles?: ProjectProfile[] }>(
+    setConCodigo(false);
+    void apiGet<{ agents: AgenteDesignableDto[]; eligePerfil?: boolean; profiles?: ProjectProfile[]; conCodigo?: boolean }>(
       `/api/proyectos/${proyecto.idProject}/agentes`,
       'No se pudo cargar la lista de asistentes.'
     ).then((r) => {
       setCandidatos(r.ok ? r.data.agents : []);
       setPerfiles(r.ok && r.data.eligePerfil ? r.data.profiles ?? [] : null);
+      setConCodigo(r.ok && r.data.conCodigo === true);
       if (!r.ok) setError(r.error);
     });
   }, [opened, proyecto.idProject]);
@@ -624,6 +629,9 @@ export function DesignarAgenteModal({
     return perfiles.filter((p) => marcados.every((a) => a.profiles.includes(p.key)));
   })();
   const perfilValido = perfil !== null && comunes.some((p) => p.key === perfil) ? perfil : comunes[0]?.key ?? null;
+  const avisoNegocio = conCodigo
+    ? avisoSinCodigo((candidatos ?? []).filter((a) => elegidos.includes(a.code) && a.esDesarrollo !== true).map((a) => a.displayName))
+    : '';
 
   const designar = async () => {
     setEnviando(true);
@@ -685,6 +693,11 @@ export function DesignarAgenteModal({
             ))}
           </Stack>
         </Checkbox.Group>
+      )}
+      {avisoNegocio && (
+        <Alert color='blue' variant='light' radius='md' icon={<IconInfoCircle size={18} />} py={8} data-testid='proyecto-agentes-sin-codigo'>
+          {avisoNegocio}
+        </Alert>
       )}
       {perfiles && candidatos && candidatos.length > 0 && (
         <SgcSelect

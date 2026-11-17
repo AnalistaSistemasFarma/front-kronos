@@ -89,6 +89,7 @@ import {
   registrarConsumoLocal,
   rutasDelHilo,
   sincronizarArchivos,
+  textoFallosDescarga,
 } from './hilos.mjs';
 
 const MAX_RESPUESTA = 40_000;
@@ -375,8 +376,11 @@ export function crearPuente({ cfg, synerlink, estado, correr = correrTurno, conv
       }
       // Perfil del turno (permisos y revisión del init). El del proyecto sigue para el mcp.json del hilo y el equipo.
       const perfilTurno = perfilConAgente(perfil, delAgente);
-      await sincronizarArchivos({ rutas, contexto, estado, descargar: (u) => synerlink.descargar(u) });
-      const adjuntos = await bajarAdjuntos({ rutas, mensajes: lote, descargar: (u) => synerlink.descargar(u) });
+      // Descargas tolerantes (2026-11-12): un archivo que no baja se salta y se le avisa al modelo.
+      const fallosDescarga = [];
+      const logDescarga = (...partes) => log(`conversación ${idConversation}:`, ...partes);
+      await sincronizarArchivos({ rutas, contexto, estado, descargar: (u) => synerlink.descargar(u), log: logDescarga, fallos: fallosDescarga });
+      const adjuntos = await bajarAdjuntos({ rutas, mensajes: lote, descargar: (u) => synerlink.descargar(u), log: logDescarga, fallos: fallosDescarga });
       // Comando nativo: se resuelve otra vez ya con los adjuntos (una skill los recibe en sus argumentos).
       const nativo = comando?.accion === 'nativo' ? resolverComando({ lote, catalogo, operador, adjuntos, negocio: esNegocio(cfg), agente: cfg.agenteNombre ?? cfg.agente }) : null;
       // /goal: el objetivo queda guardado POR CONVERSACIÓN (estado.json) y va en el encabezado de
@@ -495,7 +499,7 @@ export function crearPuente({ cfg, synerlink, estado, correr = correrTurno, conv
       let ultimoTexto = null;
       const tocados = new Set();
 
-      const promptTurno = nativo?.prompt ?? armarPrompt(lote, adjuntos, (completo ? encabezadoMensajeCompleto(completo.autores) : '') + encabezadoObjetivo(objetivo));
+      const promptTurno = nativo?.prompt ?? armarPrompt(lote, adjuntos, (completo ? encabezadoMensajeCompleto(completo.autores) : '') + encabezadoObjetivo(objetivo) + textoFallosDescarga(fallosDescarga));
       // Recuperación al reiniciar: en una sesión NUEVA de un hilo que ya tenía mensajes, el
       // primer turno lleva los últimos mensajes anteriores (no tras /clear ni con comandos nativos).
       const conRecuperacion = (sesion, prompt) => {

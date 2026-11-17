@@ -19,7 +19,20 @@ function manifestBase(): MetadataRoute.Manifest {
     name: 'SynerLink',
     short_name: 'SynerLink',
     description: 'Sistema de gestión de solicitudes',
-    start_url: '/',
+    /*
+     * ARRANQUE DIRECTO (2026-11-14): antes `start_url: '/'` abría la página
+     * pública de presentación (animaciones, contadores) cada vez que se tocaba
+     * el ícono, y de ahí había que entrar. Ahora abre la aplicación: con sesión
+     * va al inicio de Procesos; sin sesión, el middleware lleva al login y
+     * vuelve aquí.
+     *
+     * `id: '/'` FIJO: el navegador identifica la app instalada por su `id`
+     * (que por defecto es el start_url). Sin fijarlo, cambiar el start_url la
+     * convertía en OTRA app y las instaladas quedaban huérfanas.
+     */
+    id: '/',
+    start_url: '/process',
+    scope: '/',
     display: 'standalone',
     background_color: '#ffffff',
     theme_color: '#0078D4',

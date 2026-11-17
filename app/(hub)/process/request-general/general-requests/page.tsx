@@ -40,6 +40,10 @@ import {
   RequestsPage,
 } from '../../../../../components/request-general/list/RequestListUi';
 import { RequestListFilters } from '../../../../../components/request-general/list/RequestListFilters';
+import {
+  AllTasksModal,
+  type GeneralTask,
+} from '../../../../../components/request-general/list/AllTasksModal';
 import AutoRefreshNote from '../../../../../components/ui/AutoRefreshNote';
 import IosSearchField from '../../../../../components/ui/IosSearchField';
 import { useAutoRefresh } from '../../../../../components/ui/useAutoRefresh';
@@ -56,7 +60,7 @@ import {
 } from '@/lib/orion/taskProgress';
 
 const ITEMS_PER_PAGE = 100;
-const EMPTY_COUNTS: StatusCounts = { all: 0, pending: 0, done: 0, cancelled: 0 };
+const EMPTY_COUNTS: StatusCounts = { all: 0, pending: 0, returned: 0, done: 0, cancelled: 0 };
 
 interface RequestTask {
   id: number;
@@ -99,6 +103,21 @@ interface ConsultResponse {
 /** Lo que se le pide al servidor: los filtros del panel + el texto del buscador. */
 type AppliedQuery = { filters: ListFilters; search: string };
 
+function queryParams({ filters: f, search }: AppliedQuery): URLSearchParams {
+  const params = new URLSearchParams();
+  params.append('status', f.state || f.status);
+  if (f.company) params.append('company', f.company);
+  if (f.date_from) params.append('date_from', f.date_from);
+  if (f.date_to) params.append('date_to', f.date_to);
+  if (f.person) params.append('assigned_to', f.person);
+  if (f.process) params.append('process', f.process);
+  if (f.category) params.append('category', f.category);
+  const idDigits = f.id.replace(/\D/g, '');
+  if (idDigits) params.append('id', idDigits);
+  if (search) params.append('search', search);
+  return params;
+}
+
 function RequestGeneralPage() {
   const { data: session, status } = useSession();
   const router = useRouter();
@@ -131,6 +150,13 @@ function RequestGeneralPage() {
   const prevQueryRef = useRef<AppliedQuery | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+
+  const [allTasks, setAllTasks] = useState<GeneralTask[] | null>(null);
+  const [allTasksLoading, setAllTasksLoading] = useState(false);
+  const [allTasksError, setAllTasksError] = useState<string | null>(null);
+  const [allTasksTruncated, setAllTasksTruncated] = useState(false);
+  const [tasksModalOpen, setTasksModalOpen] = useState(false);
+  const allTasksSeqRef = useRef(0);
 
   const totalPages = Math.max(1, Math.ceil(totalTickets / ITEMS_PER_PAGE));
 
@@ -186,6 +212,34 @@ function RequestGeneralPage() {
     }
   };
 
+  const fetchAllTasks = async (query: AppliedQuery) => {
+    const seq = ++allTasksSeqRef.current;
+    setAllTasksLoading(true);
+    try {
+      const params = queryParams(query);
+      params.append('tasks', '1');
+      const response = await fetch(`/api/requests-general/general-requests?${params.toString()}`);
+      if (!response.ok) throw new Error('Failed to fetch all tasks');
+      const data = (await response.json()) as { tasks?: GeneralTask[]; truncated?: boolean };
+      if (seq !== allTasksSeqRef.current) return;
+      setAllTasks(Array.isArray(data.tasks) ? data.tasks : []);
+      setAllTasksTruncated(Boolean(data.truncated));
+      setAllTasksError(null);
+    } catch (err) {
+      console.error('Error fetching all tasks:', err);
+      if (seq === allTasksSeqRef.current) {
+        setAllTasksError('No se pudieron cargar todas las tareas. Inténtalo de nuevo.');
+      }
+    } finally {
+      if (seq === allTasksSeqRef.current) setAllTasksLoading(false);
+    }
+  };
+
+  const openTasksModal = () => {
+    setTasksModalOpen(true);
+    if (appliedRef.current) void fetchAllTasks(appliedRef.current);
+  };
+
   /** `silent`: refresca la tabla sin tapar la pantalla con el cargador (filtros, búsqueda y refresco automático). */
   const fetchTickets = async (query: AppliedQuery, page = 1, silent = false) => {
     const seq = ++requestSeqRef.current;
@@ -193,23 +247,10 @@ function RequestGeneralPage() {
       if (silent) setRefreshing(true);
       else setLoading(true);
       appliedRef.current = query;
-      const { filters: f, search } = query;
 
-      const params = new URLSearchParams();
+      const params = queryParams(query);
       params.append('page', String(page));
       params.append('pageSize', String(ITEMS_PER_PAGE));
-      // El estado viaja como grupo (all | pending | done | cancelled) o, si se eligió un estado
-      // exacto, como su id (la API acepta los dos).
-      params.append('status', f.state || f.status);
-      if (f.company) params.append('company', f.company);
-      if (f.date_from) params.append('date_from', f.date_from);
-      if (f.date_to) params.append('date_to', f.date_to);
-      if (f.person) params.append('assigned_to', f.person);
-      if (f.process) params.append('process', f.process);
-      if (f.category) params.append('category', f.category);
-      const idDigits = f.id.replace(/\D/g, '');
-      if (idDigits) params.append('id', idDigits);
-      if (search) params.append('search', search);
 
       const response = await fetch(`/api/requests-general/general-requests?${params.toString()}`);
       if (!response.ok) throw new Error('Failed to fetch tickets');
@@ -230,6 +271,7 @@ function RequestGeneralPage() {
         pending: Number(data.counts?.pending) || 0,
         done: Number(data.counts?.done) || 0,
         cancelled: Number(data.counts?.cancelled) || 0,
+        returned: 0,
       });
       setCurrentPage(page);
       setLastUpdated(new Date());
@@ -237,7 +279,6 @@ function RequestGeneralPage() {
       void fetchTasksForTickets(rows);
     } catch (err) {
       console.error('Error fetching tickets:', err);
-      // En el refresco automático un fallo de red no tapa la tabla; se reintenta en el siguiente.
       if (!silent && seq === requestSeqRef.current) {
         setError('No se pudieron cargar las solicitudes. Inténtalo de nuevo.');
       }
@@ -268,6 +309,7 @@ function RequestGeneralPage() {
       () => {
         loadedOnceRef.current = true;
         void fetchTickets(query, 1, !first);
+        void fetchAllTasks(query);
       },
       first || onlyStatusChanged ? 0 : 350
     );
@@ -280,6 +322,7 @@ function RequestGeneralPage() {
   useAutoRefresh(() => {
     if (canLoad && appliedRef.current) {
       void fetchTickets(appliedRef.current, currentPage, true);
+      if (tasksModalOpen) void fetchAllTasks(appliedRef.current);
     }
   });
 
@@ -379,7 +422,11 @@ function RequestGeneralPage() {
 
   const getTasksProgress = (tasks: RequestTask[]) => getSimplifiedTasksProgress(tasks);
 
-  const globalProgress = getTasksProgress(Object.values(tasksByRequest).flat());
+  const globalProgress = allTasks
+    ? getSimplifiedTasksProgress(allTasks)
+    : getTasksProgress(Object.values(tasksByRequest).flat());
+  const progressLabel =
+    allTasks || totalPages <= 1 ? 'Avance de tareas' : 'Avance de tareas (esta página)';
 
   /** Exporta la página que se está viendo (la lista completa vive en el servidor). */
   async function exportToExcel() {
@@ -470,7 +517,18 @@ function RequestGeneralPage() {
         counts={statusCounts}
         options={listOptions}
         progress={globalProgress}
-        progressLabel={totalPages > 1 ? 'Avance de tareas (esta página)' : 'Avance de tareas'}
+        progressLabel={progressLabel}
+        progressHint='Ver todas las tareas'
+        onProgressClick={openTasksModal}
+      />
+
+      <AllTasksModal
+        opened={tasksModalOpen}
+        onClose={() => setTasksModalOpen(false)}
+        tasks={allTasks}
+        loading={allTasksLoading}
+        error={allTasksError}
+        truncated={allTasksTruncated}
       />
 
       {error && (

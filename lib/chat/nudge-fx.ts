@@ -120,6 +120,15 @@ export function prepararAudioZumbido(): void {
   desbloqueoInstalado = true;
   const desbloquear = () => {
     if (audio && audio.state === 'running') return;
+    // FUERA de Apple el contexto NO se crea dentro del gesto (2026-11-14):
+    // crear un AudioContext abre el dispositivo de audio del sistema y en
+    // algunos equipos (audífonos Bluetooth, escritorio remoto, sin parlantes)
+    // tarda SEGUNDOS — el primer clic de la app (p. ej. elegir un agente)
+    // quedaba congelado 5 s. En Chrome/Edge/Firefox basta con que la persona
+    // ya haya interactuado con la página: el contexto se crea al primer sonido
+    // (ver `contextoAudio(true)` en sonar() y en message-sound). Si ya existía
+    // y quedó suspendido, aquí solo se reanuda (barato).
+    if (!audio && !requiereGestoParaAudio()) return;
     const ctx = crearAudio();
     if (!ctx) return;
     try {
@@ -140,15 +149,40 @@ export function prepararAudioZumbido(): void {
 }
 
 /**
+ * Safari (iPhone, iPad y Mac) solo deja sonar un contexto creado o reanudado
+ * DENTRO de un gesto; ahí se conserva el desbloqueo con el primer toque (y en
+ * esos equipos crear el contexto es rápido). El resto de navegadores permite
+ * crearlo después, mientras la persona ya haya interactuado con la página.
+ */
+function requiereGestoParaAudio(): boolean {
+  if (typeof navigator === 'undefined') return true;
+  const ua = navigator.userAgent;
+  const ios = /iP(hone|ad|od)/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  const safari = /Safari\//.test(ua) && !/(Chrome|Chromium|CriOS|Edg|OPR|Firefox|FxiOS)\//.test(ua);
+  // Sin `userActivation` no se puede saber si ya hubo un gesto: mejor el camino seguro.
+  const sinActivacion = !(navigator as Navigator & { userActivation?: unknown }).userActivation;
+  return ios || safari || sinActivacion;
+}
+
+/** ¿La persona ya tocó la página? (condición del navegador para sonar sin gesto). */
+function yaHuboGesto(): boolean {
+  const ua = (navigator as Navigator & { userActivation?: { hasBeenActive: boolean } }).userActivation;
+  return Boolean(ua?.hasBeenActive);
+}
+
+/**
  * El contexto de audio compartido (zumbido y sonido de mensaje nuevo usan el
  * mismo: iOS limita cuántos puede haber). Con `crear`, lo crea y lo reanuda —
  * solo tiene sentido dentro de un gesto, como la vista previa de un tono.
  * Devuelve null si no hay Web Audio o si aún no está habilitado.
  */
 export function contextoAudio(crear = false): AudioContext | null {
-  const ctx = crear ? crearAudio() : audio;
+  // Fuera de Apple el contexto se crea al primer sonido (no en el primer
+  // clic): basta con que la persona ya haya interactuado con la página.
+  const crearAhora = crear || (!audio && typeof window !== 'undefined' && !requiereGestoParaAudio() && yaHuboGesto());
+  const ctx = crearAhora ? crearAudio() : audio;
   if (!ctx) return null;
-  if (crear && ctx.state !== 'running') void ctx.resume().catch(() => undefined);
+  if (crearAhora && ctx.state !== 'running') void ctx.resume().catch(() => undefined);
   return ctx;
 }
 
@@ -160,7 +194,7 @@ export function momentoUltimoZumbido(): number {
 
 function sonar(): void {
   if (!sonidoZumbidoActivado()) return;
-  const ctx = audio;
+  const ctx = contextoAudio(false);
   if (!ctx || ctx.state !== 'running') return;
   ultimoZumbidoAt = Date.now();
   try {

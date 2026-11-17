@@ -188,6 +188,10 @@ export async function GET(request: NextRequest) {
         // Multiagente (2026-10-29): de quién es el hilo y si a ESTE agente lo invitaron por mención.
         mainAgent: principal ? { idAgent: principal.id_agent, code: principal.code, name: principal.display_name } : null,
         invited: conv.invitado,
+        // Menciones entre asistentes (2026-11-12): un asistente puede despertar
+        // con @ a otro del proyecto, con frenos. En las mesas no (los turnos los
+        // reparte el motor). El puente solo lo anuncia si viene en true.
+        agentMentions: !conv.esMesa,
         history,
       },
     });

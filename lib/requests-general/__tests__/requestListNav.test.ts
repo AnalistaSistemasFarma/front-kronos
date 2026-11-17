@@ -136,6 +136,12 @@ describe('estado de la lista (filtros)', () => {
     expect(loadRequestListState('create-request')).toBeNull();
   });
 
+  it('conserva la tarjeta «Devueltas» (grupo returned, #970)', () => {
+    const state = { filters: { ...EMPTY_LIST_FILTERS, status: 'returned' as const, state: '7' }, search: '' };
+    saveRequestListState('create-request', state);
+    expect(loadRequestListState('create-request')).toEqual(state);
+  });
+
   it('valida lo guardado: ignora campos y valores desconocidos', () => {
     const parsed = parseRequestListState(
       JSON.stringify({ filters: { status: 'raro', company: 5, process: 'Compras', otro: 'x' }, search: 3, type: 'x', page: -1 })

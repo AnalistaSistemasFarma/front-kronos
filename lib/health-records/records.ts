@@ -1,5 +1,6 @@
 import { sapGet, sapGetAll, sapPost, sapPatch, sapDelete, type SapSession } from '../sap/serviceLayer';
 import type { CompanySapEndpoint } from './access';
+import { AUTO_LOG_PREFIX, DATE_FIELDS, FIELD_LABELS } from './fields';
 
 /**
  * Logica de negocio de registros sanitarios (UDO de SAP B1), compartida por las
@@ -114,7 +115,8 @@ export async function eliminarRegistro(
 
 /**
  * Tamaños máximos (EditSize) de los campos de texto del UDO de registros
- * sanitarios, leídos de la metadata de SAP (UserFieldsMD). Sirve para validar
+ * sanitarios (solo db_Alpha; los db_Memo no tienen tope), leídos de la
+ * metadata de SAP (UserFieldsMD). Sirve para validar
  * el largo ANTES de crear (así la simulación detecta "valor demasiado largo"
  * sin tener que intentar el POST). Devuelve un mapa { U_Campo: maxLargo }.
  */
@@ -135,13 +137,35 @@ export async function getFieldSizes(
       `UserFieldsMD?$filter=TableName eq '@${table}'&$select=Name,Type,EditSize&$top=200`
     );
     for (const f of data.value ?? []) {
-      // Solo campos de texto (alfanuméricos / memo) tienen límite relevante.
-      if (f.Type === 'db_Alpha' || f.Type === 'db_Memo') sizes[`U_${f.Name}`] = f.EditSize;
+      // Solo los alfanuméricos (db_Alpha) tienen tope real en SAP. Los memo
+      // (db_Memo, p. ej. U_SEND_Link con SubType st_Link) no tienen límite: su
+      // EditSize (254) es solo el tamaño de pantalla, así que no se registran.
+      if (f.Type === 'db_Alpha') sizes[`U_${f.Name}`] = f.EditSize;
     }
   } catch {
     // Si no se puede leer la metadata, no se valida el largo (no bloquea).
   }
   return sizes;
+}
+
+/**
+ * Valida el largo de los campos de texto contra su tamaño en SAP (EditSize).
+ * Devuelve un mensaje claro con el primer campo que se pasa, o null si todo
+ * cabe. Así no se trunca ni falla el POST/PATCH con un 400 críptico de SAP.
+ */
+export function validarLargos(
+  record: HealthRecordInput,
+  sizes: Record<string, number>
+): string | null {
+  const rec = record as Record<string, string | undefined>;
+  for (const [field, max] of Object.entries(sizes)) {
+    const len = rec[field]?.length ?? 0;
+    if (max > 0 && len > max) {
+      const label = FIELD_LABELS[field] ?? field;
+      return `El campo "${label}" admite máximo ${max} caracteres en SAP para esta empresa (tiene ${len}). Abrévielo antes de guardar.`;
+    }
+  }
+  return null;
 }
 
 /**
@@ -193,8 +217,6 @@ export async function getNombresExistentes(
 }
 
 /**
- * Agrega una linea a la bitacora (colección hija). Append: sin
- * B1S-ReplaceCollectionsOnPatch. El nombre de la colección varia por empresa.
  */
 export async function agregarLog(
   session: SapSession,
@@ -202,13 +224,63 @@ export async function agregarLog(
   logCollection: string,
   docNum: number,
   userName: string,
-  comentario: string
+  comentarios: string | string[]
 ): Promise<void> {
+  const lineas = (Array.isArray(comentarios) ? comentarios : [comentarios])
+    .map((c) => c.trim())
+    .filter(Boolean);
+  if (lineas.length === 0) return;
+
+  const fecha = today();
   await sapPatch(session, `${entity}(${docNum})`, {
-    [logCollection]: [
-      { U_RegSan_Fec: today(), U_RegSan_Nom: userName, U_RegSan_Com: comentario },
-    ],
+    [logCollection]: lineas.map((c) => ({
+      U_RegSan_Fec: fecha,
+      U_RegSan_Nom: userName,
+      U_RegSan_Com: c,
+    })),
   });
+}
+
+export async function getRegistro(
+  session: SapSession,
+  entity: string,
+  docNum: number
+): Promise<Record<string, unknown>> {
+  return sapGet<Record<string, unknown>>(session, `${entity}(${docNum})`);
+}
+
+export interface RecordChange {
+  field: string;
+  label: string;
+  oldValue: string;
+  newValue: string;
+}
+
+/** Valor comparable: string recortado; las fechas de SAP vienen con hora. */
+function comparable(field: string, value: unknown): string {
+  const s = value == null ? '' : String(value).trim();
+  return DATE_FIELDS.includes(field) ? s.slice(0, 10) : s;
+}
+
+export function describeChanges(
+  before: Record<string, unknown>,
+  changes: HealthRecordInput
+): RecordChange[] {
+  const out: RecordChange[] = [];
+  for (const [field, value] of Object.entries(changes)) {
+    const oldValue = comparable(field, before[field]);
+    const newValue = comparable(field, value);
+    if (oldValue === newValue) continue;
+    out.push({ field, label: FIELD_LABELS[field] ?? field, oldValue, newValue });
+  }
+  return out;
+}
+
+export function changeLogLines(changes: RecordChange[]): string[] {
+  return changes.map(
+    (c) =>
+      `${AUTO_LOG_PREFIX} "${c.label}". Nuevo valor: "${c.newValue}". Valor anterior: "${c.oldValue}".`
+  );
 }
 
 /**

@@ -1,0 +1,245 @@
+.shell {
+  position: relative;
+  overflow: hidden;
+  border-radius: 22px;
+  padding: 1.75rem 1.5rem 1.35rem;
+  background:
+    radial-gradient(
+      120% 90% at 50% -10%,
+      color-mix(in srgb, var(--mantine-color-green-filled) 18%, transparent),
+      transparent 62%
+    ),
+    var(--app-surface-raised, var(--mantine-color-body));
+}
+
+.shell[data-tone='return'] {
+  background:
+    radial-gradient(
+      120% 90% at 50% -10%,
+      color-mix(in srgb, var(--mantine-color-orange-filled) 16%, transparent),
+      transparent 62%
+    ),
+    var(--app-surface-raised, var(--mantine-color-body));
+}
+
+.hero {
+  position: relative;
+  width: 128px;
+  height: 128px;
+  margin: 0 auto 0.35rem;
+  display: grid;
+  place-items: center;
+}
+
+.orbGlow {
+  position: absolute;
+  inset: 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--mantine-color-green-filled) 28%, transparent);
+  filter: blur(12px);
+  animation: pulseGlow 2.4s ease-in-out 0.7s infinite;
+}
+
+.hero[data-tone='return'] .orbGlow {
+  background: color-mix(in srgb, var(--mantine-color-orange-filled) 26%, transparent);
+}
+
+.markSvg {
+  position: relative;
+  width: 112px;
+  height: 112px;
+  overflow: visible;
+}
+
+.circle {
+  fill: color-mix(in srgb, var(--mantine-color-green-filled) 12%, var(--app-surface-raised, #fff));
+  stroke: var(--mantine-color-green-filled);
+  stroke-width: 3.5;
+  stroke-linecap: round;
+  stroke-dasharray: 283;
+  stroke-dashoffset: 283;
+  animation: drawStroke 0.55s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+
+.hero[data-tone='return'] .circle {
+  fill: color-mix(in srgb, var(--mantine-color-orange-filled) 12%, var(--app-surface-raised, #fff));
+  stroke: var(--mantine-color-orange-filled);
+}
+
+.check {
+  fill: none;
+  stroke: var(--mantine-color-green-filled);
+  stroke-width: 5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-dasharray: 72;
+  stroke-dashoffset: 72;
+  animation: drawStroke 0.42s cubic-bezier(0.4, 0, 0.2, 1) 0.38s forwards;
+}
+
+.signature {
+  fill: none;
+  stroke: var(--mantine-color-green-filled);
+  stroke-width: 2.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  opacity: 0.85;
+  stroke-dasharray: 160;
+  stroke-dashoffset: 160;
+  animation: drawStroke 0.7s cubic-bezier(0.4, 0, 0.2, 1) 0.72s forwards;
+}
+
+.returnArrow {
+  fill: none;
+  stroke: var(--mantine-color-orange-filled);
+  stroke-width: 5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-dasharray: 90;
+  stroke-dashoffset: 90;
+  animation: drawStroke 0.45s cubic-bezier(0.4, 0, 0.2, 1) 0.38s forwards;
+}
+
+.spark {
+  position: absolute;
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--mantine-color-green-filled);
+  opacity: 0;
+  animation: sparkPop 0.7s ease-out 0.55s both;
+}
+
+.spark:nth-child(1) {
+  top: 10px;
+  left: 50%;
+  --dx: -18px;
+  --dy: -22px;
+}
+.spark:nth-child(2) {
+  top: 28px;
+  right: 14px;
+  --dx: 20px;
+  --dy: -12px;
+}
+.spark:nth-child(3) {
+  bottom: 22px;
+  right: 18px;
+  --dx: 16px;
+  --dy: 18px;
+}
+.spark:nth-child(4) {
+  bottom: 18px;
+  left: 16px;
+  --dx: -20px;
+  --dy: 14px;
+}
+.spark:nth-child(5) {
+  top: 36px;
+  left: 12px;
+  --dx: -22px;
+  --dy: -4px;
+}
+
+.kicker {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.2rem 0.7rem;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--mantine-color-green-filled);
+  background: color-mix(in srgb, var(--mantine-color-green-filled) 12%, transparent);
+}
+
+.kicker[data-tone='return'] {
+  color: var(--mantine-color-orange-filled);
+  background: color-mix(in srgb, var(--mantine-color-orange-filled) 12%, transparent);
+}
+
+.fileChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  max-width: 100%;
+  padding: 0.45rem 0.75rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--app-border, #dde3ea) 55%, transparent);
+  color: var(--mantine-color-text);
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
+.fileChip span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.metaRow {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.5rem 0.85rem;
+  color: var(--mantine-color-dimmed);
+  font-size: 0.8rem;
+}
+
+@keyframes drawStroke {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+@keyframes pulseGlow {
+  0%,
+  100% {
+    opacity: 0.45;
+    transform: scale(0.92);
+  }
+  50% {
+    opacity: 0.9;
+    transform: scale(1.08);
+  }
+}
+
+@keyframes sparkPop {
+  0% {
+    opacity: 0;
+    transform: translate(0, 0) scale(0.4);
+  }
+  35% {
+    opacity: 1;
+    transform: translate(var(--dx), var(--dy)) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(calc(var(--dx) * 1.35), calc(var(--dy) * 1.35)) scale(0.2);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .orbGlow,
+  .spark {
+    animation: none;
+  }
+
+  .circle,
+  .check,
+  .signature,
+  .returnArrow {
+    animation: none;
+    stroke-dashoffset: 0;
+  }
+
+  .spark {
+    opacity: 0;
+  }
+
+  .orbGlow {
+    opacity: 0.55;
+  }
+}

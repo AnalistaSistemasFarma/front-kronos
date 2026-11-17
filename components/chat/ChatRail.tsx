@@ -388,7 +388,12 @@ function RailList({
 
 /* ─────────────────────────── Barra ─────────────────────────── */
 
-export default function ChatRail() {
+export default function ChatRail({
+  onDisponibleChange,
+}: {
+  /** Avisa si el usuario puede usar el chat (el Header lo usa para el logo en el celular). */
+  onDisponibleChange?: (disponible: boolean) => void;
+} = {}) {
   const { data: session, status } = useSession();
   const router = useRouter();
   const pathname = usePathname() ?? '';
@@ -421,6 +426,10 @@ export default function ChatRail() {
 
   const visible = mounted && status === 'authenticated' && overview.canUseChat;
   const pins = useChatPins(visible);
+
+  useEffect(() => {
+    onDisponibleChange?.(visible);
+  }, [visible, onDisponibleChange]);
 
   const items = useMemo(
     () =>

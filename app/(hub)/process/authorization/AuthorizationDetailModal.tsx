@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useSession } from 'next-auth/react';
 import {
   Modal,
   Stack,
@@ -15,14 +16,16 @@ import {
   Loader,
   Alert,
   ThemeIcon,
-  LoadingOverlay,
   Box,
   Button,
   Table,
   ScrollArea,
+  Skeleton,
 } from '@mantine/core';
 import { useMediaQuery } from '@mantine/hooks';
 import PurchaseRequestDetail from '../purchases/PurchaseRequestDetail';
+import DocumentFlowCompact from '@/components/orion/DocumentFlowCompact';
+import { authorizationPreviewPdfUrl } from '../../../../lib/authorization/previewPdf';
 import SalesOfferDetail from '../sales/SalesOfferDetail';
 import {
   IconBuilding,
@@ -57,6 +60,10 @@ import {
   parseTableValue,
 } from '../../../../lib/requests-general/tableField';
 import { formatEstimatedPaymentDate } from '../../../../lib/treasury/estimatedPaymentDate';
+import {
+  loadAuthorizationDetail,
+  peekAuthorizationDetail,
+} from '../../../../lib/authorization/detailPrefetch';
 
 // Item mínimo que llega desde el panel de autorización (subconjunto de AuthorizationRequest).
 interface RequestSummary {
@@ -199,6 +206,8 @@ function isFirmaAuthorizationRequest(request: RequestSummary | null): boolean {
 
 export default function AuthorizationDetailModal({ opened, onClose, request }: Props) {
   const isMobile = useMediaQuery('(max-width: 768px)');
+  const { data: session } = useSession();
+  const userKey = session?.user?.email ?? null;
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -216,54 +225,58 @@ export default function AuthorizationDetailModal({ opened, onClose, request }: P
   const [isSale, setIsSale] = useState(false);
   useEffect(() => setIsPurchase(false), [idReqGen]);
   const isFirmaAuth = isFirmaAuthorizationRequest(request);
-  // En firma solo se muestra metadatos básicos: sin adjuntos, notas ni progreso Orion.
+  // En firma: sin adjuntos ni notas. El recorrido del documento va al final del detalle en versión
+  // corta (DocumentFlowCompact, 2026-11-13); «Ver flujo» en Acciones abre la versión completa.
   const hideSensitiveFirmaContext = isFirmaAuth;
 
   useEffect(() => {
     if (!opened || !idReqGen) return;
     let active = true;
+    const withNotes = !hideSensitiveFirmaContext;
+    const cached = peekAuthorizationDetail(idReqGen, withNotes, userKey);
 
-    // Reset al abrir.
     setError(null);
-    setDetail(null);
-    setFormValues([]);
-    setNotes([]);
     setFiles([]);
     setFilesError(null);
-
-    // Datos internos (SQL): detalle + valores del formulario (+ notas si no es firma).
-    const loadData = async () => {
+    if (cached) {
+      // Prefetch de Acciones: pintar al toque sin pantalla de espera.
+      if (!cached.detailOk) {
+        setError(cached.detailError || 'No se pudo cargar el detalle de la solicitud.');
+        setDetail(null);
+        setFormValues([]);
+        setNotes([]);
+      } else {
+        setDetail((cached.detail as DetailData | null) ?? null);
+        const values = Array.isArray(cached.formValues) ? (cached.formValues as FormValue[]) : [];
+        setFormValues(values.filter((fv) => !isOrionSignatureFormValue(fv)));
+        setNotes(withNotes && Array.isArray(cached.notes) ? (cached.notes as NoteItem[]) : []);
+      }
+      setLoading(false);
+    } else {
+      setDetail(null);
+      setFormValues([]);
+      setNotes([]);
       setLoading(true);
+    }
+
+    const loadData = async () => {
       try {
-        const fetches: Promise<Response>[] = [
-          fetch(`/api/requests-general/view-request?id=${idReqGen}`),
-          fetch(`/api/requests-general/request-form-values?id_request=${idReqGen}`),
-        ];
-        if (!hideSensitiveFirmaContext) {
-          fetches.push(fetch(`/api/requests-general/notes?id_request=${idReqGen}`));
-        }
-
-        const responses = await Promise.all(fetches);
-        const detailRes = responses[0];
-        const valuesRes = responses[1];
-        const notesRes = responses[2];
-
-        const detailJson = await detailRes.json().catch(() => null);
-        const valuesJson = await valuesRes.json().catch(() => []);
-        const notesJson = notesRes ? await notesRes.json().catch(() => []) : [];
+        const data = await loadAuthorizationDetail(idReqGen, withNotes, undefined, userKey);
         if (!active) return;
-
-        if (!detailRes.ok) {
-          setError(detailJson?.error || 'No se pudo cargar el detalle de la solicitud.');
+        if (!data.detailOk) {
+          setError(data.detailError || 'No se pudo cargar el detalle de la solicitud.');
+          setDetail(null);
         } else {
-          setDetail(detailJson);
+          setDetail((data.detail as DetailData | null) ?? null);
+          setError(null);
         }
-        // Nunca volcar payloads Orion (firmantes / estado) en este modal.
-        const values = Array.isArray(valuesJson) ? valuesJson : [];
-        setFormValues(values.filter((fv: FormValue) => !isOrionSignatureFormValue(fv)));
-        setNotes(hideSensitiveFirmaContext ? [] : Array.isArray(notesJson) ? notesJson : []);
-      } catch {
-        if (active) setError('No se pudo cargar el detalle de la solicitud.');
+        const values = Array.isArray(data.formValues) ? (data.formValues as FormValue[]) : [];
+        setFormValues(values.filter((fv) => !isOrionSignatureFormValue(fv)));
+        setNotes(withNotes && Array.isArray(data.notes) ? (data.notes as NoteItem[]) : []);
+      } catch (err: unknown) {
+        if (!active) return;
+        if (err instanceof DOMException && err.name === 'AbortError') return;
+        setError('No se pudo cargar el detalle de la solicitud.');
       } finally {
         if (active) setLoading(false);
       }
@@ -278,7 +291,6 @@ export default function AuthorizationDetailModal({ opened, onClose, request }: P
       }
       setFilesLoading(true);
       try {
-        // Lista el servidor: el token de Graph no sale del servidor.
         const res = await fetch(
           `/api/requests-general/list-attachments?requestId=${encodeURIComponent(String(idReqGen))}&storagePath=SG&entityType=Request`
         );
@@ -287,20 +299,19 @@ export default function AuthorizationDetailModal({ opened, onClose, request }: P
         if (!active) return;
         setFiles(Array.isArray(data.files) ? data.files : []);
       } catch {
-        // La carpeta puede no existir (404) o no haber token: se muestra "Sin adjuntos".
         if (active) setFilesError('Sin adjuntos');
       } finally {
         if (active) setFilesLoading(false);
       }
     };
 
-    loadData();
-    loadFiles();
+    void loadData();
+    void loadFiles();
 
     return () => {
       active = false;
     };
-  }, [opened, idReqGen, hideSensitiveFirmaContext]);
+  }, [opened, idReqGen, hideSensitiveFirmaContext, userKey]);
 
   const subject = detail?.subject_request || request?.subject || '';
   const firmaDocName = isFirmaAuth
@@ -309,20 +320,19 @@ export default function AuthorizationDetailModal({ opened, onClose, request }: P
   const isReview = isOrionReviewResolution(request?.resolution);
   const reviewDocName = isReview ? parseOrionReviewFileName(request?.resolution) : null;
   const reviewFileId = isReview ? parseOrionReviewFileId(request?.resolution) : null;
-  const reviewPdfUrl =
-    reviewFileId && idReqGen
-      ? `/api/requests-general/attachment-file?requestId=${idReqGen}&fileId=${encodeURIComponent(reviewFileId)}`
-      : null;
-  // Firma pendiente: el firmante debe poder ver el documento que va a autorizar (solo ese
-  // archivo; los demás adjuntos siguen ocultos). signed-file entrega la última versión con
-  // las firmas previas o, si aún no hay firmas, redirige al PDF original de la solicitud.
+  // Firma: el firmante ve solo el documento a autorizar (los demás adjuntos siguen ocultos).
+  // signed-file entrega la última versión con las firmas hechas (o el original si aún no hay)
+  // y no se guarda en el navegador, así que al volver se ve lo último firmado. Misma URL que
+  // la precarga al pasar el mouse (lib/authorization/previewPdf) para aprovecharla.
   const firmaFileId = isFirmaAuth ? parseOrionFileIdFromAuthResolution(request?.resolution) : null;
-  const firmaPdfUrl =
-    firmaFileId && idReqGen
-      ? `/api/integrations/orion/signed-file?requestId=${idReqGen}&fileId=${encodeURIComponent(firmaFileId)}`
-      : null;
-  const previewPdfUrl = reviewPdfUrl ?? firmaPdfUrl;
-  const previewDocName = reviewPdfUrl ? reviewDocName : firmaDocName;
+  const previewPdfUrl = authorizationPreviewPdfUrl({
+    requestId: idReqGen,
+    resolution: request?.resolution,
+    isFirma: isFirmaAuth,
+  });
+  /** Documento cuyo recorrido se muestra al final del detalle. */
+  const flowFileId = firmaFileId ?? reviewFileId;
+  const previewDocName = isReview ? reviewDocName : firmaDocName;
 
   return (
     <Modal
@@ -340,16 +350,14 @@ export default function AuthorizationDetailModal({ opened, onClose, request }: P
         </Group>
       }
     >
-      <Box pos='relative' mih={120}>
-        <LoadingOverlay visible={loading} zIndex={5} overlayProps={{ blur: 1 }} />
-
+      <Box mih={120}>
         {error ? (
           <Alert color='red' icon={<IconAlertCircle size={16} />} title='Error'>
             {error}
           </Alert>
         ) : (
           <Stack gap='md'>
-            {/* Encabezado */}
+            {/* Encabezado: sale al toque con datos del listado (sin pantalla blanca). */}
             <div>
               <Group justify='space-between' align='flex-start' wrap='nowrap'>
                 <Text fw={600} size='lg' style={{ flex: 1 }}>
@@ -367,7 +375,16 @@ export default function AuthorizationDetailModal({ opened, onClose, request }: P
                 </Badge>
               )}
               {isFirmaAuth && firmaDocName ? (
-                <Alert color='violet' variant='light' mt='sm' title='Documento a firmar'>
+                <Alert
+                  color='violet'
+                  variant='light'
+                  mt='sm'
+                  title={
+                    request?.status === 'pendiente'
+                      ? 'Documento a firmar'
+                      : 'Documento (se muestra la última versión firmada)'
+                  }
+                >
                   <Text size='sm' fw={600} style={{ wordBreak: 'break-word' }}>
                     {firmaDocName}
                   </Text>
@@ -389,12 +406,7 @@ export default function AuthorizationDetailModal({ opened, onClose, request }: P
               ) : null}
             </div>
 
-            {/* Compras: si esta autorización es de una solicitud de compra, se muestra con el diseño de SAPSEND. */}
-            {idReqGen ? <PurchaseRequestDetail requestId={idReqGen} onLoaded={setIsPurchase} /> : null}
-
-            {/* Ventas: oferta en SAP con cupo, % de extracupo y cartera por edades para decidir. */}
-            {idReqGen ? <SalesOfferDetail requestId={idReqGen} onLoaded={setIsSale} /> : null}
-
+            {/* El documento sale apenas se abre: no espera a que cargue el resto del detalle. */}
             {previewPdfUrl ? (
               <Card withBorder radius='md' p={0} style={{ overflow: 'hidden' }}>
                 <Group justify='space-between' px='sm' py={6} wrap='nowrap'>
@@ -429,6 +441,41 @@ export default function AuthorizationDetailModal({ opened, onClose, request }: P
                 />
               </Card>
             ) : null}
+
+            {loading ? (
+              <Stack gap='md' aria-busy aria-label='Cargando detalle de la solicitud'>
+                <Grid>
+                  {Array.from({ length: 4 }).map((_, i) => (
+                    <Grid.Col span={{ base: 12, sm: 6 }} key={`sk-meta-${i}`}>
+                      <Skeleton height={12} width='40%' mb={8} radius='sm' />
+                      <Skeleton height={18} width='72%' radius='sm' />
+                    </Grid.Col>
+                  ))}
+                </Grid>
+                <Skeleton height={64} radius='md' />
+                <Grid>
+                  {Array.from({ length: 4 }).map((_, i) => (
+                    <Grid.Col span={{ base: 12, sm: 6 }} key={`sk-card-${i}`}>
+                      <Skeleton height={72} radius='md' />
+                    </Grid.Col>
+                  ))}
+                </Grid>
+                {!hideSensitiveFirmaContext ? (
+                  <>
+                    <Skeleton height={20} width={120} radius='sm' />
+                    <Skeleton height={88} radius='md' />
+                  </>
+                ) : (
+                  <Skeleton height={56} radius='md' />
+                )}
+              </Stack>
+            ) : (
+              <>
+            {/* Compras: si esta autorización es de una solicitud de compra, se muestra con el diseño de SAPSEND. */}
+            {idReqGen ? <PurchaseRequestDetail requestId={idReqGen} onLoaded={setIsPurchase} /> : null}
+
+            {/* Ventas: oferta en SAP con cupo, % de extracupo y cartera por edades para decidir. */}
+            {idReqGen ? <SalesOfferDetail requestId={idReqGen} onLoaded={setIsSale} /> : null}
 
             <Divider />
 
@@ -575,8 +622,8 @@ export default function AuthorizationDetailModal({ opened, onClose, request }: P
 
             {hideSensitiveFirmaContext ? (
               <Alert color='blue' variant='light' icon={<IconAlertCircle size={16} />}>
-                Por privacidad, en esta autorización no se muestran adjuntos, firmantes ni el
-                avance del proceso de firma.
+                Por privacidad, en esta autorización no se muestran los demás adjuntos ni las
+                notas de la solicitud.
                 {request?.status === 'pendiente'
                   ? ' Autorice en el listado para poder firmar su parte.'
                   : ' Abra la solicitud para firmar su parte.'}
@@ -676,6 +723,18 @@ export default function AuthorizationDetailModal({ opened, onClose, request }: P
                 </div>
               </>
             )}
+
+              </>
+            )}
+
+            {/* Recorrido del documento (firma o validación), versión corta y sin animaciones.
+                Fuera de la espera del detalle: se pide apenas se abre (o ya viene precargado). */}
+            {flowFileId && idReqGen ? (
+              <>
+                <Divider />
+                <DocumentFlowCompact requestId={idReqGen} fileId={flowFileId} />
+              </>
+            ) : null}
           </Stack>
         )}
       </Box>

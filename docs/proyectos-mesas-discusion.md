@@ -81,6 +81,29 @@ Pedido de Nicolás Rivera (2026-11-11):
   (`prisma/manual/2026-11-11-chat-project-mesa-archivo-compartido-*.sql`). Si el script todavía no
   se ha corrido, el archivo igual se comparte y solo falta el evento (la falla queda en el log).
 
+## Agentes de negocio en proyectos con código (2026-11-11)
+
+Nicolás Rivera (2026-11-11, 15:22 COT): «la mesa de discusión no debe depender de proyectos de
+desarrollo». Un agente que **no** es de desarrollo (`agent.es_desarrollo = 0`) **sí** se puede
+agregar a un proyecto con política de código (`lectura`, `desarrollo` o `desarrollo_pases`) y a
+sus mesas. Participa en conversaciones y mesas **sin acceso al código**.
+
+- **La reja es el servidor, no la pantalla.** `politicaParaPuente(idProject, { esDesarrollo: false })`
+  devuelve siempre `codeLevel: 'ninguno'`, `level: 0`, sin repos ni autorizadores de pases, con
+  `source: 'bd'` (manda también sobre el archivo manual del puente). `GET /api/chat/agent/projects/policy`
+  calcula `esDesarrollo` desde la llave del agente, en la consulta de un hilo y en la lista de todos
+  sus proyectos. Si la columna `es_desarrollo` no existe todavía, nadie es de desarrollo (falla cerrado).
+- **Ya no se bloquea** (antes: 400 «El acceso a código y los repositorios solo se asignan a agentes de
+  desarrollo…»): ni al agregar asistentes (`POST /api/proyectos/[id]/agentes`), ni al crear una mesa
+  (`crearMesa`), ni al crear un proyecto con agentes mixtos (`POST /api/proyectos`), ni al guardar la
+  política con código (`PATCH /api/proyectos/[id]/permisos`). No se exige que **todos** sean de desarrollo.
+- **Aviso informativo, no bloqueante**: «<Nombre> no es agente de desarrollo: participa sin acceso al
+  código.» (`avisoSinCodigo` en `lib/proyectos/agentes-desarrollo-rules.ts`). Lo muestran «Agregar
+  asistentes», «Nueva mesa de discusión», «Nuevo proyecto» y «Permisos de los agentes» cuando el
+  proyecto tiene código; las respuestas de esas rutas traen `avisos: string[]`, y
+  `GET …/agentes` y `GET …/mesas?candidatos=1` traen `conCodigo`.
+- `codeAllowed` en `GET /api/proyectos/[id]/permisos` queda siempre en `true` (compatibilidad).
+
 ## Lo que el agente NO puede hacer en una mesa
 
 - Nada con efecto: ni correos, ni cambios en SAP o en SynerLink, ni pases. El turno de mesa **nunca**

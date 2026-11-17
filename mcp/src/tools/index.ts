@@ -30,6 +30,7 @@ import { USUARIOS_TOOLS, registerUsuariosTools } from './usuarios.js';
 import { BITACORA_TOOLS, registerBitacoraTools } from './bitacoraProceso.js';
 import { CORREO_AGENTE_TOOLS, correoAgenteHabilitado, registerCorreoAgenteTools } from './correoAgente.js';
 import { PROYECTOS_TOOLS_LECTURA, PROYECTOS_TOOLS_PROPUESTA, registerProyectosTools } from './proyectos.js';
+import { SGC_TOOLS, registerSgcTools } from './sgcDocumentos.js';
 
 interface ToolContext {
   scope: AuthScope;
@@ -328,6 +329,16 @@ export const ENTITY_METADATA = {
       'supervisor', 'jefe_produccion', 'operarios', 'registros (operario + usuario_sesion)', 'firmas (confirmaciones Cerró/Verificó)', 'ultima_actividad_en',
     ],
   },
+  sgc_documents: {
+    description:
+      'SGC documental (esquema sgc): documentos controlados (sgc.document), sus versiones (sgc.document_version; current_version_id = vigente), tipos documentales, proceso y área, y firmas electrónicas del flujo de aprobación (sgc.signature). Los PDF controlados viven en OneDrive (SGC/<EMPRESA>/...) y se descargan por MS Graph con verificación SHA-256. Por política el MCP solo ve documentos VIGENTES de confidencialidad pública de empresas con el SGC activo, y solo entrega la versión vigente. Vía sgc_list_documents, sgc_get_document, sgc_download_document, sgc_list_document_types y sgc_master_list.',
+    companyColumn: 'sgc.document.id_company (y sgc.company_config.is_active)',
+    fields: [
+      'id_document', 'code', 'title', 'company', 'document_type', 'process', 'area', 'confidentiality',
+      'current_version (version_number, effective_date)', 'review_due_date', 'vigencia (vencido|por_vencer|al_dia|sin_fecha)',
+      'versions[] (metadatos)', 'signatures[] (elaboró/revisó/aprobó)', 'text / content_base64 (sgc_download_document)', 'synerlink_path',
+    ],
+  },
   attachments: {
     description:
       'Adjuntos/documentos de una solicitud. El CONTENIDO binario NO se guarda en la base de datos: los archivos se suben a OneDrive (MS Graph) en la carpeta determinística SAPSEND/TEC/SG/Request-<id>. kronos_list_attachments devuelve DOS cosas: (a) "required_files" = la DEFINICIÓN de qué archivos exige el proceso (file_process_category: etiqueta, obligatoriedad, condición) y (b) "files" = los archivos REALES cargados en OneDrive (name, size, tipo, fechas, file_id y download_url temporal). kronos_get_attachment resuelve el archivo real (download_url y, opcional, base64) o la definición del proceso.',
@@ -350,9 +361,9 @@ export const ENTITY_METADATA = {
  * candado de solo lectura del resto del servidor.
  */
 export const TOOL_CAPABILITIES = {
-  /** 51 con «Consultar a un agente» encendido (CORREO_AGENTE_HABILITADO=true); 46 si está apagado (2026-11-06: +proyecto_historial y proyecto_prs). */
+  /** 56 con «Consultar a un agente» encendido (CORREO_AGENTE_HABILITADO=true); 51 si está apagado (2026-11-06: +proyecto_historial y proyecto_prs; 2026-11-13: +5 del SGC documental). */
   get totalTools(): number {
-    return correoAgenteHabilitado() ? 51 : 51 - CORREO_AGENTE_TOOLS.length;
+    return correoAgenteHabilitado() ? 56 : 56 - CORREO_AGENTE_TOOLS.length;
   },
   readOnly: [
     'kronos_metadata',
@@ -382,6 +393,8 @@ export const TOOL_CAPABILITIES = {
     'correo_adjunto_compartido',
     // Proyectos (2026-10-18): lo que VE la persona de la concesión de 24 h (chat_project_grant).
     ...PROYECTOS_TOOLS_LECTURA,
+    // SGC documental (2026-11-13): documentos vigentes públicos, detalle, descarga del PDF controlado y listado maestro.
+    ...SGC_TOOLS,
   ],
   write: [
     'kronos_categorize_case',
@@ -459,6 +472,17 @@ export function registerTools(rawServer: McpServer, ctx: ToolContext): void {
     withAudit: (tool, params, fn) => withAudit(ctx, tool, params, fn),
     companyClause,
     isMissingTableError,
+  });
+
+  // SGC documental: 5 tools de SOLO LECTURA (src/tools/sgcDocumentos.ts).
+  registerSgcTools(server, {
+    scope: ctx.scope,
+    maxPageSize: ctx.maxPageSize,
+    defaultPageSize: ctx.defaultPageSize,
+    withAudit: (tool, params, fn) => withAudit(ctx, tool, params, fn),
+    companyClause,
+    isMissingTableError,
+    getGraphClient,
   });
 
   // ---------------------------------------------------------------------------
