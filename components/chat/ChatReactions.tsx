@@ -14,7 +14,7 @@ import {
   Tooltip,
   UnstyledButton,
 } from '@mantine/core';
-import { IconArrowBackUp, IconCopy, IconMoodPlus, IconPlus, IconSearch } from '@tabler/icons-react';
+import { IconArrowBackUp, IconCopy, IconMessageForward, IconMoodPlus, IconPlus, IconSearch } from '@tabler/icons-react';
 import {
   CATEGORIAS_EMOJI,
   REACCIONES_RAPIDAS,
@@ -146,6 +146,30 @@ export function SelectorEmoji({ onElegir, alto = 260 }: { onElegir: (emoji: stri
  * Aparece al pasar el mouse por el mensaje (CSS `.chat-msg:hover`). En el
  * celular no se muestra: ahí se reacciona con toque largo.
  */
+/** Se puede reenviar: mensaje ya guardado, no aviso del sistema, ni sticker/GIF. */
+export function esReenviable(m: ChatMessageDto): boolean {
+  return m.id > 0 && !m.pending && !m.failed && m.role !== 'system' && !m.media;
+}
+
+/** Botón de escritorio, junto al de reaccionar (aparece al pasar el mouse). */
+export function BotonReenviar({ onReenviar }: { onReenviar: () => void }) {
+  return (
+    <ActionIcon
+      variant='subtle'
+      color='gray'
+      radius='xl'
+      size='sm'
+      className='chat-reaccionar-btn'
+      onClick={onReenviar}
+      aria-label='Reenviar este mensaje'
+      title='Reenviar'
+      data-testid='chat-reenviar-mensaje'
+    >
+      <IconMessageForward size={16} />
+    </ActionIcon>
+  );
+}
+
 export function BotonReaccionar({ onElegir, alLado }: { onElegir: (emoji: string) => void; alLado: 'left' | 'right' }) {
   const [abierto, setAbierto] = useState(false);
   const [completo, setCompleto] = useState(false);
@@ -210,12 +234,15 @@ export function HojaMensaje({
   onCerrar,
   onReaccionar,
   onCitar,
+  onReenviar,
   puedeReaccionar,
 }: {
   mensaje: ChatMessageDto | null;
   onCerrar: () => void;
   onReaccionar: (mensaje: ChatMessageDto, emoji: string) => void;
   onCitar?: (mensaje: ChatMessageDto) => void;
+  /** Reenviar ESTE mensaje a otra conversación (2026-11-17). */
+  onReenviar?: (mensaje: ChatMessageDto) => void;
   puedeReaccionar: boolean;
 }) {
   const [completo, setCompleto] = useState(false);
@@ -276,6 +303,19 @@ export function HojaMensaje({
               >
                 <IconArrowBackUp size={18} />
                 <Text size='sm'>Responder</Text>
+              </UnstyledButton>
+            )}
+            {onReenviar && mensaje && esReenviable(mensaje) && (
+              <UnstyledButton
+                className='chat-hoja__accion'
+                onClick={() => {
+                  onReenviar(mensaje);
+                  cerrar();
+                }}
+                data-testid='chat-hoja-reenviar'
+              >
+                <IconMessageForward size={18} />
+                <Text size='sm'>Reenviar</Text>
               </UnstyledButton>
             )}
             {texto && (

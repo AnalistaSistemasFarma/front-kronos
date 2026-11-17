@@ -24,6 +24,23 @@ export interface ArchivoOrigen {
   onedrive_item_id: string;
 }
 
+/**
+ * Puerta del DESTINO de un reenvío (archivo o mensaje): quien reenvía tiene que
+ * poder escribir allí, y no vale un hilo directo con un agente (lo despertaría
+ * sin que nadie se lo pidiera).
+ */
+export async function puertaDestinoReenvio(idDestino: number) {
+  const destino = await guardConversation(String(idDestino));
+  if ('response' in destino) return destino;
+  if (destino.kind === 'direct') {
+    return { response: badRequest('Solo se puede reenviar a una persona, un grupo o una conversación de proyecto.') };
+  }
+  if (destino.kind === 'project' && !destino.projectWritable.ok) {
+    return { response: forbidden(destino.projectWritable.motivo) };
+  }
+  return destino;
+}
+
 /** POST: copia el archivo a la conversación elegida y publica el mensaje. `idOrigen` = null si no viene de una conversación. */
 export async function reenviarArchivo(request: NextRequest, adjunto: ArchivoOrigen, idOrigen: number | null) {
   const datos = await readJsonBody(request);
@@ -42,14 +59,8 @@ export async function reenviarArchivo(request: NextRequest, adjunto: ArchivoOrig
   }
 
   // 2. Puerta del DESTINO.
-  const destino = await guardConversation(String(idDestino));
+  const destino = await puertaDestinoReenvio(idDestino);
   if ('response' in destino) return destino.response;
-  if (destino.kind === 'direct') {
-    return badRequest('Solo se puede reenviar a una persona, un grupo o una conversación de proyecto.');
-  }
-  if (destino.kind === 'project' && !destino.projectWritable.ok) {
-    return forbidden(destino.projectWritable.motivo);
-  }
 
   // Mismas reglas que un adjunto nuevo (por si cambiaron desde que se subió).
   if (isBlockedAttachmentExtension(adjunto.file_name)) {
