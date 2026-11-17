@@ -64,6 +64,9 @@ export function sumarConsumo(a: ConsumoDto, b: ConsumoDto): ConsumoDto {
 }
 
 export interface TurnoRecienteDto {
+  code: string;
+  avatarUrl: string | null;
+  avatarVersion: number | null;
   agente: string;
   empresa: string | null;
   licencia: string | null;
@@ -97,6 +100,16 @@ export interface AgenteLicenciaDto {
   consumoMes: ConsumoDto;
   consumoHoy: ConsumoDto;
   ultimoTurno: string | null;
+  /** Para pintar el ícono del agente (mismo criterio que el chat). */
+  avatarUrl: string | null;
+  avatarVersion: number | null;
+  /**
+   * Parte del uso de la licencia que le toca al agente en el mes (0–1): sus tokens
+   * ÷ los de la licencia. Sin consumo registrado, se reparte por igual.
+   */
+  participacion: number | null;
+  /** Costo mensual de la licencia × participación. */
+  costoAsignado: number | null;
 }
 
 export interface SemanaUsoDto {
@@ -127,10 +140,14 @@ export interface LicenciaDto {
   agentes: AgenteLicenciaDto[];
   semanas: SemanaUsoDto[];
   usoActual: number | null;
+  /** Ventana de 5 horas (lo más «en tiempo real» que da Anthropic). */
+  uso5h: number | null;
   promedio4: number | null;
   pico4: number | null;
   semaforo: Semaforo;
   costoPorAgente: number | null;
+  /** Costo de la parte del cupo pagado que no se usa: costo × (1 − promedio de 4 semanas). */
+  capacidadSinUsar: number | null;
   alertas: AlertaDto[];
   consumoMes: ConsumoDto;
   consumoHoy: ConsumoDto;
@@ -145,6 +162,7 @@ export interface CostoEmpresaDto {
   agentes: number;
   costoMensual: number;
   sinCosto: number;
+  capacidadSinUsar: number;
   consumoMes: ConsumoDto;
 }
 
@@ -172,6 +190,9 @@ export interface LicenciasDto {
     mezclanEmpresas: number;
     conUsoAdicional: number;
     noAsignarMas: number;
+    /** Promedio del cupo usado (4 semanas), ponderado por costo si hay costos registrados. */
+    aprovechamiento: number | null;
+    capacidadSinUsar: number;
     consumoMes: ConsumoDto;
     consumoHoy: ConsumoDto;
     /** Agentes activos que reportan consumo por turno (el resto no tiene el hook). */
@@ -245,7 +266,7 @@ export function validarAsignacion(empresaAgente: number | null, empresaLicencia:
 
 /** Completa cada licencia (uso, semáforo, costo por agente, alertas) y arma los totales. */
 export function armarTablero(
-  base: Omit<LicenciaDto, 'usoActual' | 'promedio4' | 'pico4' | 'semaforo' | 'costoPorAgente' | 'alertas' | 'consumoMes' | 'consumoHoy' | 'rendimiento'>[],
+  base: Omit<LicenciaDto, 'usoActual' | 'uso5h' | 'promedio4' | 'pico4' | 'semaforo' | 'costoPorAgente' | 'capacidadSinUsar' | 'alertas' | 'consumoMes' | 'consumoHoy' | 'rendimiento'>[],
   sinLicencia: AgenteLicenciaDto[],
   huellasPorRevocar: { huella: string; notas: string | null }[],
   empresas: { idEmpresa: number; empresa: string }[],
@@ -257,11 +278,31 @@ export function armarTablero(
     const { promedio, pico } = promedioCuatroSemanas(b.semanas, actual);
     const costoPorAgente = b.costoMensual !== null && b.agentes.length ? round1(b.costoMensual / b.agentes.length) : null;
     const consumoMes = b.agentes.reduce((s, a) => sumarConsumo(s, a.consumoMes), consumoVacio());
+    // Reparto del costo: por la parte de los tokens del mes de cada agente; sin consumo, por igual.
+    const agentes = b.agentes.map((a) => {
+      const participacion = b.agentes.length
+        ? consumoMes.tokens > 0
+          ? a.consumoMes.tokens / consumoMes.tokens
+          : 1 / b.agentes.length
+        : null;
+      return {
+        ...a,
+        participacion: participacion === null ? null : Math.round(participacion * 1000) / 1000,
+        costoAsignado: participacion !== null && b.costoMensual !== null ? round1(b.costoMensual * participacion) : null,
+      };
+    });
+    const recientes = agentes.filter((a) => a.medidoEn && ahora.getTime() - Date.parse(a.medidoEn) <= MAX_DIAS_MEDICION * 86_400_000);
+    const usos5h = recientes.map((a) => a.uso5h).filter((v): v is number => v !== null);
+    const uso5h = usos5h.length ? Math.max(...usos5h) : null;
     const consumoHoy = b.agentes.reduce((s, a) => sumarConsumo(s, a.consumoHoy), consumoVacio());
     const rendimiento = b.costoMensual ? round1(consumoMes.valorApi / b.costoMensual) : null;
+    const capacidadSinUsar = b.costoMensual !== null && promedio !== null ? round1(b.costoMensual * Math.max(0, 1 - promedio / 100)) : null;
     const l = {
       ...b,
+      agentes,
       usoActual: actual,
+      uso5h,
+      capacidadSinUsar,
       promedio4: promedio,
       pico4: pico,
       semaforo: semaforoDe(promedio),
@@ -278,8 +319,9 @@ export function armarTablero(
   const activas = licencias.filter((l) => l.activa);
   const emp = new Map<number, CostoEmpresaDto>();
   for (const l of activas) {
-    const e = emp.get(l.idEmpresa) ?? { idEmpresa: l.idEmpresa, empresa: l.empresa, licencias: 0, agentes: 0, costoMensual: 0, sinCosto: 0, consumoMes: consumoVacio() };
+    const e = emp.get(l.idEmpresa) ?? { idEmpresa: l.idEmpresa, empresa: l.empresa, licencias: 0, agentes: 0, costoMensual: 0, sinCosto: 0, capacidadSinUsar: 0, consumoMes: consumoVacio() };
     e.licencias += 1;
+    e.capacidadSinUsar = round1(e.capacidadSinUsar + (l.capacidadSinUsar ?? 0));
     e.consumoMes = sumarConsumo(e.consumoMes, l.consumoMes);
     e.agentes += l.agentes.length;
     if (l.costoMensual === null) e.sinCosto += 1;
@@ -293,10 +335,18 @@ export function armarTablero(
       const d = dep.get(k) ?? { departamento: k, agentes: 0, costoMensual: 0, consumoMes: consumoVacio() };
       d.agentes += 1;
       d.consumoMes = sumarConsumo(d.consumoMes, a.consumoMes);
-      d.costoMensual = round1(d.costoMensual + (l.costoPorAgente ?? 0));
+      d.costoMensual = round1(d.costoMensual + (a.costoAsignado ?? 0));
       dep.set(k, d);
     }
   }
+
+  const conUso = activas.filter((l) => l.promedio4 !== null);
+  const conCosto = conUso.filter((l) => l.costoMensual);
+  const aprovechamiento = conCosto.length
+    ? round1(conCosto.reduce((s, l) => s + (l.promedio4 as number) * (l.costoMensual as number), 0) / conCosto.reduce((s, l) => s + (l.costoMensual as number), 0))
+    : conUso.length
+      ? round1(conUso.reduce((s, l) => s + (l.promedio4 as number), 0) / conUso.length)
+      : null;
 
   return {
     licencias,
@@ -315,6 +365,8 @@ export function armarTablero(
       mezclanEmpresas: activas.filter((l) => l.alertas.some((a) => a.texto.startsWith('Mezcla empresas'))).length,
       conUsoAdicional: activas.filter((l) => l.alertas.some((a) => a.texto.startsWith('Uso adicional'))).length,
       noAsignarMas: activas.filter((l) => l.promedio4 !== null && l.promedio4 > UMBRAL_NO_ASIGNAR).length,
+      aprovechamiento,
+      capacidadSinUsar: round1(activas.reduce((s, l) => s + (l.capacidadSinUsar ?? 0), 0)),
       // Todo el consumo de la flota, también el de agentes sin licencia registrada.
       consumoMes: (extra.agentesActivos ?? []).reduce((s, a) => sumarConsumo(s, a.consumoMes), consumoVacio()),
       consumoHoy: (extra.agentesActivos ?? []).reduce((s, a) => sumarConsumo(s, a.consumoHoy), consumoVacio()),

@@ -56,7 +56,7 @@ export async function leerLicencias(): Promise<LicenciasDto> {
 
         SELECT huella, id_license, estado, notas FROM dbo.ai_license_token;
 
-        SELECT a.id_agent, a.code, a.display_name,
+        SELECT a.id_agent, a.code, a.display_name, a.avatar_url, a.avatar_updated_at,
                emp.id_company, RTRIM(emp.company) AS empresa,
                COALESCE(d.departamento, us.departamento) AS departamento,
                q.utilization_7d, q.reset_7d, q.utilization_5h, q.overage, q.measured_at, q.token_fp,
@@ -154,6 +154,10 @@ export async function leerLicencias(): Promise<LicenciasDto> {
         consumoMes: mes.get(Number(a.id_agent)) ?? consumoVacio(),
         consumoHoy: dia.get(Number(a.id_agent)) ?? consumoVacio(),
         ultimoTurno: ultimoPorAgente.get(Number(a.id_agent)) ?? null,
+        avatarUrl: txt(a.avatar_url),
+        avatarVersion: a.avatar_updated_at instanceof Date ? a.avatar_updated_at.getTime() : null,
+        participacion: null,
+        costoAsignado: null,
       };
     });
 
@@ -188,7 +192,7 @@ export async function leerLicencias(): Promise<LicenciasDto> {
           .map((t) => ({ huella: String(t.huella), estado: String(t.estado) })),
         agentes: delaLicencia,
         semanas: semPorLic.get(id) ?? [],
-      } satisfies Omit<LicenciaDto, "usoActual" | "promedio4" | "pico4" | "semaforo" | "costoPorAgente" | "alertas" | "consumoMes" | "consumoHoy" | "rendimiento">;
+      } satisfies Omit<LicenciaDto, "usoActual" | "uso5h" | "promedio4" | "pico4" | "semaforo" | "costoPorAgente" | "capacidadSinUsar" | "alertas" | "consumoMes" | "consumoHoy" | "rendimiento">;
     });
 
     const sinLicencia = ags.filter((a) => a.idLicencia === null && a.idLicenciaPorHuella === null);
@@ -202,6 +206,9 @@ export async function leerLicencias(): Promise<LicenciasDto> {
       const t = tk(u);
       const lic = a ? (a.idLicencia ?? a.idLicenciaPorHuella) : null;
       return {
+        code: a?.code ?? String(u.id_agent),
+        avatarUrl: a?.avatarUrl ?? null,
+        avatarVersion: a?.avatarVersion ?? null,
         agente: a?.nombre ?? `Agente ${String(u.id_agent)}`,
         empresa: a?.empresa ?? null,
         licencia: lic ? (codigoLic.get(lic) ?? null) : null,
