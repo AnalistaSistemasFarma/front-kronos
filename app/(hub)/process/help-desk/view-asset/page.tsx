@@ -139,11 +139,16 @@ interface StatusAssetRow {
   id: number;
   estado: string;
 }
+interface CompanyRow {
+  id: number;
+  empresa: string;
+}
 interface ConsultsResponse {
   types: TypeAssetRow[];
   subtypes: SubtypeAssetRow[];
   departments: DepartmentRow[];
   users: UserAssetRow[];
+  companies?: CompanyRow[];
   statuses?: StatusAssetRow[];
 }
 
@@ -192,6 +197,7 @@ interface AssetFormData {
   costo_equipo: number | string;
   activo: boolean;
   sitio: string;
+  empresa: string;
   so: string;
   factura: string;
   renovacion: string;
@@ -258,12 +264,18 @@ const ALMACENAMIENTO_OPTIONS = toOptions([
   'NO APLICA',
 ]);
 
-const SITIOS = toOptions([
-  'OFICINA PRINCIPAL FARMALOGICA',
-  'FARMALOGICA PLANTA',
-  'CELTA',
-  'RYAN',
-]);
+// Misma lista que en create (assets/page.tsx). Si falta alguna aquí, al editar el Select
+// queda vacío aunque el activo sí tenga sitio (p. ej. GSS / OFICINA PRINCIPAL GSS).
+const SITIOS = [
+  { value: 'OFICINA PRINCIPAL FARMALOGICA', label: 'OFICINA PRINCIPAL FARMALOGICA' },
+  { value: 'FARMALOGICA PLANTA', label: 'FARMALOGICA PLANTA' },
+  { value: 'CELTA', label: 'CELTA' },
+  { value: 'RYAN', label: 'OFICINA PRINCIPAL RYAN' },
+  { value: 'GSS', label: 'OFICINA PRINCIPAL GSS' },
+  { value: 'OLP', label: 'OFICINA PRINCIPAL OLP' },
+  { value: 'ABAMIA', label: 'OFICINA PRINCIPAL ABAMIA' },
+  { value: 'MEDITRACK', label: 'OFICINA PRINCIPAL MEDITRACK' },
+];
 
 const SISTEMAS_OPERATIVOS = [
   { value: 'Microsoft Windows 10 Pro', label: 'WINDOWS 10 PRO' },
@@ -396,6 +408,7 @@ const ASSET_LOG_FIELDS: AssetLogField[] = [
     format: (v) => (isActive(v as Asset['activo']) ? 'Si' : 'No'),
   },
   { key: 'sitio', label: 'Sitio' },
+  { key: 'empresa', label: 'Empresa' },
   { key: 'so', label: 'Sistema operativo' },
   { key: 'factura', label: 'Factura' },
   {
@@ -443,6 +456,7 @@ const assetToForm = (asset: Asset): AssetFormData => ({
   costo_equipo: asset.costo_equipo ?? '',
   activo: isActive(asset.activo),
   sitio: asset.sitio ?? '',
+  empresa: asset.id_company_asset != null ? String(asset.id_company_asset) : '',
   so: asset.so ?? '',
   factura: asset.factura ?? '',
   renovacion:
@@ -664,6 +678,7 @@ function ViewAsset() {
   const [subtypeOptions, setSubtypeOptions] = useState<SubtypeAssetRow[]>([]);
   const [departmentOptions, setDepartmentOptions] = useState<DepartmentRow[]>([]);
   const [userOptions, setUserOptions] = useState<UserAssetRow[]>([]);
+  const [companyOptions, setCompanyOptions] = useState<CompanyRow[]>([]);
   const [statusOptions, setStatusOptions] = useState<StatusAssetRow[]>([]);
   const [listsLoading, setListsLoading] = useState(false);
 
@@ -754,6 +769,7 @@ function ViewAsset() {
       setSubtypeOptions(Array.isArray(data.subtypes) ? data.subtypes : []);
       setDepartmentOptions(Array.isArray(data.departments) ? data.departments : []);
       setUserOptions(Array.isArray(data.users) ? data.users : []);
+      setCompanyOptions(Array.isArray(data.companies) ? data.companies : []);
       if (Array.isArray(data.statuses) && data.statuses.length > 0) {
         setStatusOptions(data.statuses);
       }
@@ -829,6 +845,22 @@ function ViewAsset() {
 
   const statusSelectData = statusOptions.map((s) => ({ value: String(s.id), label: s.estado }));
 
+  const companySelectData = companyOptions.map((c) => ({
+    value: String(c.id),
+    label: c.empresa,
+  }));
+
+  const sitioSelectData = (() => {
+    const current = formData?.sitio || asset?.sitio || '';
+    if (current && !SITIOS.some((s) => s.value === current)) {
+      return [...SITIOS, { value: current, label: current }];
+    }
+    return SITIOS;
+  })();
+
+  const sitioLabel = (value?: string | null) =>
+    SITIOS.find((s) => s.value === value)?.label ?? value ?? '';
+
   const departmentNameForUser = (userId: string) => {
     const user = userOptions.find((u) => String(u.id) === userId);
     if (!user) return '';
@@ -882,6 +914,7 @@ function ViewAsset() {
     if (!formData.tipo_equipo) errors.tipo_equipo = 'El tipo de equipo es obligatorio';
     if (!formData.usuario) errors.usuario = 'El usuario asignado es obligatorio';
     if (!formData.estado) errors.estado = 'El estado es obligatorio';
+    if (!formData.empresa) errors.empresa = 'La empresa es obligatoria';
     if (formData.factura && !isValidUrl(formData.factura)) {
       errors.factura = 'Debe ser una URL válida (http/https)';
     }
@@ -909,6 +942,7 @@ function ViewAsset() {
       equipment_cost: Number(formData.costo_equipo) || 0,
       active: formData.activo ? 1 : 0,
       site: formData.sitio,
+      id_company_asset: Number(formData.empresa),
       os: formData.so,
       invoice: formData.factura.trim(),
       renewal: formData.renovacion === '' ? null : Number(formData.renovacion),
@@ -961,6 +995,9 @@ function ViewAsset() {
         costo_equipo: payload.equipment_cost,
         activo: payload.active as 0 | 1,
         sitio: payload.site,
+        id_company_asset: payload.id_company_asset,
+        empresa:
+          companyOptions.find((c) => c.id === payload.id_company_asset)?.empresa ?? asset.empresa,
         so: payload.os,
         factura: payload.invoice,
         renovacion: payload.renewal as 0 | 1 | null,
@@ -1566,15 +1603,21 @@ function ViewAsset() {
                         {editing ? (
                           <Select
                             label='Sitio'
-                            placeholder='Seleccione'
-                            data={SITIOS}
+                            placeholder='Seleccione el sitio'
+                            data={sitioSelectData}
+                            searchable
                             clearable
                             value={form.sitio || null}
                             onChange={(value) => handleFormChange('sitio', value || '')}
                             leftSection={<IconMapPin size={16} />}
+                            comboboxProps={{ withinPortal: true }}
                           />
                         ) : (
-                          <InfoItem label='Sitio' value={asset.sitio} Icon={IconMapPin} />
+                          <InfoItem
+                            label='Sitio'
+                            value={sitioLabel(asset.sitio)}
+                            Icon={IconMapPin}
+                          />
                         )}
                       </Grid.Col>
                       <Grid.Col span={{ base: 12, sm: 6, md: 4 }}>
@@ -1702,7 +1745,22 @@ function ViewAsset() {
                         )}
                       </Grid.Col>
                       <Grid.Col span={{ base: 12, sm: 6 }}>
-                        <InfoItem label='Empresa' value={asset.empresa} Icon={IconBuilding} />
+                        {editing ? (
+                          <Select
+                            label='Empresa'
+                            placeholder='Seleccione la empresa'
+                            data={companySelectData}
+                            searchable
+                            value={form.empresa || null}
+                            onChange={(value) => handleFormChange('empresa', value || '')}
+                            error={formErrors.empresa}
+                            required
+                            leftSection={<IconBuilding size={16} />}
+                            comboboxProps={{ withinPortal: true }}
+                          />
+                        ) : (
+                          <InfoItem label='Empresa' value={asset.empresa} Icon={IconBuilding} />
+                        )}
                       </Grid.Col>
                     </Grid>
                   </Card>

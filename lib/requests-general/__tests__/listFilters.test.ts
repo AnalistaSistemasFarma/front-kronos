@@ -28,10 +28,11 @@ const row = (over: Partial<ListRow> = {}): ListRow => ({
 const f = (over: Partial<ListFilters> = {}): ListFilters => ({ ...EMPTY_LIST_FILTERS, ...over });
 
 describe('estado general (solicitudes y tareas)', () => {
-  it('abierto, sin empezar y devuelta son pendientes', () => {
+  it('abierto y sin empezar son pendientes; devuelta va aparte', () => {
     expect(statusGroupOf(1, 'Abierto')).toBe('pending');
     expect(statusGroupOf(4, 'Sin empezar')).toBe('pending');
-    expect(statusGroupOf(7, 'Devuelta')).toBe('pending');
+    expect(statusGroupOf(7, 'Devuelta')).toBe('returned');
+    expect(statusGroupOf(99, 'Devuelta al solicitante')).toBe('returned');
     // Compras/Ventas: igual que el grupo `pending` de /api/requests-general/general-requests.
     expect(statusGroupOf(5, 'Por Autorizar')).toBe('pending');
     expect(statusGroupOf(6, 'En Borrador')).toBe('pending');
@@ -100,8 +101,14 @@ describe('matchesListFilters', () => {
 describe('apoyos', () => {
   it('cuenta por estado', () => {
     expect(
-      countByStatusGroup([row(), row({ group: 'done' }), row({ group: 'cancelled' }), row()])
-    ).toEqual({ all: 4, pending: 2, done: 1, cancelled: 1 });
+      countByStatusGroup([
+        row(),
+        row({ group: 'done' }),
+        row({ group: 'cancelled' }),
+        row(),
+        row({ group: 'returned' }),
+      ])
+    ).toEqual({ all: 5, pending: 2, returned: 1, done: 1, cancelled: 1 });
   });
 
   it('separa personas y quita vacíos y repetidos', () => {
@@ -147,7 +154,7 @@ describe('filtros restaurados del panel anterior (hotfix 2026-11-10)', () => {
   it('cada estado exacto cae en su tarjeta', () => {
     expect(stateGroup('1')).toBe('pending');
     expect(stateGroup('4')).toBe('pending');
-    expect(stateGroup('7')).toBe('pending');
+    expect(stateGroup('7')).toBe('returned');
     expect(stateGroup('2')).toBe('done');
     expect(stateGroup('3')).toBe('cancelled');
   });

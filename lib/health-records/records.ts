@@ -115,7 +115,8 @@ export async function eliminarRegistro(
 
 /**
  * Tamaños máximos (EditSize) de los campos de texto del UDO de registros
- * sanitarios, leídos de la metadata de SAP (UserFieldsMD). Sirve para validar
+ * sanitarios (solo db_Alpha; los db_Memo no tienen tope), leídos de la
+ * metadata de SAP (UserFieldsMD). Sirve para validar
  * el largo ANTES de crear (así la simulación detecta "valor demasiado largo"
  * sin tener que intentar el POST). Devuelve un mapa { U_Campo: maxLargo }.
  */
@@ -136,13 +137,35 @@ export async function getFieldSizes(
       `UserFieldsMD?$filter=TableName eq '@${table}'&$select=Name,Type,EditSize&$top=200`
     );
     for (const f of data.value ?? []) {
-      // Solo campos de texto (alfanuméricos / memo) tienen límite relevante.
-      if (f.Type === 'db_Alpha' || f.Type === 'db_Memo') sizes[`U_${f.Name}`] = f.EditSize;
+      // Solo los alfanuméricos (db_Alpha) tienen tope real en SAP. Los memo
+      // (db_Memo, p. ej. U_SEND_Link con SubType st_Link) no tienen límite: su
+      // EditSize (254) es solo el tamaño de pantalla, así que no se registran.
+      if (f.Type === 'db_Alpha') sizes[`U_${f.Name}`] = f.EditSize;
     }
   } catch {
     // Si no se puede leer la metadata, no se valida el largo (no bloquea).
   }
   return sizes;
+}
+
+/**
+ * Valida el largo de los campos de texto contra su tamaño en SAP (EditSize).
+ * Devuelve un mensaje claro con el primer campo que se pasa, o null si todo
+ * cabe. Así no se trunca ni falla el POST/PATCH con un 400 críptico de SAP.
+ */
+export function validarLargos(
+  record: HealthRecordInput,
+  sizes: Record<string, number>
+): string | null {
+  const rec = record as Record<string, string | undefined>;
+  for (const [field, max] of Object.entries(sizes)) {
+    const len = rec[field]?.length ?? 0;
+    if (max > 0 && len > max) {
+      const label = FIELD_LABELS[field] ?? field;
+      return `El campo "${label}" admite máximo ${max} caracteres en SAP para esta empresa (tiene ${len}). Abrévielo antes de guardar.`;
+    }
+  }
+  return null;
 }
 
 /**

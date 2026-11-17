@@ -145,7 +145,7 @@ export async function assertAgentConversation(
 export type AgentConversation =
   | { id: number; kind: 'direct'; idUser: string }
   | { id: number; kind: 'group'; title: string | null; agentes: AgenteMencionable[] }
-  | { id: number; kind: 'project'; idProject: number; projectName: string };
+  | { id: number; kind: 'project'; idProject: number; projectName: string; idAgentPrincipal: number; esMesa: boolean };
 
 /**
  * El ALCANCE de la llave decide qué puertas se prueban, y son excluyentes:
@@ -166,6 +166,8 @@ export async function resolveAgentConversation(
       kind: 'project',
       idProject: proyecto.idProject,
       projectName: proyecto.projectName,
+      idAgentPrincipal: proyecto.idAgentPrincipal,
+      esMesa: proyecto.esMesa,
     };
   }
 

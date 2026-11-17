@@ -15,7 +15,7 @@ import type { ChatAgentIdentity } from '../../../../../lib/chat/agent-auth';
 import { cargarConfigProyectos } from '../../../../../lib/proyectos/config-agentes';
 import { whereProyectoDelAgente } from '../../../../../lib/chat/projects';
 import { mensajesConEntregaPendiente } from '../../../../../lib/chat/entregas-pendientes';
-import { cuerpoParaAgente, EVENT_TYPE_TURNO, tickMesas } from '../../../../../lib/proyectos/mesas';
+import { EVENT_TYPE_TURNO, tickMesas, turnoParaAgente } from '../../../../../lib/proyectos/mesas';
 
 // El long-poll obliga a que la ruta sea dinámica: nada de esto se cachea.
 export const dynamic = 'force-dynamic';
@@ -279,6 +279,7 @@ async function bandejaDeProyectos(opciones: {
   const includeProyecto = {
     attachments: true,
     userAuthor: { select: { id: true, name: true, email: true } },
+    agentAuthor: { select: { id_agent: true, code: true, display_name: true } },
     conversation: {
       select: { id: true, title: true, kind: true, project: { select: { id_project: true, name: true } } },
     },
@@ -307,7 +308,8 @@ async function bandejaDeProyectos(opciones: {
   /**
    * MENCIONES en hilos de OTRO agente del mismo proyecto (2026-10-29,
    * multiagente). Una fila de chat_message_delivery de ESTE agente existe solo
-   * si una persona lo mencionó; la entrega es por (mensaje, agente), así que
+   * si una persona —o, con frenos, otro asistente (2026-11-12)— lo mencionó, o
+   * si es su turno en una mesa; la entrega es por (mensaje, agente), así que
    * recogerla no se la esconde al principal ni a otros mencionados.
    */
   const fetchMenciones = () =>
@@ -317,9 +319,11 @@ async function bandejaDeProyectos(opciones: {
       prisma.chatMessage.findMany({
         where: {
           id: { in: ids },
-          // Personas que lo mencionaron, o el AVISO DE TURNO de una mesa de
-          // discusión (mensaje de sistema con su fila de entrega).
-          OR: [{ role: 'user' }, { role: 'system', event_type: EVENT_TYPE_TURNO }],
+          // Personas que lo mencionaron, OTRO ASISTENTE que lo mencionó
+          // (2026-11-12, con frenos anti-bucle en POST /api/chat/agent/messages),
+          // o el AVISO DE TURNO de una mesa de discusión (mensaje de sistema con
+          // su fila de entrega).
+          OR: [{ role: 'user' }, { role: 'agent' }, { role: 'system', event_type: EVENT_TYPE_TURNO }],
           conversation: {
             kind: 'project',
             archived: false,
@@ -367,10 +371,14 @@ async function bandejaDeProyectos(opciones: {
   }
 
   // Aviso de turno de una mesa: el agente recibe además las instrucciones de
-  // la mesa (no quedan guardadas en el hilo; ver mesas-rules.ts).
-  const cuerpos = new Map<number, string>();
+  // la mesa (no quedan guardadas en el hilo; ver mesas-rules.ts) y, como
+  // adjuntos del aviso, los archivos que compartieron los agentes de ESA mesa
+  // (2026-11-11): el puente los baja a ./adjuntos como cualquier adjunto.
+  const turnos = new Map<number, NonNullable<Awaited<ReturnType<typeof turnoParaAgente>>>>();
   for (const m of pending) {
-    if (m.event_type === EVENT_TYPE_TURNO) cuerpos.set(m.id, await cuerpoParaAgente(m));
+    if (m.event_type !== EVENT_TYPE_TURNO) continue;
+    const t = await turnoParaAgente(m, agent.idAgent);
+    if (t) turnos.set(m.id, t);
   }
 
   return jsonNoStore({
@@ -382,11 +390,21 @@ async function bandejaDeProyectos(opciones: {
       id: m.id,
       idConversation: m.id_conversation,
       role: m.role,
-      body: cuerpos.get(m.id) ?? m.body,
+      body: turnos.get(m.id)?.body ?? m.body,
       createdAt: m.created_at.toISOString(),
       author: m.userAuthor
         ? { kind: 'user' as const, id: m.userAuthor.id, name: m.userAuthor.name, email: m.userAuthor.email }
-        : m.event_type === EVENT_TYPE_TURNO
+        : m.agentAuthor
+          ? // Otro ASISTENTE lo mencionó. Sin correo: un asistente NUNCA activa
+            // los permisos de una persona (operador, memoria, conectores).
+            {
+              kind: 'agent' as const,
+              id: null,
+              name: `${m.agentAuthor.display_name} (asistente)`,
+              email: null,
+              code: m.agentAuthor.code,
+            }
+          : m.event_type === EVENT_TYPE_TURNO
           ? // Sin correo: un aviso de turno NUNCA activa permisos de una persona.
             { kind: 'system' as const, id: null, name: 'Mesa de discusión', email: null }
           : null,
@@ -401,7 +419,7 @@ async function bandejaDeProyectos(opciones: {
       project: m.conversation.project
         ? { idProject: m.conversation.project.id_project, name: m.conversation.project.name }
         : null,
-      attachments: m.attachments.map(serializeAttachment),
+      attachments: turnos.get(m.id)?.adjuntos ?? m.attachments.map(serializeAttachment),
     })),
   });
 }

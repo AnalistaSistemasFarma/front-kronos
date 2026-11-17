@@ -314,14 +314,22 @@ test.describe('Administración de usuarios · permisos de Proyectos', () => {
     await page.goto('/process/administration/users');
     await page.getByRole('button', { name: 'Asignar subprocesos' }).first().click();
     const modal = page.getByRole('dialog');
-    await expect(modal.getByText('Asignar Subprocesos - Silvia Quintana')).toBeVisible();
+    // Modal Procesos → Empresas (2026-11-13): arranca con la empresa que ya tiene subprocesos.
+    await expect(modal.getByText('Subprocesos — Silvia Quintana')).toBeVisible();
     await modal.getByLabel('Buscar subprocesos').fill('Proyectos');
-    await expect(modal.getByText('URL: /process/proyectos', { exact: true })).toBeVisible();
+    const tarjetaProyectos = modal.getByRole('button').filter({ has: page.getByText('Proyectos', { exact: true }) });
+    await expect(tarjetaProyectos).toBeVisible();
     await expect(modal.getByText('Permiso: configurar qué asistentes trabajan en Proyectos (en la empresa seleccionada)')).toBeVisible();
-    await modal.getByText('Proyectos', { exact: true }).click();
+    await tarjetaProyectos.click();
+    await expect(tarjetaProyectos).toHaveAttribute('aria-pressed', 'true');
+    // La empresa donde se guarda: ONE LATAM PHARMA (id 3), la que ya tenía subprocesos.
+    await modal.getByText(/^Empresas/).click();
+    await expect(modal.getByRole('button', { name: /ONE LATAM PHARMA/ })).toHaveAttribute('aria-pressed', 'true');
     if (CAPTURAS) await page.screenshot({ path: `${CAPTURAS}/escritorio-admin-usuarios-asignar-proyectos.png` });
-    await modal.getByRole('button', { name: 'Guardar Cambios' }).click();
+    await modal.getByRole('button', { name: 'Guardar', exact: true }).click();
     await expect.poll(() => guardados.length).toBeGreaterThan(0);
-    expect(JSON.stringify(guardados[0])).toContain('112');
+    const enviado = guardados[0] as { companyIds?: number[]; subprocessIds?: number[] };
+    expect(enviado.companyIds).toEqual([3]);
+    expect(enviado.subprocessIds).toEqual(expect.arrayContaining([112, 13]));
   });
 });

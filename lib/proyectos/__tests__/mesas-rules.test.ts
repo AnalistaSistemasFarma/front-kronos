@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
+  ADVERTENCIA_ARCHIVOS,
+  archivosDesdeUltimaSintesis,
+  archivosParaAgente,
+  detalleArchivoCompartido,
+  esParticipanteMesa,
+  MAX_ARCHIVOS_POR_TURNO,
+  type ArchivoMesa,
   decidirTick,
   decidirTrasRespuesta,
   dentroDeHorario,
@@ -249,4 +256,97 @@ describe('textos', () => {
     expect(resumenParaOperador('a'.repeat(400)).length).toBe(280);
   });
 
+});
+
+describe('mesas: archivos compartidos (2026-11-11)', () => {
+  // Mesa: Orus (1, modera), Mechita (2), Duo (3). El 9 es un agente de afuera.
+  const mesa = { participantes: [1, 2, 3], idAgentModerador: 1 };
+  const archivo = (id: number, idAgent: number, ronda: number | null, agente = `A${idAgent}`): ArchivoMesa => ({
+    idAttachment: id,
+    nombre: `archivo-${id}.csv`,
+    idAgent,
+    agente,
+    ronda,
+  });
+
+  it('solo los agentes de la mesa reciben los archivos', () => {
+    const archivos = [archivo(10, 2, 1), archivo(11, 3, 2)];
+    expect(esParticipanteMesa(mesa, 2)).toBe(true);
+    expect(esParticipanteMesa({ participantes: [2, 3], idAgentModerador: 1 }, 1)).toBe(true);
+    expect(esParticipanteMesa(mesa, 9)).toBe(false);
+    expect(archivosParaAgente({ archivos, ...mesa, idAgent: 3 }).map((a) => a.idAttachment)).toEqual([10, 11]);
+    expect(archivosParaAgente({ archivos, ...mesa, idAgent: 9 })).toEqual([]);
+  });
+
+  it('no reparte archivos que publicó un agente de afuera de la mesa', () => {
+    const archivos = [archivo(10, 2, 1), archivo(12, 9, 1)];
+    expect(archivosParaAgente({ archivos, ...mesa, idAgent: 1 }).map((a) => a.idAttachment)).toEqual([10]);
+  });
+
+  it('entrega solo los más recientes, hasta el tope por turno', () => {
+    const muchos = Array.from({ length: MAX_ARCHIVOS_POR_TURNO + 3 }, (_, i) => archivo(i + 1, 2, 1));
+    const r = archivosParaAgente({ archivos: muchos, ...mesa, idAgent: 3 });
+    expect(r).toHaveLength(MAX_ARCHIVOS_POR_TURNO);
+    expect(r[0].idAttachment).toBe(4);
+    expect(r.at(-1)?.idAttachment).toBe(MAX_ARCHIVOS_POR_TURNO + 3);
+  });
+
+  it('instrucciones con archivos: qué hay, quién lo compartió, en qué ronda, y la advertencia', () => {
+    const t = instruccionesTurno({
+      tema: 'Demoras de Tesorería',
+      turno: { idAgent: 3, ronda: 2, turnoIdx: 2, esSintesis: false, rol: 'verifica datos' },
+      participantes: [{ nombre: 'Orus', rol: 'propone' }, { nombre: 'Mechita', rol: 'critica' }],
+      archivos: [{ idAttachment: 10, nombre: 'pagos-octubre.csv', idAgent: 2, agente: 'Mechita', ronda: 1 }],
+    });
+    expect(t).toContain('Archivos de la mesa');
+    expect(t).toContain('«pagos-octubre.csv» (lo compartió Mechita en la ronda 1)');
+    expect(t).toContain('Puede abrirlos, leerlos y citarlos');
+    expect(t).toContain('adjúntelo a su intervención');
+    expect(t).toContain(ADVERTENCIA_ARCHIVOS);
+  });
+
+  it('instrucciones sin archivos: lo dice, y aun así explica cómo compartir y advierte', () => {
+    const t = instruccionesTurno({
+      tema: 'x',
+      turno: { idAgent: 2, ronda: 1, turnoIdx: 0, esSintesis: false, rol: 'propone' },
+      participantes: [],
+    });
+    expect(t).toContain('nadie ha compartido archivos');
+    expect(t).toContain('adjúntelo a su intervención');
+    expect(t).toContain('No comparta contraseñas, llaves ni datos personales sensibles');
+  });
+
+  it('síntesis: exige la línea «Archivos compartidos:» con los de las rondas desde la síntesis anterior', () => {
+    const archivos = [archivo(10, 2, 2, 'Mechita'), archivo(11, 3, 4, 'Duo'), archivo(12, 2, 6, 'Mechita')];
+    expect(archivosDesdeUltimaSintesis(archivos, 6, 3).map((a) => a.idAttachment)).toEqual([11, 12]);
+    const t = instruccionesTurno({
+      tema: 'x',
+      turno: { idAgent: 1, ronda: 6, turnoIdx: 3, esSintesis: true, rol: 'moderador: síntesis' },
+      participantes: [],
+      archivos,
+      sintesisCada: 3,
+    });
+    expect(t).toContain('«Archivos compartidos:»');
+    expect(t).toContain('quién lo compartió y para qué sirve');
+    expect(t).toContain('«archivo-11.csv» (lo compartió Duo en la ronda 4)');
+    expect(t).toContain('«archivo-12.csv» (lo compartió Mechita en la ronda 6)');
+    // El de la ronda 2 ya lo informó la síntesis de la ronda 3: no se exige otra vez en esa línea.
+    const lineaSintesis = t.split('\n').filter((l) => l.startsWith('- «archivo-10'));
+    expect(lineaSintesis).toEqual([]);
+  });
+
+  it('síntesis sin archivos nuevos: la línea dice que nadie compartió', () => {
+    const t = instruccionesTurno({
+      tema: 'x',
+      turno: { idAgent: 1, ronda: 3, turnoIdx: 2, esSintesis: true, rol: 'moderador: síntesis' },
+      participantes: [],
+      archivos: [],
+    });
+    expect(t).toContain('nadie compartió archivos');
+  });
+
+  it('detalle del evento archivo_compartido: nombre, agente y ronda, dentro del tope', () => {
+    expect(detalleArchivoCompartido('pagos.csv', 'Mechita', 2)).toBe('Mechita compartió «pagos.csv» en la ronda 2.');
+    expect(detalleArchivoCompartido('x'.repeat(2000), 'Mechita', 2).length).toBeLessThanOrEqual(1000);
+  });
 });

@@ -44,6 +44,8 @@ import { buildLogoutCallbackUrl, clearClientSessionArtifacts } from '../lib/auth
 import { DASHBOARDS_REGISTRO, type DashboardKey } from '../lib/dashboards/registro';
 import { useDashboardsPermitidos } from '../lib/dashboards/useDashboardsPermitidos';
 
+const CHAT_URL = '/process/chat';
+
 function useAppSectionOptional(): AppSectionContextValue | null {
   return useContext(AppSectionContext);
 }
@@ -74,6 +76,15 @@ export default function Header() {
   const solicitadoUrl =
     hasSolicitadoAccess || !hasEquipoAccess ? solicitadoBaseUrl : `${solicitadoBaseUrl}/equipo`;
   const [dashMenuOpen, setDashMenuOpen] = useState(false);
+  // Submenú «Dashboard» del menú MÓVIL, con estado PROPIO (hotfix 2026-11-12). Antes
+  // compartía `dashMenuOpen` con el <Menu> de escritorio: en el celular ese <Menu> sigue
+  // montado (oculto) y, al abrirse, el primer toque en una subentrada contaba como «clic
+  // afuera» y lo cerraba en el touchstart; la lista se desmontaba antes del click y el
+  // toque caía en «Procesos». Por eso desde el menú móvil no se llegaba a los dashboards.
+  const [mobileDashOpen, setMobileDashOpen] = useState(false);
+  // En el celular el logo lleva al chat cuando el usuario lo tiene (lo informa ChatRail,
+  // que ya consulta el permiso: no se duplica la petición).
+  const [chatDisponible, setChatDisponible] = useState(false);
   const isSolicitanteActive = pathname.startsWith(solicitanteUrl);
   const isSolicitadoActive = pathname.startsWith(solicitadoBaseUrl);
   // Dashboards con permiso propio (lib/dashboards/registro.ts), por subproceso y empresa.
@@ -107,6 +118,7 @@ export default function Header() {
   useEffect(() => {
     setIsMobileMenuOpen(false);
     setDashMenuOpen(false);
+    setMobileDashOpen(false);
   }, [pathname]);
 
   const dashboardItems = useMemo(() => {
@@ -205,6 +217,7 @@ export default function Header() {
 
   const openDashboardItem = (item: (typeof dashboardItems)[number]) => {
     setDashMenuOpen(false);
+    setMobileDashOpen(false);
     setIsMobileMenuOpen(false);
     if (item.key === 'admin') {
       goToSection('dashboard');
@@ -243,7 +256,27 @@ export default function Header() {
               </ActionIcon>
             </div>
 
-            <div className='flex items-center'>
+            {/* Celular: el logo lleva al chat (si el usuario lo tiene); el botón ☰ abre el menú.
+                Sin chat, el logo hace lo mismo que en escritorio. */}
+            {chatDisponible && (
+              <div className='flex items-center md:hidden'>
+                <Link
+                  href={CHAT_URL}
+                  aria-label='Ir al chat'
+                  onClick={() => setIsMobileMenuOpen(false)}
+                >
+                  <Image
+                    src={logoSrc}
+                    alt='Logo'
+                    width={1980}
+                    height={100}
+                    className='h-12 w-auto'
+                  />
+                </Link>
+              </div>
+            )}
+
+            <div className={`items-center ${chatDisponible ? 'hidden md:flex' : 'flex'}`}>
               {sectionCtx && !showSolicitadoNav && !showSolicitanteNav ? (
                 <UnstyledButton
                   onClick={() => goToSection(isDashboardAdmin ? 'dashboard' : 'process')}
@@ -353,7 +386,7 @@ export default function Header() {
                   se monta aparte, fija a la izquierda—; en el celular deja
                   solo el botón que abre el menú deslizable de chats. Se pinta
                   solo si el usuario tiene el permiso. */}
-              <ChatRail />
+              <ChatRail onDisponibleChange={setChatDisponible} />
               {/* Pulso del chat entre personas (mensajes directos y zumbidos
                   📳 en cualquier pantalla). No pinta nada. */}
               <ChatPulse />
@@ -436,17 +469,17 @@ export default function Header() {
                   <button
                     type='button'
                     className={`flex w-full items-center justify-between text-left text-base font-medium ${dashTriggerClass}`}
-                    aria-expanded={dashMenuOpen}
-                    onClick={() => setDashMenuOpen((open) => !open)}
+                    aria-expanded={mobileDashOpen}
+                    onClick={() => setMobileDashOpen((open) => !open)}
                   >
                     Dashboard
                     <IconChevronDown
                       size={16}
-                      className={`app-nav-chevron ${dashMenuOpen ? 'app-nav-chevron--open' : ''}`}
+                      className={`app-nav-chevron ${mobileDashOpen ? 'app-nav-chevron--open' : ''}`}
                       aria-hidden
                     />
                   </button>
-                  {dashMenuOpen && (
+                  {mobileDashOpen && (
                     <ul className='app-macos-menu app-macos-menu--inline'>
                       {dashboardItems.map((item) => (
                         <li key={item.key}>

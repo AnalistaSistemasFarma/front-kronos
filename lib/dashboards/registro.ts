@@ -22,6 +22,12 @@ export const DASHBOARDS_REGISTRO = [
     href: '/process/dashboards/venta-diaria',
     subprocessUrl: '/process/dashboards/venta-diaria',
   },
+  {
+    key: 'gestion-comercial',
+    label: 'Gestión comercial',
+    href: '/process/dashboards/gestion-comercial',
+    subprocessUrl: '/process/dashboards/gestion-comercial',
+  },
 ] as const satisfies readonly DashboardRegistro[];
 
 export type DashboardKey = (typeof DASHBOARDS_REGISTRO)[number]['key'];

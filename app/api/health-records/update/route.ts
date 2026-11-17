@@ -8,6 +8,8 @@ import {
   describeChanges,
   getRegistro,
   sanitizeRecord,
+  getFieldSizes,
+  validarLargos,
 } from '../../../../lib/health-records/records';
 import {
   notifyChanges,
@@ -54,6 +56,16 @@ export async function POST(request: NextRequest) {
     });
 
     try {
+      // Largo máximo de cada campo según SAP (varía por empresa: p. ej. Titular
+      // es de 20 caracteres en unas bases y de 254 en otras).
+      const largoError = validarLargos(
+        changes,
+        await getFieldSizes(sap, company.endpoint.healthRecordsEntity!)
+      );
+      if (largoError) {
+        return NextResponse.json({ error: largoError }, { status: 400 });
+      }
+
       const before = await getRegistro(sap, entity, docNum);
       const realChanges = describeChanges(before, changes);
       if (realChanges.length === 0) {

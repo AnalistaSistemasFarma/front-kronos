@@ -1,11 +1,12 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Modal, Select, TextInput, Textarea, Button, Group, Stack, Alert, NumberInput, SimpleGrid, Loader,
   Paper, UnstyledButton, Text, Badge,
 } from '@mantine/core';
 import { PAISES, ESTADOS, OBSOLETO } from '../../../../lib/health-records/fields';
+import NameCombobox from './NameCombobox';
 
 interface WritableCompany {
   idCompany: number;
@@ -38,6 +39,14 @@ const EMPTY = {
   U_SEND_Link: '',
 };
 
+interface NameOptions {
+  titulares: string[];
+  fabricantes: string[];
+  sizes: Record<string, number>;
+}
+
+const EMPTY_OPTIONS: NameOptions = { titulares: [], fabricantes: [], sizes: {} };
+
 interface ItemResult {
   itemCode: string;
   itemName: string;
@@ -57,6 +66,23 @@ export default function CreateModal({ opened, onClose, companies, onCreated }: P
   const [error, setError] = useState<string | null>(null);
 
   const set = (field: string, value: string) => setRecord((r) => ({ ...r, [field]: value }));
+
+  // Listas de Titular/Fabricante (valores ya usados en SAP) y largo máximo de
+  // los campos según la empresa.
+  const [nameOptions, setNameOptions] = useState<NameOptions>(EMPTY_OPTIONS);
+  const [loadingOptions, setLoadingOptions] = useState(false);
+  useEffect(() => {
+    if (!opened || !companyId) return;
+    let cancel = false;
+    setLoadingOptions(true);
+    fetch(`/api/health-records/options?companyId=${companyId}`)
+      .then((r) => (r.ok ? r.json() : EMPTY_OPTIONS))
+      .then((d) => { if (!cancel) setNameOptions({ ...EMPTY_OPTIONS, ...d }); })
+      .catch(() => { if (!cancel) setNameOptions(EMPTY_OPTIONS); })
+      .finally(() => { if (!cancel) setLoadingOptions(false); });
+    return () => { cancel = true; };
+  }, [companyId, opened]);
+
 
   const searchItems = async (q: string) => {
     setArticleQuery(q);
@@ -183,8 +209,8 @@ export default function CreateModal({ opened, onClose, companies, onCreated }: P
           <TextInput label="Fecha vencimiento" type="date" value={record.U_Fecha_Vencimiento} onChange={(e) => set('U_Fecha_Vencimiento', e.currentTarget.value)} />
           <TextInput label="Codigo CUM" value={record.U_Codigo_CUM} onChange={(e) => set('U_Codigo_CUM', e.currentTarget.value)} />
           <TextInput label="Codigo IUM" value={record.U_Codigo_IUM} onChange={(e) => set('U_Codigo_IUM', e.currentTarget.value)} />
-          <TextInput label="Titular" value={record.U_Titular} onChange={(e) => set('U_Titular', e.currentTarget.value)} />
-          <TextInput label="Fabricante" value={record.U_Fabricante} onChange={(e) => set('U_Fabricante', e.currentTarget.value)} />
+          <NameCombobox label="Titular" value={record.U_Titular} onChange={(v) => set('U_Titular', v)} options={nameOptions.titulares} maxLength={nameOptions.sizes.U_Titular} loading={loadingOptions} />
+          <NameCombobox label="Fabricante" value={record.U_Fabricante} onChange={(v) => set('U_Fabricante', v)} options={nameOptions.fabricantes} maxLength={nameOptions.sizes.U_Fabricante} loading={loadingOptions} />
           <Select label="Estado entrada" data={ESTADOS} value={record.U_Estado_Entrada} onChange={(v) => set('U_Estado_Entrada', v ?? 'Inactivo')} />
           <Select label="Estado comercializacion" data={ESTADOS} value={record.U_Estado_Comercializacion} onChange={(v) => set('U_Estado_Comercializacion', v ?? 'Inactivo')} />
           <Select label="Obsoleto" data={OBSOLETO} value={record.U_Obsoleto} onChange={(v) => set('U_Obsoleto', v ?? 'NO')} />

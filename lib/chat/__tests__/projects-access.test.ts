@@ -209,6 +209,7 @@ describe('assertAgentProjectConversation (llave del puente)', () => {
       invitado: false,
       idAgentPrincipal: PLAY,
       perfil: 'comex-latam',
+      esMesa: false,
     });
     expect(findConversation.mock.calls[0][0].where).toEqual({
       id: 40,

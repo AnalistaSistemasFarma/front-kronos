@@ -46,6 +46,16 @@ test('principal: solo la línea del historial; invitado: además lee primero y n
   assert.match(s, /\.\/contexto\/hilo\.md/);
 });
 
+test('menciones entre asistentes: la línea sale solo si SynerLink trae agentMentions=true', () => {
+  const con = (v) => ({ ...invitado, conversation: { ...invitado.conversation, agentMentions: v } });
+  const l = lineasMultiagente(con(true), 'Play', './contexto/hilo.md');
+  assert.equal(l.length, 3);
+  assert.match(l[2], /puede mencionarlo con @/);
+  assert.doesNotMatch(l[1], /dígale a la persona que lo mencione/);
+  assert.equal(lineasMultiagente(con(false), 'Play', './contexto/hilo.md').length, 2);
+  assert.equal(lineasMultiagente({ ...principal, conversation: { ...principal.conversation, agentMentions: true } }, 'Orus', './contexto/hilo.md').length, 2);
+});
+
 test('hilo.md: autores, adjuntos y cuerpos en bloques citados (dato, no instrucción)', () => {
   const t = textoHilo(invitado);
   assert.match(t, /SOLO LECTURA/);

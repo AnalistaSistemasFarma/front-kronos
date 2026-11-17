@@ -2,9 +2,22 @@
 
 import React, { useEffect, useState } from 'react';
 import {
-  ActionIcon, Alert, Button, Group, Loader, NumberInput, Paper, ScrollArea, Select, Stack, Switch, Table, Text, TextInput, Textarea,
+  ActionIcon, Alert, Button, FileButton, Group, Loader, NumberInput, Paper, ScrollArea, Select, Stack, Switch, Table, Text, TextInput, Textarea,
 } from '@mantine/core';
-import { IconCloudUpload, IconFile, IconPlus, IconSend, IconTrash, IconX } from '@tabler/icons-react';
+import {
+  IconCloudUpload,
+  IconDownload,
+  IconEraser,
+  IconFile,
+  IconFileSpreadsheet,
+  IconPlus,
+  IconSend,
+  IconTrash,
+  IconUpload,
+  IconX,
+} from '@tabler/icons-react';
+import type ExcelJS from 'exceljs';
+import BulkModal from './BulkModal';
 import { COLUMNS, toFormLine, type FieldError, type Line, type LineField } from './RequestFormModal';
 import PurchaseSearchModal from './PurchaseSearchModal';
 import { purchaseSubject } from '../../../../lib/purchases/subject';
@@ -37,7 +50,7 @@ interface Props {
   onDone: (result: { ok: boolean; message: string }) => void;
 }
 
-type Readiness = 'loading' | 'ready' | 'no-write' | 'no-sap';
+type Readiness = 'loading' | 'ready' | 'no-write' | 'no-sap' | 'no-profile';
 
 /** Valor interno de «moneda local» (Ryan guarda la moneda vacía, como en SAPSEND). */
 const LOCAL = '__local';
@@ -185,6 +198,15 @@ export default function PurchaseInlineForm({ companyId, edit, onDone }: Props) {
   /** Lupa: búsqueda ampliada del campo de una línea. */
   const [search, setSearch] = useState<{ kind: LookupKind; line: number; field: LineField; q: string } | null>(null);
   const [loadingEdit, setLoadingEdit] = useState(false);
+  const [companyName, setCompanyName] = useState('');
+  const [bulkOpen, setBulkOpen] = useState(false);
+  const [bulkDone, setBulkDone] = useState(false);
+  /** Asignación masiva: fecha requerida y proveedor a todas las líneas o a una. */
+  const [massDate, setMassDate] = useState('');
+  const [massDateTarget, setMassDateTarget] = useState<string>('all');
+  const [massVendor, setMassVendor] = useState<{ text: string; option: LookupOption | null }>({ text: '', option: null });
+  const [massVendorTarget, setMassVendorTarget] = useState<string>('all');
+  const [massVendorSearch, setMassVendorSearch] = useState<string | null>(null);
 
   // Edición: carga el borrador.
   useEffect(() => {
@@ -233,8 +255,11 @@ export default function PurchaseInlineForm({ companyId, edit, onDone }: Props) {
         if (cancelled) return;
         const c = (d.companies ?? []).find((x: { idCompany: number }) => String(x.idCompany) === companyId);
         setDefaultCurrency(String(c?.defaultCurrency ?? ''));
+        setCompanyName(String(c?.companyName ?? ''));
         if (!c?.canWrite) setReadiness('no-write');
         else if (!c.ready) setReadiness('no-sap');
+        // Sin perfil de SAPSEND en la empresa no se puede crear (SAP registra quién solicita y su departamento).
+        else if (c.sapsendUserId == null || c.sapsendDepartmentId == null) setReadiness('no-profile');
         else setReadiness('ready');
       })
       .catch(() => {
@@ -272,6 +297,99 @@ export default function PurchaseInlineForm({ companyId, edit, onDone }: Props) {
     setLines((prev) =>
       prev.map((l, j) => (j === i ? { ...l, ...(opt.fill ?? {}), [field]: opt.fill?.[field] ?? opt.value } : l))
     );
+
+  const lineTargets = [
+    { value: 'all', label: 'Todas las líneas' },
+    ...lines.map((_, i) => ({ value: String(i), label: `Línea ${i + 1}` })),
+  ];
+  const inTarget = (target: string, i: number) => target === 'all' || Number(target) === i;
+  const applyDate = () => {
+    if (!massDate) return;
+    setLines((prev) => prev.map((l, i) => (inTarget(massDateTarget, i) ? { ...l, RequiredDate: massDate } : l)));
+  };
+  const clearDates = () => setLines((prev) => prev.map((l) => ({ ...l, RequiredDate: '' })));
+  const applyVendor = () => {
+    const opt = massVendor.option;
+    if (!opt) {
+      toast.error('Elija el proveedor de la lista de SAP.');
+      return;
+    }
+    setLines((prev) => prev.map((l, i) => (inTarget(massVendorTarget, i) ? { ...l, ...(opt.fill ?? {}) } : l)));
+  };
+  const clearVendors = () => setLines((prev) => prev.map((l) => ({ ...l, LineVendor: '', U_NombreProveedor: '' })));
+
+  /** Plantilla de líneas: una columna por campo de la tabla (nombre visible). */
+  const downloadLinesTemplate = async () => {
+    const { default: Excel } = await import('exceljs');
+    const wb = new Excel.Workbook();
+    const ws = wb.addWorksheet('Lineas');
+    ws.addRow(COLUMNS.map((c) => `${c.label}${c.required ? ' *' : ''}`));
+    ws.getRow(1).font = { bold: true };
+    ws.columns.forEach((col) => {
+      col.width = 20;
+    });
+    const buf = await wb.xlsx.writeBuffer();
+    const url = URL.createObjectURL(new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'plantilla-lineas-solicitud-compra.xlsx';
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  /** Carga las líneas desde la plantilla (reemplaza las líneas vacías; agrega a las que ya tienen datos). */
+  const loadLinesFile = async (file: File | null) => {
+    if (!file) return;
+    try {
+      const { default: Excel } = await import('exceljs');
+      const wb = new Excel.Workbook();
+      await wb.xlsx.load(await file.arrayBuffer());
+      const ws = wb.worksheets[0];
+      if (!ws) throw new Error('El archivo no tiene hojas.');
+      const norm = (t: string) => t.replace(/\*/g, '').trim().toLowerCase();
+      const byHeader = new Map<string, LineField>();
+      for (const c of COLUMNS) {
+        byHeader.set(norm(c.label), c.field);
+        byHeader.set(norm(c.field), c.field);
+      }
+      const cols: (LineField | null)[] = [];
+      ws.getRow(1).eachCell((cell, col) => {
+        cols[col] = byHeader.get(norm(String(cell.value ?? ''))) ?? null;
+      });
+      if (!cols.some(Boolean)) throw new Error('El archivo no tiene los encabezados de la plantilla de líneas.');
+      const cellVal = (v: ExcelJS.CellValue): string | number => {
+        if (v == null) return '';
+        if (v instanceof Date) return v.toISOString().slice(0, 10);
+        if (typeof v === 'object') {
+          if ('result' in v) return cellVal((v as ExcelJS.CellFormulaValue).result as ExcelJS.CellValue);
+          if ('richText' in v) return (v as ExcelJS.CellRichTextValue).richText.map((t) => t.text).join('');
+          if ('text' in v) return String((v as ExcelJS.CellHyperlinkValue).text);
+          return '';
+        }
+        return typeof v === 'number' ? v : String(v).trim();
+      };
+      const parsed: Line[] = [];
+      for (let r = 2; r <= ws.rowCount; r++) {
+        const line: Line = {};
+        let has = false;
+        ws.getRow(r).eachCell((cell, col) => {
+          const f = cols[col];
+          const v = cellVal(cell.value);
+          if (!f || v === '') return;
+          const c = COLUMNS.find((x) => x.field === f);
+          line[f] = c?.numeric ? Number(String(v).replace(/,/g, '')) || 0 : f === 'ItemDescription' ? String(v).toUpperCase() : v;
+          has = true;
+        });
+        if (has) parsed.push(line);
+      }
+      if (parsed.length === 0) throw new Error('La plantilla no trae líneas.');
+      setLines((prev) => [...prev.filter((l) => Object.values(l).some((v) => !isEmpty(v))), ...parsed]);
+      setNotFromList(new Set());
+      toast.success(`Se cargaron ${parsed.length} línea(s). Revise y complete los campos en rojo.`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'No se pudo leer el archivo. Use la plantilla .xlsx.');
+    }
+  };
 
   const submit = async () => {
     setTried(true);
@@ -364,6 +482,14 @@ export default function PurchaseInlineForm({ companyId, edit, onDone }: Props) {
       </Alert>
     );
   }
+  if (readiness === 'no-profile') {
+    return (
+      <Alert color="yellow" title="Falta su perfil de SAPSEND en esta empresa">
+        Para crear solicitudes de compra su usuario necesita el ID de usuario y el ID de departamento de SAPSEND de esta
+        empresa. Pídale a Tecnología que los registre en Administración → Usuarios → «SAPSEND por empresa».
+      </Alert>
+    );
+  }
   if (readiness === 'no-sap') {
     return (
       <Alert color="yellow" title="Solicitud de compra">
@@ -406,9 +532,67 @@ export default function PurchaseInlineForm({ companyId, edit, onDone }: Props) {
       />
 
       <div>
-        <Text fw={600} size="sm" mb={4}>
-          Líneas de la solicitud
-        </Text>
+        <Group justify="space-between" mb={6} wrap="wrap">
+          <Text fw={600} size="sm">
+            Líneas de la solicitud
+          </Text>
+          <Group gap="xs">
+            <Button size="xs" variant="subtle" leftSection={<IconDownload size={14} />} onClick={downloadLinesTemplate}>
+              Plantilla de líneas
+            </Button>
+            <FileButton onChange={loadLinesFile} accept=".xlsx">
+              {(props) => (
+                <Button {...props} size="xs" variant="light" leftSection={<IconUpload size={14} />}>
+                  Cargar líneas desde Excel
+                </Button>
+              )}
+            </FileButton>
+            {!edit && (
+              <Button size="xs" variant="light" color="grape" leftSection={<IconFileSpreadsheet size={14} />} onClick={() => setBulkOpen(true)}>
+                Cargue masivo de solicitudes
+              </Button>
+            )}
+          </Group>
+        </Group>
+
+        {/* Asignación masiva a las líneas: a todas o a una en específico; y borrar en todas de una vez. */}
+        <Paper withBorder radius="md" p="xs" mb="xs">
+          <Group gap="lg" align="flex-end" wrap="wrap">
+            <Group gap={6} align="flex-end" wrap="nowrap">
+              <TextInput size="xs" type="date" label="Fecha requerida" value={massDate} onChange={(e) => setMassDate(e.currentTarget.value)} />
+              <Select size="xs" w={150} label="Aplicar a" data={lineTargets} value={massDateTarget} onChange={(v) => setMassDateTarget(v ?? 'all')} allowDeselect={false} comboboxProps={{ withinPortal: true, zIndex: 1100 }} />
+              <Button size="xs" onClick={applyDate} disabled={!massDate}>
+                Aplicar
+              </Button>
+              <Button size="xs" variant="subtle" color="red" leftSection={<IconEraser size={14} />} onClick={clearDates}>
+                Quitar en todas
+              </Button>
+            </Group>
+            <Group gap={6} align="flex-end" wrap="nowrap">
+              <div style={{ width: 260 }}>
+                <SapLookupInput
+                  size="xs"
+                  label="Proveedor"
+                  companyId={companyId}
+                  kind="vendor"
+                  value={massVendor.text}
+                  onChange={(v) => setMassVendor({ text: v, option: null })}
+                  onSelect={(opt) => setMassVendor({ text: opt.label, option: opt })}
+                  onExpand={(q) => setMassVendorSearch(q)}
+                  ariaLabel="Proveedor para asignar a las líneas"
+                />
+              </div>
+              <Select size="xs" w={150} label="Aplicar a" data={lineTargets} value={massVendorTarget} onChange={(v) => setMassVendorTarget(v ?? 'all')} allowDeselect={false} comboboxProps={{ withinPortal: true, zIndex: 1100 }} />
+              <Button size="xs" onClick={applyVendor} disabled={!massVendor.option}>
+                Aplicar
+              </Button>
+              <Button size="xs" variant="subtle" color="red" leftSection={<IconEraser size={14} />} onClick={clearVendors}>
+                Quitar en todas
+              </Button>
+            </Group>
+          </Group>
+        </Paper>
+
         <ScrollArea type="auto" offsetScrollbars>
           <Table withTableBorder withColumnBorders verticalSpacing={4} horizontalSpacing={6} style={{ minWidth: 1900 }}>
             <Table.Thead>
@@ -572,6 +756,25 @@ export default function PurchaseInlineForm({ companyId, edit, onDone }: Props) {
           onSelect={(opt) => applyOption(search.line, search.field, opt)}
         />
       )}
+      {massVendorSearch !== null && (
+        <PurchaseSearchModal
+          opened
+          onClose={() => setMassVendorSearch(null)}
+          companyId={companyId}
+          kind="vendor"
+          initialQuery={massVendorSearch}
+          onSelect={(opt) => setMassVendor({ text: opt.label, option: opt })}
+        />
+      )}
+      <BulkModal
+        opened={bulkOpen}
+        onClose={() => {
+          setBulkOpen(false);
+          if (bulkDone) onDone({ ok: true, message: 'Carga masiva procesada: las solicitudes quedaron en Mis solicitudes.' });
+        }}
+        onDone={() => setBulkDone(true)}
+        companies={[{ idCompany: Number(companyId), companyName: companyName || 'Empresa' }]}
+      />
     </Stack>
   );
 }

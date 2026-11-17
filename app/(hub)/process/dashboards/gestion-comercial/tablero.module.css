@@ -1,0 +1,107 @@
+/* Tablero comercial — estilos de contenido alineados al esquema de SynerLink.
+   Solo usa las variables de Mantine / tema de la app (claro y oscuro); no define
+   cromo propio (encabezado, menú, fondos): eso lo pone DashboardPageShell. */
+
+.page { display: flex; flex-direction: column; gap: var(--mantine-spacing-md); min-width: 0; }
+
+.kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: var(--mantine-spacing-md); }
+.kpisSm { grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
+.grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--mantine-spacing-md); }
+.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.bar { display: flex; flex-wrap: wrap; gap: var(--mantine-spacing-sm); align-items: flex-end; }
+
+.lead { margin: 0; font-size: var(--mantine-font-size-sm); }
+.note { margin: 0; font-size: var(--mantine-font-size-xs); color: var(--mantine-color-dimmed); }
+.empty { font-size: var(--mantine-font-size-sm); color: var(--mantine-color-dimmed); padding: var(--mantine-spacing-xs) 0; }
+.dim { color: var(--mantine-color-dimmed); }
+.up { color: var(--mantine-color-teal-6); font-weight: 600; white-space: nowrap; }
+.down { color: var(--mantine-color-red-6); font-weight: 600; white-space: nowrap; }
+.aviso { font-size: var(--mantine-font-size-sm); }
+
+.h2row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--mantine-spacing-xs); margin-top: var(--mantine-spacing-xs); }
+.h2 { margin: 0; font-size: var(--mantine-h4-font-size); font-weight: 600; }
+
+/* Campos nativos usados en filtros internos de cada sección */
+.fld { display: flex; flex-direction: column; gap: 4px; font-size: var(--mantine-font-size-sm); font-weight: 500; }
+.fld select,
+.fld input,
+.search input {
+  font: inherit;
+  font-size: var(--mantine-font-size-sm);
+  color: var(--mantine-color-text);
+  background: var(--mantine-color-body);
+  border: 1px solid var(--mantine-color-default-border);
+  border-radius: var(--mantine-radius-sm);
+  padding: 6px 10px;
+  min-height: 36px;
+  min-width: 180px;
+}
+.fld select:focus,
+.fld input:focus,
+.search input:focus { outline: none; border-color: var(--mantine-color-blue-filled); }
+.search { position: relative; }
+.search input { width: 100%; }
+.sres {
+  position: absolute; left: 0; right: 0; top: calc(100% + 4px); z-index: 30; max-height: 360px; overflow: auto; padding: 4px;
+  background: var(--mantine-color-body); border: 1px solid var(--mantine-color-default-border);
+  border-radius: var(--mantine-radius-md); box-shadow: var(--mantine-shadow-md);
+}
+.sr {
+  display: flex; flex-direction: column; gap: 2px; width: 100%; text-align: left; border: 0; background: transparent;
+  padding: 8px 10px; cursor: pointer; font: inherit; color: var(--mantine-color-text); border-radius: var(--mantine-radius-sm);
+}
+.sr:hover { background: var(--mantine-color-default-hover); }
+.sr span { font-size: var(--mantine-font-size-xs); color: var(--mantine-color-dimmed); }
+
+/* Botones de descarga (equivalentes a Button size xs variant light) */
+.btn {
+  appearance: none; cursor: pointer; font: inherit; font-size: var(--mantine-font-size-xs); font-weight: 600;
+  border-radius: var(--mantine-radius-sm); padding: 6px 12px; border: 1px solid var(--mantine-color-default-border);
+  background: var(--mantine-color-default); color: var(--mantine-color-text);
+}
+.btn:hover { background: var(--mantine-color-default-hover); }
+.btnSolid { background: var(--mantine-color-blue-light); color: var(--mantine-color-blue-light-color); border-color: transparent; }
+.btnSolid:hover { background: var(--mantine-color-blue-light-hover); }
+.btnSm { padding: 4px 10px; }
+
+/* Tablas (mismo aspecto que Card withBorder + Table striped de Mantine) */
+.tw {
+  overflow: auto; max-height: 560px; border: 1px solid var(--mantine-color-default-border);
+  border-radius: var(--mantine-radius-md); background: var(--mantine-color-body); box-shadow: var(--mantine-shadow-sm);
+}
+.t { width: 100%; border-collapse: separate; border-spacing: 0; font-size: var(--mantine-font-size-sm); }
+.t th {
+  position: sticky; top: 0; z-index: 1; background: var(--mantine-color-body); text-align: left; font-weight: 600;
+  padding: 8px 12px; border-bottom: 1px solid var(--mantine-color-default-border); white-space: nowrap;
+}
+.t td { padding: 7px 12px; border-bottom: 1px solid var(--mantine-color-default-border); white-space: nowrap; }
+.t tbody tr:nth-child(odd) td { background: var(--mantine-color-default-hover); }
+.t tbody tr:hover td { background: var(--mantine-color-blue-light); }
+.t tfoot td { font-weight: 700; position: sticky; bottom: 0; background: var(--mantine-color-body); border-top: 1px solid var(--mantine-color-default-border); }
+.r { text-align: right !important; font-variant-numeric: tabular-nums; }
+.lnk { appearance: none; border: 0; background: none; padding: 0; font: inherit; color: var(--mantine-color-anchor); cursor: pointer; text-align: left; }
+.lnk:hover { text-decoration: underline; }
+.sortable { cursor: pointer; }
+.nocopy { user-select: none; -webkit-user-select: none; }
+
+/* Estados (equivalentes a Badge variant light) */
+.st, .tipo { display: inline-block; font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 99px; text-transform: uppercase; letter-spacing: 0.02em; }
+.stOk { color: var(--mantine-color-teal-light-color); background: var(--mantine-color-teal-light); }
+.stWarn { color: var(--mantine-color-yellow-light-color); background: var(--mantine-color-yellow-light); }
+.stCrit { color: var(--mantine-color-red-light-color); background: var(--mantine-color-red-light); }
+.tipo { color: var(--mantine-color-blue-light-color); background: var(--mantine-color-blue-light); }
+.tipoN { color: var(--mantine-color-grape-light-color); background: var(--mantine-color-grape-light); }
+
+.pager { display: flex; flex-wrap: wrap; gap: var(--mantine-spacing-xs); align-items: center; justify-content: space-between; font-size: var(--mantine-font-size-sm); color: var(--mantine-color-dimmed); }
+.pager button {
+  appearance: none; cursor: pointer; font: inherit; min-width: 32px; height: 30px; border-radius: var(--mantine-radius-sm);
+  border: 1px solid var(--mantine-color-default-border); background: var(--mantine-color-body); color: var(--mantine-color-text);
+}
+.pager button:disabled { opacity: 0.4; cursor: default; }
+
+@media (max-width: 900px) {
+  .grid, .three { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 560px) {
+  .fld select, .fld input { min-width: 0; width: 100%; }
+}

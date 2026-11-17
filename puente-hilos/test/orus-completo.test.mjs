@@ -9,8 +9,10 @@ import {
   leerVariablesEnv,
   pluginsCompletos,
   revisarInitCompleto,
+  servicioLlavero,
   servidoresOrus,
   textoOrusCompleto,
+  tokensOAuthMcp,
   turnoOrusCompleto,
 } from '../src/orus-completo.mjs';
 import { armarArgumentos, armarArgumentosCompleto, armarEntornoCompleto, revisarInit } from '../src/claude.mjs';
@@ -268,4 +270,41 @@ test('puente: si el config del principal no se puede leer, el turno de Nicolás 
   await puente.atender('51', [msg(1, NICO)]);
   assert.ok(corridas[0].args.includes('--restricted'));
   assert.match(s.llamadas.find((l) => l[0] === 'responder')[2], /no pude preparar el modo Orus completo/);
+});
+
+test('OAuth del principal: cabecera Bearer solo para MCP remotos con token vigente (higgsfield, 2026-11-10)', () => {
+  const ahora = 1_800_000_000_000;
+  const mcpServers = {
+    higgsfield: { type: 'http', url: 'https://mcp.higgsfield.ai/mcp' },
+    vencido: { type: 'http', url: 'https://x.example/mcp' },
+    conCabecera: { type: 'http', url: 'https://y.example/mcp', headers: { authorization: 'Bearer propio' } },
+    local: { type: 'http', url: 'http://192.168.10.5:3012/mcp' },
+    stdio: { command: 'node', args: ['x.js'] },
+    otraUrl: { type: 'http', url: 'https://z.example/mcp' },
+  };
+  const credenciales = {
+    mcpOAuth: {
+      'higgsfield|abc': { serverName: 'higgsfield', serverUrl: 'https://mcp.higgsfield.ai/mcp', accessToken: 'tok-1', expiresAt: ahora + 3_600_000, refreshToken: 'r' },
+      'vencido|abc': { serverName: 'vencido', serverUrl: 'https://x.example/mcp', accessToken: 'tok-2', expiresAt: ahora + 1000 },
+      'conCabecera|abc': { serverName: 'conCabecera', serverUrl: 'https://y.example/mcp', accessToken: 'tok-3', expiresAt: ahora + 3_600_000 },
+      'otraUrl|abc': { serverName: 'otraUrl', serverUrl: 'https://distinta.example/mcp', accessToken: 'tok-4', expiresAt: ahora + 3_600_000 },
+    },
+  };
+  const r = tokensOAuthMcp({ mcpServers, credenciales, ahora });
+  assert.deepEqual(r.mcpServers.higgsfield, { type: 'http', url: 'https://mcp.higgsfield.ai/mcp', headers: { Authorization: 'Bearer tok-1' } });
+  assert.deepEqual(r.conToken, ['higgsfield']);
+  assert.deepEqual(r.sinToken, [{ nombre: 'vencido', motivo: 'token del principal vencido' }]);
+  assert.deepEqual(r.mcpServers.vencido, mcpServers.vencido);
+  assert.deepEqual(r.mcpServers.conCabecera, mcpServers.conCabecera);
+  assert.deepEqual(r.mcpServers.local, mcpServers.local);
+  assert.deepEqual(r.mcpServers.otraUrl, mcpServers.otraUrl);
+  assert.equal(mcpServers.higgsfield.headers, undefined, 'no muta la entrada');
+  // Sin credenciales: todo igual.
+  assert.deepEqual(tokensOAuthMcp({ mcpServers, credenciales: null, ahora }).mcpServers, mcpServers);
+  // Nombres y motivos, nunca el token.
+  assert.ok(!JSON.stringify({ c: r.conToken, s: r.sinToken }).includes('tok-'));
+});
+
+test('servicioLlavero: mismo nombre que usa Claude Code para un CLAUDE_CONFIG_DIR', () => {
+  assert.equal(servicioLlavero('/Users/horus/.horus/claude-config'), 'Claude Code-credentials-c9c5c640');
 });

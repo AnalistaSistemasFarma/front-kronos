@@ -37,7 +37,10 @@
  * autorizado; y cada turno en este modo queda en auditoria-codigo.jsonl (inicio,
  * cada herramienta usada y cada negación).
  */
+import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { buscarSecreto } from './memoria.mjs';
 import { REGLAS_ORUS_PRINCIPAL } from './codigo.mjs';
@@ -162,6 +165,81 @@ export function servidoresOrus({ configDir, envArchivo = null, excluir = [] }) {
   return { mcpServers: valor, nombres: Object.keys(valor).sort(), faltan };
 }
 
+/**
+ * CONECTORES REMOTOS CON OAUTH (p. ej. higgsfield, https://mcp.higgsfield.ai/mcp) — 2026-11-10,
+ * reporte de Nicolás Rivera: «me dice en uno de mis proyectos que no tiene acceso a Higgsfield».
+ * Claude Code guarda el token OAuth de un MCP http en el llavero de macOS, en un servicio que
+ * depende de CLAUDE_CONFIG_DIR («Claude Code-credentials-<sha256(dir)[0:8]>»; en Linux, en
+ * <dir>/.credentials.json). El turno corre con el config AISLADO del puente, así que no ve el
+ * token que autorizó el Orus principal y el conector queda «needs-auth».
+ * Arreglo: en cada turno completo se LEE (solo lectura) el token vigente del principal y se pasa
+ * como cabecera Authorization en el mcp.json 600 del turno (se borra al terminar). No se copia el
+ * refresh token ni se escribe en el llavero: la renovación la sigue haciendo solo el principal,
+ * así no se invalidan sus credenciales. Si el token está vencido o no existe, el conector va como
+ * antes y el log lo dice (sin el valor).
+ */
+export function servicioLlavero(configDir) {
+  const defecto = path.join(os.homedir(), '.claude');
+  if (path.resolve(configDir) === path.resolve(defecto)) return 'Claude Code-credentials';
+  return `Claude Code-credentials-${createHash('sha256').update(configDir).digest('hex').slice(0, 8)}`;
+}
+
+/** Credenciales de Claude Code de un config dir (llavero en macOS, .credentials.json en otros). Nunca lanza. */
+export function leerCredencialesClaude(configDir) {
+  const intentos = [];
+  if (process.platform === 'darwin') {
+    const servicio = servicioLlavero(configDir);
+    let cuenta = null;
+    try {
+      cuenta = os.userInfo().username;
+    } catch {}
+    if (cuenta) intentos.push(['find-generic-password', '-s', servicio, '-a', cuenta, '-w']);
+    intentos.push(['find-generic-password', '-s', servicio, '-w']);
+  }
+  for (const args of intentos) {
+    try {
+      const texto = execFileSync('/usr/bin/security', args, { encoding: 'utf8', timeout: 5000, stdio: ['ignore', 'pipe', 'ignore'] });
+      const j = JSON.parse(texto);
+      if (j?.mcpOAuth && typeof j.mcpOAuth === 'object') return j;
+    } catch {}
+  }
+  try {
+    return JSON.parse(readFileSync(path.join(configDir, '.credentials.json'), 'utf8'));
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Pone `Authorization: Bearer <token del principal>` a los MCP http/sse remotos que no traen esa
+ * cabecera y cuyo token OAuth vigente está en las credenciales del principal (mismo nombre y URL).
+ * Pura: devuelve { mcpServers, conToken, sinToken } (nombres y motivos, nunca valores).
+ */
+export function tokensOAuthMcp({ mcpServers, credenciales, ahora = Date.now(), margenMs = 120000 }) {
+  const salida = { ...mcpServers };
+  const conToken = [];
+  const sinToken = [];
+  const entradas = Object.values(credenciales?.mcpOAuth ?? {}).filter((e) => e && typeof e === 'object');
+  for (const [nombre, s] of Object.entries(mcpServers ?? {})) {
+    if (!s || (s.type !== 'http' && s.type !== 'sse') || typeof s.url !== 'string' || !/^https:\/\//.test(s.url)) continue;
+    const cab = s.headers && typeof s.headers === 'object' ? s.headers : {};
+    if (Object.keys(cab).some((k) => k.toLowerCase() === 'authorization')) continue;
+    const e = entradas.find((x) => x.serverName === nombre && x.serverUrl === s.url);
+    if (!e) continue; // conector sin OAuth (o nunca autorizado): va como está
+    if (typeof e.accessToken !== 'string' || !e.accessToken.trim()) {
+      sinToken.push({ nombre, motivo: 'el principal no tiene token' });
+      continue;
+    }
+    if (typeof e.expiresAt === 'number' && e.expiresAt <= ahora + margenMs) {
+      sinToken.push({ nombre, motivo: 'token del principal vencido' });
+      continue;
+    }
+    salida[nombre] = { ...s, headers: { ...cab, Authorization: `Bearer ${e.accessToken.trim()}` } };
+    conToken.push(nombre);
+  }
+  return { mcpServers: salida, conToken, sinToken };
+}
+
 /** Carpetas de plugins del turno completo: el plugin «orus» saneado se cambia por el completo. */
 export function pluginsCompletos(pluginDirs = [], pluginCompleto = null) {
   if (!pluginCompleto) return [...pluginDirs];
@@ -194,13 +272,15 @@ export function borrarMcpCompleto(ruta) {
  * puente que ya llevaba el turno (PRUEBAS, conectores del proyecto…): se conservan, y si un nombre
  * choca manda la definición del Orus principal («la misma configuración»).
  */
-export function prepararOrusCompleto({ cfg, lote, idConversation, perfilServidores = {} }) {
+export function prepararOrusCompleto({ cfg, lote, idConversation, perfilServidores = {}, leerCredenciales = leerCredencialesClaude }) {
   const oc = cfg.orusCompleto;
   if (!oc?.autores?.length) return null;
   const t = turnoOrusCompleto(lote, oc.autores);
   if (!t.activo) return null;
   const orus = servidoresOrus({ configDir: oc.configDir, envArchivo: oc.envArchivo, excluir: oc.excluir ?? [] });
-  const mcpServers = { ...perfilServidores, ...orus.mcpServers };
+  // MCP remotos con OAuth (higgsfield…): token vigente del principal como cabecera (solo lectura).
+  const oauth = tokensOAuthMcp({ mcpServers: orus.mcpServers, credenciales: leerCredenciales(oc.configDir) });
+  const mcpServers = { ...perfilServidores, ...oauth.mcpServers };
   const rutaMcp = escribirMcpCompleto({ hilosDir: cfg.hilosDir, idConversation, mcpServers });
   return {
     activo: true,
@@ -208,6 +288,7 @@ export function prepararOrusCompleto({ cfg, lote, idConversation, perfilServidor
     rutaMcp,
     servidores: Object.keys(mcpServers).sort(),
     faltan: orus.faltan,
+    oauth: { conToken: oauth.conToken, sinToken: oauth.sinToken },
     pluginDirs: pluginsCompletos(cfg.pluginDirs ?? [], oc.plugin),
   };
 }
