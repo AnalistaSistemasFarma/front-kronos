@@ -39,6 +39,15 @@ const ALERTA: Record<string, string> = { rojo: "red", amarillo: "yellow", gris: 
 const pct = (v: number | null) => (v === null ? "—" : `${Math.round(v * 10) / 10} %`.replace(".", ","));
 const dinero = (v: number | null, moneda = "USD") =>
   v === null ? "—" : `${moneda} ${v.toLocaleString("es-CO", { maximumFractionDigits: 2 })}`;
+const tokens = (n: number) =>
+  n >= 1_000_000_000 ? `${(n / 1e9).toFixed(1).replace(".", ",")} mil M` : n >= 1_000_000 ? `${(n / 1e6).toFixed(1).replace(".", ",")} M` : n >= 1000 ? `${Math.round(n / 1000)} k` : String(n);
+const usd = (v: number) => `USD ${v.toLocaleString("es-CO", { maximumFractionDigits: v < 10 ? 2 : 0 })}`;
+const haceSeg = (iso: string | null, ahora: number) => {
+  if (!iso) return "—";
+  const s = Math.max(0, Math.round((ahora - Date.parse(iso)) / 1000));
+  return s < 60 ? `hace ${s} s` : s < 3600 ? `hace ${Math.round(s / 60)} min` : s < 86400 ? `hace ${Math.round(s / 3600)} h` : `hace ${Math.round(s / 86400)} d`;
+};
+const REFRESCO_MS = 30_000;
 const fechaCorta = (iso: string | null) =>
   iso ? new Date(iso).toLocaleDateString("es-CO", { day: "2-digit", month: "short" }) : "—";
 
@@ -51,9 +60,11 @@ export default function CostosLicenciasPage() {
   const [edicion, setEdicion] = useState<Edicion | null>(null);
   const [aviso, setAviso] = useState<{ color: string; texto: string } | null>(null);
   const [guardando, setGuardando] = useState(false);
+  const [enVivo, setEnVivo] = useState(true);
+  const [ahora, setAhora] = useState(() => Date.now());
 
-  const cargar = useCallback(async () => {
-    setCargando(true);
+  const cargar = useCallback(async (silencioso = false) => {
+    if (!silencioso) setCargando(true);
     try {
       const r = await fetch("/api/chat/auditoria/licencias", { cache: "no-store" });
       const j = await r.json();
@@ -69,6 +80,18 @@ export default function CostosLicenciasPage() {
   useEffect(() => {
     void cargar();
   }, [cargar]);
+  // EN VIVO: el consumo llega por el hook de cada agente en cada turno; se refresca solo.
+  useEffect(() => {
+    if (!enVivo) return;
+    const id = setInterval(() => {
+      if (document.visibilityState === "visible") void cargar(true);
+    }, REFRESCO_MS);
+    return () => clearInterval(id);
+  }, [enVivo, cargar]);
+  useEffect(() => {
+    const id = setInterval(() => setAhora(Date.now()), 5_000);
+    return () => clearInterval(id);
+  }, []);
 
   const opcionesLicencia = useMemo(
     () => (datos?.licencias ?? []).filter((l) => l.activa).map((l) => ({ value: String(l.idLicencia), label: `${l.codigo} · ${l.empresa}` })),
@@ -147,6 +170,18 @@ export default function CostosLicenciasPage() {
             Costos y licencias
           </Title>
         </Group>
+        <Group gap="sm">
+          <Switch
+            size="sm"
+            checked={enVivo}
+            onChange={(e) => setEnVivo(e.currentTarget.checked)}
+            label={
+              <Group gap={6}>
+                {enVivo && <span style={{ width: 8, height: 8, borderRadius: 99, background: "var(--mantine-color-green-6)", display: "inline-block" }} />}
+                <Text size="xs">{enVivo ? `En vivo · ${datos ? haceSeg(datos.generadoEn, ahora) : ""}` : "En pausa"}</Text>
+              </Group>
+            }
+          />
         <Button
           size="xs"
           leftSection={<IconPlus size={14} />}
@@ -156,6 +191,7 @@ export default function CostosLicenciasPage() {
         >
           Nueva licencia
         </Button>
+        </Group>
       </Group>
       <Text size="sm" c="dimmed" mb="md">
         Licencias de Anthropic, qué empresa paga cada una y qué agentes comparten su cupo (comparten uso, nunca datos). El
@@ -192,6 +228,29 @@ export default function CostosLicenciasPage() {
             <Kpi titulo="Con uso adicional pagado" valor={String(datos.resumen.conUsoAdicional)} color={datos.resumen.conUsoAdicional ? "yellow" : "green"} />
           </SimpleGrid>
 
+          <SimpleGrid cols={{ base: 1, sm: 3 }} mb="md">
+            <Kpi
+              titulo="Consumo de hoy · valor equivalente en API"
+              valor={usd(datos.resumen.consumoHoy.valorApi)}
+              nota={`${datos.resumen.consumoHoy.turnos} turnos · ${tokens(datos.resumen.consumoHoy.tokens)} tokens`}
+            />
+            <Kpi
+              titulo="Consumo del mes · valor equivalente en API"
+              valor={usd(datos.resumen.consumoMes.valorApi)}
+              nota={
+                datos.resumen.costoMensual
+                  ? `Pagamos ${dinero(datos.resumen.costoMensual)} en licencias: rinden ${(datos.resumen.consumoMes.valorApi / datos.resumen.costoMensual).toFixed(1).replace(".", ",")} veces`
+                  : `${datos.resumen.consumoMes.turnos} turnos · ${tokens(datos.resumen.consumoMes.tokens)} tokens`
+              }
+            />
+            <Kpi
+              titulo="Agentes que reportan consumo"
+              valor={`${datos.resumen.agentesConConsumo} de ${datos.resumen.agentesActivos}`}
+              nota="Los demás no tienen aún el hook de consumo por turno"
+              color={datos.resumen.agentesConConsumo < datos.resumen.agentesActivos ? "yellow" : "green"}
+            />
+          </SimpleGrid>
+
           {datos.resumen.mezclanEmpresas > 0 && (
             <Alert color="red" variant="light" mb="md" icon={<IconAlertCircle size={16} />} title="Licencias que incumplen la regla de negocio">
               {datos.licencias
@@ -209,7 +268,7 @@ export default function CostosLicenciasPage() {
               Licencias
             </Text>
             <ScrollArea type="auto">
-              <Table striped highlightOnHover verticalSpacing="xs" style={{ minWidth: 1180 }}>
+              <Table striped highlightOnHover verticalSpacing="xs" style={{ minWidth: 1300 }}>
                 <Table.Thead>
                   <Table.Tr>
                     <Table.Th>Licencia</Table.Th>
@@ -219,6 +278,7 @@ export default function CostosLicenciasPage() {
                     <Table.Th ta="right">Uso actual</Table.Th>
                     <Table.Th>Promedio 4 semanas</Table.Th>
                     <Table.Th ta="right">Costo por agente</Table.Th>
+                    <Table.Th ta="right">Consumo del mes</Table.Th>
                     <Table.Th>Alertas</Table.Th>
                     <Table.Th />
                   </Table.Tr>
@@ -287,6 +347,21 @@ export default function CostosLicenciasPage() {
                       <Table.Td ta="right">
                         <Text size="sm">{dinero(l.costoPorAgente, l.moneda)}</Text>
                       </Table.Td>
+                      <Table.Td ta="right">
+                        <Tooltip
+                          withArrow
+                          multiline
+                          w={280}
+                          label={`Hoy: ${usd(l.consumoHoy.valorApi)} · ${l.consumoHoy.turnos} turnos. Mes: ${l.consumoMes.turnos} turnos · ${tokens(l.consumoMes.tokens)} tokens. Valor si se pagara por API.`}
+                        >
+                          <div>
+                            <Text size="sm">{usd(l.consumoMes.valorApi)}</Text>
+                            <Text size="xs" c="dimmed">
+                              {l.rendimiento !== null ? `rinde ${String(l.rendimiento).replace(".", ",")}×` : `${tokens(l.consumoMes.tokens)} tokens`}
+                            </Text>
+                          </div>
+                        </Tooltip>
+                      </Table.Td>
                       <Table.Td style={{ maxWidth: 300 }}>
                         <Group gap={4}>
                           {l.alertas.length === 0 ? (
@@ -331,6 +406,7 @@ export default function CostosLicenciasPage() {
                     <Table.Th ta="right">Licencias</Table.Th>
                     <Table.Th ta="right">Agentes</Table.Th>
                     <Table.Th ta="right">Costo mensual</Table.Th>
+                    <Table.Th ta="right">Valor API del mes</Table.Th>
                   </Table.Tr>
                 </Table.Thead>
                 <Table.Tbody>
@@ -348,6 +424,7 @@ export default function CostosLicenciasPage() {
                           </Text>
                         ) : null}
                       </Table.Td>
+                      <Table.Td ta="right">{usd(e.consumoMes.valorApi)}</Table.Td>
                     </Table.Tr>
                   ))}
                 </Table.Tbody>
@@ -367,6 +444,7 @@ export default function CostosLicenciasPage() {
                       <Table.Th>Departamento</Table.Th>
                       <Table.Th ta="right">Agentes</Table.Th>
                       <Table.Th ta="right">Costo mensual</Table.Th>
+                      <Table.Th ta="right">Valor API del mes</Table.Th>
                     </Table.Tr>
                   </Table.Thead>
                   <Table.Tbody>
@@ -375,6 +453,7 @@ export default function CostosLicenciasPage() {
                         <Table.Td>{d.departamento}</Table.Td>
                         <Table.Td ta="right">{d.agentes}</Table.Td>
                         <Table.Td ta="right">{dinero(d.costoMensual)}</Table.Td>
+                        <Table.Td ta="right">{usd(d.consumoMes.valorApi)}</Table.Td>
                       </Table.Tr>
                     ))}
                   </Table.Tbody>
@@ -382,6 +461,70 @@ export default function CostosLicenciasPage() {
               </ScrollArea>
             </Card>
           </SimpleGrid>
+
+          <Card withBorder radius="md" padding="md" mb="md" className="chat-surface">
+            <Group justify="space-between">
+              <Text fw={600} size="sm">
+                Consumo en vivo · últimos turnos de la flota
+              </Text>
+              <Text size="xs" c="dimmed">
+                Valor equivalente en API (precio de lista): referencia, no lo que se paga
+              </Text>
+            </Group>
+            <ScrollArea h={280} type="auto" mt="xs">
+              <Table verticalSpacing={3} striped>
+                <Table.Thead>
+                  <Table.Tr>
+                    <Table.Th>Cuándo</Table.Th>
+                    <Table.Th>Agente</Table.Th>
+                    <Table.Th>Empresa</Table.Th>
+                    <Table.Th>Licencia</Table.Th>
+                    <Table.Th>Modelo</Table.Th>
+                    <Table.Th ta="right">Tokens</Table.Th>
+                    <Table.Th ta="right">Valor API</Table.Th>
+                  </Table.Tr>
+                </Table.Thead>
+                <Table.Tbody>
+                  {datos.ultimosTurnos.map((u, i) => (
+                    <Table.Tr key={`${u.fin}-${i}`}>
+                      <Table.Td>
+                        <Text size="xs">{haceSeg(u.fin, ahora)}</Text>
+                      </Table.Td>
+                      <Table.Td>
+                        <Text size="sm">{u.agente}</Text>
+                      </Table.Td>
+                      <Table.Td>
+                        <Text size="xs">{u.empresa ?? "—"}</Text>
+                      </Table.Td>
+                      <Table.Td>
+                        <Text size="xs">{u.licencia ?? "—"}</Text>
+                      </Table.Td>
+                      <Table.Td>
+                        <Text size="xs" c="dimmed">
+                          {(u.modelos ?? "—").replace(/claude-|anthropic\//g, "")}
+                        </Text>
+                      </Table.Td>
+                      <Table.Td ta="right">
+                        <Text size="xs">{tokens(u.tokens)}</Text>
+                      </Table.Td>
+                      <Table.Td ta="right">
+                        <Text size="xs">{usd(u.valorApi)}</Text>
+                      </Table.Td>
+                    </Table.Tr>
+                  ))}
+                  {datos.ultimosTurnos.length === 0 && (
+                    <Table.Tr>
+                      <Table.Td colSpan={7}>
+                        <Text size="xs" c="dimmed">
+                          Sin turnos en los últimos 7 días.
+                        </Text>
+                      </Table.Td>
+                    </Table.Tr>
+                  )}
+                </Table.Tbody>
+              </Table>
+            </ScrollArea>
+          </Card>
 
           <SimpleGrid cols={{ base: 1, md: 2 }} mb="md">
             <Card withBorder radius="md" padding="md" className="chat-surface">

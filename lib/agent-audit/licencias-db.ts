@@ -3,8 +3,12 @@ import { sql, withMssqlPool } from "../mssqlPool";
 import type { CuotaReportada } from "../proyectos/consumo-anthropic";
 import {
   armarTablero,
+  consumoVacio,
   validarAsignacion,
+  valorApi,
   type AgenteLicenciaDto,
+  type ConsumoDto,
+  type TurnoRecienteDto,
   type LicenciaDto,
   type LicenciasDto,
   type SemanaUsoDto,
@@ -78,9 +82,54 @@ export async function leerLicencias(): Promise<LicenciasDto> {
         GROUP BY la.id_license, h.reset_7d;
 
         SELECT id_company, RTRIM(company) AS empresa FROM dbo.company ORDER BY company;
+
+        -- CONSUMO EN VIVO (hook de consumo por turno de cada agente): mes y día en curso, hora de Colombia.
+        DECLARE @ahoraCot DATETIME2(0) = DATEADD(HOUR, -5, SYSUTCDATETIME());
+        DECLARE @iniMes DATETIME2(0) = DATEADD(HOUR, 5, CAST(DATEFROMPARTS(YEAR(@ahoraCot), MONTH(@ahoraCot), 1) AS DATETIME2(0)));
+        DECLARE @iniDia DATETIME2(0) = DATEADD(HOUR, 5, CAST(CAST(@ahoraCot AS DATE) AS DATETIME2(0)));
+        SELECT u.id_agent, u.models, CASE WHEN u.created_at >= @iniDia THEN 1 ELSE 0 END AS hoy,
+               COUNT(*) AS turnos,
+               SUM(CAST(ISNULL(u.input_tokens, 0) AS BIGINT)) AS entrada,
+               SUM(CAST(ISNULL(u.cache_creation_tokens, 0) AS BIGINT)) AS cache_escritura,
+               SUM(CAST(ISNULL(u.cache_read_tokens, 0) AS BIGINT)) AS cache_lectura,
+               SUM(CAST(ISNULL(u.output_tokens, 0) AS BIGINT)) AS salida
+        FROM dbo.chat_agent_turn_usage u
+        WHERE u.created_at >= @iniMes
+        GROUP BY u.id_agent, u.models, CASE WHEN u.created_at >= @iniDia THEN 1 ELSE 0 END;
+
+        SELECT id_agent, MAX(created_at) AS ultimo FROM dbo.chat_agent_turn_usage
+        WHERE created_at >= DATEADD(DAY, -90, SYSUTCDATETIME()) GROUP BY id_agent;
+
+        SELECT TOP 25 u.id_agent, u.models, u.input_tokens, u.cache_creation_tokens, u.cache_read_tokens, u.output_tokens,
+               COALESCE(u.turn_ended_at, u.created_at) AS fin
+        FROM dbo.chat_agent_turn_usage u
+        WHERE u.created_at >= DATEADD(DAY, -7, SYSUTCDATETIME())
+        ORDER BY u.created_at DESC;
       `),
     );
-    const [lics, tokens, agentes, semanas, empresas] = r.recordsets as unknown as Fila[][];
+    const [lics, tokens, agentes, semanas, empresas, consumos, ultimos, recientes] = r.recordsets as unknown as Fila[][];
+
+    const tk = (f: Fila) => ({
+      entrada: Number(f.entrada ?? f.input_tokens ?? 0),
+      cacheEscritura: Number(f.cache_escritura ?? f.cache_creation_tokens ?? 0),
+      cacheLectura: Number(f.cache_lectura ?? f.cache_read_tokens ?? 0),
+      salida: Number(f.salida ?? f.output_tokens ?? 0),
+    });
+    const total = (x: ReturnType<typeof tk>) => x.entrada + x.cacheEscritura + x.cacheLectura + x.salida;
+    const mes = new Map<number, ConsumoDto>();
+    const dia = new Map<number, ConsumoDto>();
+    for (const c of consumos ?? []) {
+      const id = Number(c.id_agent);
+      const t = tk(c);
+      const v = { turnos: Number(c.turnos), tokens: total(t), valorApi: valorApi(txt(c.models), t) };
+      const m = mes.get(id) ?? consumoVacio();
+      mes.set(id, { turnos: m.turnos + v.turnos, tokens: m.tokens + v.tokens, valorApi: m.valorApi + v.valorApi });
+      if (Number(c.hoy) === 1) {
+        const d = dia.get(id) ?? consumoVacio();
+        dia.set(id, { turnos: d.turnos + v.turnos, tokens: d.tokens + v.tokens, valorApi: d.valorApi + v.valorApi });
+      }
+    }
+    const ultimoPorAgente = new Map<number, string | null>((ultimos ?? []).map((u) => [Number(u.id_agent), iso(u.ultimo)]));
 
     const licPorHuella = new Map<string, number>();
     for (const t of tokens) if (t.estado === "activo") licPorHuella.set(String(t.huella), Number(t.id_license));
@@ -102,6 +151,9 @@ export async function leerLicencias(): Promise<LicenciasDto> {
         idLicencia: num(a.id_license),
         idLicenciaPorHuella: huella ? (licPorHuella.get(huella) ?? null) : null,
         huellaToken: huella,
+        consumoMes: mes.get(Number(a.id_agent)) ?? consumoVacio(),
+        consumoHoy: dia.get(Number(a.id_agent)) ?? consumoVacio(),
+        ultimoTurno: ultimoPorAgente.get(Number(a.id_agent)) ?? null,
       };
     });
 
@@ -136,18 +188,36 @@ export async function leerLicencias(): Promise<LicenciasDto> {
           .map((t) => ({ huella: String(t.huella), estado: String(t.estado) })),
         agentes: delaLicencia,
         semanas: semPorLic.get(id) ?? [],
-      } satisfies Omit<LicenciaDto, "usoActual" | "promedio4" | "pico4" | "semaforo" | "costoPorAgente" | "alertas">;
+      } satisfies Omit<LicenciaDto, "usoActual" | "promedio4" | "pico4" | "semaforo" | "costoPorAgente" | "alertas" | "consumoMes" | "consumoHoy" | "rendimiento">;
     });
 
     const sinLicencia = ags.filter((a) => a.idLicencia === null && a.idLicenciaPorHuella === null);
     const porRevocar = tokens
       .filter((t) => t.estado === "revocar")
       .map((t) => ({ huella: String(t.huella), notas: txt(t.notas) }));
+    const porId = new Map(ags.map((a) => [a.idAgent, a]));
+    const codigoLic = new Map(base.map((b) => [b.idLicencia, b.codigo]));
+    const ultimosTurnos: TurnoRecienteDto[] = (recientes ?? []).map((u) => {
+      const a = porId.get(Number(u.id_agent));
+      const t = tk(u);
+      const lic = a ? (a.idLicencia ?? a.idLicenciaPorHuella) : null;
+      return {
+        agente: a?.nombre ?? `Agente ${String(u.id_agent)}`,
+        empresa: a?.empresa ?? null,
+        licencia: lic ? (codigoLic.get(lic) ?? null) : null,
+        modelos: txt(u.models),
+        tokens: total(t),
+        valorApi: valorApi(txt(u.models), t),
+        fin: iso(u.fin),
+      };
+    });
     return armarTablero(
       base,
       sinLicencia,
       porRevocar,
       empresas.map((e) => ({ idEmpresa: Number(e.id_company), empresa: String(e.empresa) })),
+      new Date(),
+      { ultimosTurnos, agentesActivos: ags },
     );
   });
 }

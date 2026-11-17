@@ -5,6 +5,7 @@ import {
   semaforoDe,
   usoActual,
   validarAsignacion,
+  valorApi,
   type AgenteLicenciaDto,
 } from '../licencias';
 
@@ -24,6 +25,9 @@ const ag = (p: Partial<AgenteLicenciaDto>): AgenteLicenciaDto => ({
   idLicencia: 1,
   idLicenciaPorHuella: null,
   huellaToken: null,
+  consumoMes: { turnos: 0, tokens: 0, valorApi: 0 },
+  consumoHoy: { turnos: 0, tokens: 0, valorApi: 0 },
+  ultimoTurno: null,
   ...p,
 });
 const base = (p: Record<string, unknown> = {}) => ({
@@ -114,5 +118,26 @@ describe('licencias de Anthropic', () => {
     ]);
     expect(t.porDepartamento.find((d) => d.departamento === 'CARTERA')?.costoMensual).toBe(100);
     expect(t.resumen.costoMensual).toBe(300);
+  });
+
+  it('valor equivalente en API por modelo principal; otros proveedores no se valoran', () => {
+    const t1 = { entrada: 1_000_000, cacheEscritura: 1_000_000, cacheLectura: 10_000_000, salida: 1_000_000 };
+    // Opus 5.5: 4 + 5 + 0,2×10 + 20 = 31
+    expect(valorApi('claude-opus-5-5, claude-haiku-5-5', t1)).toBeCloseTo(31);
+    expect(valorApi('anthropic/claude-sonnet-5-5', t1)).toBeCloseTo(2 + 2.5 + 2 + 10);
+    expect(valorApi('openai/gpt-6.1-sol', t1)).toBe(0);
+    expect(valorApi(null, t1)).toBe(0);
+  });
+
+  it('suma el consumo en vivo por licencia, empresa y resumen, y calcula cuántas veces rinde', () => {
+    const c = (v: number) => ({ turnos: 2, tokens: 1000, valorApi: v });
+    const a1 = ag({ consumoMes: c(300), consumoHoy: c(30), ultimoTurno: '2026-11-17T11:00:00Z' });
+    const a2 = ag({ idAgent: 2, consumoMes: c(100), consumoHoy: c(0) });
+    const t = armarTablero([base({ costoMensual: 100, agentes: [a1, a2] })], [], [], [], AHORA, { agentesActivos: [a1, a2] });
+    expect(t.licencias[0].consumoMes.valorApi).toBe(400);
+    expect(t.licencias[0].rendimiento).toBe(4);
+    expect(t.porEmpresa[0].consumoMes.valorApi).toBe(400);
+    expect(t.resumen.consumoHoy.valorApi).toBe(30);
+    expect(t.resumen).toMatchObject({ agentesConConsumo: 1, agentesActivos: 2 });
   });
 });
