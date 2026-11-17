@@ -3342,6 +3342,18 @@ body.chat-inmersivo .chat-page-thread--completa {
   opacity: 1;
 }
 
+/* Aviso de «mensaje reenviado» (2026-11-17): arriba y al centro, visible sin
+   desplazarse; se va solo a los 4 s. */
+.chat-aviso-reenvio {
+  position: fixed;
+  top: calc(env(safe-area-inset-top, 0px) + 72px);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 420;
+  max-width: min(92vw, 420px);
+  box-shadow: var(--mantine-shadow-md);
+}
+
 /* `.chat-msg .chat-reaccionar-btn` y no solo la clase: los estilos de Mantine
    cargan DESPUÉS de globals.css y su `display` ganaría el empate. */
 @media (hover: none), (pointer: coarse) {

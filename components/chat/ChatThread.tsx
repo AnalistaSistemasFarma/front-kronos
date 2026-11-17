@@ -67,7 +67,9 @@ import {
 } from '../../lib/chat/nudge-fx';
 import { registrarHiloAbierto, soltarHiloAbierto } from '../../lib/chat/message-sound';
 import type { ChatAttachmentDto, ChatReplyToDto } from '../../lib/chat/client';
-import { BotonReaccionar, FilaReacciones, HojaMensaje } from './ChatReactions';
+import { BotonReaccionar, BotonReenviar, FilaReacciones, HojaMensaje, esReenviable } from './ChatReactions';
+import { ReenviarModal } from './CompartirAdjunto';
+import { avisoMensajeReenviado } from '../../lib/chat/reenviar-mensaje-rules';
 import type { MediaParaEnviar } from './useChatConversation';
 import StickerAnimado from './StickerAnimado';
 
@@ -229,6 +231,7 @@ const MessageBubble = memo(function MessageBubble({
   onIrAlCitado,
   onReaccionar,
   onAbrirHoja,
+  onReenviar,
 }: {
   message: ChatMessageDto;
   /** El agente del hilo directo. En un grupo no hay "uno". */
@@ -250,6 +253,8 @@ const MessageBubble = memo(function MessageBubble({
   onReaccionar?: (message: ChatMessageDto, emoji: string) => void;
   /** Toque largo en el celular: abre la hoja de acciones del mensaje. */
   onAbrirHoja?: (message: ChatMessageDto) => void;
+  /** Reenviar ESTE mensaje a otra conversación (2026-11-17). */
+  onReenviar?: (message: ChatMessageDto) => void;
 }) {
   const isSystem = message.role === 'system';
 
@@ -380,9 +385,18 @@ const MessageBubble = memo(function MessageBubble({
   }
 
   const esSticker = message.media?.kind === 'sticker';
-  const reaccionarBoton = puedeReaccionar ? (
-    <BotonReaccionar alLado={isUser ? 'left' : 'right'} onElegir={(e) => onReaccionar?.(message, e)} />
-  ) : null;
+  const botonReenviar =
+    onReenviar && esReenviable(message) ? <BotonReenviar onReenviar={() => onReenviar(message)} /> : null;
+  const reaccionarBoton =
+    puedeReaccionar || botonReenviar ? (
+      <>
+        {isUser && botonReenviar}
+        {puedeReaccionar && (
+          <BotonReaccionar alLado={isUser ? 'left' : 'right'} onElegir={(e) => onReaccionar?.(message, e)} />
+        )}
+        {!isUser && botonReenviar}
+      </>
+    ) : null;
 
   return (
     <Group
@@ -1236,6 +1250,16 @@ export default function ChatThread({
   const abrirHoja = useCallback((message: ChatMessageDto) => setIdHoja(message.id), []);
   const mensajeHoja = idHoja === null ? null : (thread.messages.find((m) => m.id === idHoja) ?? null);
 
+  // REENVIAR un mensaje a una persona, un grupo o un proyecto (2026-11-17).
+  const [reenviando, setReenviando] = useState<ChatMessageDto | null>(null);
+  const [avisoReenvio, setAvisoReenvio] = useState<string | null>(null);
+  const reenviar = useCallback((message: ChatMessageDto) => setReenviando(message), []);
+  useEffect(() => {
+    if (!avisoReenvio) return;
+    const t = window.setTimeout(() => setAvisoReenvio(null), 4000);
+    return () => window.clearTimeout(t);
+  }, [avisoReenvio]);
+
   // El panel Emoji | Stickers | GIF vive en el compositor (botón al lado del
   // clip, 2026-10-20); aquí solo se envía.
   const enviarMediaHilo = thread.sendMedia;
@@ -1432,6 +1456,7 @@ export default function ChatThread({
                 onIrAlCitado={irAlMensaje}
                 onReaccionar={soloLectura ? undefined : reaccionar}
                 onAbrirHoja={abrirHoja}
+                onReenviar={idHiloAbierto ? reenviar : undefined}
               />
             );
           })}
@@ -1513,8 +1538,33 @@ export default function ChatThread({
         onCerrar={() => setIdHoja(null)}
         onReaccionar={reaccionar}
         onCitar={soloLectura ? undefined : citar}
+        onReenviar={idHiloAbierto ? reenviar : undefined}
         puedeReaccionar={!soloLectura}
       />
+      {reenviando && idHiloAbierto && (
+        <ReenviarModal
+          titulo='Reenviar mensaje'
+          url={`/api/chat/conversations/${idHiloAbierto}/messages/${reenviando.id}/reenviar`}
+          onClose={() => setReenviando(null)}
+          onListo={(elegido) => {
+            setReenviando(null);
+            setAvisoReenvio(avisoMensajeReenviado(elegido));
+          }}
+        />
+      )}
+      {avisoReenvio && (
+        <Alert
+          color='green'
+          variant='filled'
+          role='status'
+          withCloseButton
+          onClose={() => setAvisoReenvio(null)}
+          className='chat-aviso-reenvio'
+          data-testid='chat-aviso-reenvio'
+        >
+          {avisoReenvio}
+        </Alert>
+      )}
       {visorAdjuntos && (
         <ChatAttachmentViewer
           adjuntos={visorAdjuntos.lista}
