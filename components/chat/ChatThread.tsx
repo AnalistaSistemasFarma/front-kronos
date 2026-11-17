@@ -353,7 +353,17 @@ const MessageBubble = memo(function MessageBubble({
   // directo es siempre el agente; en un grupo, quien sea (persona o agente).
   const nombreAutor = message.author?.name ?? agent?.displayName ?? 'Asistente';
   const avatarAutor = message.author?.avatarUrl ?? agent?.avatarUrl ?? null;
-  const codigoAutor = message.author?.kind === 'agent' ? String(message.author.id) : agent?.code ?? '';
+  // Con el código y la versión de la foto SUBIDA, la burbuja pinta la misma
+  // imagen que la cabecera; sin ellos caía a la inicial.
+  const codigoAutor =
+    message.author?.kind === 'agent'
+      ? message.author.code ?? String(message.author.id)
+      : agent?.code ?? '';
+  const versionAutor = message.author?.kind === 'agent'
+    ? message.author.avatarVersion ?? null
+    : message.author
+      ? null
+      : agent?.avatarVersion ?? null;
 
   if (isSystem) {
     return (
@@ -389,6 +399,7 @@ const MessageBubble = memo(function MessageBubble({
             code={codigoAutor}
             displayName={nombreAutor}
             avatarUrl={avatarAutor}
+            avatarVersion={versionAutor}
             size={28}
             showStatus={false}
             withTooltip={false}
@@ -612,6 +623,7 @@ const AgentActivity = memo(function AgentActivity({
           code={agent.code}
           displayName={agent.displayName}
           avatarUrl={agent.avatarUrl}
+          avatarVersion={agent.avatarVersion}
           size={24}
           showStatus={false}
           withTooltip={false}
