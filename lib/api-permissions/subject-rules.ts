@@ -135,7 +135,7 @@ export interface PortalTercero {
   tipo: string | null;
 }
 
-/** Filtro de `GET /v1/suppliers`: exactamente uno (contrato de la API SAP). */
+/** Qué se busca en la API SAP: NIT que «empieza por» o nombre que «contiene». */
 export type SapSupplierQuery = { nit: string } | { nombre: string };
 
 const SAP_NAME_PATTERN = /^[\p{L}\p{N} .&,-]+$/u;
@@ -150,6 +150,21 @@ export function sapSupplierQuery(q: string): SapSupplierQuery | null {
   const digits = text.replace(/[.\s-]/g, '');
   if (/^\d+$/.test(digits)) return NIT_PATTERN.test(digits) ? { nit: digits } : null;
   return text.length >= 3 && text.length <= 60 && SAP_NAME_PATTERN.test(text) ? { nombre: text } : null;
+}
+
+/** Literal de texto OData: comillas simples duplicadas. */
+const odataText = (value: string) => `'${value.replace(/'/g, "''")}'`;
+
+/**
+ * Parámetros OData de `GET /b1s/v1/BusinessPartners` (como en el Service Layer). El nombre va en
+ * mayúsculas: así están los nombres en SAP y `contains` distingue mayúsculas.
+ */
+export function sapPartnersParams(query: SapSupplierQuery): Record<string, string> {
+  const filter =
+    'nit' in query
+      ? `startswith(FederalTaxID, ${odataText(query.nit)})`
+      : `contains(CardName, ${odataText(query.nombre.toUpperCase())})`;
+  return { $select: 'CardCode,CardName,CardType,FederalTaxID', $filter: filter, $orderby: 'CardCode', $top: '20' };
 }
 
 /** NIT de SAP (FederalTaxID, p. ej. «900.123.456-7») → solo dígitos SIN dígito de verificación. */
@@ -168,8 +183,8 @@ function shortText(value: unknown, max: number): string | null {
 }
 
 function tipoLabel(types: Set<string>): string | null {
-  const supplier = types.has('PROVEEDOR');
-  const customer = types.has('CLIENTE');
+  const supplier = types.has('cSupplier');
+  const customer = types.has('cCustomer');
   if (supplier && customer) return 'Proveedor y cliente';
   if (supplier) return 'Proveedor';
   if (customer) return 'Cliente';
@@ -177,24 +192,25 @@ function tipoLabel(types: Set<string>): string | null {
 }
 
 /**
- * Une las respuestas `{ items: Partner[] }` de cada empresa en una lista por NIT. No confía en
+ * Une las respuestas `{ value: BusinessPartner[] }` de cada empresa (formato del Service Layer:
+ * CardCode, CardName, CardType, FederalTaxID) en una lista por NIT. No confía en
  * el otro sistema: descarta respuestas y socios mal formados. Orden por nombre, máximo 50.
  */
 export function mergeSapPartners(responses: { empresa: PortalTerceroEmpresa; body: unknown }[]): PortalTercero[] {
   const byNit = new Map<string, { nombre: string | null; empresas: Map<string, PortalTerceroEmpresa>; types: Set<string> }>();
   for (const { empresa, body } of responses) {
     if (!body || typeof body !== 'object' || Array.isArray(body)) continue;
-    const items = (body as { items?: unknown }).items;
+    const items = (body as { value?: unknown }).value;
     if (!Array.isArray(items)) continue;
     for (const raw of items) {
       if (!raw || typeof raw !== 'object') continue;
       const item = raw as Record<string, unknown>;
-      const nit = normalizeSapNit(item.nit);
+      const nit = normalizeSapNit(item.FederalTaxID);
       if (!nit) continue;
       const entry = byNit.get(nit) ?? { nombre: null, empresas: new Map(), types: new Set<string>() };
-      entry.nombre ??= shortText(item.cardName, API_CLIENT_LIMITS.subjectLabel);
+      entry.nombre ??= shortText(item.CardName, API_CLIENT_LIMITS.subjectLabel);
       entry.empresas.set(empresa.clave, empresa);
-      if (typeof item.type === 'string') entry.types.add(item.type);
+      if (typeof item.CardType === 'string') entry.types.add(item.CardType);
       byNit.set(nit, entry);
     }
   }

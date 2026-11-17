@@ -12,6 +12,7 @@ import {
   resolvePortalAccessConfig,
   resolveSapApiConfig,
   SAP_API_COMPANIES,
+  sapPartnersParams,
   sapSupplierQuery,
 } from './subject-rules';
 
@@ -109,15 +110,15 @@ describe('búsqueda en la API SAP', () => {
         {
           empresa: farma,
           body: {
-            items: [
-              { cardCode: 'P1', cardName: ' ZETA  SAS ', nit: '800100200-1', type: 'PROVEEDOR', active: true },
-              { cardCode: 'C1', cardName: 'ABAMIA LABS', nit: '901724736', type: 'CLIENTE', active: true },
-              { cardCode: 'X', cardName: 'sin nit', nit: 'N/A', type: 'CLIENTE' },
+            value: [
+              { CardCode: 'P1', CardName: ' ZETA  SAS ', FederalTaxID: '800100200-1', CardType: 'cSupplier' },
+              { CardCode: 'C1', CardName: 'ABAMIA LABS', FederalTaxID: '901724736', CardType: 'cCustomer' },
+              { CardCode: 'X', CardName: 'sin nit', FederalTaxID: 'N/A', CardType: 'cCustomer' },
               null,
             ],
           },
         },
-        { empresa: gss, body: { items: [{ cardCode: 'P9', cardName: 'Abamia', nit: '901.724.736-0', type: 'PROVEEDOR' }] } },
+        { empresa: gss, body: { value: [{ CardCode: 'P9', CardName: 'Abamia', FederalTaxID: '901.724.736-0', CardType: 'cSupplier' }] } },
         { empresa: gss, body: { error: 'forma ajena' } },
       ])
     ).toEqual([
@@ -127,8 +128,18 @@ describe('búsqueda en la API SAP', () => {
   });
 
   it('limita a 50', () => {
-    const items = Array.from({ length: 80 }, (_, i) => ({ cardName: 'x', nit: String(10000 + i), type: 'CLIENTE' }));
-    expect(mergeSapPartners([{ empresa: SAP_API_COMPANIES[0], body: { items } }])).toHaveLength(50);
+    const value = Array.from({ length: 80 }, (_, i) => ({ CardName: 'x', FederalTaxID: String(10000 + i), CardType: 'cCustomer' }));
+    expect(mergeSapPartners([{ empresa: SAP_API_COMPANIES[0], body: { value } }])).toHaveLength(50);
+  });
+
+  it('arma la consulta OData de la API SAP (como el Service Layer)', () => {
+    expect(sapPartnersParams({ nit: '90012' })).toEqual({
+      $select: 'CardCode,CardName,CardType,FederalTaxID',
+      $filter: "startswith(FederalTaxID, '90012')",
+      $orderby: 'CardCode',
+      $top: '20',
+    });
+    expect(sapPartnersParams({ nombre: 'abamia labs' }).$filter).toBe("contains(CardName, 'ABAMIA LABS')");
   });
 });
 

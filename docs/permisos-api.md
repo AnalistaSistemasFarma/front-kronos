@@ -58,7 +58,7 @@ Rutas (mismo permiso que la pestaña, `requireApiClientAdmin`, sin caché, error
 
 ### Conexión con la API SAP (proveedores y clientes)
 
-Los proveedores y clientes salen de la **API SAP** (proyecto `api-sap`, rama `feat/llave-synerlink`): `GET {SAP_API_URL}/v1/suppliers?nit=` (NIT que empieza por, 5-15 dígitos) o `?nombre=` (contiene, 3-60). Cada consulta lleva un JWT **EdDSA** firmado por SynerLink con su llave **privada**; la API SAP solo tiene la pública (`SYNERLINK_JWT_PUBLIC_KEY`) y a SynerLink **solo** le deja buscar socios (`suppliers:search`), nunca leer documentos. El token es de un solo uso y por empresa, así que se consultan las 8 empresas en paralelo y se unen por NIT (sin dígito de verificación), con el tipo (Proveedor / Cliente / ambos) y las empresas donde existe. Máximo 20 por empresa (límite de la API SAP).
+Los proveedores y clientes salen de la **API SAP** (proyecto `api-sap`, rama `feat/llave-synerlink`): `GET {SAP_API_URL}/b1s/v1/BusinessPartners` con las mismas rutas y parámetros OData del Service Layer: `$filter=startswith(FederalTaxID, '…')` (NIT que empieza por, 5-15 dígitos) o `$filter=contains(CardName, '…')` (contiene, 3-60). Cada consulta lleva un JWT **EdDSA** firmado por SynerLink con su llave **privada**; la API SAP solo tiene la pública (`SYNERLINK_JWT_PUBLIC_KEY`) y a SynerLink **solo** le deja buscar socios (`suppliers:search`), nunca leer documentos. El token es de un solo uso y por empresa, así que se consultan las 8 empresas en paralelo y se unen por NIT (sin dígito de verificación), con el tipo (Proveedor / Cliente / ambos) y las empresas donde existe. Máximo 20 por empresa (límite de la API SAP).
 
 Variables **nuevas** en el `.env` de Kronos (las agrega Juan; reiniciar el servidor después):
 

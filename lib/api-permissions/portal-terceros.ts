@@ -1,7 +1,8 @@
 /**
  * PERMISOS API — proveedores y clientes desde la API SAP (proyecto api-sap), SOLO servidor.
  *
- * Contrato: GET {SAP_API_URL}/v1/suppliers?nit= o ?nombre= con un JWT EdDSA firmado por
+ * Contrato: GET {SAP_API_URL}/b1s/v1/BusinessPartners?$filter=…&$select=… (mismas rutas y
+ * parámetros OData del Service Layer, solo lectura) con un JWT EdDSA firmado por
  * SynerLink (llave PRIVADA SAP_API_SYNERLINK_PRIVATE_KEY; la API tiene la pública en
  * SYNERLINK_JWT_PUBLIC_KEY). Un token NUEVO por consulta y por empresa (uso único, 60 s,
  * scope `suppliers:search`), así que se consultan las 8 empresas en paralelo y se unen por NIT.
@@ -18,6 +19,7 @@ import {
   resolveSapApiConfig,
   type PortalAcceso,
   SAP_API_COMPANIES,
+  sapPartnersParams,
   sapSupplierQuery,
   type PortalTercero,
   type PortalTerceroEmpresa,
@@ -25,7 +27,7 @@ import {
 } from './subject-rules';
 
 const SAP_API_TIMEOUT_MS = 10_000;
-const SAP_API_PATH = '/v1/suppliers';
+const SAP_API_PATH = '/b1s/v1/BusinessPartners';
 const TOKEN_LIFETIME_SECONDS = 60;
 /** `sub` del token (auditoría y límite por minuto de la API SAP). */
 const TOKEN_SUBJECT = 'synerlink-permisos-api';
@@ -70,7 +72,7 @@ async function searchSap(query: SapSupplierQuery): Promise<PortalResult<PortalTe
     console.error('[permisos-api] SAP_API_SYNERLINK_PRIVATE_KEY no es una llave privada válida');
     return { status: 'not_configured' };
   }
-  const params = new URLSearchParams('nit' in query ? { nit: query.nit } : { nombre: query.nombre });
+  const params = new URLSearchParams(sapPartnersParams(query));
 
   const results: CompanyResult[] = await Promise.all(
     SAP_API_COMPANIES.map(async (empresa): Promise<CompanyResult> => {
