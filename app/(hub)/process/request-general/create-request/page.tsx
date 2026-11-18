@@ -8,8 +8,13 @@ import { downloadWorkbook } from '@/lib/dashboard/excel/excelHelpers';
 import PurchaseInlineForm from '../../purchases/PurchaseInlineForm';
 import PreviousPurchasesModal from '../../purchases/PreviousPurchasesModal';
 import CompanyLogo from '../../../../../components/ui/CompanyLogo';
+import { ResizableTh, useColumnWidths } from '../../../../../components/ui/ResizableTh';
+import { useUiPreference } from '../../../../../components/ui/useUiPreference';
+import { PREF_COMPANY_COLORS } from '../../../../../lib/ui/preferences';
+import { companyRowStyle } from '../../../../../lib/ui/companyColors';
 import SalesInlineForm from '../../sales/SalesInlineForm';
 import {
+  Avatar,
   Paper,
   Stack,
   Table,
@@ -158,6 +163,9 @@ interface Ticket {
   url: string;
   phone: string;
   identification: string;
+  /** Fotos de perfil (user.image) del solicitante y del asignado. */
+  requester_image?: string | null;
+  user_image?: string | null;
 }
 
 interface CompanyData {
@@ -233,6 +241,9 @@ function RequestBoard() {
   const isSapFormProcess = isPurchaseProcess || isSalesProcess;
   const [purchaseNotice, setPurchaseNotice] = useState<{ ok: boolean; message: string } | null>(null);
   const [previousOpen, setPreviousOpen] = useState(false);
+  /** Preferencias del usuario: fondo por compañía en la tabla y anchos de columna (Perfil). */
+  const [companyColors] = useUiPreference<boolean>(PREF_COMPANY_COLORS, false);
+  const colWidths = useColumnWidths('mis-solicitudes', { id: 70, asunto: 340, compania: 170, estado: 150, fecha: 170, personas: 230 });
   const isSubmittingRef = useRef(false);
 
   const linkedProcessParam = searchParams.get('linkedProcess');
@@ -1591,15 +1602,15 @@ function RequestBoard() {
           </Box>
 
           <div className='overflow-x-auto'>
-            <Table striped highlightOnHover>
+            <Table striped={!companyColors} highlightOnHover style={{ tableLayout: 'fixed', minWidth: colWidths.total }}>
               <Table.Thead>
                 <Table.Tr>
-                  <Table.Th>ID</Table.Th>
-                  <Table.Th>Asunto</Table.Th>
-                  <Table.Th>Compañía / Categoría</Table.Th>
-                  <Table.Th>Estado</Table.Th>
-                  <Table.Th>Fecha</Table.Th>
-                  <Table.Th>Solicitante / Asignado</Table.Th>
+                  <ResizableTh col='id' width={colWidths.widths.id} onResize={colWidths.setWidth}>ID</ResizableTh>
+                  <ResizableTh col='asunto' width={colWidths.widths.asunto} onResize={colWidths.setWidth}>Asunto</ResizableTh>
+                  <ResizableTh col='compania' width={colWidths.widths.compania} onResize={colWidths.setWidth}>Compañía / Categoría</ResizableTh>
+                  <ResizableTh col='estado' width={colWidths.widths.estado} onResize={colWidths.setWidth}>Estado</ResizableTh>
+                  <ResizableTh col='fecha' width={colWidths.widths.fecha} onResize={colWidths.setWidth}>Fecha</ResizableTh>
+                  <ResizableTh col='personas' width={colWidths.widths.personas} onResize={colWidths.setWidth}>Solicitante / Asignado</ResizableTh>
                 </Table.Tr>
               </Table.Thead>
               <Table.Tbody>
@@ -1624,6 +1635,7 @@ function RequestBoard() {
                     <Table.Tr
                       key={ticket.id}
                       className='cursor-pointer transition-colors'
+                      style={companyRowStyle(ticket.company, companyColors)}
                       onClick={() => {
                         sessionStorage.setItem('selectedRequest', JSON.stringify(ticket));
                         saveRequestListNav(
@@ -1641,7 +1653,7 @@ function RequestBoard() {
                           {ticket.id}
                         </Text>
                       </Table.Td>
-                      <Table.Td style={{ minWidth: 240, maxWidth: 320 }}>
+                      <Table.Td>
                         <Text size='sm' fw={500} lineClamp={2}>
                           {ticket.subject}
                         </Text>
@@ -1739,13 +1751,13 @@ function RequestBoard() {
                       </Table.Td>
                       <Table.Td>
                         <Stack gap={4}>
-                          <Group gap={4} wrap='nowrap'>
-                            <IconUser size={14} className='text-gray-400' />
-                            <Text size='sm'>{ticket.requester}</Text>
+                          <Group gap={6} wrap='nowrap'>
+                            <Avatar src={ticket.requester_image || null} name={ticket.requester} color='initials' size={22} radius='xl' />
+                            <Text size='sm' truncate>{ticket.requester}</Text>
                           </Group>
-                          <Group gap={4} wrap='nowrap'>
-                            <IconUserCheck size={14} className='text-gray-400' />
-                            <Text size='sm' c='dimmed'>
+                          <Group gap={6} wrap='nowrap'>
+                            <Avatar src={ticket.user_image || null} name={ticket.user} color='initials' size={22} radius='xl' />
+                            <Text size='sm' c='dimmed' truncate>
                               {ticket.user}
                             </Text>
                           </Group>

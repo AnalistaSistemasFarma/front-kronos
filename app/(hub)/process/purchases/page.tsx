@@ -14,6 +14,9 @@ import { EDITABLE_STATES } from '../../../../lib/purchases/drafts';
 import DetailModal, { type PurchaseDraft } from './DetailModal';
 import RequestFormModal, { type EditTarget } from './RequestFormModal';
 import CompanyLogo from '../../../../components/ui/CompanyLogo';
+import { useUiPreference } from '../../../../components/ui/useUiPreference';
+import { PREF_COMPANY_COLORS } from '../../../../lib/ui/preferences';
+import { companyRowStyle } from '../../../../lib/ui/companyColors';
 import BulkModal from './BulkModal';
 import { VARIANT_OPTIONS, matchesVariant, type PurchaseVariant } from '../../../../lib/purchases/variants';
 
@@ -61,6 +64,7 @@ function formatTotal(raw: unknown): string {
 }
 
 function PurchasesPageContent() {
+  const [companyColors] = useUiPreference<boolean>(PREF_COMPANY_COLORS, false);
   const { data: session } = useSession();
   const searchParams = useSearchParams();
 
@@ -479,7 +483,7 @@ function PurchasesPageContent() {
                     <Table.Tr
                       key={`${r.companyId}-${r.DocEntry}`}
                       onClick={() => setSelected(r)}
-                      style={{ cursor: 'pointer' }}
+                      style={{ cursor: 'pointer', ...companyRowStyle(r.companyName, companyColors) }}
                     >
                       <Table.Td>
                         <CompanyLogo name={r.companyName} />

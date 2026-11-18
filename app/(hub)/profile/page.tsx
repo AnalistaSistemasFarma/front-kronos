@@ -1,9 +1,13 @@
 'use client';
 
+import { useUiPreference } from '../../../components/ui/useUiPreference';
+import { PREF_COMPANY_COLORS } from '../../../lib/ui/preferences';
+
 import { useState, useEffect } from 'react';
 import { useSession } from 'next-auth/react';
 import { useRouter } from 'next/navigation';
 import {
+  Switch,
   Container,
   Title,
   Text,
@@ -73,6 +77,7 @@ export default function ProfileSettingsPage() {
   const { data: session, status, update } = useSession();
   const router = useRouter();
   const [loading, setLoading] = useState(true);
+  const [companyColors, setCompanyColors] = useUiPreference<boolean>(PREF_COMPANY_COLORS, false);
   const [saving, setSaving] = useState(false);
   const [changingPassword, setChangingPassword] = useState(false);
   const [profile, setProfile] = useState<UserProfile | null>(null);
@@ -591,6 +596,21 @@ export default function ProfileSettingsPage() {
                     );
                   })}
                 </SimpleGrid>
+              </div>
+
+              <div>
+                <Text fw={600} size='sm' mb={4}>
+                  Distinguir compañías por color en las tablas
+                </Text>
+                <Text size='xs' c='dimmed' mb='sm'>
+                  Cada fila lleva un fondo sutil con el color de su compañía (por ejemplo, morado para OLP).
+                  Se guarda en su perfil.
+                </Text>
+                <Switch
+                  checked={companyColors}
+                  onChange={(e) => setCompanyColors(e.currentTarget.checked)}
+                  label={companyColors ? 'Activado' : 'Desactivado'}
+                />
               </div>
             </Stack>
           </Card>
