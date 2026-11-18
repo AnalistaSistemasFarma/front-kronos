@@ -137,7 +137,8 @@ function archivoDelParche(args) {
  */
 export function partirNombre(nombre) {
   const n = String(nombre ?? '').trim()
-  const m = /^mcp__([^_].*?)__(.+)$/.exec(n)
+  // Claude Code names MCP tools `mcp__<server>__<tool>`; openclaw names them `<server>__<tool>`.
+  const m = /^mcp__([^_].*?)__(.+)$/.exec(n) ?? /^([a-z0-9][a-z0-9-]*)__([a-z0-9].*)$/i.exec(n)
   if (!m) return { servidor: '', tool: n }
   if (m[1] === 'openclaw') return { servidor: '', tool: m[2] }
   return { servidor: m[1], tool: m[2] }
@@ -296,6 +297,18 @@ function etiquetaMcp(servidor, tool, args) {
   const objeto = dato(objetoConsultado(args), 60)
 
   if (/^(synerlink|synerlink-prod)$/.test(s)) return '' // el propio canal no se anuncia
+  // Specific connectors first: several of them contain generic words (kronos, sql, sharepoint).
+  if (s.includes('infralectura') || s.startsWith('infra')) return con('🖥️ Revisando servidores', dato(primero(args, ['servidor', 'server', 'host', 'servicio', 'service', 'log']), 50))
+  if (s.includes('pruebas') && (s.includes('kronos') || s.includes('sql'))) {
+    const escribe = /escrib|write|exec/i.test(tool)
+    return con(escribe ? '🧪 Escribiendo en la base de PRUEBAS' : '🧪 Consultando SQL de PRUEBAS')
+  }
+  if (/documento|pdf|docx/i.test(tool)) return con('📄 Leyendo documento', dato(archivo(args), 60))
+  if (s.includes('lectorexcel') || /excel|xlsx|hoja/i.test(tool)) return con('📊 Leyendo Excel', dato(archivo(args), 60))
+  if (s === 'invima' || s.startsWith('invima')) return con('💊 Consultando el INVIMA', dato(primero(args, ['registro', 'expediente']), 40))
+  if (s === 'dtw' || s.startsWith('dtw')) return con('📦 Preparando el cargue DTW', dato(archivo(args), 60))
+  if (s.includes('devportal')) return con('👩‍💻 Trabajando en el código del portal')
+  if (s.includes('graphify')) return con('🕸️ Consultando el mapa del código')
   if (s.startsWith('sapsend')) return con(`💸 Consultando SAPSEND${deEmpresa}`, objeto)
   if (s.startsWith('sap')) return con(`🧾 Consultando SAP${deEmpresa}`, objeto)
   if (s.includes('kronos') || s.includes('synerlink')) return con('🗂️ Consultando SynerLink', objeto)
@@ -307,7 +320,7 @@ function etiquetaMcp(servidor, tool, args) {
   if (s.includes('playwright') || s.includes('browser')) return con('🧭 Navegando en el explorador')
   if (s.includes('engram') || s.includes('memory')) return con('🧠 Consultando la memoria')
   if (s.includes('n8n')) return con('🔁 Revisando una automatización')
-  return con(`🔌 Consultando ${dato(servidor, 40)}`, objeto)
+  return con(`🔌 Usando ${dato(tool, 40)} de ${dato(servidor, 40)}`, objeto)
 }
 
 // ── Eventos que no son herramientas ─────────────────────────────────────────

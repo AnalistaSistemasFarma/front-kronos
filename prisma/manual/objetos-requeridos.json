@@ -1,13 +1,58 @@
 {
-  "_doc": "Objetos de KRONOSDB que el codigo usa por SQL directo y que NO estan en schema.prisma (verificar-esquema.ps1 no los ve). scripts/bluegreen/verificar-objetos-sql.cjs los comprueba en SOLO LECTURA antes del cambio de color: si falta alguno, el deploy se detiene y la version activa sigue atendiendo. Agregue aqui cada tabla o columna nueva que se cree con un SQL manual y que el codigo use sin Prisma. Pase completo 2026-11-09: + ventas-config-empresa, errores de IA y analisis de seguridad.",
+  "_doc": "Objetos de KRONOSDB que el codigo usa por SQL directo y que NO estan en schema.prisma (verificar-esquema.ps1 no los ve). scripts/bluegreen/verificar-objetos-sql.cjs los comprueba en SOLO LECTURA antes del cambio de color: si falta alguno, el deploy se detiene y la version activa sigue atendiendo. Agregue aqui cada tabla o columna nueva que se cree con un SQL manual y que el codigo use sin Prisma. Pase completo 2026-11-09: + ventas-config-empresa, errores de IA y analisis de seguridad. 2026-11-18: + ANS de solicitudes (process_category.sla_*, request_sla_pause).",
   "columnas": [
-    ["task_process_category", "task_kind"],
-    ["request_form_value", "locked"],
-    ["sales_company_config", "id_process_category_oferta"],
-    ["sales_company_config", "descripcion_editable"],
-    ["sales_company_config", "id_price_list_default"],
-    ["sales_company_config", "id_process_category_directa"],
-    ["sales_company_config", "exige_oc"]
+    [
+      "task_process_category",
+      "task_kind"
+    ],
+    [
+      "request_form_value",
+      "locked"
+    ],
+    [
+      "sales_company_config",
+      "id_process_category_oferta"
+    ],
+    [
+      "sales_company_config",
+      "descripcion_editable"
+    ],
+    [
+      "sales_company_config",
+      "id_price_list_default"
+    ],
+    [
+      "sales_company_config",
+      "id_process_category_directa"
+    ],
+    [
+      "sales_company_config",
+      "exige_oc"
+    ],
+    [
+      "process_category",
+      "sla_value"
+    ],
+    [
+      "process_category",
+      "sla_unit"
+    ],
+    [
+      "process_category",
+      "sla_warn_pct"
+    ],
+    [
+      "process_category",
+      "sla_source"
+    ],
+    [
+      "process_category",
+      "sla_updated_at"
+    ],
+    [
+      "process_category",
+      "sla_updated_by"
+    ]
   ],
   "tablas": [
     "task_sap_action",
@@ -22,6 +67,9 @@
     "agent_error_issue",
     "agent_error_event",
     "agent_security_run",
-    "agent_security_finding"
+    "agent_security_finding",
+    "task_doc_template",
+    "request_generated_document",
+    "request_sla_pause"
   ]
 }

@@ -3,12 +3,13 @@ import sqlConfig from '../../../../dbconfig.js';
 import { validateTaskAction } from '../../../../lib/workflow-sap/catalog';
 
 /**
- * Guarda el tipo de la tarea (normal | authorization | sap_executor) y, si es una
+ * Guarda el tipo de la tarea (normal | authorization | sap_executor | doc_template) y, si es una
  * tarea SAP, su acción del catálogo (disparador on_execute). Las acciones de otros
- * disparadores (efectos de autorizaciones) no se tocan aquí.
+ * disparadores (efectos de autorizaciones) no se tocan aquí. La configuración de la
+ * Plantilla de documento se guarda aparte (/api/workflow-doc/task-template).
  */
-async function saveTaskKind(transaction, taskId, isAuthorization, isSapTask, sapActionKey, sapTrigger = 'on_execute') {
-  const kind = isAuthorization ? 'authorization' : isSapTask ? 'sap_executor' : 'normal';
+async function saveTaskKind(transaction, taskId, isAuthorization, isSapTask, sapActionKey, sapTrigger = 'on_execute', isDocTask = false) {
+  const kind = isAuthorization ? 'authorization' : isSapTask ? 'sap_executor' : isDocTask ? 'doc_template' : 'normal';
   await new sql.Request(transaction)
     .input('id', sql.Int, taskId)
     .input('kind', sql.NVarChar(20), kind)
@@ -194,6 +195,8 @@ export async function POST(req) {
 
           // Tarea SAP: la ejecuta el sistema con una acción del catálogo (no es autorización).
           const isSapTask = !taskIsAuthorization && taskKindIn === 'sap_executor';
+          // Plantilla de documento: genera un documento con los valores del formulario.
+          const isDocTask = !taskIsAuthorization && taskKindIn === 'doc_template';
           if (isSapTask && (action === 'create' || action === 'update')) {
             const sapErrors = validateTaskAction({ taskKind: 'sap_executor', actionKey: String(taskSapActionKey || ''), trigger: taskSapTrigger });
             if (sapErrors.length > 0) throw new Error(`Tarea SAP «${taskName}»: ${sapErrors.join(' ')}`);
@@ -247,7 +250,7 @@ export async function POST(req) {
                 .query(insertUserTaskQuery);
             }
 
-            await saveTaskKind(transaction, newTaskId, taskIsAuthorization, isSapTask, taskSapActionKey, taskSapTrigger);
+            await saveTaskKind(transaction, newTaskId, taskIsAuthorization, isSapTask, taskSapActionKey, taskSapTrigger, isDocTask);
             results.tasks.push({ action: 'create', id: newTaskId, success: true });
 
           } else if (action === 'update' && id) {
@@ -313,7 +316,7 @@ export async function POST(req) {
                 .query(insertUserTaskQuery);
             }
 
-            await saveTaskKind(transaction, id, taskIsAuthorization, isSapTask, taskSapActionKey, taskSapTrigger);
+            await saveTaskKind(transaction, id, taskIsAuthorization, isSapTask, taskSapActionKey, taskSapTrigger, isDocTask);
             results.tasks.push({ action: 'update', id, success: true });
 
           } else if (action === 'delete' && id) {

@@ -6,8 +6,16 @@ import { useRouter, useSearchParams } from 'next/navigation';
 // exportBoardExcel (y con él exceljs, ~900 KB) se carga al tocar Exportar, no al abrir la pantalla.
 import { downloadWorkbook } from '@/lib/dashboard/excel/excelHelpers';
 import PurchaseInlineForm from '../../purchases/PurchaseInlineForm';
+import PreviousPurchasesModal from '../../purchases/PreviousPurchasesModal';
+import CompanyLogo from '../../../../../components/ui/CompanyLogo';
+import PersonLine from '../../../../../components/ui/PersonLine';
+import { ResizableTh, useColumnWidths } from '../../../../../components/ui/ResizableTh';
+import { useUiPreference } from '../../../../../components/ui/useUiPreference';
+import { PREF_COMPANY_COLORS } from '../../../../../lib/ui/preferences';
+import { companyRowStyle } from '../../../../../lib/ui/companyColors';
 import SalesInlineForm from '../../sales/SalesInlineForm';
 import {
+  Avatar,
   Paper,
   Stack,
   Table,
@@ -34,6 +42,7 @@ import {
   Loader,
 } from '@mantine/core';
 import {
+  IconHistory,
   IconAlertCircle,
   IconSearch,
   IconPlus,
@@ -155,6 +164,9 @@ interface Ticket {
   url: string;
   phone: string;
   identification: string;
+  /** Fotos de perfil (user.image) del solicitante y del asignado. */
+  requester_image?: string | null;
+  user_image?: string | null;
 }
 
 interface CompanyData {
@@ -229,6 +241,10 @@ function RequestBoard() {
   const [salesModo, setSalesModo] = useState<'enviar' | 'directo'>('enviar');
   const isSapFormProcess = isPurchaseProcess || isSalesProcess;
   const [purchaseNotice, setPurchaseNotice] = useState<{ ok: boolean; message: string } | null>(null);
+  const [previousOpen, setPreviousOpen] = useState(false);
+  /** Preferencias del usuario: fondo por compañía en la tabla y anchos de columna (Perfil). */
+  const [companyColors] = useUiPreference<boolean>(PREF_COMPANY_COLORS, false);
+  const colWidths = useColumnWidths('mis-solicitudes', { id: 70, asunto: 340, compania: 170, estado: 150, fecha: 170, personas: 300 });
   const isSubmittingRef = useRef(false);
 
   const linkedProcessParam = searchParams.get('linkedProcess');
@@ -1523,6 +1539,16 @@ function RequestBoard() {
             >
               Descargar Excel
             </Button>
+            {/* Provisional: solicitudes de compra creadas antes en SAPSEND (todas las empresas), para consultar y duplicar. */}
+            <Button
+              variant='light'
+              color='grape'
+              radius='xl'
+              leftSection={<IconHistory size={16} />}
+              onClick={() => setPreviousOpen(true)}
+            >
+              Solicitudes de compra anteriores
+            </Button>
             <Button
               radius='xl'
               leftSection={<IconPlus size={16} />}
@@ -1576,16 +1602,82 @@ function RequestBoard() {
             />
           </Box>
 
-          <div className='overflow-x-auto'>
-            <Table striped highlightOnHover>
+          {/* Celular: tarjetas con el mismo logo, fotos y color por compañía de la tabla. */}
+          <Stack gap='xs' hiddenFrom='md' p='xs' data-testid='mis-solicitudes-mobile-list'>
+            {visibleTickets.length === 0 ? (
+              <Text size='sm' c='dimmed' ta='center' py='xl'>
+                {tickets.length > 0 ? 'Ninguna solicitud coincide con los filtros o la búsqueda' : 'Aún no tienes solicitudes; crea una nueva'}
+              </Text>
+            ) : (
+              visibleTickets.map((ticket) => {
+                const StatusIcon = getStatusIcon(ticket.status);
+                const open = () => {
+                  sessionStorage.setItem('selectedRequest', JSON.stringify(ticket));
+                  saveRequestListNav(
+                    'create-request',
+                    visibleTickets.map((t) => ({ kind: 'request' as const, id: Number(t.id) })),
+                    { kind: 'request', id: Number(ticket.id) }
+                  );
+                  window.open(`/process/request-general/view-request?id=${ticket.id}&from=create-request`);
+                };
+                return (
+                  <Paper
+                    key={ticket.id}
+                    withBorder
+                    radius='md'
+                    p='sm'
+                    role='button'
+                    tabIndex={0}
+                    onClick={open}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') open();
+                    }}
+                    style={{ cursor: 'pointer', ...companyRowStyle(ticket.company, companyColors) }}
+                  >
+                    <Group justify='space-between' wrap='nowrap' gap='xs' mb={4}>
+                      <Text size='sm' fw={700} c='var(--mantine-color-blue-light-color)'>
+                        #{ticket.id}
+                      </Text>
+                      <Badge color={getStatusColor(ticket.status)} variant='light' size='sm' leftSection={<StatusIcon size={12} />} styles={{ label: { overflow: 'visible' } }}>
+                        {ticket.status}
+                      </Badge>
+                    </Group>
+                    <Text size='sm' fw={600} lineClamp={2} style={{ overflowWrap: 'anywhere' }}>
+                      {ticket.subject}
+                    </Text>
+                    {requestFlows[ticket.id] ? (
+                      <div style={{ marginTop: 6 }}>
+                        <RequestFlowBar flow={requestFlows[ticket.id]} />
+                      </div>
+                    ) : null}
+                    <Group gap={8} mt={6} wrap='nowrap' align='center'>
+                      <CompanyLogo name={ticket.company} height={24} />
+                      <Text size='xs' c='dimmed' style={{ overflowWrap: 'anywhere' }}>
+                        {[ticket.category, ticket.created_at ? new Intl.DateTimeFormat('es-CO', { day: 'numeric', month: 'short', year: 'numeric' }).format(new Date(new Date(ticket.created_at).getTime() + 5 * 60 * 60 * 1000)) : null]
+                          .filter(Boolean)
+                          .join(' · ')}
+                      </Text>
+                    </Group>
+                    <Stack gap={4} mt={6}>
+                      <PersonLine name={ticket.requester} image={ticket.requester_image} role='requester' />
+                      <PersonLine name={ticket.user} image={ticket.user_image} dimmed role='assignee' />
+                    </Stack>
+                  </Paper>
+                );
+              })
+            )}
+          </Stack>
+
+          <Box visibleFrom='md' className='overflow-x-auto'>
+            <Table striped={!companyColors} highlightOnHover style={{ tableLayout: 'fixed', minWidth: colWidths.total }}>
               <Table.Thead>
                 <Table.Tr>
-                  <Table.Th>ID</Table.Th>
-                  <Table.Th>Asunto</Table.Th>
-                  <Table.Th>Compañía / Categoría</Table.Th>
-                  <Table.Th>Estado</Table.Th>
-                  <Table.Th>Fecha</Table.Th>
-                  <Table.Th>Solicitante / Asignado</Table.Th>
+                  <ResizableTh col='id' width={colWidths.widths.id} onResize={colWidths.setWidth}>ID</ResizableTh>
+                  <ResizableTh col='asunto' width={colWidths.widths.asunto} onResize={colWidths.setWidth}>Asunto</ResizableTh>
+                  <ResizableTh col='compania' width={colWidths.widths.compania} onResize={colWidths.setWidth}>Compañía / Categoría</ResizableTh>
+                  <ResizableTh col='estado' width={colWidths.widths.estado} onResize={colWidths.setWidth}>Estado</ResizableTh>
+                  <ResizableTh col='fecha' width={colWidths.widths.fecha} onResize={colWidths.setWidth}>Fecha</ResizableTh>
+                  <ResizableTh col='personas' width={colWidths.widths.personas} onResize={colWidths.setWidth}>Solicitante / Asignado</ResizableTh>
                 </Table.Tr>
               </Table.Thead>
               <Table.Tbody>
@@ -1610,6 +1702,7 @@ function RequestBoard() {
                     <Table.Tr
                       key={ticket.id}
                       className='cursor-pointer transition-colors'
+                      style={companyRowStyle(ticket.company, companyColors)}
                       onClick={() => {
                         sessionStorage.setItem('selectedRequest', JSON.stringify(ticket));
                         saveRequestListNav(
@@ -1627,7 +1720,7 @@ function RequestBoard() {
                           {ticket.id}
                         </Text>
                       </Table.Td>
-                      <Table.Td style={{ minWidth: 240, maxWidth: 320 }}>
+                      <Table.Td>
                         <Text size='sm' fw={500} lineClamp={2}>
                           {ticket.subject}
                         </Text>
@@ -1679,12 +1772,7 @@ function RequestBoard() {
                       </Table.Td>
                       <Table.Td>
                         <Stack gap={2}>
-                          <Group gap={4} wrap='nowrap'>
-                            <IconBuilding size={14} className='text-gray-400' />
-                            <Text size='sm' fw={500}>
-                              {ticket.company}
-                            </Text>
-                          </Group>
+                          <CompanyLogo name={ticket.company} />
                           <Text size='xs' c='dimmed'>
                             {ticket.category}
                           </Text>
@@ -1730,16 +1818,8 @@ function RequestBoard() {
                       </Table.Td>
                       <Table.Td>
                         <Stack gap={4}>
-                          <Group gap={4} wrap='nowrap'>
-                            <IconUser size={14} className='text-gray-400' />
-                            <Text size='sm'>{ticket.requester}</Text>
-                          </Group>
-                          <Group gap={4} wrap='nowrap'>
-                            <IconUserCheck size={14} className='text-gray-400' />
-                            <Text size='sm' c='dimmed'>
-                              {ticket.user}
-                            </Text>
-                          </Group>
+                          <PersonLine name={ticket.requester} image={ticket.requester_image} role='requester' />
+                          <PersonLine name={ticket.user} image={ticket.user_image} dimmed role='assignee' />
                         </Stack>
                       </Table.Td>
                     </Table.Tr>
@@ -1747,9 +1827,18 @@ function RequestBoard() {
                 )}
               </Table.Tbody>
             </Table>
-          </div>
+          </Box>
         </Card>
 
+        <PreviousPurchasesModal
+          opened={previousOpen}
+          onClose={() => setPreviousOpen(false)}
+          onCreated={(message) => {
+            setPreviousOpen(false);
+            setPurchaseNotice({ ok: true, message });
+            fetchTickets();
+          }}
+        />
         {purchaseNotice && (
           <Alert
             color={purchaseNotice.ok ? 'green' : 'yellow'}

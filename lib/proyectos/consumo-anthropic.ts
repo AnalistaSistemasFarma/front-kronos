@@ -25,6 +25,13 @@ export interface CuotaReportada {
   overage: string | null;
   medidoEn: Date;
   fuente: FuenteCuota;
+  /**
+   * Huellas (12 hex del SHA-256) del token y de la organización de Anthropic, para
+   * saber qué licencia usa el agente (Auditoría → Costos y licencias, 2026-11-17).
+   * Opcionales: los puentes viejos no las mandan. NUNCA el token.
+   */
+  huellaToken?: string | null;
+  huellaOrganizacion?: string | null;
 }
 
 /** Lo que la interfaz recibe por agente (GET /api/proyectos/<id>/consumo). */
@@ -68,6 +75,14 @@ function fecha(raw: unknown): Date | null | undefined {
 }
 
 /** Valida el cuerpo de POST /api/chat/agent/quota. Nunca lanza. */
+/** Huella hexadecimal de 8 a 16 caracteres; null si no vino; undefined si es inválida. */
+function huella(v: unknown): string | null | undefined {
+  if (v === undefined || v === null || v === '') return null;
+  if (typeof v !== 'string') return undefined;
+  const h = v.trim().toLowerCase();
+  return /^[0-9a-f]{8,16}$/.test(h) ? h : undefined;
+}
+
 export function normalizarCuota(payload: Record<string, unknown> | null, ahora: Date = new Date()): Resultado<CuotaReportada> {
   if (!payload) return { ok: false, error: 'El cuerpo debe ser un objeto JSON.' };
   const u7 = porcentaje(payload.utilizacion7d);
@@ -92,7 +107,15 @@ export function normalizarCuota(payload: Record<string, unknown> | null, ahora: 
   const overageCrudo = payload.overage;
   const overage = typeof overageCrudo === 'string' && overageCrudo.trim() ? overageCrudo.trim().slice(0, 40) : null;
 
-  return { ok: true, value: { utilizacion7d: u7, reset7d: r7, utilizacion5h: u5, reset5h: r5, overage, medidoEn: medido, fuente } };
+  const huellaToken = huella(payload.huellaToken);
+  const huellaOrganizacion = huella(payload.huellaOrganizacion);
+  if (huellaToken === undefined || huellaOrganizacion === undefined)
+    return { ok: false, error: 'Las huellas deben ser de 8 a 16 caracteres hexadecimales.' };
+
+  return {
+    ok: true,
+    value: { utilizacion7d: u7, reset7d: r7, utilizacion5h: u5, reset5h: r5, overage, medidoEn: medido, fuente, huellaToken, huellaOrganizacion },
+  };
 }
 
 /** Verde, amarillo desde el 70 % y rojo desde el 90 %. */

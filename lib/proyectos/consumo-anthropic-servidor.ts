@@ -37,10 +37,17 @@ export async function guardarCuota(idAgent: number, c: CuotaReportada): Promise<
     const actual = await prisma.chatAgentQuota.findUnique({ where: { id_agent: idAgent }, select: { measured_at: true } });
     if (!actual) {
       await prisma.chatAgentQuota.create({ data: { id_agent: idAgent, ...datos } });
-      return true;
+    } else {
+      if (actual.measured_at.getTime() > c.medidoEn.getTime()) return false;
+      await prisma.chatAgentQuota.update({ where: { id_agent: idAgent }, data: datos });
     }
-    if (actual.measured_at.getTime() > c.medidoEn.getTime()) return false;
-    await prisma.chatAgentQuota.update({ where: { id_agent: idAgent }, data: datos });
+    // Historial del cupo y huellas para Auditoría → Costos y licencias. Nunca tumba el reporte.
+    try {
+      const { registrarHistorialCuota } = await import('../agent-audit/licencias-db');
+      await registrarHistorialCuota(idAgent, c);
+    } catch {
+      /* sin tablas o sin conexión: el cupo ya quedó guardado */
+    }
     return true;
   } catch (error) {
     if (esTablaCuotaAusente(error)) throw new CuotaNoDisponible();

@@ -30,11 +30,13 @@ export async function GET(req) {
         rg.id,
         cr.category as category,
         up_user.name as [user],
+        up_user.image as user_image,
         rg.[description],
         rg.id_company,
         c.company,
         rg.created_at,
         u.name as requester,
+        u.image as requester_image,
         sc.status as [status],
         rg.subject_request as [subject],
         pc.process,
@@ -91,7 +93,7 @@ export async function GET(req) {
       ) cat_user
 
       OUTER APPLY (
-        SELECT TOP 1 u3.name
+        SELECT TOP 1 u3.name, u3.image
         FROM user_process_category_request_general upcrg3
         INNER JOIN [user] u3 ON u3.id = upcrg3.id_user
         WHERE upcrg3.id_process_category = pc.id
