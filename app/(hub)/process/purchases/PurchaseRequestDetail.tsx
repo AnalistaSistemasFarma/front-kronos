@@ -73,7 +73,7 @@ function Label({ icon: Icon, children }: { icon: React.ComponentType<{ size?: nu
 }
 
 /** Columnas de la tabla de lineas, en el orden de SAPSEND. */
-const LINE_COLUMNS: {
+export const LINE_COLUMNS: {
   label: string;
   render: (l: Record<string, unknown>, i: number) => React.ReactNode;
   align?: 'right';
