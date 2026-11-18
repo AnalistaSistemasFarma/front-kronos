@@ -8,6 +8,7 @@ import { downloadWorkbook } from '@/lib/dashboard/excel/excelHelpers';
 import PurchaseInlineForm from '../../purchases/PurchaseInlineForm';
 import PreviousPurchasesModal from '../../purchases/PreviousPurchasesModal';
 import CompanyLogo from '../../../../../components/ui/CompanyLogo';
+import PersonLine from '../../../../../components/ui/PersonLine';
 import { ResizableTh, useColumnWidths } from '../../../../../components/ui/ResizableTh';
 import { useUiPreference } from '../../../../../components/ui/useUiPreference';
 import { PREF_COMPANY_COLORS } from '../../../../../lib/ui/preferences';
@@ -1601,7 +1602,74 @@ function RequestBoard() {
             />
           </Box>
 
-          <div className='overflow-x-auto'>
+          {/* Celular: tarjetas con el mismo logo, fotos y color por compañía de la tabla. */}
+          <Stack gap='xs' hiddenFrom='md' p='xs' data-testid='mis-solicitudes-mobile-list'>
+            {visibleTickets.length === 0 ? (
+              <Text size='sm' c='dimmed' ta='center' py='xl'>
+                {tickets.length > 0 ? 'Ninguna solicitud coincide con los filtros o la búsqueda' : 'Aún no tienes solicitudes; crea una nueva'}
+              </Text>
+            ) : (
+              visibleTickets.map((ticket) => {
+                const StatusIcon = getStatusIcon(ticket.status);
+                const open = () => {
+                  sessionStorage.setItem('selectedRequest', JSON.stringify(ticket));
+                  saveRequestListNav(
+                    'create-request',
+                    visibleTickets.map((t) => ({ kind: 'request' as const, id: Number(t.id) })),
+                    { kind: 'request', id: Number(ticket.id) }
+                  );
+                  window.open(`/process/request-general/view-request?id=${ticket.id}&from=create-request`);
+                };
+                return (
+                  <Paper
+                    key={ticket.id}
+                    withBorder
+                    radius='md'
+                    p='sm'
+                    role='button'
+                    tabIndex={0}
+                    onClick={open}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') open();
+                    }}
+                    style={{ cursor: 'pointer', ...companyRowStyle(ticket.company, companyColors) }}
+                  >
+                    <Group justify='space-between' wrap='nowrap' gap='xs' mb={4}>
+                      <Text size='sm' fw={700} c='var(--mantine-color-blue-light-color)'>
+                        #{ticket.id}
+                      </Text>
+                      <Badge color={getStatusColor(ticket.status)} variant='light' size='sm' leftSection={<StatusIcon size={12} />} styles={{ label: { overflow: 'visible' } }}>
+                        {ticket.status}
+                      </Badge>
+                    </Group>
+                    <Text size='sm' fw={600} lineClamp={2} style={{ overflowWrap: 'anywhere' }}>
+                      {ticket.subject}
+                    </Text>
+                    {requestFlows[ticket.id] ? (
+                      <div style={{ marginTop: 6 }}>
+                        <RequestFlowBar flow={requestFlows[ticket.id]} />
+                      </div>
+                    ) : null}
+                    <Group gap={8} mt={6} wrap='nowrap' align='center'>
+                      <CompanyLogo name={ticket.company} height={24} />
+                      <Text size='xs' c='dimmed' style={{ overflowWrap: 'anywhere' }}>
+                        {[ticket.category, ticket.created_at ? new Intl.DateTimeFormat('es-CO', { day: 'numeric', month: 'short', year: 'numeric' }).format(new Date(new Date(ticket.created_at).getTime() + 5 * 60 * 60 * 1000)) : null]
+                          .filter(Boolean)
+                          .join(' · ')}
+                      </Text>
+                    </Group>
+                    <Group gap={8} mt={6} wrap='wrap'>
+                      <PersonLine name={ticket.requester} image={ticket.requester_image} />
+                      <Text size='xs' c='dimmed'>→</Text>
+                      <PersonLine name={ticket.user} image={ticket.user_image} dimmed />
+                    </Group>
+                  </Paper>
+                );
+              })
+            )}
+          </Stack>
+
+          <Box visibleFrom='md' className='overflow-x-auto'>
             <Table striped={!companyColors} highlightOnHover style={{ tableLayout: 'fixed', minWidth: colWidths.total }}>
               <Table.Thead>
                 <Table.Tr>
@@ -1768,7 +1836,7 @@ function RequestBoard() {
                 )}
               </Table.Tbody>
             </Table>
-          </div>
+          </Box>
         </Card>
 
         <PreviousPurchasesModal
