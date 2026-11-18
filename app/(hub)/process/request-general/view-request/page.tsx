@@ -130,6 +130,7 @@ import { isOrionDocumentInteractionNote } from '../../../../../lib/orion/interac
 import { partitionTasksForDisplay } from '@/lib/orion/taskProgress';
 import { formatEstimatedPaymentDate } from '../../../../../lib/treasury/estimatedPaymentDate';
 import { isAssignedTo, isRequesterSelfAssigned } from '@/lib/request-general/assignee';
+import { RequestGeneratedDocuments } from '@/components/workflow-doc/RequestGeneratedDocuments';
 
 interface Request {
   id: number;
@@ -3324,6 +3325,9 @@ function ViewRequestPage() {
             entityType='Request'
           />
         </Card>
+
+        {/* Tarea «Plantilla de documento»: documentos generados y emisión (modo revisar). */}
+        <RequestGeneratedDocuments requestId={Number(request?.id) || null} onEmitted={refreshAttachmentsAfterUpload} />
 
         <Card shadow='sm' p='lg' radius='md' withBorder mt='6'>
           {updateMessage && (

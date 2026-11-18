@@ -127,6 +127,7 @@ import OrionDocumentVersionsButton from '../../../../../components/orion/OrionDo
 import { isOrionDocumentInteractionNote } from '../../../../../lib/orion/interactionNotes';
 import { partitionTasksForDisplay } from '@/lib/orion/taskProgress';
 import { formatEstimatedPaymentDate } from '../../../../../lib/treasury/estimatedPaymentDate';
+import { RequestGeneratedDocuments } from '@/components/workflow-doc/RequestGeneratedDocuments';
 
 interface Request {
   id: number;
@@ -2819,6 +2820,9 @@ function ViewRequestPage() {
             entityType='Request'
           />
         </Card>
+
+        {/* Tarea «Plantilla de documento»: documentos generados y emisión (modo revisar). */}
+        <RequestGeneratedDocuments requestId={Number(request?.id_request_general) || null} onEmitted={refreshAttachmentsAfterUpload} />
 
         <Card shadow='sm' p='lg' radius='md' withBorder mt='6'>
           {updateMessage && (

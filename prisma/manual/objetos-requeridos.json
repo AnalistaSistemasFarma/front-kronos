@@ -22,6 +22,8 @@
     "agent_error_issue",
     "agent_error_event",
     "agent_security_run",
-    "agent_security_finding"
+    "agent_security_finding",
+    "task_doc_template",
+    "request_generated_document"
   ]
 }
