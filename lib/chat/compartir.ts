@@ -18,11 +18,18 @@
  */
 import { tipoMimeDeAdjunto } from './attachments';
 
-export type TipoDestino = 'persona' | 'grupo' | 'proyecto';
+export type TipoDestino = 'persona' | 'grupo' | 'proyecto' | 'agente';
 
 /** Un destino posible del reenvío, ya con el texto que se muestra. */
 export interface DestinoReenvio {
-  idConversation: number;
+  /**
+   * Target conversation. For an AGENT (2026-11-18, message forwarding only) it
+   * is the user's direct thread with it, or null when it does not exist yet:
+   * the server creates it on forward, keyed by `idAgent`.
+   */
+  idConversation: number | null;
+  /** Only for `tipo = 'agente'`. */
+  idAgent?: number | null;
   tipo: TipoDestino;
   titulo: string;
   /** Segunda línea: empresa del grupo, o conversación y agente del proyecto. */
@@ -34,7 +41,19 @@ export const ETIQUETA_TIPO: Record<TipoDestino, string> = {
   persona: 'Persona',
   grupo: 'Grupo',
   proyecto: 'Proyecto',
+  agente: 'Agente',
 };
+
+/** Stable key of a destination (an agent may still have no conversation). */
+export function destinationKey(d: Pick<DestinoReenvio, 'tipo' | 'idConversation' | 'idAgent'>): string {
+  return d.tipo === 'agente' ? `agent:${d.idAgent}` : `conv:${d.idConversation}`;
+}
+
+/** POST body of a forward: agents go by `idAgent`, everything else by `idConversation`. */
+export function forwardRequestBody(d: DestinoReenvio, note: string): { idConversation?: number | null; idAgent?: number | null; body?: string } {
+  const body = note.trim() || undefined;
+  return d.tipo === 'agente' ? { idAgent: d.idAgent, body } : { idConversation: d.idConversation, body };
+}
 
 /** Tope del comentario que acompaña al reenvío (el mismo mensaje del chat lo vuelve a validar). */
 export const MAX_NOTA_REENVIO = 1000;

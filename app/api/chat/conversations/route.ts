@@ -1,6 +1,6 @@
 import { NextRequest } from 'next/server';
-import { prisma } from '../../../../lib/prisma';
 import { getChatAgentAccess } from '../../../../lib/chat/access';
+import { findOrCreateDirectConversation } from '../../../../lib/chat/forward-to-agent';
 import {
   getConversationPayload,
   listUserConversations,
@@ -78,28 +78,10 @@ export async function POST(request: NextRequest) {
     // interfaz termina mostrando y enviando al grupo en vez de al hilo 1:1.
     // Bug reportado por Nicolás el 2026-09-12 (su chat con horus lo mandaba al
     // grupo y no lo dejaba hablarle en privado).
-    const existing = await prisma.chatConversation.findFirst({
-      where: { kind: 'direct', id_user: user.id, id_agent: idAgent, archived: false },
-      orderBy: { id: 'desc' },
-      select: { id: true },
-    });
-
-    if (existing) {
-      const payload = await getConversationPayload(existing.id);
-      return jsonNoStore({ conversation: payload, created: false });
-    }
-
-    const created = await prisma.chatConversation.create({
-      data: {
-        kind: 'direct',
-        id_user: user.id,
-        id_agent: idAgent,
-        title: agentAccess.displayName,
-      },
-      select: { id: true },
-    });
-
-    const payload = await getConversationPayload(created.id);
+    // Find or create: lib/chat/forward-to-agent.ts (shared with message forwarding).
+    const thread = await findOrCreateDirectConversation(user.id, agentAccess);
+    const payload = await getConversationPayload(thread.id);
+    if (!thread.created) return jsonNoStore({ conversation: payload, created: false });
     return jsonNoStore({ conversation: payload, created: true }, { status: 201 });
   } catch (error) {
     return serverError('POST /api/chat/conversations', error);
