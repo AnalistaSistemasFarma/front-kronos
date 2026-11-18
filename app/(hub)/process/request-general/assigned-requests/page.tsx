@@ -1432,7 +1432,7 @@ function RequestBoard() {
                     onKeyDown={(e) => {
                       if (e.key === 'Enter') open();
                     }}
-                    style={{ cursor: 'pointer' }}
+                    style={{ cursor: 'pointer', ...companyRowStyle(isTask ? t!.company : r!.company, companyColors) }}
                   >
                     <Group justify='space-between' wrap='nowrap' gap='xs' mb={4}>
                       <Group gap={6} wrap='nowrap' style={{ minWidth: 0 }}>
@@ -1460,14 +1460,20 @@ function RequestBoard() {
                         <RequestProgressBar {...progress} />
                       </div>
                     ) : null}
-                    <Text size='xs' c='dimmed' mt={6} style={{ overflowWrap: 'anywhere' }}>
-                      {[isTask ? null : r!.process, isTask ? t!.company : r!.company, formatAssignedDate(isTask ? t!.created_at : r!.created_at)]
-                        .filter(Boolean)
-                        .join(' · ')}
-                    </Text>
-                    <Text size='xs' c='dimmed' style={{ overflowWrap: 'anywhere' }}>
-                      {isTask ? t!.name_requester : r!.requester} → {isTask ? t!.assigned : r!.user}
-                    </Text>
+                    {/* Igual que en la tabla: logo de la compañía y fotos de solicitante y asignado. */}
+                    <Group gap={8} mt={6} wrap='nowrap' align='center'>
+                      <CompanyLogo name={isTask ? t!.company : r!.company} height={24} />
+                      <Text size='xs' c='dimmed' style={{ overflowWrap: 'anywhere' }}>
+                        {[isTask ? null : r!.process, formatAssignedDate(isTask ? t!.created_at : r!.created_at)]
+                          .filter(Boolean)
+                          .join(' · ')}
+                      </Text>
+                    </Group>
+                    <Group gap={8} mt={6} wrap='wrap'>
+                      <PersonLine name={isTask ? t!.name_requester : r!.requester} image={isTask ? t!.requester_image : r!.requester_image} />
+                      <Text size='xs' c='dimmed'>→</Text>
+                      <PersonLine name={isTask ? t!.assigned : r!.user} image={isTask ? t!.assigned_image : r!.user_image} dimmed />
+                    </Group>
                   </Paper>
                 );
               })
