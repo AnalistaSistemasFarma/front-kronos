@@ -26,6 +26,7 @@ import {
   IconBriefcase,
   IconDownload,
   IconMessageForward,
+  IconRobot,
   IconSearch,
   IconShare,
   IconUser,
@@ -37,6 +38,8 @@ import {
   AVISO_HOJA_FALLO,
   ETIQUETA_TIPO,
   MAX_NOTA_REENVIO,
+  destinationKey,
+  forwardRequestBody,
   accionTrasErrorCompartir,
   elegirEstrategiaCompartir,
   enlaceWhatsApp,
@@ -255,6 +258,7 @@ const ICONO_TIPO: Record<TipoDestino, typeof IconUser> = {
   persona: IconUser,
   grupo: IconUsersGroup,
   proyecto: IconBriefcase,
+  agente: IconRobot,
 };
 
 /**
@@ -298,6 +302,7 @@ export function ReenviarModal({
   }, [url]);
 
   const visibles = useMemo(() => filtrarDestinos(destinos ?? [], busqueda, tipo), [destinos, busqueda, tipo]);
+  const hasAgents = useMemo(() => (destinos ?? []).some((d) => d.tipo === 'agente'), [destinos]);
 
   const enviar = async () => {
     if (!elegido || enviando) return;
@@ -306,7 +311,7 @@ export function ReenviarModal({
     try {
       const res = await chatFetch(url, {
         method: 'POST',
-        body: JSON.stringify({ idConversation: elegido.idConversation, body: nota.trim() || undefined }),
+        body: JSON.stringify(forwardRequestBody(elegido, nota)),
       });
       const datos = (await res.json().catch(() => null)) as { error?: string } | null;
       if (!res.ok) throw new Error(datos?.error || 'No se pudo reenviar.');
@@ -336,7 +341,7 @@ export function ReenviarModal({
           </Alert>
         )}
         <TextInput
-          placeholder='Buscar persona, grupo o proyecto'
+          placeholder={hasAgents ? 'Buscar persona, grupo, proyecto o agente' : 'Buscar persona, grupo o proyecto'}
           leftSection={<IconSearch size={16} />}
           value={busqueda}
           onChange={(e) => setBusqueda(e.currentTarget.value)}
@@ -352,6 +357,8 @@ export function ReenviarModal({
             { value: 'persona', label: 'Personas' },
             { value: 'grupo', label: 'Grupos' },
             { value: 'proyecto', label: 'Proyectos' },
+            // Agents only exist as a target when forwarding a MESSAGE (2026-11-18).
+            ...(hasAgents ? [{ value: 'agente', label: 'Agentes' }] : []),
           ]}
           aria-label='Tipo de destino'
         />
@@ -370,10 +377,11 @@ export function ReenviarModal({
             <Stack gap={4} role='listbox' aria-label='Destinos'>
               {visibles.map((d) => {
                 const Icono = ICONO_TIPO[d.tipo];
-                const activo = elegido?.idConversation === d.idConversation;
+                const clave = destinationKey(d);
+                const activo = elegido !== null && destinationKey(elegido) === clave;
                 return (
                   <UnstyledButton
-                    key={d.idConversation}
+                    key={clave}
                     role='option'
                     aria-selected={activo}
                     onClick={() => setElegido(d)}
