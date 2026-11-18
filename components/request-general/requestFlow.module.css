@@ -166,13 +166,38 @@
   font-weight: 700;
 }
 
-/* Pantallas angostas: si no caben los nombres, solo íconos (el nombre sale en el globo). */
+/*
+ * Pantallas angostas (celular): los pasos pasan a una lista vertical, uno por fila con su
+ * ícono, nombre y detalle; antes se apretaban en una sola fila y no se leían.
+ */
 @container (max-width: 560px) {
+  .steps {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 2px;
+  }
+  .step {
+    flex-direction: row;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 8px;
+    border-radius: 10px;
+  }
+  .capsule {
+    display: none;
+  }
   .head {
-    justify-content: center;
+    flex: 1 1 auto;
+    align-items: center;
   }
   .label {
-    display: none;
+    -webkit-line-clamp: 1;
+    line-clamp: 1;
+  }
+  .detail {
+    flex: 0 1 45%;
+    margin-top: 0;
+    padding-left: 0;
+    text-align: right;
   }
 }
 

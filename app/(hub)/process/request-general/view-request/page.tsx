@@ -122,6 +122,7 @@ import { nestDraftPdfRows } from '../../../../../lib/orion/attachmentNesting';
 import { isWordDraftFileName } from '../../../../../lib/orion/draftState';
 import DeleteAttachmentModal from '../../../../../components/request-general/DeleteAttachmentModal';
 import { RequestFlowHeader } from '../../../../../components/request-general/RequestFlow';
+import CompanyLogo, { companyLogoSrc } from '../../../../../components/ui/CompanyLogo';
 import { RequestListNavigator } from '../../../../../components/request-general/RequestListNavigator';
 import OrionDocumentVersionsButton from '../../../../../components/orion/OrionDocumentVersionsButton';
 import TableFieldInput from '../create-request/TableFieldInput';
@@ -2217,7 +2218,12 @@ function ViewRequestPage() {
                 order={1}
                 className='text-3xl font-bold text-gray-900 mb-2 flex items-center gap-3'
               >
-                <IconFileDescription size={32} className='text-blue-6' />
+                {/* Logo real de la compañía (si no tiene, el ícono de siempre). */}
+                {companyLogoSrc(request.company) ? (
+                  <CompanyLogo name={request.company} height={36} />
+                ) : (
+                  <IconFileDescription size={32} className='text-blue-6' />
+                )}
                 Solicitud #{request.id}
               </Title>
               <Text size='lg'>{request.subject}</Text>
@@ -2488,11 +2494,11 @@ function ViewRequestPage() {
               <Stack gap='md'>
                 <div>
                   <Text size='sm' color='gray.6' fw={500}>
-                    Compañia
+                    Compañía
                   </Text>
                   <Card withBorder radius='md' p='md' mt='xs'>
-                    <Group>
-                      <IconBuilding size={16} />
+                    <Group wrap='nowrap'>
+                      {companyLogoSrc(request?.company) ? <CompanyLogo name={request?.company} height={30} /> : <IconBuilding size={16} />}
                       <Text size='sm'>
                         {companies.find((c) => c.value === request?.id_company?.toString())
                           ?.label || request?.company}
