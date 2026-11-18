@@ -251,7 +251,7 @@ function RequestBoard() {
   const [previousOpen, setPreviousOpen] = useState(false);
   /** Preferencias del usuario (Perfil): fondo por compañía y anchos de columna. */
   const [companyColors] = useUiPreference<boolean>(PREF_COMPANY_COLORS, false);
-  const colWidths = useColumnWidths('asignadas', { id: 90, asunto: 340, compania: 190, estado: 150, fecha: 170, personas: 230 });
+  const colWidths = useColumnWidths('asignadas', { id: 90, asunto: 340, compania: 190, estado: 150, fecha: 170, personas: 300 });
   const [exporting, setExporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [formData, setFormData] = useState({

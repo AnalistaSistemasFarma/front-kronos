@@ -244,7 +244,7 @@ function RequestBoard() {
   const [previousOpen, setPreviousOpen] = useState(false);
   /** Preferencias del usuario: fondo por compañía en la tabla y anchos de columna (Perfil). */
   const [companyColors] = useUiPreference<boolean>(PREF_COMPANY_COLORS, false);
-  const colWidths = useColumnWidths('mis-solicitudes', { id: 70, asunto: 340, compania: 170, estado: 150, fecha: 170, personas: 230 });
+  const colWidths = useColumnWidths('mis-solicitudes', { id: 70, asunto: 340, compania: 170, estado: 150, fecha: 170, personas: 300 });
   const isSubmittingRef = useRef(false);
 
   const linkedProcessParam = searchParams.get('linkedProcess');
