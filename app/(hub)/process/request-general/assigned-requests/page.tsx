@@ -32,6 +32,7 @@ import {
   SegmentedControl,
 } from '@mantine/core';
 import {
+  IconHistory,
   IconCalendar,
   IconUser,
   IconBuilding,
@@ -112,6 +113,7 @@ import { formatEstimatedPaymentDateShort } from '@/lib/treasury/estimatedPayment
 import { parseTableValue, parseTableConfig } from '@/lib/requests-general/tableField';
 import { createPrerenderSearchParamsForClientPage } from 'next/dist/server/request/search-params';
 import CompanyLogo from '../../../../../components/ui/CompanyLogo';
+import PreviousPurchasesModal from '../../purchases/PreviousPurchasesModal';
 import PersonLine from '../../../../../components/ui/PersonLine';
 import { ResizableTh, useColumnWidths } from '../../../../../components/ui/ResizableTh';
 import { useUiPreference } from '../../../../../components/ui/useUiPreference';
@@ -246,6 +248,7 @@ function RequestBoard() {
   const [teamCount, setTeamCount] = useState<number | null>(null);
   const [tasksByRequest, setTasksByRequest] = useState<Record<number, RequestTask[]>>({});
   const [loading, setLoading] = useState(true);
+  const [previousOpen, setPreviousOpen] = useState(false);
   /** Preferencias del usuario (Perfil): fondo por compañía y anchos de columna. */
   const [companyColors] = useUiPreference<boolean>(PREF_COMPANY_COLORS, false);
   const colWidths = useColumnWidths('asignadas', { id: 90, asunto: 340, compania: 190, estado: 150, fecha: 170, personas: 230 });
@@ -1282,8 +1285,27 @@ function RequestBoard() {
               Descargar Excel
             </Button>
             <WorkloadDistribution onReassigned={() => fetchTickets()} />
+            {/* Provisional: solicitudes de compra creadas antes en SAPSEND (todas las compañías), para consultar y duplicar. */}
+            <Button
+              variant='light'
+              color='grape'
+              radius='xl'
+              leftSection={<IconHistory size={16} />}
+              onClick={() => setPreviousOpen(true)}
+            >
+              Solicitudes de compra anteriores
+            </Button>
           </>
         }
+      />
+      <PreviousPurchasesModal
+        opened={previousOpen}
+        onClose={() => setPreviousOpen(false)}
+        onCreated={(message) => {
+          setPreviousOpen(false);
+          toast.success(message);
+          fetchTickets();
+        }}
       />
 
       <RequestListFilters
