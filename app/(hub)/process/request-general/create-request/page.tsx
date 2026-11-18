@@ -6,6 +6,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 // exportBoardExcel (y con él exceljs, ~900 KB) se carga al tocar Exportar, no al abrir la pantalla.
 import { downloadWorkbook } from '@/lib/dashboard/excel/excelHelpers';
 import PurchaseInlineForm from '../../purchases/PurchaseInlineForm';
+import PreviousPurchasesModal from '../../purchases/PreviousPurchasesModal';
 import SalesInlineForm from '../../sales/SalesInlineForm';
 import {
   Paper,
@@ -34,6 +35,7 @@ import {
   Loader,
 } from '@mantine/core';
 import {
+  IconHistory,
   IconAlertCircle,
   IconSearch,
   IconPlus,
@@ -229,6 +231,7 @@ function RequestBoard() {
   const [salesModo, setSalesModo] = useState<'enviar' | 'directo'>('enviar');
   const isSapFormProcess = isPurchaseProcess || isSalesProcess;
   const [purchaseNotice, setPurchaseNotice] = useState<{ ok: boolean; message: string } | null>(null);
+  const [previousOpen, setPreviousOpen] = useState(false);
   const isSubmittingRef = useRef(false);
 
   const linkedProcessParam = searchParams.get('linkedProcess');
@@ -1523,6 +1526,16 @@ function RequestBoard() {
             >
               Descargar Excel
             </Button>
+            {/* Provisional: solicitudes de compra creadas antes en SAPSEND (todas las empresas), para consultar y duplicar. */}
+            <Button
+              variant='light'
+              color='grape'
+              radius='xl'
+              leftSection={<IconHistory size={16} />}
+              onClick={() => setPreviousOpen(true)}
+            >
+              Solicitudes de compra anteriores
+            </Button>
             <Button
               radius='xl'
               leftSection={<IconPlus size={16} />}
@@ -1750,6 +1763,15 @@ function RequestBoard() {
           </div>
         </Card>
 
+        <PreviousPurchasesModal
+          opened={previousOpen}
+          onClose={() => setPreviousOpen(false)}
+          onCreated={(message) => {
+            setPreviousOpen(false);
+            setPurchaseNotice({ ok: true, message });
+            fetchTickets();
+          }}
+        />
         {purchaseNotice && (
           <Alert
             color={purchaseNotice.ok ? 'green' : 'yellow'}
