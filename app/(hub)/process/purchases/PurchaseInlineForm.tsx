@@ -490,22 +490,22 @@ export default function PurchaseInlineForm({ companyId, edit, duplicate, onDone 
   if (readiness === 'no-write') {
     return (
       <Alert color="yellow" title="Solicitud de compra">
-        No tiene permiso para crear solicitudes de compra en esta empresa («Compras · Gestionar solicitudes»).
+        No tiene permiso para crear solicitudes de compra en esta compañía («Compras · Gestionar solicitudes»).
       </Alert>
     );
   }
   if (readiness === 'no-profile') {
     return (
-      <Alert color="yellow" title="Falta su perfil de SAPSEND en esta empresa">
+      <Alert color="yellow" title="Falta su perfil de SAPSEND en esta compañía">
         Para crear solicitudes de compra su usuario necesita el ID de usuario y el ID de departamento de SAPSEND de esta
-        empresa. Pídale a Tecnología que los registre en Administración → Usuarios → «SAPSEND por empresa».
+        compañía. Pídale a Tecnología que los registre en Administración → Usuarios → «SAPSEND por empresa».
       </Alert>
     );
   }
   if (readiness === 'no-sap') {
     return (
       <Alert color="yellow" title="Solicitud de compra">
-        Esta empresa no tiene conexión a SAP configurada; no se pueden crear solicitudes de compra.
+        Esta compañía no tiene conexión a SAP configurada; no se pueden crear solicitudes de compra.
       </Alert>
     );
   }
@@ -785,7 +785,7 @@ export default function PurchaseInlineForm({ companyId, edit, duplicate, onDone 
           if (bulkDone) onDone({ ok: true, message: 'Carga masiva procesada: las solicitudes quedaron en Mis solicitudes.' });
         }}
         onDone={() => setBulkDone(true)}
-        companies={[{ idCompany: Number(companyId), companyName: companyName || 'Empresa' }]}
+        companies={[{ idCompany: Number(companyId), companyName: companyName || 'Compañía' }]}
       />
     </Stack>
   );
