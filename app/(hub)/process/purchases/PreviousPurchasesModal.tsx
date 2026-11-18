@@ -2,9 +2,10 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Alert, Badge, Button, Group, Loader, Modal, ScrollArea, SegmentedControl, Select, Table, Text, TextInput } from '@mantine/core';
-import { IconCopy, IconRefresh, IconSearch } from '@tabler/icons-react';
+import { IconCopy, IconEye, IconPaperclip, IconRefresh, IconSearch } from '@tabler/icons-react';
 import { stateColor, stateLabel } from '../../../../lib/purchases/fields';
 import PurchaseInlineForm from './PurchaseInlineForm';
+import { LINE_COLUMNS } from './PurchaseRequestDetail';
 import CompanyLogo from '../../../../components/ui/CompanyLogo';
 
 /**
@@ -47,6 +48,29 @@ export default function PreviousPurchasesModal({ opened, onClose, onCreated }: {
   const [errors, setErrors] = useState<{ company: string; error: string }[]>([]);
   const [loading, setLoading] = useState(false);
   const [dup, setDup] = useState<Row | null>(null);
+  /** Detalle de una solicitud anterior antes de duplicarla. */
+  const [view, setView] = useState<Row | null>(null);
+  const [viewData, setViewData] = useState<{ item: Record<string, unknown> & { DocumentLines?: Record<string, unknown>[] }; attachments: string[] } | null>(null);
+  const [viewError, setViewError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!view) return;
+    let cancelled = false;
+    setViewData(null);
+    setViewError(null);
+    fetch(`/api/purchases/previous/item?companyId=${view.companyId}&docEntry=${view.DocEntry}`, { cache: 'no-store' })
+      .then(async (r) => {
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(d.error || 'No se pudo cargar la solicitud');
+        if (!cancelled) setViewData({ item: d.item, attachments: d.attachments ?? [] });
+      })
+      .catch((e: Error) => {
+        if (!cancelled) setViewError(e.message);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [view]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -85,7 +109,7 @@ export default function PreviousPurchasesModal({ opened, onClose, onCreated }: {
 
   return (
     <>
-      <Modal opened={opened && !dup} onClose={onClose} size="95%" title={<Text fw={700}>Solicitudes de compra anteriores (SAP)</Text>}>
+      <Modal opened={opened && !dup && !view} onClose={onClose} size="95%" title={<Text fw={700}>Solicitudes de compra anteriores (SAP)</Text>}>
         <Text size="sm" c="dimmed" mb="sm">
           Las solicitudes creadas antes en SAPSEND, consultadas en el SAP de cada compañía. Use «Duplicar» para crearla como una
           solicitud nueva en SynerLink (se copian comentarios y líneas; las fechas se ponen de nuevo).
@@ -172,9 +196,14 @@ export default function PreviousPurchasesModal({ opened, onClose, onCreated }: {
                     {money(r.DocTotal)} {r.DocCurrency ?? ''}
                   </Table.Td>
                   <Table.Td>
-                    <Button size="xs" variant="light" leftSection={<IconCopy size={14} />} onClick={() => setDup(r)}>
-                      Duplicar
-                    </Button>
+                    <Group gap={6} wrap="nowrap">
+                      <Button size="xs" variant="default" leftSection={<IconEye size={14} />} onClick={() => setView(r)}>
+                        Ver
+                      </Button>
+                      <Button size="xs" variant="light" leftSection={<IconCopy size={14} />} onClick={() => setDup(r)}>
+                        Duplicar
+                      </Button>
+                    </Group>
                   </Table.Td>
                 </Table.Tr>
               ))}
@@ -216,6 +245,104 @@ export default function PreviousPurchasesModal({ opened, onClose, onCreated }: {
             }}
           />
         )}
+      </Modal>
+      <Modal
+        opened={Boolean(view)}
+        onClose={() => setView(null)}
+        size="95%"
+        title={
+          <Group gap="sm">
+            {view && <CompanyLogo name={view.companyName} />}
+            <Text fw={700}>Solicitud de compra · borrador #{view?.DocEntry}</Text>
+          </Group>
+        }
+      >
+        {viewError && <Alert color="red">{viewError}</Alert>}
+        {!viewData && !viewError && <Loader size="sm" />}
+        {viewData && (() => {
+          const d = viewData.item;
+          const lines = d.DocumentLines ?? [];
+          const cols = LINE_COLUMNS.filter((c) => !c.optional || lines.some((l, i) => String(c.render(l, i) ?? '').trim() !== ''));
+          const motivo = String(d.U_Motivo_Can_Solicitud ?? '').trim();
+          return (
+            <>
+              <Group gap="xl" mb="md" wrap="wrap">
+                <div>
+                  <Text size="xs" c="dimmed">Estado</Text>
+                  <Badge variant="light" color={stateColor(d.U_SEND_State as string)} styles={{ root: { textTransform: 'none' } }}>
+                    {stateLabel(d.U_SEND_State as string)}
+                  </Badge>
+                </div>
+                <div>
+                  <Text size="xs" c="dimmed">Solicitante</Text>
+                  <Text size="sm" fw={600}>{String(d.U_SEND_UserName ?? '—')}</Text>
+                </div>
+                <div>
+                  <Text size="xs" c="dimmed">Fecha / requerida</Text>
+                  <Text size="sm">{day(d.DocDate)} · {day(d.RequriedDate) || '—'}</Text>
+                </div>
+                <div>
+                  <Text size="xs" c="dimmed">Total</Text>
+                  <Text size="sm" fw={700}>{money(d.DocTotal)} {String(d.DocCurrency ?? '')}</Text>
+                </div>
+                {d.U_SEND_SolCom && /^\d+$/.test(String(d.U_SEND_SolCom)) ? (
+                  <div>
+                    <Text size="xs" c="dimmed">En firme</Text>
+                    <Text size="sm">N.º {String(d.U_SEND_SolCom)}</Text>
+                  </div>
+                ) : null}
+              </Group>
+              <Text size="xs" c="dimmed">Comentarios</Text>
+              <Text size="sm" mb="md" style={{ whiteSpace: 'pre-line' }}>{String(d.Comments ?? '—')}</Text>
+              {motivo && (
+                <Alert color="red" variant="light" mb="md" title="Motivo de rechazo o anulación">
+                  {motivo}
+                </Alert>
+              )}
+              <Table.ScrollContainer minWidth={Math.max(600, cols.length * 95)}>
+                <Table withTableBorder striped verticalSpacing={4} fz="xs">
+                  <Table.Thead>
+                    <Table.Tr>
+                      {cols.map((c) => (
+                        <Table.Th key={c.label} style={{ textAlign: c.align ?? 'left', whiteSpace: 'nowrap' }}>{c.label}</Table.Th>
+                      ))}
+                    </Table.Tr>
+                  </Table.Thead>
+                  <Table.Tbody>
+                    {lines.map((l, i) => (
+                      <Table.Tr key={i}>
+                        {cols.map((c) => (
+                          <Table.Td key={c.label} style={{ textAlign: c.align ?? 'left' }}>{c.render(l, i)}</Table.Td>
+                        ))}
+                      </Table.Tr>
+                    ))}
+                  </Table.Tbody>
+                </Table>
+              </Table.ScrollContainer>
+              {viewData.attachments.length > 0 && (
+                <Group gap={6} mt="sm">
+                  <IconPaperclip size={14} />
+                  <Text size="xs" c="dimmed">
+                    Anexos: {viewData.attachments.join(' · ')} (al duplicar no se copian; adjunte las cotizaciones nuevas)
+                  </Text>
+                </Group>
+              )}
+              <Group justify="flex-end" mt="md">
+                <Button variant="default" onClick={() => setView(null)}>Volver</Button>
+                <Button
+                  leftSection={<IconCopy size={14} />}
+                  onClick={() => {
+                    const r = view;
+                    setView(null);
+                    setDup(r);
+                  }}
+                >
+                  Duplicar esta solicitud
+                </Button>
+              </Group>
+            </>
+          );
+        })()}
       </Modal>
     </>
   );

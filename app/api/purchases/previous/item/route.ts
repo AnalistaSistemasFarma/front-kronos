@@ -28,7 +28,17 @@ export async function GET(request: NextRequest) {
       if (item.DocObjectCode !== 'oPurchaseRequest') return NextResponse.json({ error: 'No es una solicitud de compra' }, { status: 404 });
       const own = c.sapsendUserId != null && Number(item.U_SEND_UserId) === Number(c.sapsendUserId);
       if (!own && !c.canSeeAll) return NextResponse.json({ error: 'Solo puede duplicar sus propias solicitudes' }, { status: 403 });
-      return NextResponse.json({ item }, { headers: { 'Cache-Control': 'no-store' } });
+      // Nombres de los anexos (solo para ver qué tenía; al duplicar no se copian).
+      let attachments: string[] = [];
+      if (item.AttachmentEntry) {
+        const att = await sapGet<{ Attachments2_Lines?: Record<string, unknown>[] }>(sap, `Attachments2(${item.AttachmentEntry})`).catch(() => null);
+        attachments = (att?.Attachments2_Lines ?? []).map((l) => {
+          const base = String(l.FileName ?? '');
+          const ext = l.FileExtension ? `.${String(l.FileExtension)}` : '';
+          return ext && !base.toLowerCase().endsWith(ext.toLowerCase()) ? `${base}${ext}` : base;
+        });
+      }
+      return NextResponse.json({ item, attachments }, { headers: { 'Cache-Control': 'no-store' } });
     } finally {
       await sapLogout(sap).catch(() => undefined);
     }
