@@ -251,7 +251,7 @@ function RequestBoard() {
   const [previousOpen, setPreviousOpen] = useState(false);
   /** Preferencias del usuario (Perfil): fondo por compañía y anchos de columna. */
   const [companyColors] = useUiPreference<boolean>(PREF_COMPANY_COLORS, false);
-  const colWidths = useColumnWidths('asignadas', { id: 90, asunto: 340, compania: 190, estado: 150, fecha: 170, personas: 230 });
+  const colWidths = useColumnWidths('asignadas', { id: 90, asunto: 340, compania: 190, estado: 150, fecha: 170, personas: 300 });
   const [exporting, setExporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [formData, setFormData] = useState({
@@ -1254,8 +1254,8 @@ function RequestBoard() {
       </Table.Td>
       <Table.Td>
         <Stack gap={4}>
-          <PersonLine name={task.name_requester} image={task.requester_image} />
-          <PersonLine name={task.assigned} image={task.assigned_image} dimmed />
+          <PersonLine name={task.name_requester} image={task.requester_image} role='requester' />
+          <PersonLine name={task.assigned} image={task.assigned_image} dimmed role='assignee' />
         </Stack>
       </Table.Td>
     </Table.Tr>
@@ -1469,11 +1469,10 @@ function RequestBoard() {
                           .join(' · ')}
                       </Text>
                     </Group>
-                    <Group gap={8} mt={6} wrap='wrap'>
-                      <PersonLine name={isTask ? t!.name_requester : r!.requester} image={isTask ? t!.requester_image : r!.requester_image} />
-                      <Text size='xs' c='dimmed'>→</Text>
-                      <PersonLine name={isTask ? t!.assigned : r!.user} image={isTask ? t!.assigned_image : r!.user_image} dimmed />
-                    </Group>
+                    <Stack gap={4} mt={6}>
+                      <PersonLine name={isTask ? t!.name_requester : r!.requester} image={isTask ? t!.requester_image : r!.requester_image} role='requester' />
+                      <PersonLine name={isTask ? t!.assigned : r!.user} image={isTask ? t!.assigned_image : r!.user_image} dimmed role='assignee' />
+                    </Stack>
                   </Paper>
                 );
               })
@@ -1601,8 +1600,8 @@ function RequestBoard() {
                       </Table.Td>
                       <Table.Td>
                         <Stack gap={4}>
-                          <PersonLine name={ticket.requester} image={ticket.requester_image} />
-                          <PersonLine name={ticket.user} image={ticket.user_image} dimmed />
+                          <PersonLine name={ticket.requester} image={ticket.requester_image} role='requester' />
+                          <PersonLine name={ticket.user} image={ticket.user_image} dimmed role='assignee' />
                         </Stack>
                       </Table.Td>
                     </Table.Tr>

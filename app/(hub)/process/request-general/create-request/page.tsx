@@ -244,7 +244,7 @@ function RequestBoard() {
   const [previousOpen, setPreviousOpen] = useState(false);
   /** Preferencias del usuario: fondo por compañía en la tabla y anchos de columna (Perfil). */
   const [companyColors] = useUiPreference<boolean>(PREF_COMPANY_COLORS, false);
-  const colWidths = useColumnWidths('mis-solicitudes', { id: 70, asunto: 340, compania: 170, estado: 150, fecha: 170, personas: 230 });
+  const colWidths = useColumnWidths('mis-solicitudes', { id: 70, asunto: 340, compania: 170, estado: 150, fecha: 170, personas: 300 });
   const isSubmittingRef = useRef(false);
 
   const linkedProcessParam = searchParams.get('linkedProcess');
@@ -1658,11 +1658,10 @@ function RequestBoard() {
                           .join(' · ')}
                       </Text>
                     </Group>
-                    <Group gap={8} mt={6} wrap='wrap'>
-                      <PersonLine name={ticket.requester} image={ticket.requester_image} />
-                      <Text size='xs' c='dimmed'>→</Text>
-                      <PersonLine name={ticket.user} image={ticket.user_image} dimmed />
-                    </Group>
+                    <Stack gap={4} mt={6}>
+                      <PersonLine name={ticket.requester} image={ticket.requester_image} role='requester' />
+                      <PersonLine name={ticket.user} image={ticket.user_image} dimmed role='assignee' />
+                    </Stack>
                   </Paper>
                 );
               })
@@ -1819,16 +1818,8 @@ function RequestBoard() {
                       </Table.Td>
                       <Table.Td>
                         <Stack gap={4}>
-                          <Group gap={6} wrap='nowrap'>
-                            <Avatar src={ticket.requester_image || null} name={ticket.requester} color='initials' size={22} radius='xl' />
-                            <Text size='sm' truncate>{ticket.requester}</Text>
-                          </Group>
-                          <Group gap={6} wrap='nowrap'>
-                            <Avatar src={ticket.user_image || null} name={ticket.user} color='initials' size={22} radius='xl' />
-                            <Text size='sm' c='dimmed' truncate>
-                              {ticket.user}
-                            </Text>
-                          </Group>
+                          <PersonLine name={ticket.requester} image={ticket.requester_image} role='requester' />
+                          <PersonLine name={ticket.user} image={ticket.user_image} dimmed role='assignee' />
                         </Stack>
                       </Table.Td>
                     </Table.Tr>
