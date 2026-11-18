@@ -7,7 +7,8 @@ import { MAX_CHAT_ATTACHMENT_BYTES, isBlockedAttachmentExtension } from '../../.
 import { downloadChatAttachment, uploadChatAttachments } from '../../../../../../../../lib/chat/attachmentStorage';
 import { publicarMensajeDePersona } from '../../../../../../../../lib/chat/publicar-mensaje';
 import { destinosDe, puertaDestinoReenvio } from '../../../../../../../../lib/chat/reenviar-archivo';
-import { MAX_NOTA_REENVIO } from '../../../../../../../../lib/chat/compartir';
+import { MAX_NOTA_REENVIO, ordenarDestinos } from '../../../../../../../../lib/chat/compartir';
+import { agentForwardDestinations, agentForwardGate } from '../../../../../../../../lib/chat/forward-to-agent';
 import {
   MAX_ADJUNTOS_REENVIO,
   MAX_MENSAJE_REENVIADO,
@@ -30,17 +31,25 @@ export const dynamic = 'force-dynamic';
  *   GET  /api/chat/conversations/12/messages/345/reenviar
  *        → { destinos: DestinoReenvio[] }   a dónde lo puede reenviar
  *   POST /api/chat/conversations/12/messages/345/reenviar   { "idConversation": 77, "body": "opcional" }
+ *   POST /api/chat/conversations/12/messages/345/reenviar   { "idAgent": 5, "body": "opcional" }
  *        → 201 { message }                   el mensaje nuevo en el destino
  *
  * Pedido de Nicolás Rivera: «ayúdame a poder reenviar un mensaje a un chat o a
  * un proyecto». Destinos: los mismos del reenvío de archivos (personas, grupos
- * y conversaciones de proyecto con escritura). Los hilos directos con un
- * agente NO: lo despertaría sin que nadie se lo pidiera.
+ * y conversaciones de proyecto con escritura).
+ *
+ * AGENTS (2026-11-18, SynerLink prod msg 35511): `idAgent` forwards to the
+ * user's direct conversation with that agent (created if missing, like opening
+ * the chat). It is published as a regular user message, so the agent's inbox
+ * picks it up as if the user had typed it. Only agents the user has assigned
+ * (lib/chat/forward-to-agent.ts). A direct thread is never a target by
+ * `idConversation`: only by `idAgent`, which re-checks the agent permission.
  *
  * SEGURIDAD — DOS PUERTAS, como el reenvío de adjuntos:
  *   1. ORIGEN: guardConversation() sobre la conversación del mensaje, y el
  *      mensaje tiene que ser de ESA conversación. Si no, 404 sin pistas.
- *   2. DESTINO: puertaDestinoReenvio() (membresía y escritura).
+ *   2. DESTINO: puertaDestinoReenvio() (membresía y escritura), or
+ *      agentForwardGate() for an agent (agent assigned + thread ownership).
  *
  * Lo publica quien reenvía (publicarMensajeDePersona): el texto original con
  * una línea de quién era, las menciones del original neutralizadas y una COPIA
@@ -55,8 +64,11 @@ export async function GET(_request: NextRequest, { params }: Params) {
     const origen = await mensajeVisible(id, messageId);
     if ('response' in origen) return origen.response;
 
-    const destinos = await destinosDe(origen.user, origen.idConversation);
-    return jsonNoStore({ destinos });
+    const [destinos, agentes] = await Promise.all([
+      destinosDe(origen.user, origen.idConversation),
+      agentForwardDestinations(origen.user, origen.idConversation),
+    ]);
+    return jsonNoStore({ destinos: ordenarDestinos([...destinos, ...agentes]) });
   } catch (error) {
     return serverError('GET /api/chat/conversations/[id]/messages/[messageId]/reenviar', error);
   }
@@ -72,9 +84,10 @@ export async function POST(request: NextRequest, { params }: Params) {
     const datos = await readJsonBody(request);
     if (!datos) return badRequest('El cuerpo debe ser un objeto JSON.');
 
-    const idDestino = Number(datos.idConversation);
+    const toAgent = datos.idAgent !== undefined && datos.idAgent !== null;
+    const idDestino = Number(toAgent ? datos.idAgent : datos.idConversation);
     if (!Number.isInteger(idDestino) || idDestino <= 0) return badRequest('Elija a dónde reenviar el mensaje.');
-    if (idDestino === origen.idConversation) return badRequest('El mensaje ya está en esta conversación.');
+    if (!toAgent && idDestino === origen.idConversation) return badRequest('El mensaje ya está en esta conversación.');
 
     let nota = '';
     if (typeof datos.body === 'string' && datos.body.trim() !== '') {
@@ -83,7 +96,9 @@ export async function POST(request: NextRequest, { params }: Params) {
       nota = normalizada.body;
     }
 
-    const destino = await puertaDestinoReenvio(idDestino);
+    const destino = toAgent
+      ? await agentForwardGate(origen.user, idDestino, origen.idConversation)
+      : await puertaDestinoReenvio(idDestino);
     if ('response' in destino) return destino.response;
 
     const adjuntos = mensaje.attachments.filter((a) => a.onedrive_item_id);
