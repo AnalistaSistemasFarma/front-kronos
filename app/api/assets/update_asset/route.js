@@ -95,10 +95,11 @@ export async function PATCH(req) {
           : null
       );
       updateAssetRequest.input('os', sql.NVarChar(255), os);
-      updateAssetRequest.input('invoice', sql.NVarChar(255), invoice);
+      // Factura/acta: enlaces SharePoint/OneDrive suelen superar 255 caracteres.
+      updateAssetRequest.input('invoice', sql.NVarChar(2000), invoice ?? '');
       updateAssetRequest.input('renewal', sql.Bit, renewal);
       updateAssetRequest.input('renewal_date', sql.Date, renewal_date);
-      updateAssetRequest.input('exit_record', sql.Text, exit_record);
+      updateAssetRequest.input('exit_record', sql.NVarChar(2000), exit_record ?? '');
       updateAssetRequest.input('sim', sql.NVarChar(255), sim);
       updateAssetRequest.input('id', sql.Int, id);
 
