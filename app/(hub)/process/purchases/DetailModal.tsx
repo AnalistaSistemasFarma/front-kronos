@@ -117,7 +117,7 @@ export default function DetailModal({ draft, tipo, onClose }: Props) {
       {draft && (
         <Stack gap="sm">
           <Group gap="xs">
-            <Text size="sm" fw={500}>Empresa:</Text>
+            <Text size="sm" fw={500}>Compañía:</Text>
             <Badge variant="light">{draft.companyName}</Badge>
             {draft.DocNum != null && (
               <Badge variant="outline" color="gray">N.o {String(draft.DocNum)}</Badge>
