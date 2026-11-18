@@ -338,7 +338,7 @@ export function etiquetaHerramienta(nombre, entrada) {
     Agent: 'Repartiendo el trabajo entre el equipo…',
     Task: 'Repartiendo el trabajo entre el equipo…',
   };
-  return mapa[nombre] ?? 'Trabajando…';
+  return mapa[nombre] ?? `Usando ${String(nombre).slice(0, 60)}…`;
 }
 
 /**

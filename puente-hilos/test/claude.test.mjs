@@ -181,3 +181,15 @@ test('acumularEvento guarda la entrada de la última herramienta', () => {
   assert.equal(acc.ultimaHerramienta, 'Bash');
   assert.deepEqual(acc.ultimaEntrada, { description: 'Listar archivos' });
 });
+
+test('etiquetaHerramienta: new connectors get a Spanish label, never the generic one', async () => {
+  const { etiquetaHerramienta: deOpenclaw } = await import('../src/openclaw/actividad.mjs');
+  assert.match(deOpenclaw('infralectura__infra_servicios', { servidor: 'serfarma05' }), /^🖥️ Revisando servidores: serfarma05/);
+  assert.match(deOpenclaw('kronospruebas-senhatsumi__kronos_pruebas_sql_escribir', { sql: 'UPDATE x' }), /^🧪 Escribiendo en la base de PRUEBAS/);
+  assert.doesNotMatch(deOpenclaw('kronospruebas-senhatsumi__kronos_pruebas_sql_escribir', { sql: 'UPDATE x' }), /UPDATE/);
+  assert.match(deOpenclaw('lectorexcel-senhatsumi__documento_leer', { ruta: '/Users/x/inbox/acta.docx' }), /^📄 Leyendo documento/);
+  assert.match(deOpenclaw('mcp__sapbo-onelatampharma__sap_query', { entity: 'Items' }), /^🧾 Consultando SAP de OLP: Items/);
+  assert.match(deOpenclaw('mcp__nuevo-conector__hacer_algo', {}), /^🔌 Usando hacer_algo de nuevo-conector/);
+  assert.match(etiquetaHerramienta('mcp__infralectura__infra_disco', { servidor: 'serfarma07' }), /Revisando servidores/);
+  assert.equal(etiquetaHerramienta('Monitor'), 'Usando Monitor…');
+});
