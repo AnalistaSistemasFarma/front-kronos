@@ -111,6 +111,12 @@ import { downloadWorkbook } from '@/lib/dashboard/excel/excelHelpers';
 import { formatEstimatedPaymentDateShort } from '@/lib/treasury/estimatedPaymentDate';
 import { parseTableValue, parseTableConfig } from '@/lib/requests-general/tableField';
 import { createPrerenderSearchParamsForClientPage } from 'next/dist/server/request/search-params';
+import CompanyLogo from '../../../../../components/ui/CompanyLogo';
+import PersonLine from '../../../../../components/ui/PersonLine';
+import { ResizableTh, useColumnWidths } from '../../../../../components/ui/ResizableTh';
+import { useUiPreference } from '../../../../../components/ui/useUiPreference';
+import { PREF_COMPANY_COLORS } from '../../../../../lib/ui/preferences';
+import { companyRowStyle } from '../../../../../lib/ui/companyColors';
 
 const ITEMS_PER_PAGE = 100;
 
@@ -132,6 +138,8 @@ interface Ticket {
   identification: string;
   id_status_case?: number;
   users_category?: string | null;
+  requester_image?: string | null;
+  user_image?: string | null;
 }
 
 interface RequestTask {
@@ -161,6 +169,8 @@ interface AssignedTask {
   status_task: string;
   assigned: string;
   category?: string | null;
+  requester_image?: string | null;
+  assigned_image?: string | null;
 }
 
 type AssignedItem =
@@ -236,6 +246,9 @@ function RequestBoard() {
   const [teamCount, setTeamCount] = useState<number | null>(null);
   const [tasksByRequest, setTasksByRequest] = useState<Record<number, RequestTask[]>>({});
   const [loading, setLoading] = useState(true);
+  /** Preferencias del usuario (Perfil): fondo por compañía y anchos de columna. */
+  const [companyColors] = useUiPreference<boolean>(PREF_COMPANY_COLORS, false);
+  const colWidths = useColumnWidths('asignadas', { id: 90, asunto: 340, compania: 190, estado: 150, fecha: 170, personas: 230 });
   const [exporting, setExporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [formData, setFormData] = useState({
@@ -1149,12 +1162,7 @@ function RequestBoard() {
   // proceso en la línea gris porque en Asignadas se trabaja por proceso.
   const renderCompanyCell = (company: string, category?: string | null, process?: string | null) => (
     <Stack gap={2}>
-      <Group gap={4} wrap='nowrap'>
-        <IconBuilding size={14} className='text-gray-400' />
-        <Text size='sm' fw={500}>
-          {company}
-        </Text>
-      </Group>
+      <CompanyLogo name={company} />
       <Text size='xs' c='dimmed'>
         {[category, process].filter(Boolean).join(' · ')}
       </Text>
@@ -1204,6 +1212,7 @@ function RequestBoard() {
     <Table.Tr
       key={key}
       className='cursor-pointer transition-colors'
+      style={companyRowStyle(task.company, companyColors)}
       onClick={() =>
         openFromList(
           { kind: 'task', key, data: task, createdAt: task.created_at },
@@ -1219,7 +1228,7 @@ function RequestBoard() {
           {renderTypeBadge('task')}
         </Stack>
       </Table.Td>
-      <Table.Td style={{ minWidth: 240, maxWidth: 320 }}>
+      <Table.Td>
         <Text size='sm' fw={600} lineClamp={2}>
           {task.task}
         </Text>
@@ -1242,16 +1251,8 @@ function RequestBoard() {
       </Table.Td>
       <Table.Td>
         <Stack gap={4}>
-          <Group gap={4} wrap='nowrap'>
-            <IconUser size={14} className='text-gray-400' />
-            <Text size='sm'>{task.name_requester}</Text>
-          </Group>
-          <Group gap={4} wrap='nowrap'>
-            <IconUserCheck size={14} className='text-gray-400' />
-            <Text size='sm' c='dimmed'>
-              {task.assigned}
-            </Text>
-          </Group>
+          <PersonLine name={task.name_requester} image={task.requester_image} />
+          <PersonLine name={task.assigned} image={task.assigned_image} dimmed />
         </Stack>
       </Table.Td>
     </Table.Tr>
@@ -1452,15 +1453,15 @@ function RequestBoard() {
           </Stack>
 
           <Box visibleFrom='md' className='overflow-x-auto'>
-            <Table striped highlightOnHover>
+            <Table striped={!companyColors} highlightOnHover style={{ tableLayout: 'fixed', minWidth: colWidths.total }}>
               <Table.Thead>
                 <Table.Tr>
-                  <Table.Th>ID</Table.Th>
-                  <Table.Th>Asunto</Table.Th>
-                  <Table.Th>Compañía / Categoría</Table.Th>
-                  <Table.Th>Estado</Table.Th>
-                  <Table.Th>Fecha</Table.Th>
-                  <Table.Th>Solicitante / Asignado</Table.Th>
+                  <ResizableTh col='id' width={colWidths.widths.id} onResize={colWidths.setWidth}>ID</ResizableTh>
+                  <ResizableTh col='asunto' width={colWidths.widths.asunto} onResize={colWidths.setWidth}>Asunto</ResizableTh>
+                  <ResizableTh col='compania' width={colWidths.widths.compania} onResize={colWidths.setWidth}>Compañía / Categoría</ResizableTh>
+                  <ResizableTh col='estado' width={colWidths.widths.estado} onResize={colWidths.setWidth}>Estado</ResizableTh>
+                  <ResizableTh col='fecha' width={colWidths.widths.fecha} onResize={colWidths.setWidth}>Fecha</ResizableTh>
+                  <ResizableTh col='personas' width={colWidths.widths.personas} onResize={colWidths.setWidth}>Solicitante / Asignado</ResizableTh>
                 </Table.Tr>
               </Table.Thead>
               <Table.Tbody>
@@ -1492,6 +1493,7 @@ function RequestBoard() {
                     <Table.Tr
                       key={item.key}
                       className='cursor-pointer transition-colors'
+                      style={companyRowStyle(ticket.company, companyColors)}
                       onClick={() =>
                         openFromList(
                           item,
@@ -1507,7 +1509,7 @@ function RequestBoard() {
                           {renderTypeBadge('request')}
                         </Stack>
                       </Table.Td>
-                      <Table.Td style={{ minWidth: 240, maxWidth: 320 }}>
+                      <Table.Td>
                         <Text size='sm' fw={500} lineClamp={2}>
                           {ticket.subject}
                         </Text>
@@ -1571,16 +1573,8 @@ function RequestBoard() {
                       </Table.Td>
                       <Table.Td>
                         <Stack gap={4}>
-                          <Group gap={4} wrap='nowrap'>
-                            <IconUser size={14} className='text-gray-400' />
-                            <Text size='sm'>{ticket.requester}</Text>
-                          </Group>
-                          <Group gap={4} wrap='nowrap'>
-                            <IconUserCheck size={14} className='text-gray-400' />
-                            <Text size='sm' c='dimmed'>
-                              {ticket.user}
-                            </Text>
-                          </Group>
+                          <PersonLine name={ticket.requester} image={ticket.requester_image} />
+                          <PersonLine name={ticket.user} image={ticket.user_image} dimmed />
                         </Stack>
                       </Table.Td>
                     </Table.Tr>
