@@ -7,6 +7,9 @@ import { stateColor, stateLabel } from '../../../../lib/purchases/fields';
 import PurchaseInlineForm from './PurchaseInlineForm';
 import { LINE_COLUMNS } from './PurchaseRequestDetail';
 import CompanyLogo from '../../../../components/ui/CompanyLogo';
+import { useUiPreference } from '../../../../components/ui/useUiPreference';
+import { PREF_COMPANY_COLORS } from '../../../../lib/ui/preferences';
+import { companyRowStyle } from '../../../../lib/ui/companyColors';
 
 /**
  * PROVISIONAL (Nicolás Rivera, 2026-11-18): solicitudes de compra anteriores, creadas en SAPSEND,
@@ -48,6 +51,7 @@ export default function PreviousPurchasesModal({ opened, onClose, onCreated }: {
   const [errors, setErrors] = useState<{ company: string; error: string }[]>([]);
   const [loading, setLoading] = useState(false);
   const [dup, setDup] = useState<Row | null>(null);
+  const [companyColors] = useUiPreference<boolean>(PREF_COMPANY_COLORS, false);
   /** Detalle de una solicitud anterior antes de duplicarla. */
   const [view, setView] = useState<Row | null>(null);
   const [viewData, setViewData] = useState<{ item: Record<string, unknown> & { DocumentLines?: Record<string, unknown>[] }; attachments: string[] } | null>(null);
@@ -168,7 +172,7 @@ export default function PreviousPurchasesModal({ opened, onClose, onCreated }: {
             </Table.Thead>
             <Table.Tbody>
               {rows.map((r) => (
-                <Table.Tr key={`${r.companyId}-${r.DocEntry}`}>
+                <Table.Tr key={`${r.companyId}-${r.DocEntry}`} style={companyRowStyle(r.companyName, companyColors)}>
                   <Table.Td>
                     <CompanyLogo name={r.companyName} />
                   </Table.Td>
