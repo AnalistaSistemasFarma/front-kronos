@@ -5,6 +5,7 @@ import { Alert, Badge, Button, Group, Loader, Modal, ScrollArea, SegmentedContro
 import { IconCopy, IconRefresh, IconSearch } from '@tabler/icons-react';
 import { stateColor, stateLabel } from '../../../../lib/purchases/fields';
 import PurchaseInlineForm from './PurchaseInlineForm';
+import CompanyLogo from '../../../../components/ui/CompanyLogo';
 
 /**
  * PROVISIONAL (Nicolás Rivera, 2026-11-18): solicitudes de compra anteriores, creadas en SAPSEND,
@@ -78,7 +79,7 @@ export default function PreviousPurchasesModal({ opened, onClose, onCreated }: {
   const canSeeAll = companies.some((c) => c.canSeeAll);
   const noProfile = companies.filter((c) => !c.hasProfile).map((c) => c.companyName);
   const companyOptions = useMemo(
-    () => [{ value: '', label: 'Todas las empresas' }, ...companies.map((c) => ({ value: String(c.idCompany), label: c.companyName }))],
+    () => [{ value: '', label: 'Todas las compañías' }, ...companies.map((c) => ({ value: String(c.idCompany), label: c.companyName }))],
     [companies]
   );
 
@@ -86,13 +87,13 @@ export default function PreviousPurchasesModal({ opened, onClose, onCreated }: {
     <>
       <Modal opened={opened && !dup} onClose={onClose} size="95%" title={<Text fw={700}>Solicitudes de compra anteriores (SAP)</Text>}>
         <Text size="sm" c="dimmed" mb="sm">
-          Las solicitudes creadas antes en SAPSEND, consultadas en el SAP de cada empresa. Use «Duplicar» para crearla como una
+          Las solicitudes creadas antes en SAPSEND, consultadas en el SAP de cada compañía. Use «Duplicar» para crearla como una
           solicitud nueva en SynerLink (se copian comentarios y líneas; las fechas se ponen de nuevo).
         </Text>
         <Group align="flex-end" gap="sm" mb="sm" wrap="wrap">
           <TextInput type="date" label="Desde" value={from} onChange={(e) => setFrom(e.currentTarget.value)} />
           <TextInput type="date" label="Hasta" value={to} onChange={(e) => setTo(e.currentTarget.value)} />
-          <Select label="Empresa" data={companyOptions} value={company ?? ''} onChange={(v) => setCompany(v || null)} allowDeselect={false} w={220} comboboxProps={{ withinPortal: true, zIndex: 1300 }} />
+          <Select label="Compañía" data={companyOptions} value={company ?? ''} onChange={(v) => setCompany(v || null)} allowDeselect={false} w={220} comboboxProps={{ withinPortal: true, zIndex: 1300 }} />
           <TextInput
             label="Buscar"
             placeholder="Comentario o solicitante"
@@ -131,7 +132,7 @@ export default function PreviousPurchasesModal({ opened, onClose, onCreated }: {
           <Table striped highlightOnHover stickyHeader verticalSpacing={6} fz="sm">
             <Table.Thead>
               <Table.Tr>
-                <Table.Th>Empresa</Table.Th>
+                <Table.Th>Compañía</Table.Th>
                 <Table.Th>Borrador</Table.Th>
                 <Table.Th>Fecha</Table.Th>
                 <Table.Th>Estado</Table.Th>
@@ -144,7 +145,9 @@ export default function PreviousPurchasesModal({ opened, onClose, onCreated }: {
             <Table.Tbody>
               {rows.map((r) => (
                 <Table.Tr key={`${r.companyId}-${r.DocEntry}`}>
-                  <Table.Td>{r.companyName}</Table.Td>
+                  <Table.Td>
+                    <CompanyLogo name={r.companyName} />
+                  </Table.Td>
                   <Table.Td>
                     #{r.DocEntry}
                     {r.U_SEND_SolCom && /^\d+$/.test(String(r.U_SEND_SolCom)) ? (
@@ -189,7 +192,7 @@ export default function PreviousPurchasesModal({ opened, onClose, onCreated }: {
           )}
         </ScrollArea>
         <Text size="xs" c="dimmed" mt="xs">
-          {rows.length} solicitud(es) · máximo 200 por empresa (las más recientes) · rango de hasta un año.
+          {rows.length} solicitud(es) · máximo 200 por compañía (las más recientes) · rango de hasta un año.
         </Text>
       </Modal>
 

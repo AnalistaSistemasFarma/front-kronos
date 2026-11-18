@@ -13,6 +13,7 @@ import { stateLabel, stateColor, type PurchaseTipo } from '../../../../lib/purch
 import { EDITABLE_STATES } from '../../../../lib/purchases/drafts';
 import DetailModal, { type PurchaseDraft } from './DetailModal';
 import RequestFormModal, { type EditTarget } from './RequestFormModal';
+import CompanyLogo from '../../../../components/ui/CompanyLogo';
 import BulkModal from './BulkModal';
 import { VARIANT_OPTIONS, matchesVariant, type PurchaseVariant } from '../../../../lib/purchases/variants';
 
@@ -195,7 +196,7 @@ function PurchasesPageContent() {
     const wb = new ExcelJS.Workbook();
     const ws = wb.addWorksheet(tipo === 'solicitudes' ? 'Solicitudes' : 'Ordenes');
     ws.columns = [
-      { header: 'Empresa', key: 'empresa', width: 20 },
+      { header: 'Compañía', key: 'empresa', width: 20 },
       { header: 'Borrador (DocEntry)', key: 'docEntry', width: 16 },
       { header: 'Numero', key: 'docNum', width: 12 },
       { header: 'Fecha', key: 'fecha', width: 12 },
@@ -262,7 +263,7 @@ function PurchasesPageContent() {
         if (cancelled) return;
         setCompanies(userCompanies);
         if (userCompanies.length === 0) {
-          setError('No tiene acceso a compras en ninguna empresa.');
+          setError('No tiene acceso a compras en ninguna compañía.');
         }
       } catch (err) {
         if (!cancelled) setError(err instanceof Error ? err.message : 'Error inesperado');
@@ -337,7 +338,7 @@ function PurchasesPageContent() {
   }
 
   const companyOptions = [
-    { value: 'all', label: 'Todas las empresas' },
+    { value: 'all', label: 'Todas las compañías' },
     ...companies.map((c) => ({ value: String(c.idCompany), label: c.companyName })),
   ];
 
@@ -456,7 +457,7 @@ function PurchasesPageContent() {
             <Table striped highlightOnHover withTableBorder>
               <Table.Thead>
                 <Table.Tr>
-                  <Table.Th>Empresa</Table.Th>
+                  <Table.Th>Compañía</Table.Th>
                   <Table.Th>Numero</Table.Th>
                   <Table.Th>Fecha</Table.Th>
                   <Table.Th>Proveedor</Table.Th>
@@ -481,7 +482,7 @@ function PurchasesPageContent() {
                       style={{ cursor: 'pointer' }}
                     >
                       <Table.Td>
-                        <Badge variant="light">{r.companyName}</Badge>
+                        <CompanyLogo name={r.companyName} />
                       </Table.Td>
                       <Table.Td>{r.DocNum ?? '-'}</Table.Td>
                       <Table.Td>{formatDate(r.DocDate)}</Table.Td>
@@ -609,7 +610,7 @@ function PurchasesPageContent() {
 
           <Group justify="space-between" mt="md">
             <span style={{ fontSize: 13, color: '#666' }}>
-              {filtered.length} documento(s) — {companies.length} empresa(s) con acceso
+              {filtered.length} documento(s) — {companies.length} compañía(s) con acceso
             </span>
             {totalPages > 1 && (
               <Pagination total={totalPages} value={currentPage} onChange={setCurrentPage} />

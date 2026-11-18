@@ -136,7 +136,7 @@ export default function BulkModal({ opened, onClose, onDone, companies }: Props)
   };
 
   const upload = async () => {
-    if (!companyId) return setError('Seleccione la empresa.');
+    if (!companyId) return setError('Seleccione la compañía.');
     if (rows.length === 0) return setError('Cargue un archivo con datos.');
     setLoading(true);
     setError(null);
@@ -172,7 +172,7 @@ export default function BulkModal({ opened, onClose, onDone, companies }: Props)
 
         <Group grow align="flex-end">
           <Select
-            label="Empresa"
+            label="Compañía"
             data={companies.map((c) => ({ value: String(c.idCompany), label: c.companyName }))}
             value={companyId}
             onChange={setCompanyId}

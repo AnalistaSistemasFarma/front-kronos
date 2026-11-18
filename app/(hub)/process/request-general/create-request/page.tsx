@@ -7,6 +7,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { downloadWorkbook } from '@/lib/dashboard/excel/excelHelpers';
 import PurchaseInlineForm from '../../purchases/PurchaseInlineForm';
 import PreviousPurchasesModal from '../../purchases/PreviousPurchasesModal';
+import CompanyLogo from '../../../../../components/ui/CompanyLogo';
 import SalesInlineForm from '../../sales/SalesInlineForm';
 import {
   Paper,
@@ -1692,12 +1693,7 @@ function RequestBoard() {
                       </Table.Td>
                       <Table.Td>
                         <Stack gap={2}>
-                          <Group gap={4} wrap='nowrap'>
-                            <IconBuilding size={14} className='text-gray-400' />
-                            <Text size='sm' fw={500}>
-                              {ticket.company}
-                            </Text>
-                          </Group>
+                          <CompanyLogo name={ticket.company} />
                           <Text size='xs' c='dimmed'>
                             {ticket.category}
                           </Text>
