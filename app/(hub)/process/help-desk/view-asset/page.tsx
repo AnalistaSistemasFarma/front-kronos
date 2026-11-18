@@ -1779,7 +1779,7 @@ function ViewAsset() {
                             value={form.factura}
                             onChange={(e) => handleFormChange('factura', e.target.value)}
                             error={formErrors.factura}
-                            maxLength={1000}
+                            maxLength={2000}
                             leftSection={<IconLink size={16} />}
                           />
                         ) : (
@@ -1850,7 +1850,7 @@ function ViewAsset() {
                               placeholder='Referencia o enlace del acta de salida'
                               value={form.acta_salida}
                               onChange={(e) => handleFormChange('acta_salida', e.target.value)}
-                              maxLength={1000}
+                              maxLength={2000}
                               leftSection={<IconFileCertificate size={16} />}
                             />
                           ) : (
