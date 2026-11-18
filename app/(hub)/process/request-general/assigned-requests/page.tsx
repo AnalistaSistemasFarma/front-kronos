@@ -88,6 +88,10 @@ import {
 } from '../../../../../lib/requests-general/requestListNav';
 import { filterByText, requestSearchParts } from '../../../../../lib/requests-general/textSearch';
 import { RequestListFilters } from '../../../../../components/request-general/list/RequestListFilters';
+import { SlaSummaryCards } from '../../../../../components/request-general/sla/SlaSummaryCards';
+import { SlaBadge } from '../../../../../components/request-general/sla/SlaBadge';
+import { useSlaSummary } from '../../../../../components/request-general/sla/useSlaSummary';
+import type { SlaState } from '../../../../../lib/requests-general/sla';
 import {
   ASSIGNED_STATE_OPTIONS,
   EMPTY_LIST_FILTERS,
@@ -277,6 +281,13 @@ function RequestBoard() {
   // y tareas a la vez) y todo se filtra en el navegador sobre la lista COMPLETA, no por página.
   // La paginación solo reparte lo ya filtrado para pintarlo.
   const [filters, setFilters] = useState<ListFilters>(EMPTY_LIST_FILTERS);
+  // SLA (ANS) widget: card filter, also reachable from the dashboard with ?sla=overdue.
+  const [slaFilter, setSlaFilter] = useState<SlaState | null>(() => {
+    const v = searchParams.get('sla');
+    return v === 'overdue' || v === 'near_due' || v === 'on_time' || v === 'no_sla' ? v : null;
+  });
+  const [slaRefreshKey, setSlaRefreshKey] = useState(0);
+  const { data: slaSummary } = useSlaSummary(slaRefreshKey);
   const [currentPage, setCurrentPage] = useState(1);
   const [searchInput, setSearchInput] = useState('');
   const deferredSearch = useDeferredValue(searchInput);
@@ -340,10 +351,12 @@ function RequestBoard() {
   // Buscador + filtros del panel (sin estado ni tipo): base de las tarjetas y las pestañas.
   const matchingEntries = useMemo(
     () =>
-      filterByText(allEntries, deferredSearch, (e) => e.parts).filter((e) =>
-        matchesListFilters(e.row, filters, { ignoreStatus: true })
+      filterByText(allEntries, deferredSearch, (e) => e.parts).filter(
+        (e) =>
+          matchesListFilters(e.row, filters, { ignoreStatus: true }) &&
+          (!slaFilter || slaSummary?.byRequest[Number(e.row.requestId)]?.state === slaFilter)
       ),
-    [allEntries, deferredSearch, filters]
+    [allEntries, deferredSearch, filters, slaFilter, slaSummary]
   );
   const typedEntries = useMemo(
     () => matchingEntries.filter((e) => entryOfType(e, typeFilter)),
@@ -572,6 +585,7 @@ function RequestBoard() {
       } else {
         setError(null);
         setLastUpdated(new Date());
+        setSlaRefreshKey((k) => k + 1);
       }
     } catch (err) {
       console.error('Error fetching assigned tickets:', err);
@@ -1308,6 +1322,15 @@ function RequestBoard() {
         }}
       />
 
+      <SlaSummaryCards
+        data={slaSummary}
+        selected={slaFilter}
+        onSelect={(state) => {
+          setSlaFilter(state);
+          setCurrentPage(1);
+        }}
+      />
+
       <RequestListFilters
         filters={filters}
         onChange={setFilters}
@@ -1441,7 +1464,10 @@ function RequestBoard() {
                           #{isTask ? t!.id_request_general : r!.id}
                         </Text>
                       </Group>
-                      {renderStatusBadge(isTask ? t!.status_task : r!.status)}
+                      <Group gap={4} wrap='nowrap'>
+                        {!isTask && <SlaBadge info={slaSummary?.byRequest[Number(r!.id)]} />}
+                        {renderStatusBadge(isTask ? t!.status_task : r!.status)}
+                      </Group>
                     </Group>
                     <Text size='sm' fw={600} lineClamp={2} style={{ overflowWrap: 'anywhere' }}>
                       {isTask ? t!.task : r!.subject}
@@ -1588,7 +1614,10 @@ function RequestBoard() {
                       </Table.Td>
                       <Table.Td>{renderCompanyCell(ticket.company, ticket.category, ticket.process)}</Table.Td>
                       <Table.Td style={{ whiteSpace: 'nowrap' }}>
-                        {renderStatusBadge(ticket.status)}
+                        <Stack gap={4} align='flex-start'>
+                          {renderStatusBadge(ticket.status)}
+                          <SlaBadge info={slaSummary?.byRequest[Number(ticket.id)]} />
+                        </Stack>
                       </Table.Td>
                       <Table.Td>
                         <Group gap={4} wrap='nowrap' align='flex-start'>

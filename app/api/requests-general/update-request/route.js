@@ -12,6 +12,8 @@ import {
 import {
   closeOpenTasksOnReturn,
   reopenTasksClosedOnReturn,
+  openSlaPause,
+  closeSlaPause,
 } from '../../../../lib/requests-general/returnedTasks.js';
 
 export async function POST(req) {
@@ -138,6 +140,12 @@ export async function POST(req) {
 
         if (Number(status) === 7 && Number(prevRow?.status_req) !== 7) {
           await closeOpenTasksOnReturn(transaction, id);
+          await openSlaPause(transaction, id);
+        }
+
+        // Leaving "Devuelta" (reopened, resolved or cancelled): the SLA clock runs again.
+        if (Number(prevRow?.status_req) === 7 && Number(status) !== 7) {
+          await closeSlaPause(transaction, id);
         }
 
         if (isRequestClosedStatus(status)) {
