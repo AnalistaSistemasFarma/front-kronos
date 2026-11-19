@@ -169,7 +169,10 @@ function useProcessCharts(rows: ProcessSeriesRow[], range: RangeKey) {
         for (const r of rows) {
           const v = pick(r);
           if (r.host !== host || v == null) continue;
-          const s = sums[bucketIndex.get(r.bucket)!];
+          const idx = bucketIndex.get(r.bucket);
+          // A bucket off the grid (rows from another range) must not break the chart.
+          if (idx == null) continue;
+          const s = sums[idx];
           s.total += v;
           s.n += 1;
         }
@@ -252,6 +255,9 @@ export default function SystemMetricsPage() {
   const [range, setRange] = useState<RangeKey>('6h');
   const [autoRefresh, setAutoRefresh] = useState(true);
   const [metrics, setMetrics] = useState<MetricsResponse | null>(null);
+  // Range the current rows were loaded with: when the selector changes, the old rows stay
+  // on screen until the new fetch lands and must keep being drawn on their own bucket grid.
+  const [metricsRange, setMetricsRange] = useState<RangeKey>('6h');
   const [dbLive, setDbLive] = useState<DbLive | null>(null);
   const [overview, setOverview] = useState<SystemOverview | null>(null);
   const [overviewLoading, setOverviewLoading] = useState(false);
@@ -297,7 +303,9 @@ export default function SystemMetricsPage() {
     try {
       const res = await fetch(`/api/system-metrics?range=${selectedRange}`, { signal: controller.signal });
       if (!res.ok) throw new Error('No se pudieron cargar las métricas');
-      setMetrics(await res.json());
+      const data = await res.json();
+      setMetrics(data);
+      setMetricsRange(selectedRange);
       setLoadedAt(new Date().toISOString());
       setError(null);
     } catch (err) {
@@ -396,7 +404,7 @@ export default function SystemMetricsPage() {
   const rangeLong = rangeOption.long;
   const processRows = useMemo(() => metrics?.processSeries ?? [], [metrics]);
   const dbRows = useMemo(() => metrics?.db ?? [], [metrics]);
-  const charts = useProcessCharts(processRows, range);
+  const charts = useProcessCharts(processRows, metricsRange);
   const hasData = processRows.length > 0;
   // Minutos realmente medidos (sin huecos ni la parte que falta de las ventanas de los bordes).
   const observedMinutes = Math.max(1, charts.measuredMinutes);
@@ -438,7 +446,7 @@ export default function SystemMetricsPage() {
   const latest = useMemo(() => {
     if (!processRows.length) return [];
     const lastAt = Date.parse(processRows[processRows.length - 1].bucket);
-    const minAt = lastAt - BUCKET_MINUTES[range] * 60_000;
+    const minAt = lastAt - BUCKET_MINUTES[metricsRange] * 60_000;
     const byInstance = new Map<string, ProcessSeriesRow>();
     for (const r of processRows) {
       if (Date.parse(r.bucket) < minAt) continue;
@@ -447,7 +455,7 @@ export default function SystemMetricsPage() {
       if (!seen || r.bucket >= seen.bucket) byInstance.set(key, r);
     }
     return Array.from(byInstance.values());
-  }, [processRows, range]);
+  }, [processRows, metricsRange]);
 
   const lastDb = dbRows.length ? dbRows[dbRows.length - 1] : null;
   const cur = metrics?.summary?.current;
