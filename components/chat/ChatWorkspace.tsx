@@ -1680,12 +1680,16 @@ export default function ChatWorkspace({
   /* ──────────────── Armazón normal: rejilla de carpetas ─────────────────── */
 
   return (
-    <div className='app-page-shell app-page-shell--fill ios-process-hub min-h-screen'>
+    <div
+      className={`app-page-shell app-page-shell--fill ios-process-hub min-h-screen${
+        conversacionSola ? '' : ' chat-hub'
+      }`}
+    >
       <div
         className={
           conversacionSola
             ? 'chat-page-shell--completa'
-            : 'max-w-7xl mx-auto py-8 px-4 sm:px-6 lg:px-8'
+            : 'max-w-7xl mx-auto pt-4 pb-8 sm:py-8 px-4 sm:px-6 lg:px-8'
         }
       >
         <header className='mb-6' hidden={Boolean(conversacionSola && hayAlgoAbierto)}>
@@ -1715,32 +1719,66 @@ export default function ChatWorkspace({
               }
               radius='md'
             />
+            {/* Below `sm` (phones) the labelled buttons do not fit next to the
+                search box and got truncated, so they collapse to icons. */}
             {overview.canBroadcast && (
-              <Tooltip label='Ver el organigrama de la flota' withArrow>
-                <Button
-                  variant='subtle'
-                  color='gray'
-                  radius='md'
-                  leftSection={<IconHierarchy2 size={16} />}
-                  component={Link}
-                  href='/process/chat/organigrama'
-                >
-                  Organigrama
-                </Button>
-              </Tooltip>
+              <>
+                <Tooltip label='Ver el organigrama de la flota' withArrow>
+                  <Button
+                    visibleFrom='sm'
+                    variant='subtle'
+                    color='gray'
+                    radius='md'
+                    leftSection={<IconHierarchy2 size={16} />}
+                    component={Link}
+                    href='/process/chat/organigrama'
+                  >
+                    Organigrama
+                  </Button>
+                </Tooltip>
+                <Tooltip label='Organigrama' withArrow>
+                  <ActionIcon
+                    hiddenFrom='sm'
+                    variant='subtle'
+                    color='gray'
+                    size={36}
+                    radius='md'
+                    component={Link}
+                    href='/process/chat/organigrama'
+                    aria-label='Organigrama'
+                  >
+                    <IconHierarchy2 size={18} />
+                  </ActionIcon>
+                </Tooltip>
+              </>
             )}
 
             {overview.canBroadcast && overview.agents.length > 1 && (
-              <Tooltip label='Enviar un mensaje a varios asistentes' withArrow>
-                <Button
-                  variant='light'
-                  radius='md'
-                  leftSection={<IconSend size={16} />}
-                  onClick={() => setMasivoAbierto(true)}
-                >
-                  Enviar a todos
-                </Button>
-              </Tooltip>
+              <>
+                <Tooltip label='Enviar un mensaje a varios asistentes' withArrow>
+                  <Button
+                    visibleFrom='sm'
+                    variant='light'
+                    radius='md'
+                    leftSection={<IconSend size={16} />}
+                    onClick={() => setMasivoAbierto(true)}
+                  >
+                    Enviar a todos
+                  </Button>
+                </Tooltip>
+                <Tooltip label='Enviar a todos' withArrow>
+                  <ActionIcon
+                    hiddenFrom='sm'
+                    variant='light'
+                    size={36}
+                    radius='md'
+                    onClick={() => setMasivoAbierto(true)}
+                    aria-label='Enviar a todos'
+                  >
+                    <IconSend size={18} />
+                  </ActionIcon>
+                </Tooltip>
+              </>
             )}
 
             <Group gap={4} wrap='nowrap'>
