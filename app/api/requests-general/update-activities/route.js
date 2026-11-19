@@ -15,7 +15,7 @@ import { closeRequestGeneral } from '../../../../lib/workflow/closeRequestGenera
 import { resolveSessionUser } from '../../../../lib/chat/http';
 import { authorizationDecisionBlock } from '../../../../lib/request-general/workload';
 import { orionInternalTaskSql } from '../../../../lib/orion/internalTasks';
-import { closeOpenTasksOnReturn } from '../../../../lib/requests-general/returnedTasks.js';
+import { closeOpenTasksOnReturn, openSlaPause } from '../../../../lib/requests-general/returnedTasks.js';
 
 export async function POST(req) {
   const TAG = '[update-activities]';
@@ -263,6 +263,7 @@ export async function POST(req) {
           .input('id_request', sql.Int, prevRow.id_request_general)
           .query(`UPDATE requests_general SET status_req = 7 WHERE id = @id_request`);
         const closedTasks = await closeOpenTasksOnReturn(transaction, prevRow.id_request_general);
+        await openSlaPause(transaction, prevRow.id_request_general);
         console.log(`${TAG} 3c) ${closedTasks} tarea(s) abiertas canceladas al devolver la solicitud.`);
         console.log(
           `${TAG} 3b) Autorización rechazada: solicitud ${prevRow.id_request_general} marcada como Devuelta (7).`

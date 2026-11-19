@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { PREF_COMPANY_COLORS, isAllowedPrefKey, normalizePrefValue, widthsKey } from './preferences';
+import {
+  PREF_COMPANY_COLORS,
+  PREF_REQUEST_INDICATORS,
+  isAllowedPrefKey,
+  normalizeIndicatorPrefs,
+  normalizePrefValue,
+  parsePrefValue,
+  widthsKey,
+} from './preferences';
 
 describe('preferencias de interfaz', () => {
   it('solo acepta claves conocidas', () => {
@@ -13,5 +21,35 @@ describe('preferencias de interfaz', () => {
   it('colores: booleano', () => {
     expect(normalizePrefValue(PREF_COMPANY_COLORS, true)).toBe('true');
     expect(normalizePrefValue(PREF_COMPANY_COLORS, 'x')).toBe('false');
+  });
+  it('indicator cards: only known cards, no duplicates, boolean hidden flag', () => {
+    expect(isAllowedPrefKey(PREF_REQUEST_INDICATORS)).toBe(true);
+    const raw = normalizePrefValue(PREF_REQUEST_INDICATORS, {
+      slaHidden: 'yes',
+      hiddenCards: ['sla.no_sla', 'sla.no_sla', 'status.done', 'drop table', 42],
+      extra: 1,
+    });
+    expect(raw).toBe('{"slaHidden":false,"hiddenCards":["sla.no_sla","status.done"]}');
+    expect(normalizeIndicatorPrefs(parsePrefValue(PREF_REQUEST_INDICATORS, raw!))).toEqual({
+      slaHidden: false,
+      hiddenCards: ['sla.no_sla', 'status.done'],
+    });
+    expect(normalizePrefValue(PREF_REQUEST_INDICATORS, [1])).toBeNull();
+    expect(normalizeIndicatorPrefs(undefined)).toEqual({ slaHidden: false, hiddenCards: [] });
+    expect(normalizeIndicatorPrefs({ slaHidden: true }).slaHidden).toBe(true);
+  });
+});
+
+import { requestSortKey } from './preferences';
+describe('requests.sort.* (Vencimiento sort per list)', () => {
+  it('accepts only the known lists and values', () => {
+    expect(isAllowedPrefKey(requestSortKey('assigned'))).toBe(true);
+    expect(isAllowedPrefKey(requestSortKey('general'))).toBe(true);
+    expect(isAllowedPrefKey('requests.sort.other')).toBe(false);
+    expect(normalizePrefValue('requests.sort.assigned', 'due_asc')).toBe('"due_asc"');
+    expect(normalizePrefValue('requests.sort.general', 'none')).toBe('"none"');
+    expect(normalizePrefValue('requests.sort.general', 'drop table')).toBeNull();
+    expect(normalizePrefValue('requests.sort.general', { a: 1 })).toBeNull();
+    expect(parsePrefValue('requests.sort.general', '"due_desc"')).toBe('due_desc');
   });
 });

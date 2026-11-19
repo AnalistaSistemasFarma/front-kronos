@@ -513,7 +513,11 @@ function documentoHoja(css: string, html: string): string {
   return [
     '<!doctype html><html><head><meta charset="utf-8">',
     `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'">`,
-    '<style>body{margin:12px;background:#fff;color:#111;font:11pt Calibri,Carlito,Arial,sans-serif}table.sgc-hoja td{padding:1px 4px}p{font-size:10pt;color:#555}</style>',
+    '<style>body{margin:12px;background:#fff;color:#111;font:11pt Calibri,Carlito,Arial,sans-serif}table.sgc-hoja td{padding:1px 4px;overflow-wrap:anywhere}p{font-size:10pt;color:#555}</style>',
+    // Sticky header: the first print-title row (<thead>) or, without one, the first row of the sheet.
+    // The white backdrop's specificity (0,1,3) beats the base `td{background:transparent}` and
+    // loses to the cell fills (`table.sgc-hoja .sgc-bg-*`), so colored headers keep their color.
+    '<style>table.sgc-hoja thead tr:first-child>td,table.sgc-hoja:not(:has(thead)) tr.sgc-regla+tr>td{position:sticky;top:0;z-index:2;box-shadow:inset 0 -1px 0 #c8ced6}html body .sgc-hoja :where(thead tr:first-child,tr.sgc-regla+tr)>td{background-color:#fff}</style>',
     `<style>${css.replace(/<\/style/gi, '')}</style>`,
     '</head><body>',
     html,

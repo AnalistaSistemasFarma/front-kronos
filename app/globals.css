@@ -3862,12 +3862,24 @@ button.chat-galeria__archivo {
   background-color: var(--app-surface, var(--surface));
 }
 
-.chat-visor__pestanas-lista {
+/* Mantine's Tabs root sets `display: var(--tabs-display)` (block for horizontal
+   tabs) and its stylesheet loads after this one, so the single-class rule above
+   lost: the panel never stretched and the sheet iframe fell back to the
+   browser's default 150px height. Same for the panel's `flex-grow:
+   var(--tabs-panel-grow)` below. Two classes win regardless of load order. */
+.chat-visor__hoja .chat-visor__pestanas {
+  display: flex;
+  flex-direction: column;
+}
+
+/* Also double-class: Mantine's `flex-wrap: wrap` on the list wrapped the tabs to two rows on the phone. */
+.chat-visor__hoja .chat-visor__pestanas-lista {
   flex-wrap: nowrap;
+  flex-shrink: 0;
   overflow-x: auto;
 }
 
-.chat-visor__pestana {
+.chat-visor__hoja .chat-visor__pestana {
   flex: 1;
   min-height: 0;
 }
