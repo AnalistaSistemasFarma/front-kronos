@@ -72,6 +72,24 @@ export function fijarProyectoEngram(mcpServers, proyecto) {
   );
 }
 
+/**
+ * Engram of the agent (2026-11-19): absolute binary (the bridge PATH may not have it, as with Doki on
+ * cosmo) and the agent's OWN base (ENGRAM_DATA_DIR / ENGRAM_PORT, as its chat run.sh sets them).
+ * A value already present in the server definition is kept.
+ */
+export function ajustarEngram(mcpServers, { bin = null, dataDir = null, port = null } = {}) {
+  if (!bin && !dataDir && !port) return mcpServers;
+  return Object.fromEntries(
+    Object.entries(mcpServers).map(([n, s]) => {
+      if (!esEngram(s)) return [n, s];
+      const env = { ...(s.env ?? {}) };
+      if (dataDir && !env.ENGRAM_DATA_DIR) env.ENGRAM_DATA_DIR = dataDir;
+      if (port && !env.ENGRAM_PORT) env.ENGRAM_PORT = String(port);
+      return [n, { ...s, command: bin && !path.isAbsolute(s.command) ? bin : s.command, env }];
+    })
+  );
+}
+
 function leerJson(ruta) {
   return JSON.parse(readFileSync(ruta, 'utf8'));
 }
@@ -92,7 +110,7 @@ export function proyectoDelAgente(proyectos, dir) {
  * Servidores MCP del chat del agente, leídos de su config dir en el momento del turno.
  * Devuelve { mcpServers, nombres, faltan, origen } — `faltan` y `origen` son NOMBRES, sin valores.
  */
-export function servidoresAgente({ configDir, envArchivo = null, proyectoDir = null, excluir = [], engramProyecto = null }) {
+export function servidoresAgente({ configDir, envArchivo = null, proyectoDir = null, excluir = [], engramProyecto = null, engramBin = null, engramDataDir = null, engramPort = null }) {
   const claude = leerJson(path.join(configDir, '.claude.json'));
   let settings = {};
   try {
@@ -127,7 +145,7 @@ export function servidoresAgente({ configDir, envArchivo = null, proyectoDir = n
   const vars = new Map([...Object.entries(settings.env ?? {}).filter(([, v]) => typeof v === 'string'), ...leerVariablesEnv(envArchivo)]);
   const { valor: expandidos, faltan } = expandirVariables(filtrados, vars);
   const engram = Object.values(expandidos).some(esEngram) ? proyectoEngram({ proyectoDir, explicito: engramProyecto }) : null;
-  const valor = fijarProyectoEngram(expandidos, engram);
+  const valor = ajustarEngram(fijarProyectoEngram(expandidos, engram), { bin: engramBin, dataDir: engramDataDir, port: engramPort });
   const nombres = Object.keys(valor).sort();
   return { mcpServers: valor, nombres, faltan, origen: Object.fromEntries(nombres.map((n) => [n, origen[n]])), engramProyecto: engram };
 }
@@ -185,7 +203,7 @@ export function textoConectoresAgente({ agente, servidores, origen = {}, engramP
 export function prepararConectoresAgente({ cfg, idConversation, perfilServidores = {}, ahora = Date.now() }) {
   const ca = cfg.conectoresAgente;
   if (!ca?.configDir) return null;
-  const a = servidoresAgente({ configDir: ca.configDir, envArchivo: ca.envArchivo, proyectoDir: ca.proyectoDir, excluir: ca.excluir ?? [], engramProyecto: ca.engramProyecto ?? null });
+  const a = servidoresAgente({ configDir: ca.configDir, envArchivo: ca.envArchivo, proyectoDir: ca.proyectoDir, excluir: ca.excluir ?? [], engramProyecto: ca.engramProyecto ?? null, engramBin: ca.engramBin ?? null, engramDataDir: ca.engramDataDir ?? null, engramPort: ca.engramPort ?? null });
   const propios = Object.fromEntries(Object.entries(a.mcpServers).filter(([n]) => !(n in perfilServidores)));
   const nombres = Object.keys(propios).sort();
   const engramProyecto = propios && Object.values(propios).some(esEngram) ? a.engramProyecto : null;

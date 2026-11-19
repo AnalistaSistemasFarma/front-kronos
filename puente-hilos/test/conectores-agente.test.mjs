@@ -106,7 +106,7 @@ test('config: HILOS_CONECTORES_AGENTE_* validan rutas y no aceptan el config ais
   assert.throws(() => cargarConfig({ ...base, HILOS_CONECTORES_AGENTE_CONFIG_DIR: path.join(d, 'no-existe') }), /no tiene .claude.json/);
   assert.throws(() => cargarConfig({ ...base, HILOS_CONECTORES_AGENTE_CONFIG_DIR: conf, HILOS_CONECTORES_AGENTE_ENV: 'x.env' }), /ruta absoluta/);
   const cfg = cargarConfig({ ...base, HILOS_CONECTORES_AGENTE_CONFIG_DIR: conf, HILOS_CONECTORES_AGENTE_ENV: env, HILOS_CONECTORES_AGENTE_PROYECTO: vault, HILOS_CONECTORES_AGENTE_EXCLUIR: 'a, b' });
-  assert.deepEqual(cfg.conectoresAgente, { configDir: conf, envArchivo: env, proyectoDir: vault, excluir: ['a', 'b'], engramProyecto: null });
+  assert.deepEqual(cfg.conectoresAgente, { configDir: conf, envArchivo: env, proyectoDir: vault, excluir: ['a', 'b'], engramProyecto: null, engramBin: null, engramDataDir: null, engramPort: null });
   assert.equal(cargarConfig({ ...base, HILOS_CONECTORES_AGENTE_CONFIG_DIR: conf, HILOS_CONECTORES_AGENTE_ENGRAM_PROYECTO: 'gsslatam-graph' }).conectoresAgente.engramProyecto, 'gsslatam-graph');
   assert.throws(() => cargarConfig({ ...base, HILOS_CONECTORES_AGENTE_CONFIG_DIR: conf, HILOS_CONECTORES_AGENTE_ENGRAM_PROYECTO: '../x y' }), /ENGRAM_PROYECTO/);
   const listo = conectoresAgenteListo(cfg);
