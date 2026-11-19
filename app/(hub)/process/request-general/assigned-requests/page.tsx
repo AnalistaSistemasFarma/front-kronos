@@ -91,6 +91,7 @@ import { RequestListFilters } from '../../../../../components/request-general/li
 import { SlaSummaryCards } from '../../../../../components/request-general/sla/SlaSummaryCards';
 import { SlaBadge } from '../../../../../components/request-general/sla/SlaBadge';
 import { useSlaSummary } from '../../../../../components/request-general/sla/useSlaSummary';
+import { useIndicatorPrefs } from '../../../../../components/request-general/sla/useIndicatorPrefs';
 import {
   countInboxSla,
   inboxItemSlaState,
@@ -292,6 +293,12 @@ function RequestBoard() {
   });
   const [slaRefreshKey, setSlaRefreshKey] = useState(0);
   const { data: slaSummary } = useSlaSummary(slaRefreshKey);
+  // Status cards the user hid from the gear of the ANS row (saved per user).
+  const { prefs: indicatorPrefs } = useIndicatorPrefs();
+  const hiddenStatusTiles = useMemo(
+    () => indicatorPrefs.hiddenCards.filter((c) => c.startsWith('status.')).map((c) => c.slice('status.'.length)),
+    [indicatorPrefs]
+  );
   const [currentPage, setCurrentPage] = useState(1);
   const [searchInput, setSearchInput] = useState('');
   const deferredSearch = useDeferredValue(searchInput);
@@ -1347,6 +1354,7 @@ function RequestBoard() {
         available={Boolean(slaSummary?.available)}
         counts={slaCounts.counts}
         breakdown={slaCounts.breakdown}
+        showStatusOptions
         selected={slaFilter}
         onSelect={(state) => {
           setSlaFilter(state);
@@ -1360,6 +1368,7 @@ function RequestBoard() {
         onClear={clearListFilters}
         counts={statusCounts}
         showReturned
+        hiddenTiles={hiddenStatusTiles}
         hints={statusHints}
         options={listOptions}
         progress={globalProgress}

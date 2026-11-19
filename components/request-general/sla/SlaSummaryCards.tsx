@@ -9,10 +9,12 @@ import {
   IconInfoCircle,
   IconPlayerPause,
 } from '@tabler/icons-react';
-import type { ReactNode } from 'react';
+import { useEffect, type ReactNode } from 'react';
 import type { StatusTone } from '../../ui/panel/Panel';
 import { StatFilterTile } from '../list/RequestListUi';
 import styles from '../list/requestList.module.css';
+import { IndicatorSettings } from './IndicatorSettings';
+import { useIndicatorPrefs } from './useIndicatorPrefs';
 import type { InboxSlaBreakdown, InboxSlaCounts, InboxSlaState } from '../../../lib/requests-general/slaInbox';
 
 const TILES: { state: InboxSlaState; label: string; tone: StatusTone | 'violet'; icon: ReactNode }[] = [
@@ -41,26 +43,47 @@ export function SlaSummaryCards({
   breakdown,
   selected,
   onSelect,
+  showStatusOptions = false,
 }: {
   available: boolean;
   counts: InboxSlaCounts;
   breakdown?: InboxSlaBreakdown;
   selected: InboxSlaState | null;
   onSelect: (state: InboxSlaState | null) => void;
+  /** Also offer the status cards (Total, Pendientes…) in the settings (inbox only). */
+  showStatusOptions?: boolean;
 }) {
+  const { prefs, isVisible, setSlaHidden } = useIndicatorPrefs();
+  const selectedHidden = selected != null && (prefs.slaHidden || !isVisible(`sla.${selected}`));
+  // A hidden card cannot keep filtering the list.
+  useEffect(() => {
+    if (selectedHidden) onSelect(null);
+  }, [selectedHidden, onSelect]);
   if (!available) return null;
-  const tiles = TILES.filter((t) => t.state !== 'paused' || counts.paused > 0);
+  if (prefs.slaHidden) {
+    return (
+      <div className={styles.slaHead} data-testid='sla-summary-hidden' style={{ marginBottom: 12 }}>
+        <button type='button' className={styles.slaShowLink} onClick={() => setSlaHidden(false)}>
+          Mostrar indicadores de ANS
+        </button>
+        <IndicatorSettings showStatusOptions={showStatusOptions} />
+      </div>
+    );
+  }
+  const tiles = TILES.filter((t) => (t.state !== 'paused' || counts.paused > 0) && isVisible(`sla.${t.state}`));
   return (
     <section data-testid='sla-summary' style={{ marginBottom: 12 }}>
       <div className={styles.slaHead}>
         <span>ANS de pendientes</span>
+        <IndicatorSettings showStatusOptions={showStatusOptions} />
         <Tooltip label={HELP} multiline w={320} withArrow events={{ hover: true, focus: true, touch: true }}>
           <button type='button' className={styles.slaInfo} aria-label='Cómo se calcula el ANS'>
             <IconInfoCircle size={15} />
           </button>
         </Tooltip>
       </div>
-      <div className={`${styles.statGrid} ${styles.slaGrid}`}>
+      {tiles.length > 0 ? (
+        <div className={`${styles.statGrid} ${styles.slaGrid}`}>
         {tiles.map((t) => {
           const b = breakdown?.[t.state];
           return (
@@ -78,7 +101,8 @@ export function SlaSummaryCards({
             </span>
           );
         })}
-      </div>
+        </div>
+      ) : null}
     </section>
   );
 }

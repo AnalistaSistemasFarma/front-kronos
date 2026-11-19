@@ -5,17 +5,54 @@
 export const PREF_COMPANY_COLORS = 'tables.companyColors';
 const WIDTHS_PREFIX = 'tables.widths.';
 
+/**
+ * Indicator cards of the request inboxes (SLA row + status cards), per user. Stored as the
+ * list of HIDDEN cards, so a card added later shows up by default.
+ */
+export const PREF_REQUEST_INDICATORS = 'requests.indicators';
+export const SLA_INDICATOR_CARDS = ['sla.overdue', 'sla.near_due', 'sla.on_time', 'sla.no_sla', 'sla.paused'] as const;
+export const STATUS_INDICATOR_CARDS = [
+  'status.all',
+  'status.pending',
+  'status.returned',
+  'status.done',
+  'status.cancelled',
+  'status.progress',
+] as const;
+export type IndicatorCard = (typeof SLA_INDICATOR_CARDS)[number] | (typeof STATUS_INDICATOR_CARDS)[number];
+const INDICATOR_CARDS: readonly string[] = [...SLA_INDICATOR_CARDS, ...STATUS_INDICATOR_CARDS];
+
+export interface IndicatorPrefs {
+  /** «Ocultar indicadores»: hides the whole SLA row. */
+  slaHidden: boolean;
+  hiddenCards: IndicatorCard[];
+}
+export const DEFAULT_INDICATOR_PREFS: IndicatorPrefs = { slaHidden: false, hiddenCards: [] };
+
+/** Validated indicator prefs; anything unknown falls back to the defaults. */
+export function normalizeIndicatorPrefs(value: unknown): IndicatorPrefs {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return { ...DEFAULT_INDICATOR_PREFS, hiddenCards: [] };
+  const v = value as { slaHidden?: unknown; hiddenCards?: unknown };
+  const cards = Array.isArray(v.hiddenCards) ? v.hiddenCards : [];
+  const hiddenCards = [...new Set(cards.filter((c): c is IndicatorCard => typeof c === 'string' && INDICATOR_CARDS.includes(c)))];
+  return { slaHidden: v.slaHidden === true, hiddenCards };
+}
+
 export function widthsKey(table: string): string {
   return `${WIDTHS_PREFIX}${table}`;
 }
 
 export function isAllowedPrefKey(key: string): boolean {
-  return key === PREF_COMPANY_COLORS || /^tables\.widths\.[a-z0-9-]{1,60}$/.test(key);
+  return key === PREF_COMPANY_COLORS || key === PREF_REQUEST_INDICATORS || /^tables\.widths\.[a-z0-9-]{1,60}$/.test(key);
 }
 
 /** Valida y normaliza el valor según la clave (null = inválido). */
 export function normalizePrefValue(key: string, value: unknown): string | null {
   if (key === PREF_COMPANY_COLORS) return value === true || value === 'true' ? 'true' : 'false';
+  if (key === PREF_REQUEST_INDICATORS) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+    return JSON.stringify(normalizeIndicatorPrefs(value));
+  }
   if (key.startsWith(WIDTHS_PREFIX)) {
     if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
     const out: Record<string, number> = {};

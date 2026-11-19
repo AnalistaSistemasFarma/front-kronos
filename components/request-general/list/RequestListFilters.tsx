@@ -48,6 +48,7 @@ export function RequestListFilters({
   extraFields,
   extraActiveCount = 0,
   showReturned = false,
+  hiddenTiles = [],
 }: {
   filters: ListFilters;
   onChange: (next: ListFilters) => void;
@@ -64,6 +65,8 @@ export function RequestListFilters({
   extraFields?: ReactNode;
   extraActiveCount?: number;
   showReturned?: boolean;
+  /** Status cards the user chose to hide ('all', 'pending'…, 'progress'). */
+  hiddenTiles?: string[];
 }) {
   const [expanded, setExpanded] = useState(false);
   const set = <K extends keyof ListFilters>(key: K, value: ListFilters[K]) =>
@@ -99,7 +102,9 @@ export function RequestListFilters({
   return (
     <>
       <div className={styles.statGrid}>
-        {tiles.map((tile) => (
+        {tiles
+          .filter((tile) => !hiddenTiles.includes(tile.key))
+          .map((tile) => (
           <StatFilterTile
             key={tile.key}
             icon={tile.icon}
@@ -112,14 +117,16 @@ export function RequestListFilters({
             ariaLabel={tile.key === 'all' ? 'Mostrar todo' : `Mostrar ${tile.label.toLowerCase()}`}
           />
         ))}
-        <ProgressRingTile
-          label={progressLabel}
-          done={progress.done}
-          total={progress.total}
-          percent={progress.percent}
-          hint={progressHint}
-          onClick={onProgressClick}
-        />
+        {hiddenTiles.includes('progress') ? null : (
+          <ProgressRingTile
+            label={progressLabel}
+            done={progress.done}
+            total={progress.total}
+            percent={progress.percent}
+            hint={progressHint}
+            onClick={onProgressClick}
+          />
+        )}
       </div>
 
       <FilterPanel
