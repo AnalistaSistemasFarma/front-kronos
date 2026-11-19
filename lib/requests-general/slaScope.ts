@@ -133,6 +133,30 @@ export async function loadSlaScope(
     throw e;
   }
 
+  const byRequest = await buildSlaByRequest(pool, rows, opts.now);
+  return { available: true, ...countInboxSla(items, byRequest), byRequest };
+}
+
+export interface SlaRequestRow {
+  id: number;
+  created_at: Date;
+  status_req: number;
+  sla_value: number | null;
+  sla_unit: string | null;
+  sla_warn_pct: number | null;
+}
+
+/**
+ * SLA of each request whose clock runs (status 1, 4, 5); other rows are left out, which the
+ * bucket functions read as «paused». Loads the pauses of the requests that have an SLA.
+ */
+export async function buildSlaByRequest(
+  pool: sql.ConnectionPool,
+  allRows: SlaRequestRow[],
+  nowInput?: Date
+): Promise<Record<number, RequestSlaInfo>> {
+  const running = new Set<number>(SLA_RUNNING_STATUSES);
+  const rows = allRows.filter((r) => running.has(Number(r.status_req)));
   const byRequest: Record<number, RequestSlaInfo> = {};
 
   // Pauses only matter for requests that have an SLA.
@@ -154,7 +178,7 @@ export async function loadSlaScope(
     }
   }
 
-  const now = bogotaWallNow(opts.now);
+  const now = bogotaWallNow(nowInput);
   for (const r of rows) {
     const cfg = { value: r.sla_value, unit: r.sla_unit, warnPct: r.sla_warn_pct };
     const ev = evaluateSla(r.created_at, cfg, now, pauses.get(r.id) ?? []);
@@ -165,5 +189,5 @@ export async function loadSlaScope(
       slaLabel: formatSla(cfg),
     };
   }
-  return { available: true, ...countInboxSla(items, byRequest), byRequest };
+  return byRequest;
 }

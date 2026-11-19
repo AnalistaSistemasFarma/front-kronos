@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useMemo, useRef, Suspense } from 'react';
 import { useSession } from 'next-auth/react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { saveAs } from 'file-saver';
 import {
   Title,
@@ -10,7 +10,6 @@ import {
   Alert,
   Table,
   Group,
-  Badge,
   Card,
   Text,
   LoadingOverlay,
@@ -19,19 +18,11 @@ import {
   Loader,
   Pagination,
   Button,
+  Paper,
 } from '@mantine/core';
 import {
   IconAlertCircle,
-  IconX,
   IconFileDescription,
-  IconUser,
-  IconClock,
-  IconBuilding,
-  IconProgress,
-  IconCircleCheckFilled,
-  IconCircleDot,
-  IconCircle,
-  IconUserCheck,
   IconDownload,
 } from '@tabler/icons-react';
 import {
@@ -44,6 +35,35 @@ import {
   AllTasksModal,
   type GeneralTask,
 } from '../../../../../components/request-general/list/AllTasksModal';
+import { SlaSummaryCards } from '../../../../../components/request-general/sla/SlaSummaryCards';
+import { DueCell, DueSortButton, DueSortHeader, useDueSort } from '../../../../../components/request-general/sla/DueSort';
+import { useIndicatorPrefs } from '../../../../../components/request-general/sla/useIndicatorPrefs';
+import type { RequestSlaInfo } from '../../../../../components/request-general/sla/useSlaSummary';
+import {
+  emptyInboxSlaCounts,
+  generalListGroup,
+  inboxItemSlaState,
+  parseInboxSlaState,
+  type DueSort,
+  type InboxSlaCounts,
+  type InboxSlaState,
+} from '../../../../../lib/requests-general/slaInbox';
+import {
+  RequestCompanyCell,
+  RequestDateCell,
+  RequestStatusBadge,
+  RequestTaskChips,
+  RequestTypeBadge,
+  formatRequestDate,
+} from '../../../../../components/request-general/list/RequestRowParts';
+import { RequestFlowBar, useRequestFlows } from '../../../../../components/request-general/RequestFlow';
+import { SlaBadge } from '../../../../../components/request-general/sla/SlaBadge';
+import CompanyLogo from '../../../../../components/ui/CompanyLogo';
+import PersonLine from '../../../../../components/ui/PersonLine';
+import { ResizableTh, useColumnWidths } from '../../../../../components/ui/ResizableTh';
+import { useUiPreference } from '../../../../../components/ui/useUiPreference';
+import { PREF_COMPANY_COLORS } from '../../../../../lib/ui/preferences';
+import { companyRowStyle } from '../../../../../lib/ui/companyColors';
 import AutoRefreshNote from '../../../../../components/ui/AutoRefreshNote';
 import IosSearchField from '../../../../../components/ui/IosSearchField';
 import { useAutoRefresh } from '../../../../../components/ui/useAutoRefresh';
@@ -55,7 +75,6 @@ import {
   type StatusCounts,
 } from '../../../../../lib/requests-general/listFilters';
 import {
-  buildTaskDisplayBadges,
   getSimplifiedTasksProgress,
 } from '@/lib/orion/taskProgress';
 
@@ -82,6 +101,17 @@ interface Ticket {
   requester: string;
   company: string;
   subject: string;
+  id_status_case: number;
+  process?: string | null;
+  requester_image?: string | null;
+  user_image?: string | null;
+}
+
+/** SLA (ANS) block of the paged API response (same set as the status cards). */
+interface ListSla {
+  available: boolean;
+  counts?: InboxSlaCounts;
+  byRequest?: Record<number, RequestSlaInfo>;
 }
 
 interface CompanyData {
@@ -101,10 +131,12 @@ interface ConsultResponse {
 }
 
 /** Lo que se le pide al servidor: los filtros del panel + el texto del buscador. */
-type AppliedQuery = { filters: ListFilters; search: string };
+type AppliedQuery = { filters: ListFilters; search: string; sla?: InboxSlaState | null; sort?: DueSort };
 
-function queryParams({ filters: f, search }: AppliedQuery): URLSearchParams {
+function queryParams({ filters: f, search, sla, sort }: AppliedQuery): URLSearchParams {
   const params = new URLSearchParams();
+  if (sla) params.append('sla', sla);
+  if (sort && sort !== 'none') params.append('sort', sort);
   params.append('status', f.state || f.status);
   if (f.company) params.append('company', f.company);
   if (f.date_from) params.append('date_from', f.date_from);
@@ -121,6 +153,7 @@ function queryParams({ filters: f, search }: AppliedQuery): URLSearchParams {
 function RequestGeneralPage() {
   const { data: session, status } = useSession();
   const router = useRouter();
+  const searchParams = useSearchParams();
   // El servidor identifica a la persona por la sesión; basta con que exista.
   const canLoad = Boolean(session);
 
@@ -143,6 +176,26 @@ function RequestGeneralPage() {
   // de SQL sobre el conjunto filtrado (antes se descargaba todo el historial al navegador).
   const [totalTickets, setTotalTickets] = useState(0);
   const [statusCounts, setStatusCounts] = useState<StatusCounts>(EMPTY_COUNTS);
+  // SLA (ANS) cards, filter and «Vencimiento» sort: computed by the API over the listed set.
+  const [slaFilter, setSlaFilter] = useState<InboxSlaState | null>(() => parseInboxSlaState(searchParams.get('sla')));
+  const [listSla, setListSla] = useState<ListSla>({ available: false });
+  const { sort: dueSort, cycle: cycleDueSort } = useDueSort('general');
+  // Same table as the assigned inbox: per-user column widths, company colours and flow bar.
+  const [companyColors] = useUiPreference<boolean>(PREF_COMPANY_COLORS, false);
+  const colWidths = useColumnWidths('generales', {
+    id: 90,
+    asunto: 340,
+    compania: 190,
+    estado: 150,
+    vence: 160,
+    fecha: 170,
+    personas: 300,
+  });
+  const { prefs: indicatorPrefs } = useIndicatorPrefs();
+  const hiddenStatusTiles = useMemo(
+    () => indicatorPrefs.hiddenCards.filter((c) => c.startsWith('status.')).map((c) => c.slice('status.'.length)),
+    [indicatorPrefs]
+  );
   // Consulta con la que se cargó la lista: al cambiar de página o refrescar se reutiliza.
   const appliedRef = useRef<AppliedQuery | null>(null);
   const requestSeqRef = useRef(0);
@@ -159,6 +212,7 @@ function RequestGeneralPage() {
   const allTasksSeqRef = useRef(0);
 
   const totalPages = Math.max(1, Math.ceil(totalTickets / ITEMS_PER_PAGE));
+  const { flows: requestFlows } = useRequestFlows(tickets.map((t) => Number(t.id)));
 
   // Opciones de los filtros: salen de los catálogos cargados (la lista llega por páginas).
   // «Estado» exacto y «Categoría»: los filtros que había antes del panel.
@@ -259,6 +313,7 @@ function RequestGeneralPage() {
         rows: Ticket[];
         total: number;
         counts: Partial<StatusCounts>;
+        sla?: ListSla;
       };
       // Si mientras tanto se pidió otra consulta, esta respuesta ya no vale.
       if (seq !== requestSeqRef.current) return;
@@ -273,6 +328,7 @@ function RequestGeneralPage() {
         cancelled: Number(data.counts?.cancelled) || 0,
         returned: 0,
       });
+      setListSla(data.sla ?? { available: false });
       setCurrentPage(page);
       setLastUpdated(new Date());
       setError(null);
@@ -294,13 +350,16 @@ function RequestGeneralPage() {
   // el estado (tarjetas) consulta al instante; al teclear se espera a que deje de escribir.
   useEffect(() => {
     if (!canLoad) return;
-    const query: AppliedQuery = { filters, search: searchInput.trim() };
+    const query: AppliedQuery = { filters, search: searchInput.trim(), sla: slaFilter, sort: dueSort };
     const prev = prevQueryRef.current;
     prevQueryRef.current = query;
     const onlyStatusChanged =
       prev !== null &&
       prev.search === query.search &&
-      (prev.filters.status !== query.filters.status || prev.filters.state !== query.filters.state) &&
+      (prev.filters.status !== query.filters.status ||
+        prev.filters.state !== query.filters.state ||
+        prev.sla !== query.sla ||
+        prev.sort !== query.sort) &&
       (Object.keys(query.filters) as Array<keyof ListFilters>).every(
         (k) => k === 'status' || k === 'state' || prev.filters[k] === query.filters[k]
       );
@@ -316,7 +375,7 @@ function RequestGeneralPage() {
     return () => window.clearTimeout(timer);
     // fetchTickets solo usa refs y setters estables.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [canLoad, filters, searchInput]);
+  }, [canLoad, filters, searchInput, slaFilter, dueSort]);
 
   // Refresco automático cada 30 s (y al volver a la pestaña): misma página, filtros y búsqueda.
   useAutoRefresh(() => {
@@ -378,47 +437,20 @@ function RequestGeneralPage() {
     return null;
   }
 
-  const getStatusColor = (status: string) => {
-    switch (status?.toLowerCase()) {
-      case 'abierto':
-        return 'green';
-      case 'cancelado':
-        return 'gray';
-      case 'resuelto':
-        return 'blue';
-      case 'devuelta':
-      case 'devuelto':
-        return 'orange';
-      default:
-        return 'gray';
-    }
+  // Same parts as the assigned inbox (RequestRowParts): one look for both tables.
+  const openTicket = (ticket: Ticket) => {
+    sessionStorage.setItem('selectedRequest', JSON.stringify(ticket));
+    window.open(`/process/request-general/view-request?id=${ticket.id}&from=general-requests`);
   };
-
-  const getStatusIcon = (status: string) => {
-    switch (status?.toLowerCase()) {
-      case 'abierto':
-        return IconProgress;
-      case 'cancelado':
-        return IconX;
-      case 'resuelto':
-        return IconCircleCheckFilled;
-      default:
-        return IconClock;
-    }
-  };
-
-  const getTaskVisual = (status: string) => {
-    switch (status?.toLowerCase()) {
-      case 'resuelto':
-        return { color: 'green', Icon: IconCircleCheckFilled };
-      case 'abierto':
-        return { color: 'orange', Icon: IconCircleDot };
-      case 'sin empezar':
-        return { color: 'gray', Icon: IconCircle };
-      default:
-        return { color: 'red', Icon: IconCircle };
-    }
-  };
+  const dueOf = (ticket: Ticket) => ({
+    state: listSla.available
+      ? inboxItemSlaState(
+          { kind: 'request', requestId: ticket.id, group: generalListGroup(Number(ticket.id_status_case)) },
+          listSla.byRequest ?? {}
+        )
+      : null,
+    info: listSla.byRequest?.[ticket.id],
+  });
 
   const getTasksProgress = (tasks: RequestTask[]) => getSimplifiedTasksProgress(tasks);
 
@@ -510,11 +542,20 @@ function RequestGeneralPage() {
         }
       />
 
+      <SlaSummaryCards
+        available={listSla.available}
+        counts={listSla.counts ?? emptyInboxSlaCounts()}
+        showStatusOptions
+        selected={slaFilter}
+        onSelect={setSlaFilter}
+      />
+
       <RequestListFilters
         filters={filters}
         onChange={setFilters}
         onClear={clearListFilters}
         counts={statusCounts}
+        hiddenTiles={hiddenStatusTiles}
         options={listOptions}
         progress={globalProgress}
         progressLabel={progressLabel}
@@ -549,6 +590,9 @@ function RequestGeneralPage() {
         </Group>
 
         <Box mb='md'>
+          <Box hiddenFrom='md' mb='xs'>
+            <DueSortButton sort={dueSort} onCycle={cycleDueSort} />
+          </Box>
           <IosSearchField
             value={searchInput}
             onChange={setSearchInput}
@@ -562,22 +606,92 @@ function RequestGeneralPage() {
           />
         </Box>
 
-        <div className='overflow-x-auto'>
-          <Table striped highlightOnHover>
+        {/* Phone: stacked cards (same parts as the assigned inbox). */}
+        <Stack gap='xs' hiddenFrom='md' data-testid='general-mobile-list'>
+          {tickets.length === 0 ? (
+            <Text size='sm' c='dimmed' ta='center' py='xl'>
+              {searchInput.trim()
+                ? `Ninguna solicitud coincide con “${searchInput.trim()}”`
+                : 'No se encontraron solicitudes'}
+            </Text>
+          ) : (
+            tickets.map((ticket) => {
+              const due = dueOf(ticket);
+              return (
+                <Paper
+                  key={ticket.id}
+                  withBorder
+                  radius='md'
+                  p='sm'
+                  role='button'
+                  tabIndex={0}
+                  onClick={() => openTicket(ticket)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') openTicket(ticket);
+                  }}
+                  style={{ cursor: 'pointer', ...companyRowStyle(ticket.company, companyColors) }}
+                >
+                  <Group justify='space-between' wrap='wrap' gap='xs' mb={4}>
+                    <Group gap={6} wrap='nowrap' style={{ flexShrink: 0 }}>
+                      <RequestTypeBadge kind='request' />
+                      <Text size='sm' fw={700}>
+                        #{ticket.id}
+                      </Text>
+                    </Group>
+                    <Group gap={4} wrap='nowrap'>
+                      {due.state === 'overdue' || due.state === 'near_due' || due.state === 'on_time' ? (
+                        <SlaBadge info={due.info} />
+                      ) : null}
+                      <RequestStatusBadge status={ticket.status} />
+                    </Group>
+                  </Group>
+                  <Text size='sm' fw={600} lineClamp={2} style={{ overflowWrap: 'anywhere' }}>
+                    {ticket.subject}
+                  </Text>
+                  {requestFlows[ticket.id] ? (
+                    <div style={{ marginTop: 6 }}>
+                      <RequestFlowBar flow={requestFlows[ticket.id]} />
+                    </div>
+                  ) : tasksByRequest[ticket.id]?.length ? (
+                    <div style={{ marginTop: 6 }}>
+                      <RequestProgressBar {...getTasksProgress(tasksByRequest[ticket.id])} />
+                    </div>
+                  ) : null}
+                  <Group gap={8} mt={6} wrap='nowrap' align='center'>
+                    <CompanyLogo name={ticket.company} height={24} />
+                    <Text size='xs' c='dimmed' style={{ overflowWrap: 'anywhere' }}>
+                      {[ticket.process, formatRequestDate(ticket.created_at)].filter(Boolean).join(' · ')}
+                    </Text>
+                  </Group>
+                  <Stack gap={4} mt={6}>
+                    <PersonLine name={ticket.requester} image={ticket.requester_image} role='requester' />
+                    <PersonLine name={ticket.user} image={ticket.user_image} dimmed role='assignee' />
+                  </Stack>
+                </Paper>
+              );
+            })
+          )}
+        </Stack>
+
+        <Box visibleFrom='md' className='overflow-x-auto'>
+          <Table striped={!companyColors} highlightOnHover style={{ tableLayout: 'fixed', minWidth: colWidths.total }}>
             <Table.Thead>
               <Table.Tr>
-                <Table.Th>ID</Table.Th>
-                <Table.Th>Asunto</Table.Th>
-                <Table.Th>Compañía / Categoría</Table.Th>
-                <Table.Th>Estado</Table.Th>
-                <Table.Th>Fecha</Table.Th>
-                <Table.Th>Solicitante / Asignado</Table.Th>
+                <ResizableTh col='id' width={colWidths.widths.id} onResize={colWidths.setWidth}>ID</ResizableTh>
+                <ResizableTh col='asunto' width={colWidths.widths.asunto} onResize={colWidths.setWidth}>Asunto</ResizableTh>
+                <ResizableTh col='compania' width={colWidths.widths.compania} onResize={colWidths.setWidth}>Compañía / Categoría</ResizableTh>
+                <ResizableTh col='estado' width={colWidths.widths.estado} onResize={colWidths.setWidth}>Estado</ResizableTh>
+                <ResizableTh col='vence' width={colWidths.widths.vence} onResize={colWidths.setWidth}>
+                  <DueSortHeader sort={dueSort} onCycle={cycleDueSort} />
+                </ResizableTh>
+                <ResizableTh col='fecha' width={colWidths.widths.fecha} onResize={colWidths.setWidth}>Fecha</ResizableTh>
+                <ResizableTh col='personas' width={colWidths.widths.personas} onResize={colWidths.setWidth}>Solicitante / Asignado</ResizableTh>
               </Table.Tr>
             </Table.Thead>
             <Table.Tbody>
               {tickets.length === 0 ? (
                 <Table.Tr>
-                  <Table.Td colSpan={6} className='text-center py-12 text-gray-500'>
+                  <Table.Td colSpan={7} className='text-center py-12 text-gray-500'>
                     <div className='flex flex-col items-center gap-3'>
                       <IconFileDescription size={48} className='text-gray-300' />
                       <Text size='lg' fw={500}>
@@ -596,124 +710,51 @@ function RequestGeneralPage() {
                   <Table.Tr
                     key={ticket.id}
                     className='cursor-pointer transition-colors'
-                    onClick={() => {
-                      sessionStorage.setItem('selectedRequest', JSON.stringify(ticket));
-                      window.open(
-                        `/process/request-general/view-request?id=${ticket.id}&from=general-requests`
-                      );
-                    }}
+                    style={companyRowStyle(ticket.company, companyColors)}
+                    onClick={() => openTicket(ticket)}
                   >
-                    <Table.Td>
-                      <Text size='sm' fw={700} c='var(--mantine-color-blue-light-color)'>
-                        {ticket.id}
-                      </Text>
+                    <Table.Td style={{ whiteSpace: 'nowrap' }}>
+                      <Stack gap={4} align='flex-start'>
+                        <Text size='sm' fw={700} c='var(--mantine-color-blue-light-color)'>
+                          {ticket.id}
+                        </Text>
+                        <RequestTypeBadge kind='request' />
+                      </Stack>
                     </Table.Td>
-                    <Table.Td style={{ minWidth: 240, maxWidth: 320 }}>
+                    <Table.Td>
                       <Text size='sm' fw={500} lineClamp={2}>
                         {ticket.subject}
                       </Text>
+                      {requestFlows[ticket.id] ? (
+                        <div style={{ marginTop: 8 }}>
+                          <RequestFlowBar flow={requestFlows[ticket.id]} />
+                        </div>
+                      ) : null}
                       {tasksByRequest[ticket.id]?.length ? (
                         <Stack gap={6} mt={8}>
-                          <RequestProgressBar {...getTasksProgress(tasksByRequest[ticket.id])} />
-                          <Group gap={6} wrap='wrap'>
-                            {buildTaskDisplayBadges(tasksByRequest[ticket.id]).map((badge) => {
-                              const { color, Icon } = getTaskVisual(badge.statusKey);
-                              return (
-                                <Tooltip
-                                  key={badge.key}
-                                  label={`${badge.label} · ${badge.statusLabel}`}
-                                  withArrow
-                                >
-                                  <Badge
-                                    variant='light'
-                                    color={color}
-                                    size='sm'
-                                    radius='sm'
-                                    styles={{
-                                      root: {
-                                        textTransform: 'none',
-                                        fontWeight: 500,
-                                        cursor: 'default',
-                                      },
-                                      label: {
-                                        overflow: 'hidden',
-                                        textOverflow: 'ellipsis',
-                                      },
-                                    }}
-                                    leftSection={<Icon size={13} />}
-                                  >
-                                    {badge.label}
-                                  </Badge>
-                                </Tooltip>
-                              );
-                            })}
-                          </Group>
+                          {requestFlows[ticket.id] ? null : (
+                            <RequestProgressBar {...getTasksProgress(tasksByRequest[ticket.id])} />
+                          )}
+                          <RequestTaskChips tasks={tasksByRequest[ticket.id]} />
                         </Stack>
                       ) : null}
                     </Table.Td>
                     <Table.Td>
-                      <Stack gap={2}>
-                        <Group gap={4} wrap='nowrap'>
-                          <IconBuilding size={14} className='text-gray-400' />
-                          <Text size='sm' fw={500}>
-                            {ticket.company}
-                          </Text>
-                        </Group>
-                        <Text size='xs' c='dimmed'>
-                          {ticket.category}
-                        </Text>
-                      </Stack>
+                      <RequestCompanyCell company={ticket.company} category={ticket.category} process={ticket.process} />
                     </Table.Td>
                     <Table.Td style={{ whiteSpace: 'nowrap' }}>
-                      {(() => {
-                        const StatusIcon = getStatusIcon(ticket.status);
-                        return (
-                          <Badge
-                            color={getStatusColor(ticket.status)}
-                            variant='light'
-                            size='sm'
-                            leftSection={<StatusIcon size={12} />}
-                            styles={{ label: { overflow: 'visible' } }}
-                          >
-                            {ticket.status}
-                          </Badge>
-                        );
-                      })()}
+                      <RequestStatusBadge status={ticket.status} />
+                    </Table.Td>
+                    <Table.Td style={{ whiteSpace: 'nowrap' }}>
+                      <DueCell {...dueOf(ticket)} />
                     </Table.Td>
                     <Table.Td>
-                      <Text size='sm' c='dimmed'>
-                        {(() => {
-                          const raw = ticket.created_at;
-                          if (!raw) return 'Sin fecha';
-
-                          const date = new Date(raw);
-                          if (isNaN(date.getTime())) return 'Fecha inválida';
-
-                          const adjusted = new Date(date.getTime() + 5 * 60 * 60 * 1000);
-
-                          return new Intl.DateTimeFormat('es-CO', {
-                            day: 'numeric',
-                            month: 'long',
-                            year: 'numeric',
-                            hour: '2-digit',
-                            minute: '2-digit',
-                            hour12: true,
-                          }).format(adjusted);
-                        })()}
-                      </Text>
+                      <RequestDateCell raw={ticket.created_at} />
                     </Table.Td>
                     <Table.Td>
                       <Stack gap={4}>
-                        <Group gap={4} wrap='nowrap'>
-                          <IconUser size={14} className='text-gray-400' />
-                          <Text size='sm'>{ticket.requester}</Text>
-                        </Group>
-                        <Group gap={4} wrap='nowrap'>
-                          <IconUserCheck size={14} className='text-gray-400' />
-                          <Text size='sm' c='dimmed'>
-                            {ticket.user}
-                          </Text>
-                        </Group>
+                        <PersonLine name={ticket.requester} image={ticket.requester_image} role='requester' />
+                        <PersonLine name={ticket.user} image={ticket.user_image} dimmed role='assignee' />
                       </Stack>
                     </Table.Td>
                   </Table.Tr>
@@ -721,7 +762,7 @@ function RequestGeneralPage() {
               )}
             </Table.Tbody>
           </Table>
-        </div>
+        </Box>
 
         {totalPages > 1 && (
           <Group justify='center' mt='md'>
