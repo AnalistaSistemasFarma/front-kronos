@@ -246,6 +246,14 @@ export default function OrionSignaturePanel({
   const stableEmbedSrcRef = useRef<string | null>(null);
   /** Tras dibujar rúbrica, abrir el modal de firma del documento */
   const continueToSignAfterPadRef = useRef(false);
+  /** Tras autorizar: la rúbrica se dibujó en el flujo automático, firmar al guardarla. */
+  const autoSignAfterPadRef = useRef(false);
+  /**
+   * Firma automática tras autorizar (2026-11-19): el documento que hay que firmar apenas
+   * el panel tenga ese archivo activo. Se dispara en un efecto para usar el confirmSign
+   * del render actual (firmante, huella y perfil al día), no uno viejo.
+   */
+  const [autoSignFile, setAutoSignFile] = useState<OrionFileMeta | null>(null);
   /** Primer GET ensure-document terminó (canManage ya es fiable). */
   const [permissionsReady, setPermissionsReady] = useState(false);
   /** Tras autorizar: overlay hasta abrir pad / modal de firma o fallar el deep-link. */
@@ -1245,9 +1253,12 @@ export default function OrionSignaturePanel({
 
   /** Tras ver el PDF: dibujar rúbrica si falta, luego abrir firma del documento. */
   const proceedToAcceptSign = useCallback(
-    async (file: OrionFileMeta, opts?: { skipAuthRedirect?: boolean }) => {
-      void opts;
+    async (file: OrionFileMeta, opts?: { skipAuthRedirect?: boolean; autoSign?: boolean }) => {
+      // autoSign: viene de autorizar en el listado; firma sin abrir el visor ni pedir «Firmar».
+      // Solo se muestra el modal de confirmación si faltan cédula, cargo, consentimiento o huella.
+      const autoSign = opts?.autoSign === true;
       setActiveFile(file);
+      activeFileRef.current = file;
       setAcceptLoading(true);
       setError(null);
       if (!canSignPermission) {
@@ -1309,9 +1320,12 @@ export default function OrionSignaturePanel({
         }
 
         // Abrir el modal al toque; ensure/rúbrica en paralelo (Firmar no debe girar aquí).
-        setSignerModalIntent('sign');
-        setDocumentModalOpen(true);
-        setAcceptLoading(false);
+        // En la firma automática no se abre el visor: el overlay sigue hasta firmar o pedir datos.
+        if (!autoSign) {
+          setSignerModalIntent('sign');
+          setDocumentModalOpen(true);
+          setAcceptLoading(false);
+        }
         void fetch('/api/integrations/orion/complete-sign', { method: 'GET', cache: 'no-store' }).catch(
           () => undefined
         );
@@ -1372,7 +1386,8 @@ export default function OrionSignaturePanel({
         }
 
         if (!hasRubric) {
-          continueToSignAfterPadRef.current = true;
+          if (autoSign) autoSignAfterPadRef.current = true;
+          else continueToSignAfterPadRef.current = true;
           setSignatureModalOpen(true);
           return;
         }
@@ -1395,6 +1410,8 @@ export default function OrionSignaturePanel({
           setError('Aún no es su turno de firma. Espere a que firme el responsable anterior.');
           return;
         }
+
+        if (autoSign) setAutoSignFile(file);
       } finally {
         setAcceptLoading(false);
       }
@@ -1428,6 +1445,15 @@ export default function OrionSignaturePanel({
     [fromAuthorization, proceedToAcceptSign]
   );
 
+  // Firma automática tras autorizar: firma al toque si Orion ya tiene rúbrica, consentimiento
+  // y datos del sello; si falta cédula, cargo o huella, confirmSign abre el modal de siempre.
+  useEffect(() => {
+    if (!autoSignFile) return;
+    if (activeFile?.fileId !== autoSignFile.fileId) return;
+    setAutoSignFile(null);
+    void confirmSign(null);
+  }, [activeFile?.fileId, autoSignFile, confirmSign]);
+
   const saveSignature = useCallback(
     async (dataUrl: string) => {
       setSignatureSaving(true);
@@ -1453,6 +1479,12 @@ export default function OrionSignaturePanel({
           /* ignore */
         }
         setSignatureModalOpen(false);
+
+        if (autoSignAfterPadRef.current && activeFile) {
+          autoSignAfterPadRef.current = false;
+          setAutoSignFile(activeFile);
+          return;
+        }
 
         if (continueToSignAfterPadRef.current && activeFile) {
           continueToSignAfterPadRef.current = false;
@@ -1653,7 +1685,11 @@ export default function OrionSignaturePanel({
             clearDeepLink();
           });
       } else if (autoOpenAction === 'sign') {
-        void handleAcceptSign(meta)
+        // Recién autorizado en el listado: firmar sin pasar por el visor ni el botón «Firmar».
+        void proceedToAcceptSign(meta, {
+          skipAuthRedirect: fromAuthorization,
+          autoSign: fromAuthorization,
+        })
           .finally(() => {
             setPostAuthPreparing(false);
             clearDeepLink();
@@ -1673,10 +1709,11 @@ export default function OrionSignaturePanel({
     canManage,
     currentUserEmail,
     documents,
-    handleAcceptSign,
+    fromAuthorization,
     openDocumentEditor,
     openSignerView,
     permissionsReady,
+    proceedToAcceptSign,
   ]);
 
   // CTA desde adjuntos (evento global): garantiza Firmar aunque el context tarde
@@ -1871,10 +1908,11 @@ export default function OrionSignaturePanel({
             <Stack align='center' gap='md'>
               <Loader size='lg' />
               <Text fw={700} ta='center'>
-                Preparando la firma…
+                Firmando el documento…
               </Text>
               <Text size='sm' c='dimmed' ta='center'>
-                Cargando el documento tras la autorización. Espere un momento.
+                Autorización registrada. Se está firmando con su rúbrica; si faltan datos del sello,
+                se le pedirán.
               </Text>
             </Stack>
           </Card>
@@ -1897,6 +1935,7 @@ export default function OrionSignaturePanel({
         opened={signatureModalOpen}
         onClose={() => {
           setSignatureModalOpen(false);
+          autoSignAfterPadRef.current = false;
           if (padForTurnRef.current) {
             padForTurnRef.current = false;
             setIdentityModalOpen(true);
