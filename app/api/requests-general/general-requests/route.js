@@ -146,7 +146,8 @@ export async function GET(req) {
         rg.id, cr.category as category, users_proc.[user], rg.[description], rg.id_company, c.company,
         rg.created_at, u.name as 'requester', sc.status as [status], rg.subject_request as [subject],
         pc.process, cr.id as id_category, rg.resolution, rg.date_resolution,
-        rg.status_req as id_status_case, uex.name as executor_final
+        rg.status_req as id_status_case, uex.name as executor_final,
+        u.image AS requester_image, first_proc.image AS user_image
       ${from}
       OUTER APPLY (
         SELECT STUFF((
@@ -157,6 +158,14 @@ export async function GET(req) {
           FOR XML PATH(''), TYPE
         ).value('.', 'NVARCHAR(MAX)'), 1, 2, '') AS [user]
       ) users_proc
+      OUTER APPLY (
+        -- Photo of the first process owner (assignee avatar), same as request-assigned.
+        SELECT TOP 1 u4.image
+        FROM user_process_category_request_general upcrg4
+        INNER JOIN [user] u4 ON u4.id = upcrg4.id_user
+        WHERE upcrg4.id_process_category = pc.id
+        ORDER BY u4.name
+      ) first_proc
       ${where}${extra}
       ORDER BY rg.id DESC
     `;
