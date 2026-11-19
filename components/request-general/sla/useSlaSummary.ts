@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import type { SlaState } from '../../../lib/requests-general/sla';
+import type { InboxSlaBreakdown, InboxSlaCounts } from '../../../lib/requests-general/slaInbox';
 
 export interface RequestSlaInfo {
   state: SlaState;
@@ -12,11 +13,14 @@ export interface RequestSlaInfo {
 
 export interface SlaSummary {
   available: boolean;
-  counts: Record<SlaState, number> & { returned: number };
+  /** Pending inbox rows (requests + tasks) per bucket; they add up to `total`. */
+  counts: InboxSlaCounts;
+  breakdown: InboxSlaBreakdown;
+  total: number;
   byRequest: Record<number, RequestSlaInfo>;
 }
 
-/** SLA (ANS) of the open requests the user manages. `refreshKey` reloads it. */
+/** SLA (ANS) of the user's assigned-requests inbox. `refreshKey` reloads it. */
 export function useSlaSummary(refreshKey: unknown = null) {
   const [data, setData] = useState<SlaSummary | null>(null);
   const [loading, setLoading] = useState(true);

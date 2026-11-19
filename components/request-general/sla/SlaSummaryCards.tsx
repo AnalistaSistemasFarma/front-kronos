@@ -1,92 +1,108 @@
 'use client';
 
-import { Badge, Group, Paper, SimpleGrid, Text, Tooltip, UnstyledButton } from '@mantine/core';
-import { IconAlarm, IconAlertTriangle, IconCircleCheck, IconHourglassEmpty } from '@tabler/icons-react';
-import type { ReactNode } from 'react';
-import type { SlaState } from '../../../lib/requests-general/sla';
-import type { SlaSummary } from './useSlaSummary';
+import { Tooltip } from '@mantine/core';
+import {
+  IconAlarm,
+  IconAlertTriangle,
+  IconCircleCheck,
+  IconHourglassEmpty,
+  IconInfoCircle,
+  IconPlayerPause,
+} from '@tabler/icons-react';
+import { useEffect, type ReactNode } from 'react';
+import type { StatusTone } from '../../ui/panel/Panel';
+import { StatFilterTile } from '../list/RequestListUi';
+import styles from '../list/requestList.module.css';
+import { IndicatorSettings } from './IndicatorSettings';
+import { useIndicatorPrefs } from './useIndicatorPrefs';
+import type { InboxSlaBreakdown, InboxSlaCounts, InboxSlaState } from '../../../lib/requests-general/slaInbox';
 
-const CARDS: { state: Exclude<SlaState, 'no_sla'>; label: string; color: string; icon: ReactNode; hint: string }[] = [
-  { state: 'overdue', label: 'Vencidos', color: 'red', icon: <IconAlarm size={18} />, hint: 'Ya superaron el ANS del subproceso' },
-  {
-    state: 'near_due',
-    label: 'Próximos a vencer',
-    color: 'yellow',
-    icon: <IconAlertTriangle size={18} />,
-    hint: 'Les queda el 20 % o menos del ANS',
-  },
-  { state: 'on_time', label: 'Dentro del tiempo', color: 'green', icon: <IconCircleCheck size={18} />, hint: 'Van dentro del ANS' },
+const TILES: { state: InboxSlaState; label: string; tone: StatusTone | 'violet'; icon: ReactNode }[] = [
+  { state: 'overdue', label: 'Vencidos', tone: 'critical', icon: <IconAlarm size={20} /> },
+  { state: 'near_due', label: 'Próximos a vencer', tone: 'warning', icon: <IconAlertTriangle size={20} /> },
+  { state: 'on_time', label: 'Dentro del tiempo', tone: 'ok', icon: <IconCircleCheck size={20} /> },
+  { state: 'no_sla', label: 'Sin ANS', tone: 'idle', icon: <IconHourglassEmpty size={20} /> },
+  { state: 'paused', label: 'En pausa', tone: 'violet', icon: <IconPlayerPause size={20} /> },
 ];
 
+const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+
+const HELP =
+  'ANS de los trámites pendientes (las mismas solicitudes y tareas de «Pendientes»). Tiempo hábil: lunes a viernes, 8:00 a 17:00, sin festivos. ' +
+  'Próximos a vencer: les queda el 20 % o menos del ANS. Sin ANS: el subproceso no tiene ANS configurado. ' +
+  'En pausa: la solicitud está devuelta o cerrada y su reloj está detenido. Toque una tarjeta para filtrar la lista.';
+
 /**
- * «Trámites pendientes de gestión»: open requests by SLA (ANS) state. Clicking a card
- * filters the list (`onSelect`); clicking it again clears the filter.
+ * «ANS» row of the inbox: same tiles as the status cards (Total, Pendientes…). The numbers
+ * come from `countInboxSla`, the same function the list filter uses, so a tile always shows
+ * exactly the rows it filters. «En pausa» only appears when there is something paused.
  */
 export function SlaSummaryCards({
-  data,
+  available,
+  counts,
+  breakdown,
   selected,
   onSelect,
+  showStatusOptions = false,
 }: {
-  data: SlaSummary | null;
-  selected: SlaState | null;
-  onSelect: (state: SlaState | null) => void;
+  available: boolean;
+  counts: InboxSlaCounts;
+  breakdown?: InboxSlaBreakdown;
+  selected: InboxSlaState | null;
+  onSelect: (state: InboxSlaState | null) => void;
+  /** Also offer the status cards (Total, Pendientes…) in the settings (inbox only). */
+  showStatusOptions?: boolean;
 }) {
-  if (!data || !data.available) return null;
-  const toggle = (s: SlaState) => onSelect(selected === s ? null : s);
+  const { prefs, isVisible, setSlaHidden } = useIndicatorPrefs();
+  const selectedHidden = selected != null && (prefs.slaHidden || !isVisible(`sla.${selected}`));
+  // A hidden card cannot keep filtering the list.
+  useEffect(() => {
+    if (selectedHidden) onSelect(null);
+  }, [selectedHidden, onSelect]);
+  if (!available) return null;
+  if (prefs.slaHidden) {
+    return (
+      <div className={styles.slaHead} data-testid='sla-summary-hidden' style={{ marginBottom: 12 }}>
+        <button type='button' className={styles.slaShowLink} onClick={() => setSlaHidden(false)}>
+          Mostrar indicadores de ANS
+        </button>
+        <IndicatorSettings showStatusOptions={showStatusOptions} />
+      </div>
+    );
+  }
+  const tiles = TILES.filter((t) => (t.state !== 'paused' || counts.paused > 0) && isVisible(`sla.${t.state}`));
   return (
-    <Paper withBorder radius='lg' p='md' mb='md' data-testid='sla-summary'>
-      <Group justify='space-between' mb='sm' wrap='wrap' gap='xs'>
-        <div>
-          <Text fw={700}>Trámites pendientes de gestión</Text>
-          <Text size='xs' c='dimmed'>
-            Tiempo hábil (lunes a viernes, 8:00 a 17:00, sin festivos). No cuentan las devueltas ni los borradores.
-          </Text>
-        </div>
-        <Tooltip label='Solicitudes de subprocesos que aún no tienen ANS configurado' withArrow>
-          <UnstyledButton onClick={() => toggle('no_sla')} aria-pressed={selected === 'no_sla'} data-testid='sla-card-no_sla'>
-            <Badge
-              size='lg'
-              variant={selected === 'no_sla' ? 'filled' : 'light'}
-              color='gray'
-              leftSection={<IconHourglassEmpty size={14} />}
-            >
-              Sin ANS: {data.counts.no_sla}
-            </Badge>
-          </UnstyledButton>
+    <section data-testid='sla-summary' style={{ marginBottom: 12 }}>
+      <div className={styles.slaHead}>
+        <span>ANS de pendientes</span>
+        <IndicatorSettings showStatusOptions={showStatusOptions} />
+        <Tooltip label={HELP} multiline w={320} withArrow events={{ hover: true, focus: true, touch: true }}>
+          <button type='button' className={styles.slaInfo} aria-label='Cómo se calcula el ANS'>
+            <IconInfoCircle size={15} />
+          </button>
         </Tooltip>
-      </Group>
-      <SimpleGrid cols={{ base: 1, xs: 3 }} spacing='sm'>
-        {CARDS.map((c) => {
-          const active = selected === c.state;
+      </div>
+      {tiles.length > 0 ? (
+        <div className={`${styles.statGrid} ${styles.slaGrid}`}>
+        {tiles.map((t) => {
+          const b = breakdown?.[t.state];
           return (
-            <UnstyledButton
-              key={c.state}
-              onClick={() => toggle(c.state)}
-              aria-pressed={active}
-              data-testid={`sla-card-${c.state}`}
-              style={{
-                borderRadius: 12,
-                padding: '12px 14px',
-                border: `2px solid var(--mantine-color-${c.color}-${active ? 6 : 2})`,
-                background: `var(--mantine-color-${c.color}-light)`,
-              }}
-            >
-              <Group gap={6} c={`${c.color}.7`}>
-                {c.icon}
-                <Text size='sm' fw={600}>
-                  {c.label}
-                </Text>
-              </Group>
-              <Text fz={28} fw={800} lh={1.2} mt={4}>
-                {data.counts[c.state]}
-              </Text>
-              <Text size='xs' c='dimmed'>
-                {active ? 'Filtrando la lista · clic para quitar' : c.hint}
-              </Text>
-            </UnstyledButton>
+            <span key={t.state} data-testid={`sla-card-${t.state}`} style={{ display: 'contents' }}>
+              <StatFilterTile
+                icon={t.icon}
+                label={t.label}
+                value={counts[t.state]}
+                tone={t.tone}
+                active={selected === t.state}
+                onClick={() => onSelect(selected === t.state ? null : t.state)}
+                ariaLabel={`Mostrar trámites: ${t.label.toLowerCase()}`}
+                hint={b ? `${plural(b.requests, 'solicitud', 'solicitudes')} · ${plural(b.tasks, 'tarea', 'tareas')}` : undefined}
+              />
+            </span>
           );
         })}
-      </SimpleGrid>
-    </Paper>
+        </div>
+      ) : null}
+    </section>
   );
 }
