@@ -631,8 +631,8 @@ function RequestGeneralPage() {
                   }}
                   style={{ cursor: 'pointer', ...companyRowStyle(ticket.company, companyColors) }}
                 >
-                  <Group justify='space-between' wrap='nowrap' gap='xs' mb={4}>
-                    <Group gap={6} wrap='nowrap' style={{ minWidth: 0 }}>
+                  <Group justify='space-between' wrap='wrap' gap='xs' mb={4}>
+                    <Group gap={6} wrap='nowrap' style={{ flexShrink: 0 }}>
                       <RequestTypeBadge kind='request' />
                       <Text size='sm' fw={700}>
                         #{ticket.id}
