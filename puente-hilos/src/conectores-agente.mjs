@@ -61,7 +61,22 @@ export function proyectoEngram({ proyectoDir = null, explicito = null } = {}) {
 
 /** ¿Es el servidor stdio de engram? (comando `engram` o una ruta que termina en /engram). */
 export function esEngram(s) {
+  if (s && s.command === '/bin/sh' && Array.isArray(s.args) && s.args[1] === ENGRAM_CWD_SCRIPT) return path.basename(String(s.args[3] ?? '')) === 'engram';
   return Boolean(s && typeof s.command === 'string' && path.basename(s.command) === 'engram');
+}
+
+/**
+ * engram 1.x picks its project from the process cwd (the git repo name); ENGRAM_PROJECT is only a
+ * hint for `serve` (verified 2026-11-19 with 1.15: a thread saved under the conversation number).
+ * So the agent's engram is launched FROM the agent's work dir, like in its chat:
+ * `/bin/sh -c 'cd "$0" && exec "$@"' <work dir> <engram> <args…>`.
+ */
+export const ENGRAM_CWD_SCRIPT = 'cd "$0" && exec "$@"';
+export function fijarCwdEngram(mcpServers, dir) {
+  if (!dir) return mcpServers;
+  return Object.fromEntries(
+    Object.entries(mcpServers).map(([n, s]) => [n, esEngram(s) && s.command !== '/bin/sh' ? { ...s, command: '/bin/sh', args: ['-c', ENGRAM_CWD_SCRIPT, dir, s.command, ...(s.args ?? [])] } : s])
+  );
 }
 
 /** Copia de los servidores con ENGRAM_PROJECT fijo en los de engram (sin pisar uno que ya lo traiga). */
@@ -145,7 +160,8 @@ export function servidoresAgente({ configDir, envArchivo = null, proyectoDir = n
   const vars = new Map([...Object.entries(settings.env ?? {}).filter(([, v]) => typeof v === 'string'), ...leerVariablesEnv(envArchivo)]);
   const { valor: expandidos, faltan } = expandirVariables(filtrados, vars);
   const engram = Object.values(expandidos).some(esEngram) ? proyectoEngram({ proyectoDir, explicito: engramProyecto }) : null;
-  const valor = ajustarEngram(fijarProyectoEngram(expandidos, engram), { bin: engramBin, dataDir: engramDataDir, port: engramPort });
+  const ajustados = ajustarEngram(fijarProyectoEngram(expandidos, engram), { bin: engramBin, dataDir: engramDataDir, port: engramPort });
+  const valor = engram && proyectoDir && existsSync(proyectoDir) ? fijarCwdEngram(ajustados, path.resolve(proyectoDir)) : ajustados;
   const nombres = Object.keys(valor).sort();
   return { mcpServers: valor, nombres, faltan, origen: Object.fromEntries(nombres.map((n) => [n, origen[n]])), engramProyecto: engram };
 }

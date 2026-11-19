@@ -204,3 +204,13 @@ test('engram: absolute binary and the agent own base, never overriding explicit 
   assert.equal(out.fijo.command, '/x/engram');
   assert.equal(ajustarEngram(servers, {}), servers);
 });
+
+test('engram: launched from the agent work dir so it uses the chat project', async () => {
+  const { fijarCwdEngram, esEngram } = await import('../src/conectores-agente.mjs');
+  const out = fijarCwdEngram({ engram: { command: '/opt/homebrew/bin/engram', args: ['mcp', '--tools=agent'], env: { A: '1' } }, otro: { command: 'node' } }, '/vault');
+  assert.deepEqual(out.engram.args, ['-c', 'cd "$0" && exec "$@"', '/vault', '/opt/homebrew/bin/engram', 'mcp', '--tools=agent']);
+  assert.equal(out.engram.command, '/bin/sh');
+  assert.ok(esEngram(out.engram));
+  assert.ok(!esEngram(out.otro));
+  assert.deepEqual(fijarCwdEngram(out, '/otra'), out);
+});
