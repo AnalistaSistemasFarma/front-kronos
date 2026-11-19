@@ -1698,12 +1698,16 @@ export default function ChatWorkspace({
             Sus asistentes agrupados por empresa, y sus grupos. Elija uno para conversar.
           </p>
 
-          <Group gap='sm' wrap='nowrap'>
+          <Group gap='xs' wrap='nowrap'>
+            {/* The search box takes the remaining width of the row (min 160px on
+                phones, 240px from 48em); the buttons stay compact on the right. */}
             <TextInput
               flex={1}
+              className='chat-toolbar-search'
               value={search}
               onChange={(event) => setSearch(event.currentTarget.value)}
-              placeholder='Buscar asistente o empresa…'
+              placeholder={enPantallaAngosta ? 'Buscar…' : 'Buscar asistente o empresa…'}
+              aria-label='Buscar asistente o empresa'
               leftSection={<IconSearch size={16} />}
               rightSection={
                 search ? (
@@ -1719,26 +1723,46 @@ export default function ChatWorkspace({
               }
               radius='md'
             />
-            {/* Below `sm` (phones) the labelled buttons do not fit next to the
-                search box and got truncated, so they collapse to icons. */}
             {overview.canBroadcast && (
-              <>
-                <Tooltip label='Ver el organigrama de la flota' withArrow>
-                  <Button
-                    visibleFrom='sm'
-                    variant='subtle'
-                    color='gray'
-                    radius='md'
-                    leftSection={<IconHierarchy2 size={16} />}
-                    component={Link}
-                    href='/process/chat/organigrama'
-                  >
-                    Organigrama
-                  </Button>
-                </Tooltip>
+              <Tooltip label='Ver el organigrama de la flota' withArrow>
+                <Button
+                  visibleFrom='md'
+                  variant='subtle'
+                  color='gray'
+                  radius='md'
+                  style={{ flexShrink: 0 }}
+                  leftSection={<IconHierarchy2 size={16} />}
+                  component={Link}
+                  href='/process/chat/organigrama'
+                >
+                  Organigrama
+                </Button>
+              </Tooltip>
+            )}
+
+            {overview.canBroadcast && overview.agents.length > 1 && (
+              <Tooltip label='Enviar un mensaje a varios asistentes' withArrow>
+                <Button
+                  visibleFrom='md'
+                  variant='light'
+                  radius='md'
+                  style={{ flexShrink: 0 }}
+                  leftSection={<IconSend size={16} />}
+                  onClick={() => setMasivoAbierto(true)}
+                >
+                  Enviar a todos
+                </Button>
+              </Tooltip>
+            )}
+
+            <Group gap={4} wrap='nowrap' style={{ flexShrink: 0 }}>
+              {/* Below `md` (phones, tablets) the labelled buttons above are hidden: they
+                  did not fit next to the search box and got truncated, so they
+                  collapse to icons here, in the compact group. */}
+              {overview.canBroadcast && (
                 <Tooltip label='Organigrama' withArrow>
                   <ActionIcon
-                    hiddenFrom='sm'
+                    hiddenFrom='md'
                     variant='subtle'
                     color='gray'
                     size={36}
@@ -1750,25 +1774,11 @@ export default function ChatWorkspace({
                     <IconHierarchy2 size={18} />
                   </ActionIcon>
                 </Tooltip>
-              </>
-            )}
-
-            {overview.canBroadcast && overview.agents.length > 1 && (
-              <>
-                <Tooltip label='Enviar un mensaje a varios asistentes' withArrow>
-                  <Button
-                    visibleFrom='sm'
-                    variant='light'
-                    radius='md'
-                    leftSection={<IconSend size={16} />}
-                    onClick={() => setMasivoAbierto(true)}
-                  >
-                    Enviar a todos
-                  </Button>
-                </Tooltip>
+              )}
+              {overview.canBroadcast && overview.agents.length > 1 && (
                 <Tooltip label='Enviar a todos' withArrow>
                   <ActionIcon
-                    hiddenFrom='sm'
+                    hiddenFrom='md'
                     variant='light'
                     size={36}
                     radius='md'
@@ -1778,10 +1788,7 @@ export default function ChatWorkspace({
                     <IconSend size={18} />
                   </ActionIcon>
                 </Tooltip>
-              </>
-            )}
-
-            <Group gap={4} wrap='nowrap'>
+              )}
               <ChatSoundMenu />
               <Tooltip label='Vista en tarjetas' withArrow>
                 <ActionIcon
