@@ -11,7 +11,13 @@ export function SlaBadge({ info }: { info?: RequestSlaInfo }) {
   if (!info || info.state === 'no_sla') return null;
   return (
     <Tooltip label={`ANS del subproceso: ${info.slaLabel}`} withArrow>
-      <Badge size='xs' variant='light' color={COLOR[info.state]} data-testid='sla-badge'>
+      <Badge
+        size='xs'
+        variant='light'
+        color={COLOR[info.state]}
+        data-testid='sla-badge'
+        styles={{ label: { overflow: 'visible' } }}
+      >
         {formatRemaining(info.remainingHours)}
       </Badge>
     </Tooltip>
