@@ -1,12 +1,16 @@
 import { sql, getPool } from '../../../../../lib/mssqlPool';
 import { NextResponse } from 'next/server';
+import { getReassignmentAccess, scopeDepartmentIds } from '../../../../../lib/requests-general/reassignmentAccess';
 
 export async function GET(req) {
   try {
+    const access = await getReassignmentAccess();
+    if (access.error) return NextResponse.json({ error: access.error.message }, { status: access.error.status });
+
     const MAX_IDS = 500;
     const { searchParams } = new URL(req.url);
     const idsParam = searchParams.get('ids');
-    const ids = idsParam
+    const requestedIds = idsParam
       ? [
           ...new Set(
             idsParam
@@ -17,8 +21,10 @@ export async function GET(req) {
         ].slice(0, MAX_IDS)
       : null;
 
-    if (ids && ids.length === 0) {
-      return NextResponse.json({ history: [] }, { status: 200 });
+    // Always scoped to the caller's departments; never the whole history.
+    const ids = scopeDepartmentIds(requestedIds, access.departmentIds);
+    if (ids.length === 0) {
+      return NextResponse.json({ error: 'Departamento fuera de tu alcance' }, { status: 403 });
     }
 
     const pool = await getPool();
@@ -61,7 +67,6 @@ export async function GET(req) {
     return NextResponse.json(
       {
         error: 'Error procesando la solicitud',
-        details: err.message,
       },
       { status: 500 }
     );
