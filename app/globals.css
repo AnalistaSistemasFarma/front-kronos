@@ -3121,6 +3121,30 @@ body.chat-inmersivo .chat-page-thread--completa {
    instante. El movimiento del teclado del sistema ya da la sensación de
    continuidad; no hacía falta duplicarla. */
 
+/* Chat landing (folder grid) on phones and tablets: this page is rendered
+   inside AppHubShell's <main class="app-page-shell">, which already reserves
+   the header height. Its own `app-page-shell` wrapper reserved it a second
+   time, leaving a ~64px empty band under the header on mobile (2026-11-19).
+   Desktop keeps its current spacing. */
+/* Chat landing toolbar: the search box grows into the free width of the row
+   but never collapses below a usable size. */
+.chat-toolbar-search {
+  min-width: 160px;
+}
+
+@media (min-width: 48em) {
+  .chat-toolbar-search {
+    min-width: 240px;
+  }
+}
+
+@media (max-width: 992px) {
+  .app-page-shell .app-page-shell.chat-hub {
+    padding-top: 0;
+    min-height: 0;
+  }
+}
+
 .chat-page-shell--completa {
   max-width: none;
   margin: 0;
