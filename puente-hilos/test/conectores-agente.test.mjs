@@ -197,7 +197,8 @@ test('engram: el servidor del agente queda fijado a la memoria de su chat (repo 
   mkdirSync(path.join(repo, '.git'), { recursive: true });
   mkdirSync(path.join(repo, 'shared-brain', 'agentes', 'silvia'), { recursive: true });
   assert.equal(proyectoEngram({ proyectoDir: path.join(repo, 'shared-brain', 'agentes', 'silvia') }), 'gsslatam-graph');
-  assert.equal(proyectoEngram({ proyectoDir: d }), null);
+  // Outside a git repo: the folder name, as engram does with its cwd (2026-11-19).
+  assert.equal(proyectoEngram({ proyectoDir: d }), path.basename(d));
   assert.equal(proyectoEngram({ proyectoDir: d, explicito: 'mi-memoria' }), 'mi-memoria');
   assert.equal(proyectoEngram({ explicito: '../malo' }), null);
   assert.ok(esEngram({ command: '/opt/homebrew/bin/engram' }));

@@ -54,7 +54,11 @@ export function proyectoEngram({ proyectoDir = null, explicito = null } = {}) {
       return RE_PROYECTO_ENGRAM.test(n) ? n : null;
     }
     const padre = path.dirname(d);
-    if (padre === d) return null;
+    // Outside a git repo engram uses the folder name of its cwd (the agent's work dir), as in its chat.
+    if (padre === d) {
+      const n = path.basename(path.resolve(proyectoDir));
+      return RE_PROYECTO_ENGRAM.test(n) ? n : null;
+    }
     d = padre;
   }
 }
