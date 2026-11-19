@@ -96,6 +96,7 @@ interface Asset {
   costo_equipo: number | string;
   created_at?: string;
   empresa: string;
+  sitio?: string;
 }
 
 interface TypeAssetRow {
@@ -754,6 +755,7 @@ function AssetsBoard() {
       { key: 'usuario', header: 'Usuario' },
       { key: 'departamento', header: 'Departamento' },
       { key: 'empresa', header: 'Empresa' },
+      { key: 'sitio', header: 'Sitio' },
       { key: 'procesador', header: 'Procesador' },
       { key: 'ram', header: 'RAM' },
       { key: 'almacenamiento', header: 'Almacenamiento' },
