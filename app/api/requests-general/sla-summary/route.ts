@@ -5,9 +5,10 @@ import { withMssqlPool } from '../../../../lib/mssqlPool';
 import { loadSlaScope } from '../../../../lib/requests-general/slaScope';
 
 /**
- * SLA (ANS) summary of the open requests the session user manages (by process or category).
+ * SLA (ANS) summary of the session user's assigned-requests inbox: open requests of the
+ * processes/categories the user manages plus open tasks assigned to the user (one item per row).
  * GET /api/requests-general/sla-summary[?company=ID]
- * → { available, counts: { overdue, near_due, on_time, no_sla, returned }, byRequest: { [id]: info } }
+ * → { available, counts: { overdue, near_due, on_time, no_sla, paused }, breakdown, total, byRequest }
  */
 export async function GET(req: Request) {
   try {
