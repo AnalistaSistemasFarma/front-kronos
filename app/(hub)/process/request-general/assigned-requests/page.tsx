@@ -91,7 +91,11 @@ import { RequestListFilters } from '../../../../../components/request-general/li
 import { SlaSummaryCards } from '../../../../../components/request-general/sla/SlaSummaryCards';
 import { SlaBadge } from '../../../../../components/request-general/sla/SlaBadge';
 import { useSlaSummary } from '../../../../../components/request-general/sla/useSlaSummary';
-import type { SlaState } from '../../../../../lib/requests-general/sla';
+import {
+  countInboxSla,
+  inboxItemSlaState,
+  type InboxSlaState,
+} from '../../../../../lib/requests-general/slaInbox';
 import {
   ASSIGNED_STATE_OPTIONS,
   EMPTY_LIST_FILTERS,
@@ -282,9 +286,9 @@ function RequestBoard() {
   // La paginación solo reparte lo ya filtrado para pintarlo.
   const [filters, setFilters] = useState<ListFilters>(EMPTY_LIST_FILTERS);
   // SLA (ANS) widget: card filter, also reachable from the dashboard with ?sla=overdue.
-  const [slaFilter, setSlaFilter] = useState<SlaState | null>(() => {
+  const [slaFilter, setSlaFilter] = useState<InboxSlaState | null>(() => {
     const v = searchParams.get('sla');
-    return v === 'overdue' || v === 'near_due' || v === 'on_time' || v === 'no_sla' ? v : null;
+    return v === 'overdue' || v === 'near_due' || v === 'on_time' || v === 'no_sla' || v === 'paused' ? v : null;
   });
   const [slaRefreshKey, setSlaRefreshKey] = useState(0);
   const { data: slaSummary } = useSlaSummary(slaRefreshKey);
@@ -349,14 +353,31 @@ function RequestBoard() {
     [allEntries]
   );
   // Buscador + filtros del panel (sin estado ni tipo): base de las tarjetas y las pestañas.
-  const matchingEntries = useMemo(
+  const panelEntries = useMemo(
     () =>
-      filterByText(allEntries, deferredSearch, (e) => e.parts).filter(
-        (e) =>
-          matchesListFilters(e.row, filters, { ignoreStatus: true }) &&
-          (!slaFilter || slaSummary?.byRequest[Number(e.row.requestId)]?.state === slaFilter)
+      filterByText(allEntries, deferredSearch, (e) => e.parts).filter((e) =>
+        matchesListFilters(e.row, filters, { ignoreStatus: true })
       ),
-    [allEntries, deferredSearch, filters, slaFilter, slaSummary]
+    [allEntries, deferredSearch, filters]
+  );
+  // ANS row: counter and filter share `inboxItemSlaState`, over the same rows the
+  // «Pendientes» card counts (requests + tasks), so a tile shows exactly what it filters.
+  const slaByRequest = slaSummary?.byRequest ?? {};
+  const slaItemState = (e: AssignedEntry) =>
+    inboxItemSlaState({ kind: e.item.kind, requestId: e.row.requestId, group: e.row.group }, slaByRequest);
+  const slaCounts = useMemo(
+    () =>
+      countInboxSla(
+        panelEntries
+          .filter((e) => entryOfType(e, typeFilter))
+          .map((e) => ({ kind: e.item.kind, requestId: e.row.requestId, group: e.row.group })),
+        slaByRequest
+      ),
+    [panelEntries, typeFilter, slaSummary]
+  );
+  const matchingEntries = useMemo(
+    () => (slaFilter ? panelEntries.filter((e) => slaItemState(e) === slaFilter) : panelEntries),
+    [panelEntries, slaFilter, slaSummary]
   );
   const typedEntries = useMemo(
     () => matchingEntries.filter((e) => entryOfType(e, typeFilter)),
@@ -1323,7 +1344,9 @@ function RequestBoard() {
       />
 
       <SlaSummaryCards
-        data={slaSummary}
+        available={Boolean(slaSummary?.available)}
+        counts={slaCounts.counts}
+        breakdown={slaCounts.breakdown}
         selected={slaFilter}
         onSelect={(state) => {
           setSlaFilter(state);
