@@ -3126,6 +3126,18 @@ body.chat-inmersivo .chat-page-thread--completa {
    the header height. Its own `app-page-shell` wrapper reserved it a second
    time, leaving a ~64px empty band under the header on mobile (2026-11-19).
    Desktop keeps its current spacing. */
+/* Chat landing toolbar: the search box grows into the free width of the row
+   but never collapses below a usable size. */
+.chat-toolbar-search {
+  min-width: 160px;
+}
+
+@media (min-width: 48em) {
+  .chat-toolbar-search {
+    min-width: 240px;
+  }
+}
+
 @media (max-width: 992px) {
   .app-page-shell .app-page-shell.chat-hub {
     padding-top: 0;
