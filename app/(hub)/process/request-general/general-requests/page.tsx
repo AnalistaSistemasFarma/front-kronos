@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useMemo, useRef, Suspense } from 'react';
 import { useSession } from 'next-auth/react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { saveAs } from 'file-saver';
 import {
   Title,
@@ -44,6 +44,19 @@ import {
   AllTasksModal,
   type GeneralTask,
 } from '../../../../../components/request-general/list/AllTasksModal';
+import { SlaSummaryCards } from '../../../../../components/request-general/sla/SlaSummaryCards';
+import { DueCell, DueSortButton, DueSortHeader, useDueSort } from '../../../../../components/request-general/sla/DueSort';
+import { useIndicatorPrefs } from '../../../../../components/request-general/sla/useIndicatorPrefs';
+import type { RequestSlaInfo } from '../../../../../components/request-general/sla/useSlaSummary';
+import {
+  emptyInboxSlaCounts,
+  generalListGroup,
+  inboxItemSlaState,
+  parseInboxSlaState,
+  type DueSort,
+  type InboxSlaCounts,
+  type InboxSlaState,
+} from '../../../../../lib/requests-general/slaInbox';
 import AutoRefreshNote from '../../../../../components/ui/AutoRefreshNote';
 import IosSearchField from '../../../../../components/ui/IosSearchField';
 import { useAutoRefresh } from '../../../../../components/ui/useAutoRefresh';
@@ -82,6 +95,14 @@ interface Ticket {
   requester: string;
   company: string;
   subject: string;
+  id_status_case: number;
+}
+
+/** SLA (ANS) block of the paged API response (same set as the status cards). */
+interface ListSla {
+  available: boolean;
+  counts?: InboxSlaCounts;
+  byRequest?: Record<number, RequestSlaInfo>;
 }
 
 interface CompanyData {
@@ -101,10 +122,12 @@ interface ConsultResponse {
 }
 
 /** Lo que se le pide al servidor: los filtros del panel + el texto del buscador. */
-type AppliedQuery = { filters: ListFilters; search: string };
+type AppliedQuery = { filters: ListFilters; search: string; sla?: InboxSlaState | null; sort?: DueSort };
 
-function queryParams({ filters: f, search }: AppliedQuery): URLSearchParams {
+function queryParams({ filters: f, search, sla, sort }: AppliedQuery): URLSearchParams {
   const params = new URLSearchParams();
+  if (sla) params.append('sla', sla);
+  if (sort && sort !== 'none') params.append('sort', sort);
   params.append('status', f.state || f.status);
   if (f.company) params.append('company', f.company);
   if (f.date_from) params.append('date_from', f.date_from);
@@ -121,6 +144,7 @@ function queryParams({ filters: f, search }: AppliedQuery): URLSearchParams {
 function RequestGeneralPage() {
   const { data: session, status } = useSession();
   const router = useRouter();
+  const searchParams = useSearchParams();
   // El servidor identifica a la persona por la sesión; basta con que exista.
   const canLoad = Boolean(session);
 
@@ -143,6 +167,15 @@ function RequestGeneralPage() {
   // de SQL sobre el conjunto filtrado (antes se descargaba todo el historial al navegador).
   const [totalTickets, setTotalTickets] = useState(0);
   const [statusCounts, setStatusCounts] = useState<StatusCounts>(EMPTY_COUNTS);
+  // SLA (ANS) cards, filter and «Vencimiento» sort: computed by the API over the listed set.
+  const [slaFilter, setSlaFilter] = useState<InboxSlaState | null>(() => parseInboxSlaState(searchParams.get('sla')));
+  const [listSla, setListSla] = useState<ListSla>({ available: false });
+  const { sort: dueSort, cycle: cycleDueSort } = useDueSort('general');
+  const { prefs: indicatorPrefs } = useIndicatorPrefs();
+  const hiddenStatusTiles = useMemo(
+    () => indicatorPrefs.hiddenCards.filter((c) => c.startsWith('status.')).map((c) => c.slice('status.'.length)),
+    [indicatorPrefs]
+  );
   // Consulta con la que se cargó la lista: al cambiar de página o refrescar se reutiliza.
   const appliedRef = useRef<AppliedQuery | null>(null);
   const requestSeqRef = useRef(0);
@@ -259,6 +292,7 @@ function RequestGeneralPage() {
         rows: Ticket[];
         total: number;
         counts: Partial<StatusCounts>;
+        sla?: ListSla;
       };
       // Si mientras tanto se pidió otra consulta, esta respuesta ya no vale.
       if (seq !== requestSeqRef.current) return;
@@ -273,6 +307,7 @@ function RequestGeneralPage() {
         cancelled: Number(data.counts?.cancelled) || 0,
         returned: 0,
       });
+      setListSla(data.sla ?? { available: false });
       setCurrentPage(page);
       setLastUpdated(new Date());
       setError(null);
@@ -294,13 +329,16 @@ function RequestGeneralPage() {
   // el estado (tarjetas) consulta al instante; al teclear se espera a que deje de escribir.
   useEffect(() => {
     if (!canLoad) return;
-    const query: AppliedQuery = { filters, search: searchInput.trim() };
+    const query: AppliedQuery = { filters, search: searchInput.trim(), sla: slaFilter, sort: dueSort };
     const prev = prevQueryRef.current;
     prevQueryRef.current = query;
     const onlyStatusChanged =
       prev !== null &&
       prev.search === query.search &&
-      (prev.filters.status !== query.filters.status || prev.filters.state !== query.filters.state) &&
+      (prev.filters.status !== query.filters.status ||
+        prev.filters.state !== query.filters.state ||
+        prev.sla !== query.sla ||
+        prev.sort !== query.sort) &&
       (Object.keys(query.filters) as Array<keyof ListFilters>).every(
         (k) => k === 'status' || k === 'state' || prev.filters[k] === query.filters[k]
       );
@@ -316,7 +354,7 @@ function RequestGeneralPage() {
     return () => window.clearTimeout(timer);
     // fetchTickets solo usa refs y setters estables.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [canLoad, filters, searchInput]);
+  }, [canLoad, filters, searchInput, slaFilter, dueSort]);
 
   // Refresco automático cada 30 s (y al volver a la pestaña): misma página, filtros y búsqueda.
   useAutoRefresh(() => {
@@ -510,11 +548,20 @@ function RequestGeneralPage() {
         }
       />
 
+      <SlaSummaryCards
+        available={listSla.available}
+        counts={listSla.counts ?? emptyInboxSlaCounts()}
+        showStatusOptions
+        selected={slaFilter}
+        onSelect={setSlaFilter}
+      />
+
       <RequestListFilters
         filters={filters}
         onChange={setFilters}
         onClear={clearListFilters}
         counts={statusCounts}
+        hiddenTiles={hiddenStatusTiles}
         options={listOptions}
         progress={globalProgress}
         progressLabel={progressLabel}
@@ -549,6 +596,9 @@ function RequestGeneralPage() {
         </Group>
 
         <Box mb='md'>
+          <Box hiddenFrom='md' mb='xs'>
+            <DueSortButton sort={dueSort} onCycle={cycleDueSort} />
+          </Box>
           <IosSearchField
             value={searchInput}
             onChange={setSearchInput}
@@ -570,6 +620,9 @@ function RequestGeneralPage() {
                 <Table.Th>Asunto</Table.Th>
                 <Table.Th>Compañía / Categoría</Table.Th>
                 <Table.Th>Estado</Table.Th>
+                <Table.Th style={{ whiteSpace: 'nowrap', minWidth: 150 }}>
+                  <DueSortHeader sort={dueSort} onCycle={cycleDueSort} />
+                </Table.Th>
                 <Table.Th>Fecha</Table.Th>
                 <Table.Th>Solicitante / Asignado</Table.Th>
               </Table.Tr>
@@ -577,7 +630,7 @@ function RequestGeneralPage() {
             <Table.Tbody>
               {tickets.length === 0 ? (
                 <Table.Tr>
-                  <Table.Td colSpan={6} className='text-center py-12 text-gray-500'>
+                  <Table.Td colSpan={7} className='text-center py-12 text-gray-500'>
                     <div className='flex flex-col items-center gap-3'>
                       <IconFileDescription size={48} className='text-gray-300' />
                       <Text size='lg' fw={500}>
@@ -679,6 +732,19 @@ function RequestGeneralPage() {
                           </Badge>
                         );
                       })()}
+                    </Table.Td>
+                    <Table.Td style={{ whiteSpace: 'nowrap' }}>
+                      <DueCell
+                        state={
+                          listSla.available
+                            ? inboxItemSlaState(
+                                { kind: 'request', requestId: ticket.id, group: generalListGroup(Number(ticket.id_status_case)) },
+                                listSla.byRequest ?? {}
+                              )
+                            : null
+                        }
+                        info={listSla.byRequest?.[ticket.id]}
+                      />
                     </Table.Td>
                     <Table.Td>
                       <Text size='sm' c='dimmed'>

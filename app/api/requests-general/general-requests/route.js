@@ -4,6 +4,8 @@ import { authOptions } from '../../auth/[...nextauth]/route';
 import { sql, withMssqlPool } from '../../../../lib/mssqlPool';
 import { requestSearchWhere } from '../../../../lib/requests-general/requestSearchSql';
 import { sqlDateRange } from '../../../../lib/requests-general/dateRangeSql';
+import { buildSlaByRequest } from '../../../../lib/requests-general/slaScope';
+import { pageGeneralList, parseDueSort, parseInboxSlaState } from '../../../../lib/requests-general/slaInbox';
 
 const MAX_PAGE_SIZE = 500;
 const MAX_TASKS = 20000;
@@ -32,6 +34,12 @@ const STATUS_GROUP_SQL = {
  * numérico (1, 2, 3, 7...). `counts` se calcula sobre el conjunto filtrado IGNORANDO el estado,
  * para que las tarjetas no cambien al tocar un estado; `total` sí respeta el estado.
  *
+ * SLA (ANS), paged mode only: `sla` (overdue|near_due|on_time|no_sla|paused) filters by SLA
+ * bucket and `sort` (due_asc|due_desc) orders by remaining SLA time (rows without a running
+ * SLA last). The response adds `sla: { available, counts, breakdown, total, byRequest }`,
+ * computed over the same filtered set as the status cards (status ignored) with the same
+ * functions as the assigned-requests inbox, so a card counts exactly the rows it filters.
+ *
  * Una fila por solicitud: los usuarios asignados al proceso van juntos en `user` ("A, B");
  * antes el JOIN repetía la solicitud una vez por usuario.
  */
@@ -54,6 +62,8 @@ export async function GET(req) {
     const pageParam = searchParams.get('page');
     const paged = pageParam !== null;
     const page = Math.max(1, Number.parseInt(pageParam || '1', 10) || 1);
+    const slaFilter = parseInboxSlaState(searchParams.get('sla'));
+    const dueSort = parseDueSort(searchParams.get('sort'));
     const pageSize = Math.min(
       MAX_PAGE_SIZE,
       Math.max(1, Number.parseInt(searchParams.get('pageSize') || '100', 10) || 100)
@@ -131,7 +141,7 @@ export async function GET(req) {
       LEFT JOIN [user] uex ON uex.id = rg.id_executor_final
     `;
 
-    const selectRows = `
+    const selectRowsWhere = (extra) => `
       SELECT
         rg.id, cr.category as category, users_proc.[user], rg.[description], rg.id_company, c.company,
         rg.created_at, u.name as 'requester', sc.status as [status], rg.subject_request as [subject],
@@ -147,9 +157,10 @@ export async function GET(req) {
           FOR XML PATH(''), TYPE
         ).value('.', 'NVARCHAR(MAX)'), 1, 2, '') AS [user]
       ) users_proc
-      ${where}${statusClause}
+      ${where}${extra}
       ORDER BY rg.id DESC
     `;
+    const selectRows = selectRowsWhere(statusClause);
 
     const tasksMode = searchParams.get('tasks') === '1';
 
@@ -196,6 +207,63 @@ export async function GET(req) {
         return rows.recordset;
       }
 
+      // SLA of the filtered set (status ignored, like the status cards). null = no SLA columns.
+      let slaSet = null;
+      try {
+        const setRows = (
+          await bind().query(`
+            SELECT rg.id, rg.status_req, rg.created_at, pc.sla_value, pc.sla_unit, pc.sla_warn_pct
+            ${from}
+            ${where}
+            ORDER BY rg.id DESC
+          `)
+        ).recordset;
+        const seen = new Set();
+        const unique = setRows.filter((r) => (seen.has(r.id) ? false : (seen.add(r.id), true)));
+        slaSet = { rows: unique, byRequest: await buildSlaByRequest(pool, unique) };
+      } catch (e) {
+        // 207/208: the SLA migration is not applied in this database; the list works without it.
+        if (e?.number !== 207 && e?.number !== 208) throw e;
+      }
+      const slaOf = (pageRows) => {
+        if (!slaSet) return { available: false };
+        const base = pageGeneralList(
+          slaSet.rows.map((r) => ({ id: r.id, statusReq: r.status_req })),
+          slaSet.byRequest,
+          { statusKey: 'all', slaFilter: null, sort: 'none', page: 1, pageSize: 1 }
+        );
+        const byRequest = {};
+        for (const r of pageRows) if (slaSet.byRequest[r.id]) byRequest[r.id] = slaSet.byRequest[r.id];
+        return { available: true, ...base.sla, byRequest };
+      };
+
+      // SLA filter or due sort: filter/sort/page in memory over the filtered id list.
+      if (slaSet && (slaFilter || dueSort !== 'none')) {
+        const pg = pageGeneralList(
+          slaSet.rows.map((r) => ({ id: r.id, statusReq: r.status_req })),
+          slaSet.byRequest,
+          { statusKey: status, slaFilter, sort: dueSort, page, pageSize }
+        );
+        let pageRows = [];
+        if (pg.pageIds.length) {
+          const req = bind();
+          req.input('pageIds', sql.NVarChar(sql.MAX), JSON.stringify(pg.pageIds));
+          const got = (
+            await req.query(selectRowsWhere(' AND rg.id IN (SELECT CAST([value] AS INT) FROM OPENJSON(@pageIds))'))
+          ).recordset;
+          const byId = new Map(got.map((r) => [r.id, r]));
+          pageRows = pg.pageIds.map((pid) => byId.get(pid)).filter(Boolean);
+        }
+        return {
+          rows: pageRows,
+          total: pg.total,
+          counts: pg.statusCounts,
+          page,
+          pageSize,
+          sla: slaOf(pageRows),
+        };
+      }
+
       const rowsRequest = bind();
       rowsRequest.input('offset', sql.Int, (page - 1) * pageSize);
       rowsRequest.input('pageSize', sql.Int, pageSize);
@@ -231,6 +299,7 @@ export async function GET(req) {
         },
         page,
         pageSize,
+        sla: slaOf(rows.recordset),
       };
     });
 
