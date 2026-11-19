@@ -272,8 +272,9 @@ export function buildSkillsPlugin({ skills, target, pluginName, agentLabel, excl
   );
   writeFileSync(path.join(tmp, 'excluidas.json'), `${JSON.stringify(left, null, 2)}\n`);
   writeFileSync(path.join(tmp, 'FUENTE'), `${sources.join('\n')}\nBuilt: ${new Date().toISOString()}\nIncluded (${included.length}): ${included.map((x) => x.name).join(', ')}\nExcluded (${left.length}): ${left.map((x) => x.nombre).join(', ')}\n`);
-  seal(tmp);
+  // Seal AFTER the rename: macOS refuses to move a directory without write permission on it.
   renameSync(tmp, target);
+  seal(target);
   return { included, excluded: left };
 }
 
