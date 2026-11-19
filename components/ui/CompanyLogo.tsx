@@ -12,6 +12,8 @@ const LOGOS: { match: RegExp; src: string }[] = [
   // Farmalógica y Unidossis son horizontales: en la caja 4:3 se usa su isotipo (versión cuadrada).
   { match: /farmal[oó]gica/i, src: '/landing/empresas/farmalogica-icono.png' },
   { match: /ryan/i, src: '/landing/empresas/ryan.png' },
+  // ONE LATAM ONCO must be matched before the generic OneLatam Pharma rule.
+  { match: /one\s*latam\s*onco|\bolp\s*onco\b/i, src: '/landing/empresas/onelatam-onco.svg' },
   { match: /onelatam|one latam|\bolp\b/i, src: '/landing/empresas/onelatam-pharma.svg' },
   { match: /meditrack/i, src: '/landing/empresas/meditrack.png' },
   { match: /abamia/i, src: '/landing/empresas/abamia.png' },
