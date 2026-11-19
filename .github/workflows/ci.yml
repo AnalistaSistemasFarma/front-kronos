@@ -623,6 +623,14 @@ jobs:
           echo "IF OBJECT_ID(N'dbo.agent_error_issue', N'U') IS NULL OR OBJECT_ID(N'dbo.agent_error_event', N'U') IS NULL OR (SELECT COUNT(*) FROM sys.check_constraints WHERE name IN (N'CK_agent_error_issue_estado', N'CK_agent_error_issue_severidad', N'CK_agent_error_issue_ambiente')) <> 3 THROW 50000, N'El pase de errores de IA no dejó las tablas o los CHECK.', 1;" > /tmp/errores-ia-ok.sql
           npx prisma db execute --schema prisma/schema.prisma --file /tmp/errores-ia-ok.sql
           if npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-11-03-errores-ia-PROD.sql; then echo "El script de PROD de errores de IA debió negarse en kronos_ci"; exit 1; fi
+          # Tarea «Plantilla de documento» en los flujos (2026-11-18): PRUEBAS dos veces, reversa y otra vez PRUEBAS (idempotencia ida y vuelta) y PROD que se niega.
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-11-18-tarea-plantilla-documento-PRUEBAS.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-11-18-tarea-plantilla-documento-PRUEBAS.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-11-18-tarea-plantilla-documento-reversa.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-11-18-tarea-plantilla-documento-PRUEBAS.sql
+          echo "IF OBJECT_ID(N'dbo.task_doc_template', N'U') IS NULL OR OBJECT_ID(N'dbo.request_generated_document', N'U') IS NULL OR NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'UX_task_doc_template_task') OR (SELECT COUNT(*) FROM sys.check_constraints WHERE name IN (N'CK_task_doc_template_engine', N'CK_task_doc_template_source', N'CK_task_doc_template_output', N'CK_task_doc_template_mode', N'CK_task_doc_template_fields_json', N'CK_request_generated_document_status')) <> 6 THROW 50000, N'El pase de la tarea Plantilla de documento no dejó las tablas, el índice o los CHECK.', 1;" > /tmp/tarea-plantilla-doc-ok.sql
+          npx prisma db execute --schema prisma/schema.prisma --file /tmp/tarea-plantilla-doc-ok.sql
+          if npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-11-18-tarea-plantilla-documento-PROD.sql; then echo "El script de PROD de la tarea Plantilla de documento debió negarse en kronos_ci"; exit 1; fi
 
       - name: Pruebas de integración + cobertura de lib/sgc/db (vitest)
         run: npm run test:integration -- --coverage --reporter=default --reporter=junit --outputFile.junit=reports/integracion/junit.xml
