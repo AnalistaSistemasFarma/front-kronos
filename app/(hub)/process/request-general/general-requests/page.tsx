@@ -36,11 +36,11 @@ import {
   type GeneralTask,
 } from '../../../../../components/request-general/list/AllTasksModal';
 import { SlaSummaryCards } from '../../../../../components/request-general/sla/SlaSummaryCards';
-import { DueCell, DueSortButton, DueSortHeader, useDueSort } from '../../../../../components/request-general/sla/DueSort';
 import { useIndicatorPrefs } from '../../../../../components/request-general/sla/useIndicatorPrefs';
 import type { RequestSlaInfo } from '../../../../../components/request-general/sla/useSlaSummary';
 import {
   emptyInboxSlaCounts,
+  dueSortForSlaFilter,
   generalListGroup,
   inboxItemSlaState,
   parseInboxSlaState,
@@ -57,7 +57,7 @@ import {
   formatRequestDate,
 } from '../../../../../components/request-general/list/RequestRowParts';
 import { RequestFlowBar, useRequestFlows } from '../../../../../components/request-general/RequestFlow';
-import { SlaBadge } from '../../../../../components/request-general/sla/SlaBadge';
+import { DueBadge } from '../../../../../components/request-general/sla/SlaBadge';
 import CompanyLogo from '../../../../../components/ui/CompanyLogo';
 import PersonLine from '../../../../../components/ui/PersonLine';
 import { ResizableTh, useColumnWidths } from '../../../../../components/ui/ResizableTh';
@@ -179,7 +179,8 @@ function RequestGeneralPage() {
   // SLA (ANS) cards, filter and «Vencimiento» sort: computed by the API over the listed set.
   const [slaFilter, setSlaFilter] = useState<InboxSlaState | null>(() => parseInboxSlaState(searchParams.get('sla')));
   const [listSla, setListSla] = useState<ListSla>({ available: false });
-  const { sort: dueSort, cycle: cycleDueSort } = useDueSort('general');
+  // «Vencidos» / «Próximos a vencer» list the most urgent first; no card = default order.
+  const dueSort = dueSortForSlaFilter(slaFilter);
   // Same table as the assigned inbox: per-user column widths, company colours and flow bar.
   const [companyColors] = useUiPreference<boolean>(PREF_COMPANY_COLORS, false);
   const colWidths = useColumnWidths('generales', {
@@ -187,7 +188,6 @@ function RequestGeneralPage() {
     asunto: 340,
     compania: 190,
     estado: 150,
-    vence: 160,
     fecha: 170,
     personas: 300,
   });
@@ -590,9 +590,6 @@ function RequestGeneralPage() {
         </Group>
 
         <Box mb='md'>
-          <Box hiddenFrom='md' mb='xs'>
-            <DueSortButton sort={dueSort} onCycle={cycleDueSort} />
-          </Box>
           <IosSearchField
             value={searchInput}
             onChange={setSearchInput}
@@ -639,9 +636,7 @@ function RequestGeneralPage() {
                       </Text>
                     </Group>
                     <Group gap={4} wrap='nowrap'>
-                      {due.state === 'overdue' || due.state === 'near_due' || due.state === 'on_time' ? (
-                        <SlaBadge info={due.info} />
-                      ) : null}
+                      <DueBadge {...due} />
                       <RequestStatusBadge status={ticket.status} />
                     </Group>
                   </Group>
@@ -681,9 +676,6 @@ function RequestGeneralPage() {
                 <ResizableTh col='asunto' width={colWidths.widths.asunto} onResize={colWidths.setWidth}>Asunto</ResizableTh>
                 <ResizableTh col='compania' width={colWidths.widths.compania} onResize={colWidths.setWidth}>Compañía / Categoría</ResizableTh>
                 <ResizableTh col='estado' width={colWidths.widths.estado} onResize={colWidths.setWidth}>Estado</ResizableTh>
-                <ResizableTh col='vence' width={colWidths.widths.vence} onResize={colWidths.setWidth}>
-                  <DueSortHeader sort={dueSort} onCycle={cycleDueSort} />
-                </ResizableTh>
                 <ResizableTh col='fecha' width={colWidths.widths.fecha} onResize={colWidths.setWidth}>Fecha</ResizableTh>
                 <ResizableTh col='personas' width={colWidths.widths.personas} onResize={colWidths.setWidth}>Solicitante / Asignado</ResizableTh>
               </Table.Tr>
@@ -691,7 +683,7 @@ function RequestGeneralPage() {
             <Table.Tbody>
               {tickets.length === 0 ? (
                 <Table.Tr>
-                  <Table.Td colSpan={7} className='text-center py-12 text-gray-500'>
+                  <Table.Td colSpan={6} className='text-center py-12 text-gray-500'>
                     <div className='flex flex-col items-center gap-3'>
                       <IconFileDescription size={48} className='text-gray-300' />
                       <Text size='lg' fw={500}>
@@ -743,10 +735,10 @@ function RequestGeneralPage() {
                       <RequestCompanyCell company={ticket.company} category={ticket.category} process={ticket.process} />
                     </Table.Td>
                     <Table.Td style={{ whiteSpace: 'nowrap' }}>
-                      <RequestStatusBadge status={ticket.status} />
-                    </Table.Td>
-                    <Table.Td style={{ whiteSpace: 'nowrap' }}>
-                      <DueCell {...dueOf(ticket)} />
+                      <Stack gap={4} align='flex-start'>
+                        <RequestStatusBadge status={ticket.status} />
+                        <DueBadge {...dueOf(ticket)} />
+                      </Stack>
                     </Table.Td>
                     <Table.Td>
                       <RequestDateCell raw={ticket.created_at} />

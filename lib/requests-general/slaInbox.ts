@@ -107,9 +107,13 @@ export function sortByDue<T>(items: readonly T[], keyOf: (item: T) => number | n
     .map((x) => x.item);
 }
 
-/** Next state of the «Vencimiento» header/button: none → asc → desc → none. */
-export function nextDueSort(sort: DueSort): DueSort {
-  return sort === 'none' ? 'due_asc' : sort === 'due_asc' ? 'due_desc' : 'none';
+/**
+ * Default order of a list filtered by an SLA card (hotfix 2026-11-19, msg 36400): «Vencidos»
+ * shows the most overdue first and «Próximos a vencer» the soonest due first (both ascending
+ * remaining time). Any other card, or no card, keeps the list's default order.
+ */
+export function dueSortForSlaFilter(slaFilter: InboxSlaState | null | undefined): DueSort {
+  return slaFilter === 'overdue' || slaFilter === 'near_due' ? 'due_asc' : 'none';
 }
 
 export function parseDueSort(value: unknown): DueSort {

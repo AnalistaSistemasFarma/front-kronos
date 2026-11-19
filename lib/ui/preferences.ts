@@ -40,7 +40,8 @@ export function normalizeIndicatorPrefs(value: unknown): IndicatorPrefs {
 
 /**
  * «Vencimiento» sort of the request lists, per user and per list. Value: 'none' | 'due_asc' |
- * 'due_desc' (anything else is rejected).
+ * 'due_desc' (anything else is rejected). Legacy (#1042): the lists no longer read these keys
+ * (the SLA card picks the order); still accepted so older open tabs can save without errors.
  */
 export const PREF_REQUEST_SORT_PREFIX = 'requests.sort.';
 export const REQUEST_SORT_LISTS = ['assigned', 'general'] as const;
