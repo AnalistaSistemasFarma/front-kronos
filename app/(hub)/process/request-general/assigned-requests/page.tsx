@@ -90,11 +90,20 @@ import { filterByText, requestSearchParts } from '../../../../../lib/requests-ge
 import { RequestListFilters } from '../../../../../components/request-general/list/RequestListFilters';
 import { SlaSummaryCards } from '../../../../../components/request-general/sla/SlaSummaryCards';
 import { SlaBadge } from '../../../../../components/request-general/sla/SlaBadge';
+import {
+  DueCell,
+  DueSortButton,
+  DueSortHeader,
+  useDueSort,
+} from '../../../../../components/request-general/sla/DueSort';
 import { useSlaSummary } from '../../../../../components/request-general/sla/useSlaSummary';
 import { useIndicatorPrefs } from '../../../../../components/request-general/sla/useIndicatorPrefs';
 import {
   countInboxSla,
+  inboxItemRemainingHours,
   inboxItemSlaState,
+  sortByDue,
+  type InboxSlaItem,
   type InboxSlaState,
 } from '../../../../../lib/requests-general/slaInbox';
 import {
@@ -124,6 +133,15 @@ import { createPrerenderSearchParamsForClientPage } from 'next/dist/server/reque
 import CompanyLogo from '../../../../../components/ui/CompanyLogo';
 import PreviousPurchasesModal from '../../purchases/PreviousPurchasesModal';
 import PersonLine from '../../../../../components/ui/PersonLine';
+import {
+  RequestCompanyCell,
+  RequestStatusBadge,
+  RequestTypeBadge,
+  formatRequestDate,
+  requestStatusColor,
+  requestStatusIcon,
+  taskVisual,
+} from '../../../../../components/request-general/list/RequestRowParts';
 import { ResizableTh, useColumnWidths } from '../../../../../components/ui/ResizableTh';
 import { useUiPreference } from '../../../../../components/ui/useUiPreference';
 import { PREF_COMPANY_COLORS } from '../../../../../lib/ui/preferences';
@@ -260,7 +278,9 @@ function RequestBoard() {
   const [previousOpen, setPreviousOpen] = useState(false);
   /** Preferencias del usuario (Perfil): fondo por compañía y anchos de columna. */
   const [companyColors] = useUiPreference<boolean>(PREF_COMPANY_COLORS, false);
-  const colWidths = useColumnWidths('asignadas', { id: 90, asunto: 340, compania: 190, estado: 150, fecha: 170, personas: 300 });
+  const colWidths = useColumnWidths('asignadas', { id: 90, asunto: 340, compania: 190, estado: 150, vence: 160, fecha: 170, personas: 300 });
+  // «Vencimiento» sort, saved per user.
+  const { sort: dueSort, cycle: cycleDueSort } = useDueSort('assigned');
   const [exporting, setExporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [formData, setFormData] = useState({
@@ -403,8 +423,13 @@ function RequestBoard() {
     return hints;
   }, [typedEntries, typeFilter]);
   const visibleEntries = useMemo(
-    () => typedEntries.filter((e) => matchesListFilters(e.row, filters)),
-    [typedEntries, filters]
+    () =>
+      sortByDue(
+        typedEntries.filter((e) => matchesListFilters(e.row, filters)),
+        (e) => inboxItemRemainingHours({ kind: e.item.kind, requestId: e.row.requestId, group: e.row.group }, slaByRequest),
+        dueSort
+      ),
+    [typedEntries, filters, dueSort, slaSummary]
   );
   // Pestañas Todos / Solicitudes / Tareas con el estado elegido.
   const kindCounts = useMemo(() => {
@@ -425,7 +450,25 @@ function RequestBoard() {
   // Al cambiar filtros, búsqueda o tipo se vuelve a la primera página.
   useEffect(() => {
     setCurrentPage(1);
-  }, [filters, deferredSearch, typeFilter]);
+  }, [filters, deferredSearch, typeFilter, dueSort]);
+
+  // SLA of a list row (a task carries the clock of its request): bucket + remaining time.
+  const rowSlaItem = (item: AssignedItem): InboxSlaItem =>
+    item.kind === 'task'
+      ? {
+          kind: 'task',
+          requestId: (item.data as AssignedTask).id_request_general,
+          group: statusGroupOf((item.data as AssignedTask).id_status, (item.data as AssignedTask).status_task),
+        }
+      : {
+          kind: 'request',
+          requestId: (item.data as Ticket).id,
+          group: statusGroupOf((item.data as Ticket).id_status_case, (item.data as Ticket).status),
+        };
+  const rowSla = (item: AssignedItem) => {
+    const it = rowSlaItem(item);
+    return { state: inboxItemSlaState(it, slaByRequest), info: slaByRequest[Number(it.requestId)] };
+  };
 
   const fetchOpenScopeTasks = async () => {
     try {
@@ -823,49 +866,10 @@ function RequestBoard() {
     return null;
   }
 
-  const getStatusColor = (status: string) => {
-    switch (status?.toLowerCase()) {
-      case 'abierto':
-        return 'blue';
-      case 'cancelado':
-        return 'red';
-      case 'resuelto':
-        return 'green';
-      case 'devuelta':
-      case 'devuelto':
-        return 'orange';
-      default:
-        return 'gray';
-    }
-  };
-
-  const getStatusIcon = (status: string) => {
-    switch (status?.toLowerCase()) {
-      case 'sin empezar':
-        return IconClock;
-      case 'abierto':
-        return IconProgress;
-      case 'cancelado':
-        return IconX;
-      case 'resuelto':
-        return IconCircleCheckFilled;
-      default:
-        return IconClock;
-    }
-  };
-
-  const getTaskVisual = (status: string) => {
-    switch (status?.toLowerCase()) {
-      case 'resuelto':
-        return { color: 'green', Icon: IconCircleCheckFilled };
-      case 'abierto':
-        return { color: 'orange', Icon: IconCircleDot };
-      case 'sin empezar':
-        return { color: 'gray', Icon: IconCircle };
-      default:
-        return { color: 'red', Icon: IconCircle };
-    }
-  };
+  // Shared with «Solicitudes generales» (RequestRowParts) so both tables look the same.
+  const getStatusColor = requestStatusColor;
+  const getStatusIcon = requestStatusIcon;
+  const getTaskVisual = taskVisual;
 
   const getTasksProgress = (tasks: RequestTask[]) => getSimplifiedTasksProgress(tasks);
 
@@ -1185,73 +1189,18 @@ function RequestBoard() {
     }
   }
 
-  const formatAssignedDate = (raw: string) => {
-    if (!raw) return 'Sin fecha';
-
-    const date = new Date(raw);
-    if (isNaN(date.getTime())) return 'Fecha inválida';
-
-    const adjusted = new Date(date.getTime() + 5 * 60 * 60 * 1000);
-
-    return new Intl.DateTimeFormat('es-CO', {
-      day: 'numeric',
-      month: 'long',
-      year: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-      hour12: true,
-    }).format(adjusted);
-  };
+  const formatAssignedDate = (raw: string) => formatRequestDate(raw);
 
   // Misma columna que Panel, Visor y Mis solicitudes (Compañía / Categoría); aquí se suma el
   // proceso en la línea gris porque en Asignadas se trabaja por proceso.
   const renderCompanyCell = (company: string, category?: string | null, process?: string | null) => (
-    <Stack gap={2}>
-      <CompanyLogo name={company} />
-      <Text size='xs' c='dimmed'>
-        {[category, process].filter(Boolean).join(' · ')}
-      </Text>
-    </Stack>
+    <RequestCompanyCell company={company} category={category} process={process} />
   );
 
   // Etiqueta pequeña que dice qué es cada fila (va debajo del ID): «Solicitud» azul o «Tarea» morada.
-  const renderTypeBadge = (kind: AssignedItem['kind']) =>
-    kind === 'request' ? (
-      <Badge
-        variant='light'
-        color='blue'
-        size='xs'
-        leftSection={<IconTicket size={12} />}
-        styles={{ root: { textTransform: 'none' }, label: { overflow: 'visible' } }}
-      >
-        Solicitud
-      </Badge>
-    ) : (
-      <Badge
-        variant='light'
-        color='violet'
-        size='xs'
-        leftSection={<IconListCheck size={12} />}
-        styles={{ root: { textTransform: 'none' }, label: { overflow: 'visible' } }}
-      >
-        Tarea
-      </Badge>
-    );
+  const renderTypeBadge = (kind: AssignedItem['kind']) => <RequestTypeBadge kind={kind} />;
 
-  const renderStatusBadge = (status: string) => {
-    const StatusIcon = getStatusIcon(status);
-    return (
-      <Badge
-        color={getStatusColor(status)}
-        variant='light'
-        size='sm'
-        leftSection={<StatusIcon size={12} />}
-        styles={{ label: { overflow: 'visible' } }}
-      >
-        {status}
-      </Badge>
-    );
-  };
+  const renderStatusBadge = (status: string) => <RequestStatusBadge status={status} />;
 
   const renderTaskRow = (key: string, task: AssignedTask) => (
     <Table.Tr
@@ -1286,6 +1235,9 @@ function RequestBoard() {
       </Table.Td>
       <Table.Td>{renderCompanyCell(task.company, task.category, task.process)}</Table.Td>
       <Table.Td style={{ whiteSpace: 'nowrap' }}>{renderStatusBadge(task.status_task)}</Table.Td>
+      <Table.Td style={{ whiteSpace: 'nowrap' }}>
+        <DueCell {...rowSla({ kind: 'task', key, data: task, createdAt: task.created_at })} />
+      </Table.Td>
       <Table.Td>
         <Group gap={4} wrap='nowrap' align='flex-start'>
           <IconCalendarEvent size={14} className='text-gray-400' style={{ marginTop: 2 }} />
@@ -1415,6 +1367,9 @@ function RequestBoard() {
             >
               Todo lo abierto
             </Button>
+            <Box hiddenFrom='md'>
+              <DueSortButton sort={dueSort} onCycle={cycleDueSort} />
+            </Box>
             <SegmentedControl
               fullWidth={isMobile}
               size={isMobile ? 'xs' : 'sm'}
@@ -1497,7 +1452,12 @@ function RequestBoard() {
                         </Text>
                       </Group>
                       <Group gap={4} wrap='nowrap'>
-                        {!isTask && <SlaBadge info={slaSummary?.byRequest[Number(r!.id)]} />}
+                        {(() => {
+                          const due = rowSla(item);
+                          return due.state === 'overdue' || due.state === 'near_due' || due.state === 'on_time' ? (
+                            <SlaBadge info={due.info} />
+                          ) : null;
+                        })()}
                         {renderStatusBadge(isTask ? t!.status_task : r!.status)}
                       </Group>
                     </Group>
@@ -1545,6 +1505,9 @@ function RequestBoard() {
                   <ResizableTh col='asunto' width={colWidths.widths.asunto} onResize={colWidths.setWidth}>Asunto</ResizableTh>
                   <ResizableTh col='compania' width={colWidths.widths.compania} onResize={colWidths.setWidth}>Compañía / Categoría</ResizableTh>
                   <ResizableTh col='estado' width={colWidths.widths.estado} onResize={colWidths.setWidth}>Estado</ResizableTh>
+                  <ResizableTh col='vence' width={colWidths.widths.vence} onResize={colWidths.setWidth}>
+                    <DueSortHeader sort={dueSort} onCycle={cycleDueSort} />
+                  </ResizableTh>
                   <ResizableTh col='fecha' width={colWidths.widths.fecha} onResize={colWidths.setWidth}>Fecha</ResizableTh>
                   <ResizableTh col='personas' width={colWidths.widths.personas} onResize={colWidths.setWidth}>Solicitante / Asignado</ResizableTh>
                 </Table.Tr>
@@ -1552,7 +1515,7 @@ function RequestBoard() {
               <Table.Tbody>
                 {pageItems.length === 0 ? (
                   <Table.Tr>
-                    <Table.Td colSpan={6} className='text-center py-12 text-gray-500'>
+                    <Table.Td colSpan={7} className='text-center py-12 text-gray-500'>
                       <div className='flex flex-col items-center gap-3'>
                         <IconTicket size={48} className='text-gray-300' />
                         <Text size='lg' fw={500}>
@@ -1646,10 +1609,10 @@ function RequestBoard() {
                       </Table.Td>
                       <Table.Td>{renderCompanyCell(ticket.company, ticket.category, ticket.process)}</Table.Td>
                       <Table.Td style={{ whiteSpace: 'nowrap' }}>
-                        <Stack gap={4} align='flex-start'>
-                          {renderStatusBadge(ticket.status)}
-                          <SlaBadge info={slaSummary?.byRequest[Number(ticket.id)]} />
-                        </Stack>
+                        {renderStatusBadge(ticket.status)}
+                      </Table.Td>
+                      <Table.Td style={{ whiteSpace: 'nowrap' }}>
+                        <DueCell {...rowSla(item)} />
                       </Table.Td>
                       <Table.Td>
                         <Group gap={4} wrap='nowrap' align='flex-start'>

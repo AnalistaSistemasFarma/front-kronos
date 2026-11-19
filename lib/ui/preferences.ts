@@ -38,12 +38,25 @@ export function normalizeIndicatorPrefs(value: unknown): IndicatorPrefs {
   return { slaHidden: v.slaHidden === true, hiddenCards };
 }
 
+/**
+ * «Vencimiento» sort of the request lists, per user and per list. Value: 'none' | 'due_asc' |
+ * 'due_desc' (anything else is rejected).
+ */
+export const PREF_REQUEST_SORT_PREFIX = 'requests.sort.';
+export const REQUEST_SORT_LISTS = ['assigned', 'general'] as const;
+export type RequestSortList = (typeof REQUEST_SORT_LISTS)[number];
+const REQUEST_SORT_VALUES = ['none', 'due_asc', 'due_desc'];
+export const requestSortKey = (list: RequestSortList) => `${PREF_REQUEST_SORT_PREFIX}${list}`;
+const isRequestSortKey = (key: string) =>
+  key.startsWith(PREF_REQUEST_SORT_PREFIX) &&
+  (REQUEST_SORT_LISTS as readonly string[]).includes(key.slice(PREF_REQUEST_SORT_PREFIX.length));
+
 export function widthsKey(table: string): string {
   return `${WIDTHS_PREFIX}${table}`;
 }
 
 export function isAllowedPrefKey(key: string): boolean {
-  return key === PREF_COMPANY_COLORS || key === PREF_REQUEST_INDICATORS || /^tables\.widths\.[a-z0-9-]{1,60}$/.test(key);
+  return key === PREF_COMPANY_COLORS || key === PREF_REQUEST_INDICATORS || isRequestSortKey(key) || /^tables\.widths\.[a-z0-9-]{1,60}$/.test(key);
 }
 
 /** Valida y normaliza el valor según la clave (null = inválido). */
@@ -52,6 +65,9 @@ export function normalizePrefValue(key: string, value: unknown): string | null {
   if (key === PREF_REQUEST_INDICATORS) {
     if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
     return JSON.stringify(normalizeIndicatorPrefs(value));
+  }
+  if (isRequestSortKey(key)) {
+    return typeof value === 'string' && REQUEST_SORT_VALUES.includes(value) ? JSON.stringify(value) : null;
   }
   if (key.startsWith(WIDTHS_PREFIX)) {
     if (!value || typeof value !== 'object' || Array.isArray(value)) return null;

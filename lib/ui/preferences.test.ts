@@ -39,3 +39,17 @@ describe('preferencias de interfaz', () => {
     expect(normalizeIndicatorPrefs({ slaHidden: true }).slaHidden).toBe(true);
   });
 });
+
+import { requestSortKey } from './preferences';
+describe('requests.sort.* (Vencimiento sort per list)', () => {
+  it('accepts only the known lists and values', () => {
+    expect(isAllowedPrefKey(requestSortKey('assigned'))).toBe(true);
+    expect(isAllowedPrefKey(requestSortKey('general'))).toBe(true);
+    expect(isAllowedPrefKey('requests.sort.other')).toBe(false);
+    expect(normalizePrefValue('requests.sort.assigned', 'due_asc')).toBe('"due_asc"');
+    expect(normalizePrefValue('requests.sort.general', 'none')).toBe('"none"');
+    expect(normalizePrefValue('requests.sort.general', 'drop table')).toBeNull();
+    expect(normalizePrefValue('requests.sort.general', { a: 1 })).toBeNull();
+    expect(parsePrefValue('requests.sort.general', '"due_desc"')).toBe('due_desc');
+  });
+});

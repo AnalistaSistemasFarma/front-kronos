@@ -184,6 +184,8 @@ interface Note {
   note: string;
   /** null cuando la nota la deja el sistema (p. ej. cierre automático por una Tarea SAP). */
   createdBy: string | null;
+  /** Profile picture of the author (`user.image`, same source as the chat); null = initials. */
+  createdByImage?: string | null;
   creation_date?: string;
 }
 
@@ -2315,9 +2317,14 @@ function ViewRequestPage() {
                             }}
                           >
                             <Group gap={8} mb={6} wrap='nowrap'>
-                              <Avatar size={24} radius='xl' color={isCurrentUser ? 'blue' : 'gray'}>
-                                {(note.createdBy || 'S').charAt(0).toUpperCase()}
-                              </Avatar>
+                              <Avatar
+                                size={24}
+                                radius='xl'
+                                src={note.createdByImage || null}
+                                name={note.createdBy || 'SynerLink'}
+                                color='initials'
+                                data-testid='note-author-avatar'
+                              />
                               <Text size='xs' fw={600} lineClamp={1}>
                                 {note.createdBy || 'SynerLink'}
                               </Text>
