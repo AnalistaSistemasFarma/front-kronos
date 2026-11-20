@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { aggregateSessions, aggregateViewCalls, completeLines, parseAccessLine, parseSecurityLine } from '../../../scripts/sap-monitor/slLog.mjs';
+import { createHash } from 'node:crypto';
+import {
+  aggregateSessions,
+  aggregateViewCalls,
+  completeLines,
+  parseAccessLine,
+  parseSecurityLine,
+  viewCallDetails,
+} from '../../../scripts/sap-monitor/slLog.mjs';
 
 const TIMEOUT =
   "[19/Nov/2026:19:59:19 -0500] 192.168.10.11 300006812 \"GET /b1s/v1/view.svc/OLP_IND_VentasB1SLQuery?$filter=Fecha%20ge%20'2026-11-13' HTTP/1.1\" 502 341 ssl=TLSv1.3 t=300s pid=46968 sid=9d33b5f6-e47d-11f1-8000-8c8474d54850 n=.node4 -";
@@ -50,5 +58,35 @@ describe('completeLines', () => {
   it('keeps the trailing partial line for the next run', () => {
     expect(completeLines('a\nb\nc')).toEqual({ lines: ['a', 'b'], consumed: 4 });
     expect(completeLines('partial')).toEqual({ lines: [], consumed: 0 });
+  });
+});
+
+describe('join access log sid <-> Securityevent session', () => {
+  const sid = '9d33b5f6-e47d-11f1-8000-8c8474d54850';
+  // The Securityevent `session` is the uppercase hex SHA-256 of the access log sid.
+  const session = createHash('sha256').update(sid).digest('hex').toUpperCase();
+  const login = `2026-11-19 19:58:00.000000\tSERFARMA07:ONELATAMPHARMA_PROD:ServiceLayer\t192.168.10.11\tLoginSucceed:pid=1:session=${session}`;
+
+  it('labels each view call with company and SL user, plus query and node', () => {
+    const { sidWho } = aggregateSessions([parseSecurityLine(login)]);
+    const [call] = viewCallDetails([parseAccessLine(TIMEOUT)], sidWho);
+    expect(call).toMatchObject({
+      at: '2026-11-20T00:59:19.000Z',
+      view: 'OLP_IND_VentasB1SLQuery',
+      sourceIp: '192.168.10.11',
+      status: 502,
+      timeout: true,
+      query: "$filter=Fecha ge '2026-11-13'",
+      node: 'node4',
+      company: 'ONELATAMPHARMA_PROD',
+      user: 'ServiceLayer',
+    });
+    expect(aggregateViewCalls([parseAccessLine(TIMEOUT)], sidWho)[0].company).toBe('ONELATAMPHARMA_PROD');
+  });
+
+  it('leaves the owner empty when the login is not in the log; a call without query has query null', () => {
+    const [call] = viewCallDetails([parseAccessLine(OK)], new Map());
+    expect(call).toMatchObject({ company: null, user: null, query: null, node: 'node3', timeout: false });
+    expect(viewCallDetails([parseAccessLine(OTHER)])).toHaveLength(0);
   });
 });

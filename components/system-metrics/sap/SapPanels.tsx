@@ -4,6 +4,8 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { ActionIcon, Alert, Code, Group, SegmentedControl, Tooltip } from '@mantine/core';
 import {
   IconAlertTriangle,
+  IconChevronDown,
+  IconChevronRight,
   IconClockHour4,
   IconInfoCircle,
   IconLock,
@@ -430,13 +432,108 @@ const SORTERS: Record<SortKey, (v: ViewRank) => number> = {
   lecturas: (v) => v.sqlReads,
 };
 const SOURCE_HINT: Record<string, string> = {
-  '192.168.10.5': 'serfarma05 (SAPSEND, SynerLink, conectores)',
-  '192.168.10.11': 'puerta de enlace (Power BI / Power Automate / nube)',
+  '192.168.10.5': 'Servidor de aplicaciones (SynerLink/SAPSEND/conectores)',
+  '192.168.10.11': 'Puerta de enlace (NAT): automatizaciones/equipos de otra red — origen real oculto',
 };
+
+type ViewCall = {
+  at: string;
+  sourceIp: string;
+  status: number;
+  durationMs: number;
+  timeout: boolean;
+  query: string | null;
+  node: string | null;
+  company: string | null;
+  user: string | null;
+  bytes: number;
+};
+
+const formatCallTime = (iso: string) =>
+  new Intl.DateTimeFormat('es-CO', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', second: '2-digit' }).format(new Date(iso));
+
+/** Each call of one view (opened from the ranking): when, from where, how it ended and what it asked. */
+function ViewCallsDetail({ view, range }: { view: string; range: RangeKey }) {
+  const [calls, setCalls] = useState<ViewCall[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [onlyTimeouts, setOnlyTimeouts] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    setCalls(null);
+    fetch(`/api/system-metrics/sap?part=calls&view=${encodeURIComponent(view)}&range=${range}`)
+      .then(async (r) => {
+        if (!r.ok) throw new Error('No se pudo leer el detalle');
+        const body = (await r.json()) as ApiResponse<ViewCall[]>;
+        if (alive) setCalls(body.tablesMissing ? [] : body.data ?? []);
+      })
+      .catch((e) => alive && setError(e instanceof Error ? e.message : 'Error inesperado'));
+    return () => {
+      alive = false;
+    };
+  }, [view, range]);
+
+  if (error) return <div className={styles.rowSub} style={{ marginTop: 10 }}>{error}</div>;
+  if (!calls) return <div className={styles.rowSub} style={{ marginTop: 10 }}>Cargando llamadas…</div>;
+  if (!calls.length) {
+    return (
+      <div className={styles.rowSub} style={{ marginTop: 10 }}>
+        Sin detalle por llamada en el periodo (el detalle se guarda desde el 20 de noviembre de 2026).
+      </div>
+    );
+  }
+  const timeouts = calls.filter((c) => c.timeout).length;
+  const shown = onlyTimeouts ? calls.filter((c) => c.timeout) : calls;
+  return (
+    <div style={{ marginTop: 10 }}>
+      <Group justify="space-between" wrap="wrap" gap="xs" mb={6}>
+        <span className={styles.rowSub}>
+          {formatInt(calls.length)} llamadas{calls.length >= 300 ? ' (las 300 más recientes)' : ''} · {formatInt(timeouts)} timeouts. Un 502 es el corte
+          del balanceador a los 300 s.
+        </span>
+        {timeouts > 0 && (
+          <SegmentedControl
+            size="xs"
+            radius="xl"
+            value={onlyTimeouts ? 'timeouts' : 'todas'}
+            onChange={(v) => setOnlyTimeouts(v === 'timeouts')}
+            data={[
+              { value: 'todas', label: 'Todas' },
+              { value: 'timeouts', label: 'Solo timeouts' },
+            ]}
+          />
+        )}
+      </Group>
+      <div className={styles.list}>
+        {shown.map((c, i) => (
+          <div key={`${c.at}-${i}`} className={styles.listRow}>
+            <Group justify="space-between" wrap="nowrap" gap="sm">
+              <span className={styles.rowMono}>{formatCallTime(c.at)}</span>
+              <ToneChip
+                tone={c.timeout ? 'critical' : c.status >= 400 ? 'warning' : toneFor(c.durationMs / 1000, 30, 120)}
+                label={`${c.status}${c.timeout ? ' · timeout' : ''} · ${formatMs(c.durationMs)}`}
+              />
+            </Group>
+            <div className={styles.rowSub}>
+              {c.sourceIp}
+              {SOURCE_HINT[c.sourceIp] ? ` — ${SOURCE_HINT[c.sourceIp]}` : ''}
+            </div>
+            <div className={styles.rowSub}>
+              {c.company ? `${c.company} · usuario ${c.user ?? '–'}` : 'Empresa y usuario: sesión abierta antes de la lectura del log'}
+              {c.node ? ` · ${c.node}` : ''}
+              {c.bytes ? ` · ${formatValue(c.bytes / 1024, 0)} KB` : ''}
+            </div>
+            <div className={styles.queryText}>{c.query ?? '(sin filtro: trae la vista completa)'}</div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 export function SapViewsPanel({ range }: { range: RangeKey }) {
   const { res, loading, error, load } = useSapPart<ViewsData>('views', range);
   const [sort, setSort] = useState<SortKey>('tiempo');
+  const [open, setOpen] = useState<string | null>(null);
   const d = res?.data;
   const ranked = useMemo(() => (d ? rankViews(d).sort((a, b) => SORTERS[sort](b) - SORTERS[sort](a)) : []), [d, sort]);
   const top = ranked.slice(0, 5);
@@ -478,7 +575,7 @@ export function SapViewsPanel({ range }: { range: RangeKey }) {
           <div>
             <h3 className={styles.cardTitle}>Ranking</h3>
             <p className={styles.cardHint}>
-              Llamadas y tiempos del Service Layer · ejecuciones, tiempo y lecturas en SQL
+              Llamadas y tiempos del Service Layer · ejecuciones, tiempo y lecturas en SQL · toque una vista para ver cada llamada
               {d?.lastSnapshotAt ? ` · caché leída ${formatAgo(d.lastSnapshotAt)}` : ''}
             </p>
           </div>
@@ -502,9 +599,18 @@ export function SapViewsPanel({ range }: { range: RangeKey }) {
             {ranked.slice(0, 40).map((v) => (
               <div key={v.viewName} className={styles.listRow}>
                 <Group justify="space-between" wrap="nowrap" gap="sm">
-                  <span className={styles.rowTitle} style={{ wordBreak: 'break-all' }}>
-                    {v.viewName}
-                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setOpen(open === v.viewName ? null : v.viewName)}
+                    aria-expanded={open === v.viewName}
+                    title="Ver cada llamada"
+                    style={{ all: 'unset', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}
+                  >
+                    {open === v.viewName ? <IconChevronDown size={16} /> : <IconChevronRight size={16} />}
+                    <span className={styles.rowTitle} style={{ wordBreak: 'break-all' }}>
+                      {v.viewName}
+                    </span>
+                  </button>
                   {v.slTimeouts > 0 ? (
                     <ToneChip tone="critical" label={`${formatInt(v.slTimeouts)} timeouts`} />
                   ) : (
@@ -531,6 +637,16 @@ export function SapViewsPanel({ range }: { range: RangeKey }) {
                     ))}
                   </div>
                 )}
+                {v.sources.some((s) => SOURCE_HINT[s.ip]) && (
+                  <div className={styles.rowSub} style={{ marginTop: 6 }}>
+                    {v.sources
+                      .slice(0, 4)
+                      .filter((s) => SOURCE_HINT[s.ip])
+                      .map((s) => `${s.ip}: ${SOURCE_HINT[s.ip]}`)
+                      .join(' · ')}
+                  </div>
+                )}
+                {open === v.viewName && <ViewCallsDetail view={v.viewName} range={range} />}
               </div>
             ))}
           </div>

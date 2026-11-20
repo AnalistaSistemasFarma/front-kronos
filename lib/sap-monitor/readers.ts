@@ -182,6 +182,27 @@ export async function readSapViews(pool: Pool, range: RangeKey) {
   };
 }
 
+/** Each call to one view in the period (click-to-expand detail of the ranking), newest first. */
+export async function readSapViewCalls(pool: Pool, range: RangeKey, viewName: string) {
+  const r = await req(pool, range).input('view', sql.NVarChar(128), viewName.slice(0, 128)).query(`
+    SELECT TOP 300 called_at, source_ip, status, duration_ms, timed_out, query, node, company, sl_user, bytes
+    FROM dbo.sap_monitor_sl_view_call
+    WHERE view_name = @view AND called_at >= DATEADD(minute, -@minutes, SYSUTCDATETIME())
+    ORDER BY called_at DESC`);
+  return (r.recordset as Row[]).map((x) => ({
+    at: iso(x.called_at)!,
+    sourceIp: String(x.source_ip),
+    status: int(x.status),
+    durationMs: int(x.duration_ms),
+    timeout: Boolean(x.timed_out),
+    query: (x.query as string) ?? null,
+    node: (x.node as string) ?? null,
+    company: (x.company as string) ?? null,
+    user: (x.sl_user as string) ?? null,
+    bytes: int(x.bytes),
+  }));
+}
+
 export async function readSapServiceLayer(pool: Pool, range: RangeKey) {
   const nodes = await pool.request().query(`
     SELECT service, pid, handles, mem_mb, threads, started_at, sampled_at

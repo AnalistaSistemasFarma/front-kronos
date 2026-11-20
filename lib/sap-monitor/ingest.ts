@@ -1,12 +1,13 @@
 /**
  * Validation of the Service Layer collector payload (POST /api/system-metrics/sap/ingest).
- * Pure: unit tested. Only aggregated metrics get through (no raw log lines, no session ids, no free
- * text beyond names): a row that does not validate is dropped and counted in `skipped`, so one odd
+ * Pure: unit tested. Aggregated metrics plus one row per view call (time, IP, status, duration, the
+ * OData query trimmed to 1.000 characters, node and session owner); never raw log lines or session
+ * ids. A row that does not validate is dropped and counted in `skipped`, so one odd
  * log line never blocks the collector (it only advances its offsets when the server answers 2xx).
  */
 
 import type { SlNodeSample } from './analysis';
-import type { SlSessionCount, SlViewCall } from './store';
+import type { SlSessionCount, SlViewCall, SlViewCallDetail } from './store';
 
 export type IngestPayload = {
   /** Rows dropped because they did not validate (the rest is stored). */
@@ -17,7 +18,11 @@ export type IngestPayload = {
   nodes: SlNodeSample[];
   viewCalls: SlViewCall[];
   sessions: SlSessionCount[];
+  viewCallDetails: SlViewCallDetail[];
 };
+
+const MAX_DETAILS = 1000;
+const NODE = /^[A-Za-z0-9_.\-]{1,40}$/;
 
 const NAME = /^[A-Za-z0-9_.\-]{1,128}$/;
 const SERVICE = /^b1s5\d{4}$/i;
@@ -45,7 +50,11 @@ export function validateIngestPayload(body: unknown): { ok: true; payload: Inges
   const collectedAt = date(b.collectedAt);
   if (!source || !collectedAt) return { ok: false, error: 'source o collectedAt inválidos' };
   const arr = (v: unknown, max: number) => (Array.isArray(v) ? v.slice(0, max) : []);
-  if ((Array.isArray(b.viewCalls) && b.viewCalls.length > 2000) || (Array.isArray(b.sessions) && b.sessions.length > 2000)) {
+  if (
+    (Array.isArray(b.viewCalls) && b.viewCalls.length > 2000) ||
+    (Array.isArray(b.sessions) && b.sessions.length > 2000) ||
+    (Array.isArray(b.viewCallDetails) && b.viewCallDetails.length > MAX_DETAILS)
+  ) {
     return { ok: false, error: 'Demasiadas filas' };
   }
 
@@ -112,5 +121,36 @@ export function validateIngestPayload(body: unknown): { ok: true; payload: Inges
     });
   }
 
-  return { ok: true, payload: { skipped, source, collectedAt, dryRun: b.dryRun === true, nodes, viewCalls, sessions } };
+  const viewCallDetails: SlViewCallDetail[] = [];
+  for (const raw of arr(b.viewCallDetails, MAX_DETAILS)) {
+    const r = raw as Record<string, unknown>;
+    const at = date(r.at);
+    const view = typeof r.view === 'string' && NAME.test(r.view) && /B1SLQuery$/i.test(r.view) ? r.view : null;
+    const sourceIp = isIp(r.sourceIp) ? r.sourceIp : null;
+    const status = int(r.status, 999);
+    const durationMs = int(r.durationMs);
+    if (!at || !view || !sourceIp || status == null || status < 100 || durationMs == null) {
+      skipped += 1;
+      continue;
+    }
+    const query =
+      typeof r.query === 'string' && r.query.trim()
+        ? r.query.replace(/[\u0000-\u001f\u007f]/g, ' ').trim().slice(0, 1000)
+        : null;
+    viewCallDetails.push({
+      at,
+      view,
+      sourceIp,
+      status,
+      durationMs,
+      timeout: r.timeout === true,
+      query,
+      node: typeof r.node === 'string' && NODE.test(r.node) ? r.node : null,
+      company: typeof r.company === 'string' && NAME.test(r.company) ? r.company : null,
+      user: typeof r.user === 'string' && NAME.test(r.user) ? r.user : null,
+      bytes: int(r.bytes, Number.MAX_SAFE_INTEGER) ?? 0,
+    });
+  }
+
+  return { ok: true, payload: { skipped, source, collectedAt, dryRun: b.dryRun === true, nodes, viewCalls, sessions, viewCallDetails } };
 }
