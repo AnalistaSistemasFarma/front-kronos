@@ -115,6 +115,13 @@ describe('evaluateItem / evaluateCve', () => {
     expect(r.status).toBe('revisar');
     expect(r.reason).toMatch(/anterior/);
   });
+  it('exact versions: same branch → «No aplica», only newer branches listed → «Revisar»; marketing versions → «Revisar»', () => {
+    expect(evaluateItem(cve({ cpes: [{ c: 'cpe:2.3:a:apache:tomcat:8.5.80:*:*:*:*:*:*:*' }] }), item({})).status).toBe('no_aplica');
+    expect(evaluateItem(cve({ cpes: [{ c: 'cpe:2.3:a:apache:tomcat:9.0.116:*:*:*:*:*:*:*' }] }), item({})).status).toBe('revisar');
+    const sql = item({ id: 5, product: 'SQL Server 2014 Express', vendor: 'Microsoft', version: '12.0.2269.0', cpe: 'microsoft:sql_server' });
+    const c = cve({ cpes: [{ c: 'cpe:2.3:a:microsoft:sql_server:2014:sp3:*:*:*:*:x64:*' }] });
+    expect(evaluateItem(c, sql).status).toBe('revisar');
+  });
   it('KEV product match without CPE data → «Revisar»', () => {
     const kev = cve({ kev: true, kevVendor: 'Apache', kevProduct: 'Tomcat' });
     expect(evaluateItem(kev, item({})).status).toBe('revisar');
@@ -125,6 +132,11 @@ describe('evaluateItem / evaluateCve', () => {
     const win = item({ id: 2, product: 'Windows Server 2019', vendor: 'Microsoft', version: '10.0.17763.5329', cpe: 'microsoft:windows_server_2019', keywords: 'windows,win32k' });
     expect(evaluateItem(cve({ kevVendor: 'Microsoft', kevProduct: 'Win32k' }), win).status).toBe('revisar');
     expect(evaluateItem(cve({ kevVendor: 'Microsoft', kevProduct: 'Exchange Server' }), win).status).toBe('no_aplica');
+  });
+  it('a product name that merely contains the KEV product does not match («OpenSSH para Windows» ≠ «Windows»)', () => {
+    const ssh = item({ id: 4, product: 'OpenSSH para Windows', vendor: 'Microsoft', version: '9.5p2', cpe: 'openbsd:openssh,microsoft:openssh', keywords: 'openssh' });
+    expect(evaluateItem(cve({ kevVendor: 'Microsoft', kevProduct: 'Windows' }), ssh).status).toBe('no_aplica');
+    expect(evaluateItem(cve({ kevVendor: 'Microsoft', kevProduct: 'Win32k' }), ssh).status).toBe('no_aplica');
   });
   it('Windows build ranges from NVD', () => {
     const win = item({ id: 2, product: 'Windows Server 2019', vendor: 'Microsoft', version: '10.0.17763.5329', cpe: 'microsoft:windows_server_2019' });

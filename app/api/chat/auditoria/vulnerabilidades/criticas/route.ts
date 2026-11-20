@@ -40,10 +40,11 @@ export async function GET() {
           const evaluation = evaluateCve(c, snap.inventory);
           return {
             cveId: c.cveId,
-            title: spanishTitle(c),
+            // When it matches our inventory, name OUR product (NVD's first CPE may be «Apple iPadOS» for a macOS CVE).
+            title: spanishTitle(c, evaluation.matches[0]?.product),
             titleEn: c.titleEn,
             description: c.description && c.description.length > 600 ? `${c.description.slice(0, 599)}…` : c.description,
-            product: productName(c),
+            product: evaluation.matches[0]?.product ?? productName(c),
             cvss: c.cvss,
             severity: c.severity,
             published: c.published,

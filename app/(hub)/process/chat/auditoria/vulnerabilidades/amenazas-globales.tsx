@@ -403,8 +403,10 @@ export default function AmenazasGlobales() {
         )}
       </Table.Td>
       <Table.Td>
-        <Badge color={COLOR_SEV[r.severity]} variant="light">
-          {r.cvss !== null ? `${r.cvss.toFixed(1)} · ` : ""}
+        <Text size="sm" fw={700} style={{ whiteSpace: "nowrap" }}>
+          {r.cvss !== null ? r.cvss.toFixed(1) : "—"}
+        </Text>
+        <Badge color={COLOR_SEV[r.severity]} variant="light" size="sm">
           {SEVERITY_LABELS[r.severity]}
         </Badge>
       </Table.Td>
