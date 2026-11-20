@@ -1628,8 +1628,9 @@ function AuthorizationBoard() {
             </Group>
             {authorizeSignsDocument && (
                 <Text size='sm' c='dimmed'>
-                    Al autorizar se firma el documento con su rúbrica guardada. Si faltan datos del
-                    sello (cédula, cargo) o la huella, se le pedirán antes de firmar.
+                    Al autorizar se firma el documento con su firma y sus datos del sello (Mi perfil →
+                    Mi firma). Si le falta alguno (cédula, cargo) o el documento exige huella, se le
+                    pedirá antes de firmar.
                 </Text>
             )}
             <Group justify='flex-end'>
