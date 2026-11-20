@@ -3,7 +3,7 @@ import {
   compareDue,
   inboxItemRemainingHours,
   matchesGeneralStatus,
-  nextDueSort,
+  dueSortForSlaFilter,
   pageGeneralList,
   parseDueSort,
   parseInboxSlaState,
@@ -60,10 +60,14 @@ describe('sortByDue', () => {
 });
 
 describe('sort state and parsing', () => {
-  it('cycles none → asc → desc → none', () => {
-    expect(nextDueSort('none')).toBe('due_asc');
-    expect(nextDueSort('due_asc')).toBe('due_desc');
-    expect(nextDueSort('due_desc')).toBe('none');
+  it('SLA card picks the default order', () => {
+    // «Vencidos»: most overdue first; «Próximos a vencer»: soonest due first; others/none: default.
+    expect(dueSortForSlaFilter('overdue')).toBe('due_asc');
+    expect(dueSortForSlaFilter('near_due')).toBe('due_asc');
+    expect(dueSortForSlaFilter('on_time')).toBe('none');
+    expect(dueSortForSlaFilter('no_sla')).toBe('none');
+    expect(dueSortForSlaFilter('paused')).toBe('none');
+    expect(dueSortForSlaFilter(null)).toBe('none');
   });
   it('rejects unknown values', () => {
     expect(parseDueSort('due_asc')).toBe('due_asc');

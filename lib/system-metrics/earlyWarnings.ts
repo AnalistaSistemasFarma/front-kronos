@@ -28,7 +28,13 @@ export type WarningRule =
   | 'conexiones-sql'
   | 'bloqueos-sql'
   | 'log-sql'
-  | 'errores';
+  | 'errores'
+  // SAP monitor (lib/sap-monitor): SQL of SAP and Service Layer.
+  | 'sap-bloqueo'
+  | 'sap-consulta'
+  | 'sap-transaccion'
+  | 'sap-vista-timeouts'
+  | 'sap-sl-handles';
 
 /** Una fila de system_metric_sample (un proceso de Kronos, un minuto). */
 export type WatchSample = {
@@ -118,6 +124,11 @@ export const WATCH_LIST: Array<{ rule: WarningRule; label: string }> = [
   { rule: 'bloqueos-sql', label: 'Consultas de SQL bloqueadas esperando a otras' },
   { rule: 'log-sql', label: 'Log de transacciones de la base que no se libera o se puede llenar' },
   { rule: 'errores', label: 'Muchas peticiones terminando en error del servidor' },
+  { rule: 'sap-bloqueo', label: 'SAP: una sesión bloqueando a otras más de 2 minutos (si el monitor SAP está configurado)' },
+  { rule: 'sap-transaccion', label: 'SAP: transacción abierta más de 5 minutos' },
+  { rule: 'sap-consulta', label: 'SAP: consulta corriendo más de 5 minutos' },
+  { rule: 'sap-vista-timeouts', label: 'SAP: una vista *B1SLQuery con 3 o más timeouts en 15 minutos' },
+  { rule: 'sap-sl-handles', label: 'Service Layer: un nodo con más de 5.000 handles (crítico desde 6.000)' },
 ];
 
 const MINUTE = 60_000;

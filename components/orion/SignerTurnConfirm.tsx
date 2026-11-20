@@ -113,11 +113,11 @@ export default function SignerTurnConfirm({
   useEffect(() => {
     if (!preview) return;
     setSupplementName((v) => v || preview.fullName || preview.suggested.fullName || '');
-    // Preferir cédula de SynerLink (suggested) si está; si no, la de Orion.
-    setSupplementIdNumber(
-      (v) => v || preview.suggested.idNumber || preview.idNumber || ''
-    );
-    // Cargo no se precarga: el firmante lo escribe solo si quiere estamparlo.
+    // Cédula y cargo: se precargan con lo guardado en Mi perfil → Datos del sello (Orion),
+    // para que el sello quede con eso. Si la persona los borró, llegan vacíos; no se
+    // rellenan con la cédula del usuario de SynerLink (Juan, 2026-11-20).
+    setSupplementIdNumber((v) => v || preview.idNumber || '');
+    setSupplementJobTitle((v) => v || preview.jobTitle || '');
   }, [preview]);
 
   const missing = new Set(preview?.missingInOrion ?? []);
