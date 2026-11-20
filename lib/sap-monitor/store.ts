@@ -141,6 +141,20 @@ export type SlViewCall = {
   bytes: number;
 };
 
+export type SlViewCallDetail = {
+  at: string;
+  view: string;
+  sourceIp: string;
+  status: number;
+  durationMs: number;
+  timeout: boolean;
+  query: string | null;
+  node: string | null;
+  company: string | null;
+  user: string | null;
+  bytes: number;
+};
+
 export type SlSessionCount = {
   bucketAt: string;
   sourceIp: string;
@@ -204,6 +218,26 @@ export async function insertSlSessions(pool: Pool, rows: SlSessionCount[]): Prom
   }
 }
 
+export async function insertSlViewCallDetails(pool: Pool, rows: SlViewCallDetail[]): Promise<void> {
+  for (const v of rows.slice(0, 1000)) {
+    await pool
+      .request()
+      .input('at', sql.DateTime2(0), new Date(v.at))
+      .input('view', sql.NVarChar(128), v.view.slice(0, 128))
+      .input('ip', sql.VarChar(45), v.sourceIp.slice(0, 45))
+      .input('status', sql.SmallInt, v.status)
+      .input('dur', sql.Int, Math.round(v.durationMs))
+      .input('timeout', sql.Bit, v.timeout ? 1 : 0)
+      .input('query', sql.NVarChar(1000), v.query?.slice(0, 1000) ?? null)
+      .input('node', sql.VarChar(40), v.node?.slice(0, 40) ?? null)
+      .input('company', sql.NVarChar(128), v.company?.slice(0, 128) ?? null)
+      .input('user', sql.NVarChar(128), v.user?.slice(0, 128) ?? null)
+      .input('bytes', sql.BigInt, Math.round(v.bytes)).query(`
+        INSERT INTO dbo.sap_monitor_sl_view_call (called_at, view_name, source_ip, status, duration_ms, timed_out, query, node, company, sl_user, bytes)
+        VALUES (@at, @view, @ip, @status, @dur, @timeout, @query, @node, @company, @user, @bytes)`);
+  }
+}
+
 /** Timeouts per view in the last `minutes` (for the alert rule). */
 export async function readRecentViewTimeouts(
   pool: Pool,
@@ -240,6 +274,7 @@ export async function deleteOldSapMetrics(pool: Pool, retentionDays: number): Pr
     ['dbo.sap_monitor_sl_view', 'bucket_at'],
     ['dbo.sap_monitor_sl_node', 'sampled_at'],
     ['dbo.sap_monitor_sl_session', 'bucket_at'],
+    ['dbo.sap_monitor_sl_view_call', 'called_at'],
   ];
   let total = 0;
   for (const [table, column] of tables) {

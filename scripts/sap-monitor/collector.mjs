@@ -30,7 +30,7 @@ import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { aggregateSessions, aggregateViewCalls, completeLines, parseAccessLine, parseSecurityLine } from './slLog.mjs';
+import { aggregateSessions, aggregateViewCalls, completeLines, parseAccessLine, parseSecurityLine, viewCallDetails } from './slLog.mjs';
 
 const args = new Set(process.argv.slice(2));
 const argValue = (name) => {
@@ -157,10 +157,19 @@ async function main() {
   const security = consume(res.security, state.security);
 
   const secEntries = security.lines.map((l) => parseSecurityLine(l)).filter(Boolean);
-  const { sessions } = aggregateSessions(secEntries);
+  const { sessions, sidWho: fresh } = aggregateSessions(secEntries);
+  // Session owners survive between runs (a session lives ~30 min idle and is restored across
+  // cycles): key = first 16 hex of SHA-256(sid), never the sid itself. Kept 24 h, at most 20.000.
+  const now = Date.now();
+  const who = new Map(
+    Object.entries(state.who ?? {}).filter(([, v]) => Array.isArray(v) && now - Number(v[2]) < 24 * 3_600_000)
+  );
+  for (const [k, v] of fresh) who.set(k, [v.company, v.user, now]);
+  const sidWho = new Map([...who].map(([k, v]) => [k, { company: v[0], user: v[1] }]));
 
   const accEntries = access.lines.map((l) => parseAccessLine(l)).filter(Boolean);
-  const viewCalls = aggregateViewCalls(accEntries);
+  const viewCalls = aggregateViewCalls(accEntries, sidWho);
+  const viewCallRows = viewCallDetails(accEntries, sidWho).slice(-1000);
   const nodes = (Array.isArray(res.nodes) ? res.nodes : res.nodes ? [res.nodes] : []).map((nd) => ({
     service: String(nd.service).toLowerCase(),
     pid: nd.pid,
@@ -170,7 +179,7 @@ async function main() {
     startedAt: nd.startedAt,
   }));
 
-  const payload = { source: 'serfarma07', collectedAt: res.now ?? new Date().toISOString(), dryRun: DRY_RUN, nodes, viewCalls, sessions };
+  const payload = { source: 'serfarma07', collectedAt: res.now ?? new Date().toISOString(), dryRun: DRY_RUN, nodes, viewCalls, sessions, viewCallDetails: viewCallRows };
   const summary = {
     sshMs: Date.now() - t0,
     accessLines: access.lines.length,
@@ -180,6 +189,8 @@ async function main() {
     nodes: nodes.length,
     maxHandles: nodes.reduce((m, nd) => Math.max(m, nd.handles), 0),
     viewCalls: viewCalls.length,
+    viewCallDetails: viewCallRows.length,
+    viewCallsWithOwner: viewCallRows.filter((r) => r.company).length,
     viewTimeouts: viewCalls.reduce((s, v) => s + v.timeouts, 0),
     sessionRows: sessions.length,
     dryRun: DRY_RUN,
@@ -203,6 +214,7 @@ async function main() {
   state.access = access.next;
   state.security = security.next;
   delete state.sids;
+  state.who = Object.fromEntries([...who].slice(-20_000));
   fs.writeFileSync(statePath, JSON.stringify(state), { mode: 0o600 });
   log('OK', JSON.stringify(summary), 'envío:', posted);
   if (args.has('--print')) console.log(JSON.stringify({ ...payload, sessions: payload.sessions.slice(0, 20), viewCalls: payload.viewCalls.slice(0, 20) }, null, 2));
