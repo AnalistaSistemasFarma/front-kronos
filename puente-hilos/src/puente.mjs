@@ -45,7 +45,6 @@ import {
 import { ColaHilos } from './cola.mjs';
 import { analizarComando, catalogoPlugins, encabezadoObjetivo, MAX_REVISIONES_OBJETIVO, SKILLS_CON_GIT, estadoObjetivoSesion, resolverComando, rutaTranscripcion, skillsDePlugins, textoObjetivo } from './comandos.mjs';
 import { combinarPerfil, prepararConectoresTurno, secretosConectores } from './conectores.mjs';
-import { ensureAgentSkillsPlugin, mergePluginDirs, prepareSkillScripts, scriptsSandbox, skillScriptsText, agentSkillSources, DEFAULT_EXCLUDED } from './chat-parity.mjs';
 import { borrarMcpAgente, perfilConAgente, prepararConectoresAgente, secretosConectoresAgente, servidoresAgente, textoConectoresAgente } from './conectores-agente.mjs';
 import { guiaDesarrolloSegura } from './guia.mjs';
 import { esNegocio, perfilListo, textoPerfilNegocio } from './perfil-agente.mjs';
@@ -292,26 +291,7 @@ export function crearPuente({ cfg, synerlink, estado, correr = correrTurno, conv
       let operador = false;
       // Turno de un autor del modo completo (identidad del servidor): plugin «orus» completo (sin exclusiones).
       const turnoCompleto = turnoOrusCompleto(lote, cfg.orusCompleto?.autores).activo;
-      // Chat parity (chat-parity.mjs): the agent's chat skills, synced from its live sources at turn start.
-      let skillsChat = null;
-      if (cfg.skillsAgente && !turnoCompleto) {
-        try {
-          const sa = cfg.skillsAgente;
-          const excluded = { ...DEFAULT_EXCLUDED, ...Object.fromEntries(sa.excluir.map((n) => [n, 'Tecnología la dejó fuera de los hilos de proyecto'])) };
-          skillsChat = ensureAgentSkillsPlugin({
-            baseDir: path.join(cfg.hilosDir, 'skills-agente'),
-            sources: agentSkillSources({ configDir: sa.configDir, workDir: sa.workDir, explicit: sa.fuentes }),
-            pluginName: sa.nombre,
-            agentLabel: cfg.agenteNombre ?? cfg.agente,
-            excluded,
-            log: (m) => log(`conversación ${idConversation}: ${m}`),
-          });
-        } catch (e) {
-          skillsChat = null;
-          log(`conversación ${idConversation}: could not sync the chat skills, the turn uses the configured plugins:`, e.message);
-        }
-      }
-      const pluginDirsTurno = turnoCompleto ? pluginsCompletos(cfg.pluginDirs ?? [], cfg.orusCompleto?.plugin) : mergePluginDirs(cfg.pluginDirs ?? [], skillsChat);
+      const pluginDirsTurno = turnoCompleto ? pluginsCompletos(cfg.pluginDirs ?? [], cfg.orusCompleto?.plugin) : (cfg.pluginDirs ?? []);
       if (lote.some((m) => analizarComando(m?.body))) {
         catalogo = catalogoPlugins(pluginDirsTurno);
         operador = loteDeOperador(cfg, lote);
@@ -471,17 +451,6 @@ export function crearPuente({ cfg, synerlink, estado, correr = correrTurno, conv
             agentes: armarAgentes({ equipo, perfil, agente: agenteNombre, proyecto: contexto.project, topes, codigo }),
           }
         : null;
-      // Skill scripts (chat-parity.mjs): only scripts inside the synced skills copy, re-checked by a hook.
-      let scripts = null;
-      if (skillsChat && !completo) {
-        try {
-          scripts = prepareSkillScripts({ cfg, skillsRoots: [skillsChat.skillsRoot], bridgeDir: path.join(cfg.hilosDir, 'scripts-skill', `c${idConversation}`) });
-          if (scripts) scripts.sandbox = scriptsSandbox({ hilosDir: cfg.hilosDir, homeReal: cfg.home, secrets: [...secretosConectoresAgente(cfg), path.join(cfg.hilosDir, 'scripts-skill')] });
-        } catch (e) {
-          scripts = null;
-          log(`conversación ${idConversation}: skill scripts not available in this turn:`, e.message);
-        }
-      }
       // Memoria del bot principal, en solo lectura (copia renovada en cada turno).
       const memoria = prepararMemoriaTurno({ cfg, rutas, lote, agenteNombre });
       if (memoria.motivo) log(`conversación ${idConversation}: turno sin memoria (${memoria.motivo}).`);
@@ -513,7 +482,7 @@ export function crearPuente({ cfg, synerlink, estado, correr = correrTurno, conv
           textoGrafos(grafosTurno, { conBash: Boolean(codigo || completo) }) +
           (completo ? `\n${textoOrusCompleto({ autores: completo.autores, servidores: completo.servidores })}` : ''),
         bloqueMemoria: memoria.bloque,
-        bloqueConectores: (conectores?.bloque ?? '') + (delAgente?.servidores.length ? textoConectoresAgente({ agente: agenteNombre, servidores: delAgente.servidores, origen: delAgente.origen, engramProyecto: delAgente.engramProyecto }) : '') + skillScriptsText(scripts),
+        bloqueConectores: (conectores?.bloque ?? '') + (delAgente?.servidores.length ? textoConectoresAgente({ agente: agenteNombre, servidores: delAgente.servidores, origen: delAgente.origen, engramProyecto: delAgente.engramProyecto }) : ''),
         bloquePruebas: pruebas.bloque,
         bloquePdf: textoPdf({ disponible: Boolean(chromePdf), recursos }),
         bloqueTiempo: textoTiempoTurno({ topeMs: cfg.timeoutTurnoMs, avisoMs: cfg.avisoProgresoMs ?? 0 }),
@@ -572,7 +541,6 @@ export function crearPuente({ cfg, synerlink, estado, correr = correrTurno, conv
           objetivo: conObjetivo,
           // La lectura de los clones solo si el turno NO lleva worktree ni índice bajo demanda (el código ya lo maneja).
           lectura: codigo || indiceRepos ? null : politicaTurno.lectura,
-          scripts,
         });
         let ultimaEtiqueta = null;
         let ultimosActivos = '';
@@ -590,7 +558,6 @@ export function crearPuente({ cfg, synerlink, estado, correr = correrTurno, conv
           perfil: perfilTurno,
           equipo,
           codigo,
-          scripts: completo ? null : scripts,
           completo,
           vigia,
           timeoutMs: cfg.timeoutTurnoMs,

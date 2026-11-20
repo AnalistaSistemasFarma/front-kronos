@@ -106,7 +106,7 @@ test('config: HILOS_CONECTORES_AGENTE_* validan rutas y no aceptan el config ais
   assert.throws(() => cargarConfig({ ...base, HILOS_CONECTORES_AGENTE_CONFIG_DIR: path.join(d, 'no-existe') }), /no tiene .claude.json/);
   assert.throws(() => cargarConfig({ ...base, HILOS_CONECTORES_AGENTE_CONFIG_DIR: conf, HILOS_CONECTORES_AGENTE_ENV: 'x.env' }), /ruta absoluta/);
   const cfg = cargarConfig({ ...base, HILOS_CONECTORES_AGENTE_CONFIG_DIR: conf, HILOS_CONECTORES_AGENTE_ENV: env, HILOS_CONECTORES_AGENTE_PROYECTO: vault, HILOS_CONECTORES_AGENTE_EXCLUIR: 'a, b' });
-  assert.deepEqual(cfg.conectoresAgente, { configDir: conf, envArchivo: env, proyectoDir: vault, excluir: ['a', 'b'], engramProyecto: null, engramBin: null, engramDataDir: null, engramPort: null });
+  assert.deepEqual(cfg.conectoresAgente, { configDir: conf, envArchivo: env, proyectoDir: vault, excluir: ['a', 'b'], engramProyecto: null });
   assert.equal(cargarConfig({ ...base, HILOS_CONECTORES_AGENTE_CONFIG_DIR: conf, HILOS_CONECTORES_AGENTE_ENGRAM_PROYECTO: 'gsslatam-graph' }).conectoresAgente.engramProyecto, 'gsslatam-graph');
   assert.throws(() => cargarConfig({ ...base, HILOS_CONECTORES_AGENTE_CONFIG_DIR: conf, HILOS_CONECTORES_AGENTE_ENGRAM_PROYECTO: '../x y' }), /ENGRAM_PROYECTO/);
   const listo = conectoresAgenteListo(cfg);
@@ -197,8 +197,7 @@ test('engram: el servidor del agente queda fijado a la memoria de su chat (repo 
   mkdirSync(path.join(repo, '.git'), { recursive: true });
   mkdirSync(path.join(repo, 'shared-brain', 'agentes', 'silvia'), { recursive: true });
   assert.equal(proyectoEngram({ proyectoDir: path.join(repo, 'shared-brain', 'agentes', 'silvia') }), 'gsslatam-graph');
-  // Outside a git repo: the folder name, as engram does with its cwd (2026-11-19).
-  assert.equal(proyectoEngram({ proyectoDir: d }), path.basename(d));
+  assert.equal(proyectoEngram({ proyectoDir: d }), null);
   assert.equal(proyectoEngram({ proyectoDir: d, explicito: 'mi-memoria' }), 'mi-memoria');
   assert.equal(proyectoEngram({ explicito: '../malo' }), null);
   assert.ok(esEngram({ command: '/opt/homebrew/bin/engram' }));

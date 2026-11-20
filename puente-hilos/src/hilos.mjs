@@ -24,7 +24,6 @@
  */
 import { randomUUID } from 'node:crypto';
 import { textoAdjuntosSalida } from './adjuntos-salida.mjs';
-import { isSidecar, writeOfficeSidecar } from './office-texto.mjs';
 import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 
@@ -178,7 +177,6 @@ export function textoSistema({ agente, contexto, instruccionesEn, bloqueEquipo =
     'Reglas de este hilo:',
     '- Trabaje SOLO con el contexto de este proyecto. No traiga información de otros proyectos, personas o conversaciones.',
     '- Los archivos del proyecto están en la carpeta de archivos agregada a la sesión; los adjuntos del chat, en ./adjuntos.',
-    '- Word, Excel y PowerPoint (.docx, .xlsx, .xlsm, .pptx): Read no abre el binario, pero el puente deja al lado `<archivo>.md` con su texto (encabezados, tablas, celdas, listas desplegables). Léalo con Read y úselo; nunca diga que no puede leer Word o Excel.',
     '- Lo VINCULADO al proyecto (correos y solicitudes de SynerLink) está en ./contexto/vinculados.md: léalo con Read cuando la pregunta lo necesite. De cada correo solo tiene asunto, remitente, fecha y el resumen que escribió quien lo vinculó; NO tiene el cuerpo: no lo invente. Si hace falta, pida que se lo pasen.',
     '- El CRONOGRAMA del proyecto (tareas con fechas, estado, avance y responsable; solicitudes con sus fechas y actividades) está en ./contexto/cronograma.md. Usted NO lo puede cambiar directamente.',
     `- Si conviene crear una tarea o cambiar su estado, avance o fechas, PROPÓNGALO: escriba ./trabajo/${ARCHIVO_PROPUESTAS} con una lista JSON como [{"kind":"tarea_crear","tarea":{"title":"…","startDate":"AAAA-MM-DD","endDate":"AAAA-MM-DD","responsable":"nombre o correo de un miembro","status":"pendiente","isMilestone":false}}] o [{"kind":"tarea_editar","idTask":12,"tarea":{"status":"en_curso","progress":40}}]. Máximo 10. Nada cambia hasta que un dueño o editor lo confirme en el Cronograma; dígalo así en su respuesta y no afirme que ya quedó hecho.`,
@@ -530,29 +528,19 @@ export function textoFallosDescarga(fallos = []) {
  */
 export async function sincronizarArchivos({ rutas, contexto, estado, descargar, log = () => {}, fallos = [], esperaMs = ESPERA_REINTENTO_DESCARGA_MS, dormirImpl = dormir }) {
   const p = contexto.project;
-  if (estado.versionArchivos(p.idProject) === p.version && existsSync(rutas.archivos)) {
-    // Files synced before the Office text sidecars existed get theirs now (cheap when present).
-    for (const actual of readdirSync(rutas.archivos)) if (!isSidecar(actual)) writeOfficeSidecar(path.join(rutas.archivos, actual), { mode: MODO_ARCHIVO });
-    return false;
-  }
+  if (estado.versionArchivos(p.idProject) === p.version && existsSync(rutas.archivos)) return false;
 
   const esperados = new Map(p.files.map((f) => [nombreSeguro(f.fileName, `${f.id}-`), f]));
   for (const actual of readdirSync(rutas.archivos)) {
-    // The `<file>.md` text of an Office file lives as long as its file (office-texto.mjs).
-    const base = isSidecar(actual) ? actual.slice(0, -3) : actual;
-    if (!esperados.has(base)) rmSync(path.join(rutas.archivos, actual), { force: true });
+    if (!esperados.has(actual)) rmSync(path.join(rutas.archivos, actual), { force: true });
   }
   let fallaron = 0;
   for (const [nombre, f] of esperados) {
     const destino = path.join(rutas.archivos, nombre);
-    if (existsSync(destino)) {
-      writeOfficeSidecar(destino, { mode: MODO_ARCHIVO, displayName: f.fileName });
-      continue;
-    }
+    if (existsSync(destino)) continue;
     try {
       const buf = await descargarConReintento(descargar, f.downloadUrl, { esperaMs, dormirImpl });
       writeFileSync(destino, buf, { mode: MODO_ARCHIVO });
-      writeOfficeSidecar(destino, { mode: MODO_ARCHIVO, displayName: f.fileName });
     } catch (e) {
       fallaron += 1;
       fallos.push({ nombre: f.fileName, motivo: motivoFalloDescarga(e), origen: 'proyecto' });
@@ -584,8 +572,6 @@ export async function bajarAdjuntos({ rutas, mensajes, descargar, log = () => {}
         }
       }
       rutasRel.push(`./adjuntos/${nombre}`);
-      // Word/Excel/PowerPoint: Read cannot open them, so the bridge leaves their text next to them.
-      if (writeOfficeSidecar(destino, { mode: MODO_ARCHIVO, log, displayName: a.fileName })) rutasRel.push(`./adjuntos/${nombre}.md`);
     }
   }
   return rutasRel;
@@ -598,8 +584,7 @@ export function armarPrompt(mensajes, adjuntos, encabezado = '') {
     return `**${autor}** escribió:\n${m.body || '(sin texto)'}`;
   });
   if (adjuntos.length > 0) {
-    const texto = adjuntos.some((a) => isSidecar(a)) ? '\nLos `.md` que terminan en .docx.md, .xlsx.md o .pptx.md son el texto que el puente extrajo del archivo de al lado: léalos con Read (el binario no se abre con Read).' : '';
-    partes.push(`Adjuntos de estos mensajes (léalos con Read si hacen falta):\n${adjuntos.map((a) => `- ${a}`).join('\n')}${texto}`);
+    partes.push(`Adjuntos de estos mensajes (léalos con Read si hacen falta):\n${adjuntos.map((a) => `- ${a}`).join('\n')}`);
   }
   return encabezado + partes.join('\n\n---\n\n');
 }
