@@ -12,6 +12,7 @@
     5. dbo.sap_monitor_sl_view         — llamadas a vistas por el Service Layer (access log), por IP y empresa, en ventanas de 5 min.
     6. dbo.sap_monitor_sl_node         — handles y memoria de cada nodo del Service Layer.
     7. dbo.sap_monitor_sl_session      — logins / logouts del Service Layer por hora, IP, empresa y usuario.
+    8. dbo.sap_monitor_sl_view_call    — cada llamada a una vista (hora, IP, estado HTTP, duración, filtro, nodo, empresa y usuario del SL).
   Las alertas reutilizan dbo.system_metric_alert y sus suscriptores (no se crean tablas de alertas).
   Sin modelo Prisma: lib/sap-monitor/store.ts. Retención: 30 días (la limpia el propio monitor).
 
@@ -156,6 +157,25 @@ BEGIN
     failures    INT           NOT NULL
   );
   CREATE CLUSTERED INDEX IX_sap_monitor_sl_session_bucket ON dbo.sap_monitor_sl_session (bucket_at);
+END;
+IF OBJECT_ID(N'dbo.sap_monitor_sl_view_call', N'U') IS NULL
+BEGIN
+  CREATE TABLE dbo.sap_monitor_sl_view_call (
+    id          BIGINT IDENTITY(1,1) NOT NULL CONSTRAINT PK_sap_monitor_sl_view_call PRIMARY KEY NONCLUSTERED,
+    called_at   DATETIME2(0)   NOT NULL,                 -- hora de la llamada (UTC, del access log)
+    view_name   NVARCHAR(128)  NOT NULL,
+    source_ip   VARCHAR(45)    NOT NULL,
+    status      SMALLINT       NOT NULL,                 -- HTTP; 502 = el balanceador cortó a los 300 s
+    duration_ms INT            NOT NULL,
+    timed_out   BIT            NOT NULL,
+    query       NVARCHAR(1000) NULL,                     -- $filter/$select de la llamada (decodificado)
+    node        VARCHAR(40)    NULL,                     -- nodo del Service Layer (node1…node10)
+    company     NVARCHAR(128)  NULL,                     -- base de SAP de la sesión (Securityevent)
+    sl_user     NVARCHAR(128)  NULL,                     -- usuario del Service Layer de la sesión
+    bytes       BIGINT         NOT NULL
+  );
+  CREATE CLUSTERED INDEX IX_sap_monitor_sl_view_call_at ON dbo.sap_monitor_sl_view_call (called_at);
+  CREATE NONCLUSTERED INDEX IX_sap_monitor_sl_view_call_view ON dbo.sap_monitor_sl_view_call (view_name, called_at);
 END;
 /* BLOQUE-DDL-FIN */
 

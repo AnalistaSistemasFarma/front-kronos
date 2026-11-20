@@ -42,6 +42,35 @@ describe('validateIngestPayload', () => {
   });
 });
 
+describe('validateIngestPayload: per-call detail', () => {
+  const base = { source: 'serfarma07', collectedAt: new Date().toISOString() };
+  it('keeps valid calls, trims the query and drops bad rows', () => {
+    const at = new Date().toISOString();
+    const r = validateIngestPayload({
+      ...base,
+      viewCallDetails: [
+        { at, view: 'OLP_IND_VentasB1SLQuery', sourceIp: '192.168.10.11', status: 502, durationMs: 300007, timeout: true, query: "$filter=Fecha ge '2026-11-13'\n" + 'x'.repeat(2000), node: 'node4', company: 'ONELATAMPHARMA_PROD', user: 'ServiceLayer', bytes: 341 },
+        { at, view: 'Items', sourceIp: '192.168.10.5', status: 200, durationMs: 1 },
+        { at, view: 'IT_SolicitudesB1SLQuery', sourceIp: 'nope', status: 200, durationMs: 1 },
+        { at, view: 'IT_SolicitudesB1SLQuery', sourceIp: '192.168.10.5', status: 200, durationMs: 5, node: 'bad node!', company: "x'; DROP" },
+      ],
+    });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.payload.skipped).toBe(2);
+    expect(r.payload.viewCallDetails).toHaveLength(2);
+    const [a, b] = r.payload.viewCallDetails;
+    expect(a).toMatchObject({ status: 502, timeout: true, node: 'node4', company: 'ONELATAMPHARMA_PROD', user: 'ServiceLayer' });
+    expect(a.query!.length).toBe(1000);
+    expect(a.query).not.toContain('\n');
+    expect(b).toMatchObject({ node: null, company: null, timeout: false, query: null });
+  });
+  it('rejects more than 1.000 calls', () => {
+    const r = validateIngestPayload({ ...base, viewCallDetails: new Array(1001).fill({}) });
+    expect(r.ok).toBe(false);
+  });
+});
+
 describe('config', () => {
   const prev = process.env.SAP_MONITOR_INGEST_KEYS;
   afterEach(() => {

@@ -6,10 +6,11 @@ import { hasSystemMetricsAccess } from '../../../../lib/system-metrics/access';
 import { parseRange } from '../../../../lib/system-metrics/store';
 import { isSapSqlMonitorEnabled, ingestKeys } from '../../../../lib/sap-monitor/config';
 import { getSapMonitorStatus } from '../../../../lib/sap-monitor/job';
-import { readSapDatabase, readSapServiceLayer, readSapViews } from '../../../../lib/sap-monitor/readers';
+import { readSapDatabase, readSapServiceLayer, readSapViewCalls, readSapViews } from '../../../../lib/sap-monitor/readers';
 
 /**
  * GET /api/system-metrics/sap?part=db|views|sl&range=1h|6h|24h|7d
+ * GET /api/system-metrics/sap?part=calls&view=<X>B1SLQuery&range=…  (each call of one view)
  *
  * Reads ONLY KRONOSDB (what the SAP monitor job and the Service Layer collector stored). It never
  * queries SAP: opening the screen adds zero load to the SAP server.
@@ -24,6 +25,10 @@ export async function GET(request: Request) {
     const url = new URL(request.url);
     const part = url.searchParams.get('part') ?? 'db';
     const range = parseRange(url.searchParams.get('range'));
+    const view = url.searchParams.get('view') ?? '';
+    if (part === 'calls' && !/^[A-Za-z0-9_]{1,120}B1SLQuery$/i.test(view)) {
+      return NextResponse.json({ error: 'Vista inválida' }, { status: 400 });
+    }
     const config = {
       sqlConfigured: isSapSqlMonitorEnabled(),
       ingestConfigured: ingestKeys().length > 0,
@@ -31,7 +36,13 @@ export async function GET(request: Request) {
     };
     try {
       const data = await withMssqlPool<unknown>((pool) =>
-        part === 'views' ? readSapViews(pool, range) : part === 'sl' ? readSapServiceLayer(pool, range) : readSapDatabase(pool, range)
+        part === 'calls'
+          ? readSapViewCalls(pool, range, view)
+          : part === 'views'
+            ? readSapViews(pool, range)
+            : part === 'sl'
+              ? readSapServiceLayer(pool, range)
+              : readSapDatabase(pool, range)
       );
       return NextResponse.json({ part, range, config, tablesMissing: false, data });
     } catch (error) {
