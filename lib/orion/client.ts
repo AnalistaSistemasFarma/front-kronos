@@ -662,17 +662,26 @@ export async function loadOrionUserSignature(email: string) {
   };
 }
 
+/** Datos del sello que Orion guarda junto a la rúbrica (solo actualiza los que vienen con valor). */
+export type OrionSignatureIdentity = {
+  fullName?: string | null;
+  idDocumentType?: string | null;
+  idNumber?: string | null;
+  jobTitle?: string | null;
+};
+
 export async function saveOrionUserSignature(
   email: string,
   signatureDataUrl: string,
-  method: 'drawn' | 'uploaded' = 'drawn'
+  method: 'drawn' | 'uploaded' = 'drawn',
+  identity?: OrionSignatureIdentity
 ) {
   const encoded = encodeURIComponent(email.trim().toLowerCase());
   return orionFetch<{ ok: boolean; skipped?: boolean; code?: string; error?: string }>(
     `/api/integrations/synerlink/user-signature?email=${encoded}`,
     {
       method: 'POST',
-      body: JSON.stringify({ signatureDataUrl, method }),
+      body: JSON.stringify({ signatureDataUrl, method, ...(identity ?? {}) }),
     }
   );
 }

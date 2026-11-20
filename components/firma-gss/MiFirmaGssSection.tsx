@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Alert, Badge, Button, Card, Group, Image, Loader, Paper, PasswordInput, Stack, Text, Title } from '@mantine/core';
 import { IconAlertTriangle, IconSignature } from '@tabler/icons-react';
 import CapturaFirma, { type FirmaCapturada } from './CapturaFirma';
+import DatosSelloSection from './DatosSelloSection';
 
 type Resultado = { tipo: 'ok' | 'error'; mensaje: string };
 interface Vista {
@@ -154,6 +155,11 @@ export default function MiFirmaGssSection({ onResultado }: { onResultado: (r: Re
             )}
           </Group>
         </Stack>
+      )}
+
+      {/* Nombre, documento y cargo del sello: con ellos, autorizar una firma la deja firmada de una vez. */}
+      {vista && vista.disponible && (
+        <DatosSelloSection hasSignature={vista.hasSignature} onResultado={onResultado} />
       )}
     </Card>
   );
