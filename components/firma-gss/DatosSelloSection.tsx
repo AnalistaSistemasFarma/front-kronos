@@ -71,7 +71,8 @@ export default function DatosSelloSection({
     void cargar();
   }, [cargar]);
 
-  const completos = Boolean(vista?.fullName && vista?.idNumber && vista?.jobTitle && vista?.hasSigningLegalConsent);
+  // Para firmar de una vez basta el nombre y las condiciones aceptadas; documento y cargo son opcionales.
+  const completos = Boolean(vista?.fullName && vista?.hasSigningLegalConsent);
 
   const abrir = () => {
     setForm({
@@ -141,8 +142,8 @@ export default function DatosSelloSection({
         )}
       </Group>
       <Text size='sm' c='dimmed'>
-        Nombre, documento y cargo con los que se estampa su firma. Si están completos, al autorizar una firma el documento
-        queda firmado de una vez, sin pedirle estos datos.
+        Nombre (obligatorio), documento y cargo (opcionales) con los que se estampa su firma. Con el nombre y las
+        condiciones aceptadas, al autorizar una firma el documento queda firmado de una vez.
       </Text>
 
       {!vista && <Loader size='sm' />}
@@ -211,24 +212,22 @@ export default function DatosSelloSection({
               value={form.idDocumentType}
               onChange={(v) => setForm((f) => ({ ...f, idDocumentType: v || 'CC' }))}
               allowDeselect={false}
-              required
             />
             <TextInput
               size='md'
-              label='Número de documento'
+              label='Número de documento (opcional)'
               value={form.idNumber}
               onChange={(e) => setForm((f) => ({ ...f, idNumber: e.currentTarget.value }))}
               maxLength={50}
-              required
             />
           </SimpleGrid>
           <TextInput
             size='md'
-            label='Cargo'
+            label='Cargo (opcional)'
+            description='Solo se estampa en el sello si lo registra.'
             value={form.jobTitle}
             onChange={(e) => setForm((f) => ({ ...f, jobTitle: e.currentTarget.value }))}
             maxLength={120}
-            required
           />
           {!vista.hasSigningLegalConsent && (
             <Alert color='blue' variant='light' title={SIGNING_LEGAL_COPY.ELECTRONIC.title}>

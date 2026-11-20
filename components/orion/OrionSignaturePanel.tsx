@@ -736,8 +736,9 @@ export default function OrionSignaturePanel({
             setIdentityModalOpen(true);
             return false;
           }
-          // Un clic solo si Orion ya tiene los datos del sello; si falta cédula/nombre/cargo, modal.
-          if ((preview?.missingInOrion?.length ?? 0) > 0) {
+          // Un clic si Orion ya tiene el nombre del sello. Cédula y cargo son opcionales
+          // (igual que en el modal y en Mi perfil → Datos del sello): no abren el modal.
+          if (preview?.missingInOrion?.includes('fullName')) {
             setIdentityModalOpen(true);
             return false;
           }
