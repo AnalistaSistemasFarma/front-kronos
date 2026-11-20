@@ -29,6 +29,8 @@ import {
   IconInfoCircle,
   IconLayoutDashboard,
   IconRefresh,
+  IconServer,
+  IconTable,
   IconTopologyStar3,
   IconUsers,
 } from '@tabler/icons-react';
@@ -53,6 +55,7 @@ import { SystemMap, type MapData } from '../../../../components/system-metrics/S
 import { UserBehavior } from '../../../../components/system-metrics/UserBehavior';
 import { AlertSubscriptionSwitch } from '../../../../components/system-metrics/AlertSubscriptionSwitch';
 import { UserConsumption } from '../../../../components/system-metrics/UserConsumption';
+import { SapDatabasePanel, SapServiceLayerPanel, SapViewsPanel } from '../../../../components/system-metrics/sap/SapPanels';
 import type { StatusTone } from '../../../../components/system-metrics/colors';
 import {
   formatAgo,
@@ -89,8 +92,8 @@ import styles from '../../../../components/system-metrics/monitor.module.css';
 
 const SEVERITY_RANK: Record<Severity, number> = { critical: 0, warning: 1, info: 2, ok: 3 };
 
-type TabKey = 'resumen' | 'mapas' | 'usuarios' | 'rendimiento' | 'base' | 'externos';
-const TAB_KEYS: TabKey[] = ['resumen', 'mapas', 'usuarios', 'rendimiento', 'base', 'externos'];
+type TabKey = 'resumen' | 'mapas' | 'usuarios' | 'rendimiento' | 'base' | 'sap-db' | 'sap-vistas' | 'sap-sl' | 'externos';
+const TAB_KEYS: TabKey[] = ['resumen', 'mapas', 'usuarios', 'rendimiento', 'base', 'sap-db', 'sap-vistas', 'sap-sl', 'externos'];
 /** Enlaces viejos (p. ej. las notificaciones abren #alertas) a su pestaña. */
 const HASH_ALIASES: Record<string, TabKey> = { alertas: 'resumen', 'vista-general': 'mapas', 'base-de-datos': 'base' };
 
@@ -796,6 +799,15 @@ export default function SystemMetricsPage() {
             >
               Base de datos
             </Tabs.Tab>
+            <Tabs.Tab value="sap-db" leftSection={<IconDatabase size={16} />}>
+              Base de datos SAP
+            </Tabs.Tab>
+            <Tabs.Tab value="sap-vistas" leftSection={<IconTable size={16} />}>
+              Vistas SAP
+            </Tabs.Tab>
+            <Tabs.Tab value="sap-sl" leftSection={<IconServer size={16} />}>
+              Service Layer
+            </Tabs.Tab>
             {outbound.length > 0 && (
               <Tabs.Tab value="externos" leftSection={<IconCloud size={16} />}>
                 Servicios externos
@@ -1252,6 +1264,18 @@ export default function SystemMetricsPage() {
           )}
         </section>
 
+        </Tabs.Panel>
+
+        <Tabs.Panel value="sap-db">
+          <SapDatabasePanel range={range} />
+        </Tabs.Panel>
+
+        <Tabs.Panel value="sap-vistas">
+          <SapViewsPanel range={range} />
+        </Tabs.Panel>
+
+        <Tabs.Panel value="sap-sl">
+          <SapServiceLayerPanel range={range} />
         </Tabs.Panel>
 
         <Tabs.Panel value="externos">
