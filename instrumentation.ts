@@ -18,6 +18,10 @@ export async function register() {
     // Monitor del sistema (CPU, memoria, peticiones, SQL). Por defecto solo en producción.
     const { startSystemMetrics } = await import('./lib/system-metrics/collector');
     startSystemMetrics();
+
+    // SAP monitor (SQL of SAP, read-only DMVs). Only when SAP_SQL_MONITOR_URL is set.
+    const { startSapMonitor } = await import('./lib/sap-monitor/job');
+    startSapMonitor();
   }
 }
 

@@ -7,8 +7,8 @@ import { authOptions } from '../../auth/[...nextauth]/route';
 const TASK_SELECT = `
         SELECT
             trg.id, trg.id_task, tpc.task ,rg.id as id_request_general, rg.description, rg.subject_request, rg.id_company, c.company ,rg.created_at,
-            rg.id_requester, urq.name as name_requester, urq.email as requester_email, rg.status_req, trg.id_status ,sc.status as status_task, u.name as assigned, pc.process, cr.category,
-            trg.start_date, trg.resolution, trg.date_resolution, uex.name as executor_final,
+            rg.id_requester, urq.name as name_requester, urq.image as requester_image, urq.email as requester_email, rg.status_req, trg.id_status ,sc.status as status_task, u.name as assigned, u.image as assigned_image, pc.process, cr.category,
+            trg.start_date, trg.resolution, trg.date_resolution, uex.name as executor_final, uex.image as executor_final_image,
             tpc.id_linked_process, lp.process as linked_process_label,
             lrq.id as linked_request_id, lrq.status_req as linked_request_status,
             pc.id AS id_process_category
