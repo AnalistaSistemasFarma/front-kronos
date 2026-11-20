@@ -17,12 +17,14 @@ import {
   Select,
   SimpleGrid,
   Table,
+  Tabs,
   Text,
   TextInput,
   Title,
   Tooltip,
 } from "@mantine/core";
-import { IconAlertCircle, IconArrowLeft, IconBug, IconCircleCheck, IconDownload, IconRefresh, IconSearch } from "@tabler/icons-react";
+import { IconAlertCircle, IconArrowLeft, IconBug, IconCircleCheck, IconCode, IconDownload, IconFlame, IconRefresh, IconSearch } from "@tabler/icons-react";
+import AmenazasGlobales from "./amenazas-globales";
 import type { HallazgoVulnDto, VulnsDto } from "../../../../../../lib/agent-audit/vulns-db";
 import {
   enlaceOsv,
@@ -61,6 +63,19 @@ export default function VulnerabilidadesPage() {
   const [q, setQ] = useState("");
   const [page, setPage] = useState(1);
   const [guardando, setGuardando] = useState<number | null>(null);
+  // Tab «Lo más reciente y crítico» (2026-11-20); remembered in the URL (?tab=criticas).
+  const [tab, setTab] = useState<string>("codigo");
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get("tab") === "criticas") setTab("criticas");
+  }, []);
+  const cambiarTab = (v: string | null) => {
+    const t = v ?? "codigo";
+    setTab(t);
+    const u = new URL(window.location.href);
+    if (t === "criticas") u.searchParams.set("tab", "criticas");
+    else u.searchParams.delete("tab");
+    window.history.replaceState(null, "", u.toString());
+  };
 
   const cargar = useCallback(async () => {
     try {
@@ -264,6 +279,20 @@ export default function VulnerabilidadesPage() {
             Vulnerabilidades
           </Title>
         </Group>
+        <Tabs value={tab} onChange={cambiarTab} mb="md">
+          <Tabs.List>
+            <Tabs.Tab value="codigo" leftSection={<IconCode size={14} />}>
+              Nuestro código
+            </Tabs.Tab>
+            <Tabs.Tab value="criticas" leftSection={<IconFlame size={14} />}>
+              Lo más reciente y crítico
+            </Tabs.Tab>
+          </Tabs.List>
+        </Tabs>
+        {tab === "criticas" ? (
+          <AmenazasGlobales />
+        ) : (
+          <>
         <Text className="ios-process-hub__subtitle" mb="lg">
           Las dependencias reales de cada desarrollo (npm, Go y Python), en sus ramas de producción y pruebas, consultadas en OSV
           (base abierta de vulnerabilidades de Google) cada 6 horas. Arriba, lo crítico y alto que salió en los últimos 7 días.
@@ -393,6 +422,8 @@ export default function VulnerabilidadesPage() {
                 {ultimo.resumen}
               </Text>
             )}
+          </>
+        )}
           </>
         )}
       </div>
