@@ -747,9 +747,11 @@ export default function OrionSignaturePanel({
             acceptedBiometric: needsFp ? true : undefined,
             identity: {
               fullName: preview?.fullName || preview?.suggested.fullName || currentUserName || '',
-              // Precedencia Orion → sugerencia SynerLink (nunca al revés en el sello).
-              idNumber: preview?.idNumber || preview?.suggested.idNumber || '',
-              jobTitle: preview?.jobTitle ?? null,
+              // Cédula y cargo: SOLO lo guardado en Mi perfil → Datos del sello (Orion).
+              // Si la persona los borró, se firma sin ellos; nunca se rellenan con la
+              // cédula del usuario de SynerLink (Juan, 2026-11-20). '' explícito = sin dato.
+              idNumber: preview?.idNumber || '',
+              jobTitle: preview?.jobTitle || '',
             },
           };
         }
