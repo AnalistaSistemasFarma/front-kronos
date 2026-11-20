@@ -165,17 +165,27 @@ export function versionInRange(version: string, m: CpeMatch): boolean | null {
   return true;
 }
 
-/** Lowest lower bound across the criteria (to detect an older, out-of-support branch the vendor did not evaluate). */
+/**
+ * Lowest lower bound across the criteria (exact versions count as their own bound). If our version is older than
+ * every evaluated version, our branch was probably not evaluated (e.g. Tomcat 8.5 after its end of life).
+ */
 function lowestLowerBound(ms: CpeMatch[]): string | null {
   let low: string | null = null;
   for (const m of ms) {
     const c = parseCpe(m.c);
     const lb = m.si ?? m.se ?? (c && !m.ei && !m.ee ? cpeExactVersion(c) : null);
-    if (!lb) return null; // some criterion has no lower bound → older versions are covered by it
+    if (!lb) return null; // a range with no lower bound covers every older version
     if (!low || compareVersions(lb, low) < 0) low = lb;
   }
   return low;
 }
+
+/** NVD sometimes versions a product by marketing name («sql_server:2014») instead of build numbers. */
+const isMarketingVersion = (m: CpeMatch) => {
+  const c = parseCpe(m.c);
+  const v = c ? cpeExactVersion(c) : null;
+  return Boolean(v && /^(19|20)\d\d$/.test(v.split('.')[0]) && !m.si && !m.se && !m.ei && !m.ee);
+};
 
 /* ------------------------------------------------------------------ matching */
 
@@ -216,7 +226,8 @@ function kevMatchesItem(cve: ThreatCve, item: InventoryItem): boolean {
       .split(',')
       .map(norm),
   ].filter((n) => n.length >= 3);
-  return names.some((n) => kp === n || kp.includes(n) || (n.includes(kp) && kp.length >= 4));
+  // Only «KEV product contains our name/keyword»: the reverse («OpenSSH para Windows» contains «Windows») over-matches.
+  return names.some((n) => kp === n || kp.includes(n));
 }
 
 /** Evaluates one CVE against one inventory item. */
@@ -235,7 +246,13 @@ export function evaluateItem(cve: ThreatCve, item: InventoryItem): ItemMatch {
     if (results.some((r) => r === true))
       return { ...base, status: 'afecta', reason: `La versión ${item.version} está en el rango afectado.` };
     if (results.some((r) => r === null))
-      return { ...base, status: 'revisar', reason: 'El producto coincide, pero el fabricante no publicó rangos de versión.' };
+      return {
+        ...base,
+        status: 'revisar',
+        reason: 'El producto coincide, pero NVD no publica rangos de versión para este CVE: confirmar que la actualización del fabricante esté aplicada.',
+      };
+    if (relevant.some(isMarketingVersion) && !relevant.some((m) => m.si || m.se || m.ei || m.ee))
+      return { ...base, status: 'revisar', reason: 'NVD identifica el producto por su nombre comercial (por ejemplo «2014»), no por compilación: confirmar con el fabricante.' };
     const low = lowestLowerBound(relevant);
     if (low && compareVersions(item.version, low) < 0)
       return {
@@ -374,12 +391,15 @@ export function productName(c: Pick<ThreatCve, 'kevVendor' | 'kevProduct' | 'cpe
 }
 
 /** Short Spanish title: «<type of weakness> en <product>». Falls back to a generic sentence. */
-export function spanishTitle(c: Pick<ThreatCve, 'cwes' | 'titleEn' | 'description' | 'kevVendor' | 'kevProduct' | 'cpes'>): string {
+export function spanishTitle(
+  c: Pick<ThreatCve, 'cwes' | 'titleEn' | 'description' | 'kevVendor' | 'kevProduct' | 'cpes'>,
+  productOverride?: string | null,
+): string {
   const type =
     c.cwes.map((w) => CWE_ES[w.toUpperCase()]).find(Boolean) ??
     KEYWORDS_ES.find(([re]) => re.test(`${c.titleEn ?? ''} ${c.description ?? ''}`))?.[1] ??
     'Vulnerabilidad';
-  const product = productName(c);
+  const product = productOverride || productName(c);
   return product ? `${type} en ${product}` : type;
 }
 
@@ -403,7 +423,7 @@ const isoDate = (v: unknown): string | null => {
   return Number.isFinite(t) ? new Date(t).toISOString() : null;
 };
 
-export const MAX_CPES_PER_CVE = 300;
+export const MAX_CPES_PER_CVE = 2000;
 
 /** CISA KEV catalog entry → partial ThreatCve (no CVSS; NVD enriches it). */
 export function parseKevEntry(e: unknown): Partial<ThreatCve> & { cveId: string } | null {
