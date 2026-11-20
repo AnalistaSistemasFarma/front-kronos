@@ -312,6 +312,8 @@ function UserManagement() {
     { value: string; label: string }[]
   >([]);
   const [selectedAuthorizationTypeIds, setSelectedAuthorizationTypeIds] = useState<string[]>([]);
+  // Authorization types as loaded from the server, to detect a change of types alone
+  const [savedAuthorizationTypeIds, setSavedAuthorizationTypeIds] = useState<string[]>([]);
 
   // Form states
   const [formData, setFormData] = useState({
@@ -695,6 +697,7 @@ function UserManagement() {
     setAssignedSnapshot(null);
     setConfirmClear(null);
     setSelectedAuthorizationTypeIds([]);
+    setSavedAuthorizationTypeIds([]);
 
     try {
       const [
@@ -721,7 +724,9 @@ function UserManagement() {
 
       if (userAuthTypesResponse.ok) {
         const { typeIds } = await userAuthTypesResponse.json();
-        setSelectedAuthorizationTypeIds((typeIds as number[]).map((id) => id.toString()));
+        const loadedTypeIds = (typeIds as number[]).map((id) => id.toString());
+        setSelectedAuthorizationTypeIds(loadedTypeIds);
+        setSavedAuthorizationTypeIds(loadedTypeIds);
       }
 
       let companiesData: Company[] = [];
@@ -991,9 +996,44 @@ function UserManagement() {
     }
     // Cada empresa se guarda con lo suyo + los cambios; las que no cambian no se tocan.
     const toSave = getCompanyChanges();
+    const sortedIds = (ids: string[]) => [...new Set(ids)].sort().join(',');
+    const authTypesChanged =
+      sortedIds(selectedAuthorizationTypeIds) !== sortedIds(savedAuthorizationTypeIds);
+    // Only the authorization types changed (the user already has "Autorización"): save just the
+    // types; otherwise they were silently dropped with «No hay cambios para guardar».
     if (toSave.length === 0) {
-      toast.success('No hay cambios para guardar');
-      setSubprocessModalOpened(false);
+      const authAssignedNow =
+        authSubprocessId !== null &&
+        assignedSubprocesses.some((a) =>
+          a.subprocesses.some((s) => s.subprocessId === authSubprocessId)
+        );
+      if (!authTypesChanged || !authAssignedNow) {
+        toast.success('No hay cambios para guardar');
+        setSubprocessModalOpened(false);
+        return;
+      }
+      if (selectedAuthorizationTypeIds.length === 0) {
+        toast.error('Debe seleccionar al menos un tipo de autorización');
+        return;
+      }
+      setSubprocessLoading(true);
+      try {
+        const response = await fetch(`/api/users/${selectedUser.id}/authorization-types`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ typeIds: selectedAuthorizationTypeIds.map(Number) }),
+        }).catch(() => null);
+        if (!response?.ok) {
+          toast.error('No se pudieron guardar los tipos de autorización');
+          return;
+        }
+        setSavedAuthorizationTypeIds(selectedAuthorizationTypeIds);
+        notifySubprocessAssignmentsChanged();
+        toast.success('Tipos de autorización actualizados');
+        setSubprocessModalOpened(false);
+      } finally {
+        setSubprocessLoading(false);
+      }
       return;
     }
 
@@ -1068,6 +1108,8 @@ function UserManagement() {
         ).catch(() => null);
         if (!authTypesResponse?.ok) {
           toast.error('Subprocesos guardados, pero no se pudieron guardar los tipos de autorización');
+        } else {
+          setSavedAuthorizationTypeIds(authReallyAssigned ? selectedAuthorizationTypeIds : []);
         }
         notifySubprocessAssignmentsChanged();
       }

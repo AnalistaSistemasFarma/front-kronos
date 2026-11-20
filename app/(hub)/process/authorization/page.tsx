@@ -848,7 +848,7 @@ function AuthorizationBoard() {
             }
 
             if (shouldOpenSignFlow && singleOk) {
-                toast.success('Autorizado. Puede firmar el documento en la solicitud.');
+                toast.success('Autorizado. Firmando el documento…');
                 setLoading(false);
                 void fetchActivities(userId, filters);
                 void fetchStats(userId, filters);
@@ -934,6 +934,10 @@ function AuthorizationBoard() {
     };
 
     const actionCount = actionTarget !== null ? 1 : selectedIds.size;
+    // Una sola autorización de firma: al autorizar se firma el documento (2026-11-19).
+    const authorizeSignsDocument =
+        actionCount === 1 &&
+        requests.some((r) => targetIds().includes(r.id) && isFirmaAuthorizationRow(r));
 
     const breadcrumbItems = [
         { title: 'Procesos', href: '/process' },
@@ -1523,7 +1527,7 @@ function AuthorizationBoard() {
                                 {openingSignDocument === 'review'
                                     ? 'Espere un momento. Podrá revisar el PDF y validarlo o devolverlo.'
                                     : openingSignDocument
-                                      ? 'Espere un momento. Se abrirá el asistente de firma.'
+                                      ? 'Espere un momento. Se firmará el documento; si faltan datos del sello, se le pedirán.'
                                       : 'Confirmando la autorización en SynerLink.'}
                             </Text>
                         </Stack>
@@ -1622,6 +1626,13 @@ function AuthorizationBoard() {
                 ?
                 </Text>
             </Group>
+            {authorizeSignsDocument && (
+                <Text size='sm' c='dimmed'>
+                    Al autorizar se firma el documento con su firma y sus datos del sello (Mi perfil →
+                    Mi firma). Si le falta alguno (cédula, cargo) o el documento exige huella, se le
+                    pedirá antes de firmar.
+                </Text>
+            )}
             <Group justify='flex-end'>
                 <Button
                     variant='default'
@@ -1636,7 +1647,7 @@ function AuthorizationBoard() {
                     onClick={() => void confirmAuthorize()}
                     loading={loading || Boolean(openingSignDocument)}
                 >
-                Autorizar
+                {authorizeSignsDocument ? 'Autorizar y firmar' : 'Autorizar'}
                 </Button>
             </Group>
             </Stack>

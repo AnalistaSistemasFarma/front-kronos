@@ -18,7 +18,7 @@ export async function GET(req) {
 
     const query = `
         SELECT 
-          trg.id, trg.id_request_general, trg.id_task, tpc.task, trg.id_status, sc.status, trg.id_assigned, u.name, trg.start_date, trg.end_date, trg.resolution, trg.date_resolution, rg.description,
+          trg.id, trg.id_request_general, trg.id_task, tpc.task, trg.id_status, sc.status, trg.id_assigned, u.name, u.image AS assigned_image, trg.start_date, trg.end_date, trg.resolution, trg.date_resolution, rg.description,
           rg.subject_request, rg.id_company, c.company, rg.created_at, rg.id_requester, urg.name as name_requester, rg.status_req,
           tpc.is_sequential, tpc.display_order
         FROM task_request_general trg

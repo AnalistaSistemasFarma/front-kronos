@@ -61,6 +61,9 @@ import Link from 'next/link';
 import IndicadorAutomejora from '../../../../../components/request-general/IndicadorAutomejora';
 import { sendMessage } from '../../../../../components/email/utils/sendMessage';
 import AutoRefreshNote from '../../../../../components/ui/AutoRefreshNote';
+import CompanyLogo from '../../../../../components/ui/CompanyLogo';
+import PersonLine from '../../../../../components/ui/PersonLine';
+import { formatSla } from '../../../../../lib/requests-general/sla';
 import IosSearchField from '../../../../../components/ui/IosSearchField';
 import { useAutoRefresh } from '../../../../../components/ui/useAutoRefresh';
 import { filterWorkflows } from '../../../../../lib/requests-general/workflowSearch';
@@ -93,7 +96,14 @@ interface WorkFlow {
   id_status_process: number;
   status_process: string;
   assigned_process_category: string;
+  /** Profile photo of the process assignee (null = initials avatar). */
+  assigned_image?: string | null;
   company: string;
+  /** Subprocess SLA (process_category.sla_*); null when it has none. */
+  sla_value?: number | null;
+  sla_unit?: string | null;
+  /** 'baseline' = computed from history (automatic) | 'manual' = set by an admin. */
+  sla_source?: string | null;
 }
 
 // Job del servicio central de tareas automáticas (scheduled_job) que esta página
@@ -1562,6 +1572,7 @@ function RequestBoard() {
                   <Table.Th>Empresa</Table.Th>
                   <Table.Th>Categoria</Table.Th>
                   <Table.Th>Proceso</Table.Th>
+                  <Table.Th>ANS</Table.Th>
                   <Table.Th>Asignado Proceso</Table.Th>
                   <Table.Th>Activo</Table.Th>
                 </Table.Tr>
@@ -1603,12 +1614,8 @@ function RequestBoard() {
                         </Text>
                       </Table.Td>
                       <Table.Td>
-                        <Group gap={4} className='flex'>
-                          <IconBuilding size={12} style={{ color: 'var(--mantine-color-dimmed)' }} />
-                          <Text size='sm' className='max-w-xs truncate'>
-                            {workflow.company}
-                          </Text>
-                        </Group>
+                        {/* Same company logo as the request tables. */}
+                        <CompanyLogo name={workflow.company} />
                       </Table.Td>
                       <Table.Td>
                         <Text size='sm' className='max-w-xs truncate'>
@@ -1620,11 +1627,26 @@ function RequestBoard() {
                           {workflow.process}
                         </Text>
                       </Table.Td>
+                      <Table.Td style={{ whiteSpace: 'nowrap' }} data-testid='workflow-sla'>
+                        {workflow.sla_value ? (
+                          <Stack gap={0}>
+                            <Text size='sm'>{formatSla({ value: workflow.sla_value, unit: workflow.sla_unit })}</Text>
+                            {workflow.sla_source === 'manual' || workflow.sla_source === 'baseline' ? (
+                              <Text size='xs' c='dimmed'>
+                                {workflow.sla_source === 'manual' ? 'Manual' : 'Automático'}
+                              </Text>
+                            ) : null}
+                          </Stack>
+                        ) : (
+                          <Text size='sm' c='dimmed'>
+                            Sin ANS
+                          </Text>
+                        )}
+                      </Table.Td>
                       <Table.Td>
-                        <Group gap={4}>
-                          <IconUserCheck size={14} style={{ color: 'var(--mantine-color-dimmed)' }} />
-                          <Text size='sm'>{workflow.assigned_process_category}</Text>
-                        </Group>
+                        {workflow.assigned_process_category ? (
+                          <PersonLine name={workflow.assigned_process_category} image={workflow.assigned_image} />
+                        ) : null}
                       </Table.Td>
                       <Table.Td>
                         <Badge color={getActiveColor(workflow.active)} variant='light' size='sm'>
