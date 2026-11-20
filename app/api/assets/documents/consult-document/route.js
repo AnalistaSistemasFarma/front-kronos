@@ -29,7 +29,8 @@ export async function GET(req) {
       console.log('API assets: Agregando filtro por ID de activo:', idAsset);
     }
 
-    query += ` ORDER BY ds.id DESC`;
+    // Preferir acta activa; si no hay, la más reciente (incluye ya devueltas).
+    query += ` ORDER BY CASE WHEN ds.active_minute = 1 THEN 0 ELSE 1 END, ds.id DESC`;
 
     const request = pool.request();
 
