@@ -170,8 +170,8 @@ export async function requestSync(origin: "manual" | "programado", email: string
         .input("email", sql.NVarChar(200), email).query(`
         SET XACT_ABORT ON; BEGIN TRAN;
         UPDATE dbo.agent_threat_sync SET status = N'fallido', finished_at = SYSUTCDATETIME(),
-               error_summary = N'La actualización no terminó a tiempo (1 hora); se puede pedir de nuevo.'
-        WHERE status = N'en_curso' AND started_at < DATEADD(HOUR, -1, SYSUTCDATETIME());
+               error_summary = N'La actualización no terminó a tiempo (3 horas); se puede pedir de nuevo.'
+        WHERE status = N'en_curso' AND started_at < DATEADD(HOUR, -3, SYSUTCDATETIME());
         DECLARE @id INT = (SELECT TOP 1 id_sync FROM dbo.agent_threat_sync WITH (UPDLOCK, HOLDLOCK)
                            WHERE status IN (N'pendiente', N'en_curso') ORDER BY requested_at DESC);
         IF @id IS NULL
@@ -194,8 +194,8 @@ export async function claimSync(): Promise<SyncDto | null> {
       pool.request().query(`
         SET XACT_ABORT ON; BEGIN TRAN;
         UPDATE dbo.agent_threat_sync SET status = N'fallido', finished_at = SYSUTCDATETIME(),
-               error_summary = N'La actualización no terminó a tiempo (1 hora); se puede pedir de nuevo.'
-        WHERE status = N'en_curso' AND started_at < DATEADD(HOUR, -1, SYSUTCDATETIME());
+               error_summary = N'La actualización no terminó a tiempo (3 horas); se puede pedir de nuevo.'
+        WHERE status = N'en_curso' AND started_at < DATEADD(HOUR, -3, SYSUTCDATETIME());
         DECLARE @id INT = (SELECT TOP 1 id_sync FROM dbo.agent_threat_sync WITH (UPDLOCK, READPAST) WHERE status = N'pendiente' ORDER BY requested_at);
         IF @id IS NOT NULL
           UPDATE dbo.agent_threat_sync SET status = N'en_curso', started_at = SYSUTCDATETIME(), progreso = N'Descargando el catálogo de CISA…' WHERE id_sync = @id;
