@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef, Suspense, type CSSProperties } from 'react';
+import { useState, useEffect, useMemo, useRef, Suspense, type CSSProperties } from 'react';
 import { useSession } from 'next-auth/react';
 import { useRouter } from 'next/navigation';
 // Solo tipos: la librería (~900 KB) se descarga al exportar/importar, no al abrir la pantalla.
@@ -34,7 +34,7 @@ import {
   SimpleGrid,
   Tooltip,
 } from '@mantine/core';
-import { useMediaQuery } from '@mantine/hooks';
+import { useDebouncedValue, useMediaQuery } from '@mantine/hooks';
 import {
   IconAlertCircle,
   IconChevronRight,
@@ -42,7 +42,6 @@ import {
   IconFilter,
   IconX,
   IconCheck,
-  IconRefresh,
   IconFlag,
   IconClock,
   IconBuilding,
@@ -63,6 +62,7 @@ import {
   IconMapPin,
   IconBrandWindows,
   IconDeviceMobile,
+  IconSearch,
 } from '@tabler/icons-react';
 import toast from 'react-hot-toast';
 import { sendMessage } from '../../../../../components/email/utils/sendMessage';
@@ -175,6 +175,15 @@ interface AssetFormData {
 }
 
 const ASSET_STORAGE_KEY = 'selectedAsset';
+// Lista visible al abrir un activo: el detalle la usa para las flechas anterior / siguiente.
+const ASSETS_LIST_STORAGE_KEY = 'assetsList';
+
+/** Minúsculas y sin tildes, para que "camara" encuentre "Cámara". */
+const foldText = (value: unknown) =>
+  String(value ?? '')
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .toLowerCase();
 
 const EMPTY_FILTERS: AssetFilters = {
   serial: '',
@@ -359,6 +368,14 @@ function AssetsBoard() {
 
   const [filters, setFilters] = useState<AssetFilters>(EMPTY_FILTERS);
   const [filtersExpanded, setFiltersExpanded] = useState(false);
+  // La lista se refresca sola al cambiar un filtro; la espera evita una consulta por cada tecla.
+  const [debouncedFilters] = useDebouncedValue(filters, 350);
+  const debouncedFiltersKey = JSON.stringify(debouncedFilters);
+  const [searchQuery, setSearchQuery] = useState('');
+  // Solo la primera carga muestra la pantalla de "Cargando..."; las siguientes, el velo sobre la lista.
+  const [loadedOnce, setLoadedOnce] = useState(false);
+  // Si llegan respuestas fuera de orden, solo se aplica la de la última consulta.
+  const fetchSeqRef = useRef(0);
 
   const [modalOpened, setModalOpened] = useState(false);
   const [formData, setFormData] = useState<AssetFormData>(EMPTY_FORM);
@@ -378,8 +395,13 @@ function AssetsBoard() {
       return;
     }
     fetchLists();
-    fetchAssets();
   }, [session, status, router]);
+
+  // Carga inicial y autorefresco: cada cambio de filtros (ya con la espera aplicada) vuelve a consultar.
+  useEffect(() => {
+    if (status !== 'authenticated') return;
+    fetchAssets(debouncedFilters);
+  }, [status, debouncedFiltersKey]);
 
   const fetchLists = async () => {
     try {
@@ -406,6 +428,7 @@ function AssetsBoard() {
   };
 
   const fetchAssets = async (filtersToUse: AssetFilters = filters) => {
+    const seq = ++fetchSeqRef.current;
     try {
       setLoading(true);
       setError(null);
@@ -426,6 +449,7 @@ function AssetsBoard() {
         : Array.isArray(data?.value)
           ? data.value
           : [];
+      if (seq !== fetchSeqRef.current) return;
       setAssets(list);
 
       if (!statusesFromApiRef.current) {
@@ -440,10 +464,14 @@ function AssetsBoard() {
         });
       }
     } catch (err) {
+      if (seq !== fetchSeqRef.current) return;
       console.error('Error fetching assets:', err);
       setError('No se pudieron cargar los activos. Intente de nuevo.');
     } finally {
-      setLoading(false);
+      if (seq === fetchSeqRef.current) {
+        setLoading(false);
+        setLoadedOnce(true);
+      }
     }
   };
 
@@ -487,21 +515,42 @@ function AssetsBoard() {
     });
   };
 
-  const handleApplyFilters = async () => {
-    await fetchAssets();
-  };
-
-  const handleClearFilters = async () => {
+  const handleClearFilters = () => {
     setFilters(EMPTY_FILTERS);
+    setSearchQuery('');
     setError(null);
-    await fetchAssets(EMPTY_FILTERS);
   };
 
   const filterByStatus = (statusId: string) => {
-    const nf = { ...filters, estado: statusId };
-    setFilters(nf);
-    fetchAssets(nf);
+    setFilters((prev) => ({ ...prev, estado: statusId }));
   };
+
+  const activeFiltersCount =
+    Object.values(filters).filter(Boolean).length + (searchQuery.trim() ? 1 : 0);
+
+  // Búsqueda en vivo sobre la lista ya filtrada (no consulta al servidor).
+  const visibleAssets = useMemo(() => {
+    const words = foldText(searchQuery).split(/\s+/).filter(Boolean);
+    if (words.length === 0) return assets;
+    return assets.filter((a) => {
+      const haystack = foldText(
+        [
+          a.id,
+          a.nombre,
+          a.modelo,
+          a.serial,
+          a.etiqueta,
+          a.usuario,
+          a.departamento,
+          a.empresa,
+          a.tipo_activo,
+          a.tipo_equipo,
+          a.estado,
+        ].join(' ')
+      );
+      return words.every((w) => haystack.includes(w));
+    });
+  }, [assets, searchQuery]);
 
   const handleFormChange = <K extends keyof AssetFormData>(field: K, value: AssetFormData[K]) => {
     setFormData((prev) => {
@@ -742,6 +791,12 @@ function AssetsBoard() {
 
   const openAssetDetail = (asset: Asset) => {
     sessionStorage.setItem(ASSET_STORAGE_KEY, JSON.stringify(asset));
+    try {
+      sessionStorage.setItem(ASSETS_LIST_STORAGE_KEY, JSON.stringify(visibleAssets));
+    } catch {
+      // Sin espacio en sessionStorage: el detalle se abre igual, solo sin flechas.
+      sessionStorage.removeItem(ASSETS_LIST_STORAGE_KEY);
+    }
     router.push(`/process/help-desk/view-asset?id=${asset.id}`);
   };
 
@@ -789,7 +844,7 @@ function AssetsBoard() {
     { label: 'Costo Equipos', value: formatCurrency(totalCost), color: 'violet', Icon: IconCoin },
   ];
 
-  if (status === 'loading' || loading) {
+  if (status === 'loading' || (loading && !loadedOnce)) {
     return (
       <div
         style={{ minHeight: '100vh', backgroundColor: 'var(--mantine-color-body)' }}
@@ -944,10 +999,17 @@ function AssetsBoard() {
 
         <Card shadow='sm' p={{ base: 'md', sm: 'lg' }} radius='md' withBorder mb='md'>
           <Group justify='space-between' mb='md' wrap='nowrap'>
-            <Title order={3} className='flex items-center gap-2' style={{ fontSize: 'clamp(1rem, 3vw, 1.25rem)' }}>
-              <IconFilter size={20} style={{ flexShrink: 0 }} />
-              Filtros de Búsqueda
-            </Title>
+            <Group gap='sm' wrap='wrap' style={{ minWidth: 0 }}>
+              <Title order={3} className='flex items-center gap-2' style={{ fontSize: 'clamp(1rem, 3vw, 1.25rem)' }}>
+                <IconFilter size={20} style={{ flexShrink: 0 }} />
+                Filtros de Búsqueda
+              </Title>
+              {activeFiltersCount > 0 && (
+                <Badge variant='light' color='blue' size='lg' radius='sm'>
+                  {activeFiltersCount} activo{activeFiltersCount === 1 ? '' : 's'}
+                </Badge>
+              )}
+            </Group>
             <ActionIcon
               variant='subtle'
               size='lg'
@@ -959,6 +1021,31 @@ function AssetsBoard() {
               {filtersExpanded ? <IconX size={16} /> : <IconFilter size={16} />}
             </ActionIcon>
           </Group>
+
+          <TextInput
+            label='Buscar activos'
+            description='Filtra en vivo por modelo, nombre, serial, etiqueta, usuario, departamento o empresa'
+            placeholder='Ej: MACBOOK, POR001, Karen Rodríguez…'
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.currentTarget.value)}
+            leftSection={<IconSearch size={18} className='text-blue-600' />}
+            rightSection={
+              searchQuery ? (
+                <ActionIcon
+                  variant='subtle'
+                  color='gray'
+                  size='sm'
+                  onClick={() => setSearchQuery('')}
+                  aria-label='Limpiar búsqueda'
+                >
+                  <IconX size={14} />
+                </ActionIcon>
+              ) : null
+            }
+            size='md'
+            radius='md'
+            data-testid='search-assets'
+          />
 
           <Collapse in={filtersExpanded}>
             <Box mt='md'>
@@ -1140,15 +1227,6 @@ function AssetsBoard() {
                 >
                   Limpiar Filtros
                 </Button>
-                <Button
-                  onClick={handleApplyFilters}
-                  leftSection={<IconRefresh size={16} />}
-                  data-testid='apply-filters'
-                  fullWidth={!!isMobile}
-                  mih={44}
-                >
-                  Aplicar Filtros
-                </Button>
               </Flex>
             </Box>
           </Collapse>
@@ -1173,23 +1251,25 @@ function AssetsBoard() {
               Lista de Activos
             </Title>
             <Badge variant='light' size='lg' style={{ flexShrink: 0 }}>
-              {assets.length} registros
+              {visibleAssets.length} registros
             </Badge>
           </Group>
 
-          {assets.length === 0 ? (
+          {visibleAssets.length === 0 ? (
             <Stack align='center' gap='sm' py='xl'>
               <IconDeviceLaptop size={48} className='text-gray-300' />
               <Text size='lg' fw={500}>
                 No se encontraron activos
               </Text>
               <Text size='sm' c='dimmed' ta='center' px='md'>
-                Intenta ajustar los filtros o crea un nuevo activo
+                {searchQuery.trim()
+                  ? 'Ningún activo coincide con la búsqueda. Prueba con otras palabras.'
+                  : 'Intenta ajustar los filtros o crea un nuevo activo'}
               </Text>
             </Stack>
           ) : useCardList ? (
             <SimpleGrid cols={{ base: 1, sm: 2 }} spacing='sm'>
-              {assets.map((asset) => {
+              {visibleAssets.map((asset) => {
                 const StatusIcon = getAssetStatusIcon(asset.estado);
                 return (
                   <Card
@@ -1284,7 +1364,7 @@ function AssetsBoard() {
                   </Table.Tr>
                 </Table.Thead>
                 <Table.Tbody>
-                  {assets.map((asset) => {
+                  {visibleAssets.map((asset) => {
                     const StatusIcon = getAssetStatusIcon(asset.estado);
                     return (
                       <Table.Tr

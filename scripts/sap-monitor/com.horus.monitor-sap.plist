@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Service Layer collector of the SAP monitor (scripts/sap-monitor/collector.mjs). Runs on the horus
+  Mac every 5 min; reads serfarma07 logs over ONE read-only SSH session and posts aggregates to
+  SynerLink. Nothing is scheduled on the SAP server.
+  Installed DISABLED until the production go (launchctl disable + not bootstrapped).
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.horus.monitor-sap</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/opt/homebrew/bin/node</string>
+    <string>/Users/horus/.horus/monitor-sap/collector.mjs</string>
+    <string>--env</string>
+    <string>/Users/horus/.horus/monitor-sap/collector.env</string>
+  </array>
+  <key>StartInterval</key><integer>300</integer>
+  <key>RunAtLoad</key><false/>
+  <key>ProcessType</key><string>Background</string>
+  <key>LowPriorityIO</key><true/>
+  <key>Nice</key><integer>10</integer>
+  <key>StandardOutPath</key><string>/Users/horus/.horus/monitor-sap/collector.log</string>
+  <key>StandardErrorPath</key><string>/Users/horus/.horus/monitor-sap/collector.log</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key><string>/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    <key>HOME</key><string>/Users/horus</string>
+  </dict>
+</dict>
+</plist>
