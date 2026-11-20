@@ -7,8 +7,8 @@ import { cpeKeys, mergeCve, parseKevEntry, parseNvdCve, type ThreatCve } from ".
  *   1. CISA KEV catalog (known exploited, one JSON file).
  *   2. NVD CVE API 2.0 — CRITICAL and HIGH published in the last THREATS_WINDOW_DAYS days (default 30, max 120).
  *   3. NVD — KEV entries added in the window (to get CVSS + CPE ranges).
- *   4. NVD — per inventory CPE key and version (`virtualMatchString`): exploited ones of any age, and anything
- *      published in the last 120 days. This is what tells «Nos afecta».
+ *   4. NVD — per inventory CPE key and version (`virtualMatchString` + `hasKev`): exploited ones of any age that
+ *      NVD maps to our exact version. Recent non-exploited ones come from step 2 and are matched locally.
  *   5. FIRST EPSS (exploit probability), optional (THREATS_EPSS=0 turns it off).
  * NVD rate limit: 5 requests / 30 s without key, 50 / 30 s with NVD_API_KEY (optional, .env). We wait between calls.
  * Triggered by «Actualizar ahora» (administration) or lazily when the last refresh is older than 24 h.
@@ -32,6 +32,7 @@ async function getJson(url: string, headers: Record<string, string> = {}, timeou
     try {
       const r = await fetch(url, { headers: { Accept: "application/json", "User-Agent": "SynerLink-threats/1.0", ...headers }, signal: ctrl.signal, cache: "no-store" });
       if ((r.status === 403 || r.status === 429 || r.status >= 500) && attempt < 2) {
+        console.warn(`[threats] HTTP ${r.status} from ${new URL(url).host}, retrying in 30 s`);
         await sleep(30_000); // NVD answers 403/429 when the rolling window is exceeded
         continue;
       }
@@ -121,19 +122,14 @@ async function refresh(id: number): Promise<void> {
   const inventory = (await readInventory()).filter((i) => i.active && i.version);
   const keys = new Map<string, string>();
   for (const it of inventory) for (const k of cpeKeys(it)) keys.set(`cpe:2.3:*:${k.vendor}:${k.product}:${it.version}`, it.product);
-  const from120 = nvdDate(now - 119 * DAY);
   let n = 0;
   for (const [match, product] of keys) {
     n++;
     await progressSync(id, `Cruzando el inventario con NVD (${n} de ${keys.size}): ${product}…`);
     try {
       const exploited = await nvd({ virtualMatchString: match, hasKev: null });
-      const recent = await nvd({ virtualMatchString: match, pubStartDate: from120, pubEndDate: to, noRejected: null });
-      for (const c of [...exploited, ...recent]) {
-        const p = parseNvdCve(c);
-        if (p && (p.kev || (p.cvss ?? 0) >= 7)) add(p, true);
-      }
-      nvdCount += exploited.length + recent.length;
+      exploited.forEach((c) => add(parseNvdCve(c), true));
+      nvdCount += exploited.length;
     } catch (e) {
       // NVD may reject an odd version string: skip that key, keep the rest.
       console.warn("[threats] inventory query skipped", match, e instanceof Error ? e.message : e);
@@ -162,6 +158,6 @@ async function refresh(id: number): Promise<void> {
   await finishSync(id, {
     kev: kevList.length,
     nvd: nvdCount,
-    summary: `CISA KEV: ${kevList.length} explotadas conocidas. NVD: ${nvdCount} registros (críticas y altas de ${days} días, explotadas recientes y ${keys.size} claves del inventario).${nvdKey() ? "" : " Sin llave de NVD (consultas más lentas)."}`,
+    summary: `CISA KEV: ${kevList.length} explotadas conocidas. NVD: ${nvdCount} registros (críticas y altas de ${days} días, explotadas recientes y explotadas que afectan ${keys.size} claves del inventario).${nvdKey() ? "" : " Sin llave de NVD (consultas más lentas)."}`,
   });
 }
