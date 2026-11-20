@@ -466,6 +466,16 @@ export default function AuditoriaAgentesPage() {
             ·
           </Text>
           <Link
+            href='/process/chat/auditoria/vulnerabilidades'
+            className='chat-text-muted'
+            style={{ fontSize: 13 }}
+          >
+            Ver vulnerabilidades
+          </Link>
+          <Text size='xs' c='dimmed'>
+            ·
+          </Text>
+          <Link
             href='/process/chat/auditoria/licencias'
             className='chat-text-muted'
             style={{ fontSize: 13 }}
