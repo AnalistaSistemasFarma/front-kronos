@@ -105,9 +105,24 @@ describe('Datos del sello (GSS Firma) · ruta', () => {
     expect(m.guardar).not.toHaveBeenCalled();
   });
 
-  it('PUT: datos incompletos o inválidos es 400 y no pide contraseña', async () => {
-    expect((await ruta.PUT(put({ ...DATOS, idNumber: '', password: 'x' }))).status).toBe(400);
-    expect((await ruta.PUT(put({ ...DATOS, jobTitle: '', password: 'x' }))).status).toBe(400);
+  it('PUT: documento y cargo son opcionales; el nombre no', async () => {
+    const res = await ruta.PUT(put({ fullName: 'Ana María Pérez', idNumber: '', jobTitle: '', password: 'x' }));
+    expect(res.status).toBe(200);
+    expect(m.guardar).toHaveBeenCalledWith(EMAIL, 'data:image/png;base64,AA==', 'uploaded', {
+      fullName: 'Ana María Pérez',
+      idDocumentType: 'CC',
+      idNumber: '',
+      jobTitle: '',
+    });
+    m.guardar.mockClear();
+    m.verificar.mockClear();
+    expect((await ruta.PUT(put({ ...DATOS, fullName: '', password: 'x' }))).status).toBe(400);
+    expect(m.verificar).not.toHaveBeenCalled();
+    expect(m.guardar).not.toHaveBeenCalled();
+  });
+
+  it('PUT: datos inválidos es 400 y no pide contraseña', async () => {
+    expect((await ruta.PUT(put({ ...DATOS, idNumber: '12', password: 'x' }))).status).toBe(400);
     expect((await ruta.PUT(put({ ...DATOS, idDocumentType: 'XX', password: 'x' }))).status).toBe(400);
     expect((await ruta.PUT(put({ ...DATOS, idNumber: '12<script>', password: 'x' }))).status).toBe(400);
     expect(m.verificar).not.toHaveBeenCalled();

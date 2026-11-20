@@ -5,8 +5,8 @@ import {
 } from '../orion/signerIdentity';
 
 /**
- * «DATOS DEL SELLO» en el perfil (Juan Fonseca, 2026-11-20): nombre, documento y
- * cargo con los que se estampa la firma, configurados una sola vez junto a «Mi
+ * «DATOS DEL SELLO» en el perfil (Juan Fonseca, 2026-11-20): nombre (obligatorio),
+ * documento y cargo (opcionales) con los que se estampa la firma, configurados una sola vez junto a «Mi
  * firma». Así, al autorizar una firma, el documento queda firmado de una vez
  * sin el modal de cédula/cargo (ver OrionSignaturePanel, firma automática).
  *
@@ -50,13 +50,13 @@ export function parseDatosSello(raw: unknown): DatosSelloInput {
   const r = raw as Record<string, unknown>;
   const text = (v: unknown, max: number) => (typeof v === 'string' ? v.trim().replace(/\s+/g, ' ').slice(0, max) : '');
   const fullName = text(r.fullName, 80);
-  const idDocumentType = text(r.idDocumentType, 20).toUpperCase();
+  const idDocumentType = text(r.idDocumentType, 20).toUpperCase() || 'CC';
   const idNumber = text(r.idNumber, 50);
   const jobTitle = text(r.jobTitle, 120);
 
+  // Documento y cargo son OPCIONALES, igual que en el modal de firma (Juan, 2026-11-20):
+  // solo se estampan si la persona los registra. El nombre sí es obligatorio.
   if (!TIPOS.has(idDocumentType)) throw new DatosSelloError('Elija el tipo de documento.');
-  if (!idNumber) throw new DatosSelloError('Escriba su número de documento.');
-  if (!jobTitle) throw new DatosSelloError('Escriba su cargo.');
   const error = validateSignerIdentity({
     fullName,
     idDocumentType: idDocumentType as SignerIdDocumentType,
