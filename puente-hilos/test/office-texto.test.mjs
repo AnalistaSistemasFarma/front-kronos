@@ -4,7 +4,7 @@ import { deflateRawSync } from 'node:zlib';
 import { mkdtempSync, writeFileSync, readFileSync, existsSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { officeToMarkdown, writeOfficeSidecar, isSidecar, officeExtension, readZip } from '../src/office-texto.mjs';
+import { officeToMarkdown, writeOfficeSidecar, isSidecar, officeExtension, readZip, xmlElements } from '../src/office-texto.mjs';
 import { bajarAdjuntos, armarPrompt } from '../src/hilos.mjs';
 
 /** Builds a small deflated ZIP from { name: string }. */
@@ -57,6 +57,53 @@ test('xlsx: shared/inline strings, formulas, merges and dropdown lists', () => {
 test('pptx: slides in numeric order', () => {
   const md = officeToMarkdown(PPTX, 'pptx', 'deck.pptx');
   assert.ok(md.indexOf('Primera') < md.indexOf('Segunda'));
+});
+
+test('xmlElements: first closing tag, self-closing, name boundaries, attrs option', () => {
+  const xml = '<w:t>a</w:t><w:tab/><w:t xml:space="preserve"> b </w:t><w:tbl></w:tbl><w:t/><w:t>c';
+  const els = xmlElements(xml, 'w:t');
+  assert.deepEqual(els.map((e) => e.inner), ['a', ' b ', null]);
+  assert.deepEqual(els.map((e) => e.head), ['', ' xml:space="preserve"', '']);
+  assert.deepEqual(xmlElements('<si>x</si><si/><si a="1">y</si>', 'si', { attrs: false }).map((e) => e.inner), ['x', null]);
+  assert.equal(xmlElements('<c r="A1"><v>1</v></c>', 'c')[0].inner, '<v>1</v>');
+});
+
+test('docx/xlsx edge cases keep the previous output', () => {
+  const doc = zip({
+    'word/document.xml': '<w:document><w:body><w:p><w:r><w:t>A</w:t><w:tab/><w:t>B</w:t><w:br w:type="page"/><w:t>C</w:t><w:cr/><w:t>D</w:t></w:r></w:p></w:body></w:document>',
+    'word/comments.xml': '<w:comments><w:comment w:id="0" w:author="Juan"><w:p><w:r><w:t>Revisar</w:t></w:r></w:p></w:comment></w:comments>',
+  });
+  const md = officeToMarkdown(doc, 'docx');
+  assert.match(md, /A\tB\nC\nD/);
+  assert.match(md, /- Juan: Revisar/);
+  const book = zip({
+    'xl/workbook.xml': '<workbook><sheets><sheet name="H" r:id="rId1"/></sheets></workbook>',
+    'xl/_rels/workbook.xml.rels': '<Relationships><Relationship Id="rId1" Target="worksheets/sheet1.xml"/></Relationships>',
+    'xl/sharedStrings.xml': '<sst><si/><si><t>uno\n\n  dos</t></si></sst>',
+    'xl/worksheets/sheet1.xml': '<worksheet><sheetData><row r="1" spans="1:3"><c r="A1" t="s"><v>1</v></c><c r="B1"><f t="shared" si="0"/><v>7</v></c><c r="C1" s="2"/></row></sheetData></worksheet>',
+  });
+  assert.match(officeToMarkdown(book, 'xlsx'), /- Fila 1: A1: uno \/ dos \| B1: 7\n/);
+});
+
+test('adversarial inputs (unclosed tags, long whitespace) are parsed in linear time', () => {
+  const N = 200_000;
+  const cases = {
+    docx: zip({ 'word/document.xml': `<w:document><w:body><w:p>${'<w:t>x'.repeat(N)}${'<w:br '.repeat(N)}${'<w:p '.repeat(N)}</w:p></w:body></w:document>`, 'word/comments.xml': '<w:comment '.repeat(N) }),
+    xlsx: zip({
+      'xl/workbook.xml': '<workbook><sheets><sheet name="H" r:id="rId1"/></sheets></workbook>',
+      'xl/_rels/workbook.xml.rels': '<Relationships><Relationship Id="rId1" Target="worksheets/sheet1.xml"/></Relationships>',
+      'xl/sharedStrings.xml': `<sst>${'<si><t a="1">y'.repeat(N)}</sst>`,
+      'xl/worksheets/sheet1.xml': `<worksheet><sheetData><row r="1">${'<c r="A1" t="inlineStr"><is><t>z'.repeat(N)}<c r="B1"><f t="1">${'<f '.repeat(N)}<v>${' '.repeat(N)}1${' '.repeat(N)}</v></c></row><row r="2">${'<c '.repeat(N)}</row>${'<dataValidation '.repeat(N)}</sheetData></worksheet>`,
+    }),
+    pptx: zip({ 'ppt/slides/slide1.xml': `<p:sld>${'<a:p><a:t>'.repeat(N)}</p:sld>` }),
+  };
+  for (const [ext, buf] of Object.entries(cases)) {
+    const t0 = performance.now();
+    const md = officeToMarkdown(buf, ext);
+    const ms = performance.now() - t0;
+    assert.ok(md.startsWith('# Texto extraído'), ext);
+    assert.ok(ms < 2000, `${ext} took ${Math.round(ms)} ms`);
+  }
 });
 
 test('helpers and failures never throw', () => {
