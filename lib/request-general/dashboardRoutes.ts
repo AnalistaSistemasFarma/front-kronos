@@ -15,7 +15,7 @@ import { isLoginAuditMarkerSubprocess } from '../auth/login-audit/constants';
 import { isProjectsConfigMarkerSubprocess } from '../proyectos/config-agentes-rules';
 import { isPurchasesWriteMarkerSubprocess } from '../purchases/fields';
 import { isTeamTasksSubprocess } from './teamTasksAccess';
-import { isSalasMarkerSubprocess } from '../salas/permisos';
+import { isRoomsMarkerSubprocess } from '../rooms/permissions';
 
 export const DASHBOARD_SOLICITANTE_URL = '/process/request-general/dashboard-solicitante';
 export const DASHBOARD_SOLICITADO_URL = '/process/request-general/dashboard-solicitado';
@@ -39,8 +39,8 @@ export function isHubHiddenRequestDashboardSubprocess(subprocess: {
     isProjectsConfigMarkerSubprocess(subprocess) ||
     // Permiso de escritura de Compras (2026-10-22): marcador, no página.
     isPurchasesWriteMarkerSubprocess(subprocess) ||
-    // Salas (2026-11-17): niveles reservar/admin son marcadores, no páginas.
-    isSalasMarkerSubprocess(subprocess) ||
+    // Rooms (2026-11-17): book/admin levels are markers, not pages.
+    isRoomsMarkerSubprocess(subprocess) ||
     isTeamTasksSubprocess(subprocess)
   ) {
     return true;
