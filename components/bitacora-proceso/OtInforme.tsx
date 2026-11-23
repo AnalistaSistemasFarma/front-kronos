@@ -1,13 +1,15 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Alert, Anchor, Box, Breadcrumbs, Button, Card, Divider, Group, Loader, SimpleGrid, Stack, Table, Text, Title } from '@mantine/core';
 import { useMediaQuery } from '@mantine/hooks';
 import { IconAlertTriangle, IconArrowLeft, IconChevronRight, IconPrinter, IconSquare, IconSquareCheck } from '@tabler/icons-react';
 import { OT_BASE_URL, OT_INSPECTOR_LABEL, OT_JEFE_PRODUCCION_LABEL, OT_METODO_LABEL, OT_NOTA_CIERRE_JEFE, OT_ROL_APERTURA_CIERRE, OT_ROL_LABEL, OT_SIGNIFICADO_CIERRE_JEFE, otNombreCompleto } from '../../lib/bitacora-proceso/constants';
 import type { OrdenDetalle } from '../../lib/bitacora-proceso/db';
 import type { OtCompanyAccess } from '../../lib/bitacora-proceso/rules';
+import { buildInformePrintCss, mmACm, parseMargenSuperiorCm } from '../../lib/bitacora-proceso/impresion';
+import { OtMargenBatchCampo, useOtMargenBatch } from './OtMargenBatch';
 import { codigoOt, fmtFecha, fmtFechaHora, fmtFechaHoraSeg, nombreArchivoInforme, otHref, turnoLabel, useOtFetch } from './otClient';
 
 /**
@@ -19,32 +21,11 @@ import { codigoOt, fmtFecha, fmtFechaHora, fmtFechaHoraSeg, nombreArchivoInforme
  *   - A7: el bloque de verificación nunca se parte entre páginas (break-inside: avoid).
  *   - A8: el título del documento (nombre sugerido del PDF) es
  *     Bitacora_<código>_<lote>_<fecha>.
+ *   - #8316 (2026-11-23): cada página deja arriba, en blanco, el espacio del encabezado del lote
+ *     batch (margen configurable por empresa, 4 cm por defecto; se puede ajustar para una
+ *     impresión). Las páginas se numeran en el pie. CSS en lib/bitacora-proceso/impresion.ts.
  * En el celular la cronología va en tarjetas (sin desplazamiento lateral).
  */
-const PRINT_CSS = `
-@media print {
-  @page { size: A4; margin: 14mm; }
-  html, body { background: #fff !important; }
-  body * { visibility: hidden !important; }
-  .ot-informe, .ot-informe * { visibility: visible !important; }
-  /* Solo queda la hoja: se ocultan los hermanos de sus contenedores (menú, encabezado,
-     botones) para que no generen páginas en blanco, y los contenedores no agregan alto. */
-  body *:not(:has(.ot-informe)):not(.ot-informe):not(.ot-informe *) { display: none !important; }
-  body *:has(.ot-informe) { min-height: 0 !important; height: auto !important; margin: 0 !important; padding: 0 !important; overflow: visible !important; position: static !important; background: #fff !important; box-shadow: none !important; border: 0 !important; }
-  .ot-informe { width: 100%; color: #000 !important; background: #fff !important; border: 0 !important; padding: 0 !important; }
-  .ot-informe .mantine-Card-root, .ot-informe .mantine-Paper-root { box-shadow: none !important; background: #fff !important; border-color: #999 !important; }
-  .ot-informe .mantine-Text-root, .ot-informe .mantine-Title-root, .ot-informe td, .ot-informe th { color: #000 !important; }
-  .ot-no-print { display: none !important; }
-  .ot-solo-impresion { display: block !important; }
-  .ot-tabla-impresion { display: table !important; }
-  .ot-tarjetas-pantalla { display: none !important; }
-  .ot-tabla-impresion { width: 100%; table-layout: fixed; }
-  .ot-tabla-impresion th, .ot-tabla-impresion td { font-size: 9.5pt !important; padding: 4px 6px !important; overflow-wrap: anywhere; }
-  .ot-tabla-impresion thead { display: table-header-group; }
-  .ot-tabla-impresion tr { break-inside: avoid; page-break-inside: avoid; }
-  .ot-bloque-final { break-inside: avoid; page-break-inside: avoid; }
-  .ot-vistos-grid { display: grid !important; grid-template-columns: repeat(4, minmax(0, 1fr)) !important; gap: 8px !important; }
-}`;
 
 function Campo({ label, value }: { label: string; value: React.ReactNode }) {
   return (
@@ -59,6 +40,15 @@ export default function OtInforme({ company, idOrden }: { company: OtCompanyAcce
   const desktop = useMediaQuery('(min-width: 48em)') ?? false;
   const { data, error, loading } = useOtFetch<{ orden: OrdenDetalle }>(`/api/bitacora-proceso/${idOrden}?company=${company.idCompany}`);
   const o = data?.orden;
+  // #8316: margen superior para el encabezado batch (empresa; ajustable solo para esta impresión).
+  const margen = useOtMargenBatch(company.idCompany);
+  const [margenCm, setMargenCm] = useState<number | null>(null);
+  const margenEmpresaCm = mmACm(margen.margenMm);
+  const margenMm = parseMargenSuperiorCm(margenCm ?? margenEmpresaCm) ?? margen.margenMm;
+  const printCss = useMemo(
+    () => buildInformePrintCss(margenMm, o ? `SynerLink · Bitácora ${codigoOt(o.consecutivo)} · Lote ${o.lote}` : 'SynerLink · Bitácora de Proceso'),
+    [margenMm, o]
+  );
 
   // A8: el navegador propone el título del documento como nombre del PDF.
   const titulo = o ? nombreArchivoInforme(o.consecutivo, o.lote, o.abiertaEn) : null;
@@ -97,7 +87,7 @@ export default function OtInforme({ company, idOrden }: { company: OtCompanyAcce
 
   return (
     <Stack gap='md' pb={desktop ? 0 : 88}>
-      <style>{PRINT_CSS}</style>
+      <style>{printCss}</style>
       <Breadcrumbs separator={<IconChevronRight size={14} />} className='ot-no-print' style={{ flexWrap: 'wrap' }}>
         <Anchor component={Link} href='/process' size='sm'>Procesos</Anchor>
         <Anchor component={Link} href={otHref(OT_BASE_URL, company.idCompany)} size='sm'>Bitácora de Proceso</Anchor>
@@ -261,6 +251,19 @@ export default function OtInforme({ company, idOrden }: { company: OtCompanyAcce
         bg={desktop ? undefined : 'var(--mantine-color-body)'}
         style={desktop ? undefined : { borderTop: '1px solid var(--mantine-color-default-border)', zIndex: 150 }}
       >
+        <Box mb='sm' data-testid='ot-margen-batch-panel'>
+          <OtMargenBatchCampo
+            company={company}
+            valorCm={margenCm ?? margenEmpresaCm}
+            onChange={setMargenCm}
+            guardadoCm={margenEmpresaCm}
+            onGuardado={async () => {
+              await margen.reload(true);
+              setMargenCm(null);
+            }}
+            description={`Espacio en blanco arriba de cada página para el encabezado del lote batch. Empresa: ${margenEmpresaCm} cm${company.canManage ? '' : ' (lo cambia el supervisor)'}.`}
+          />
+        </Box>
         <Group grow={!desktop} justify='flex-end' gap='sm'>
           <Button variant='default' size={desktop ? 'lg' : 'md'} h={desktop ? undefined : 52} leftSection={<IconArrowLeft size={18} />} component={Link} href={otHref(`${OT_BASE_URL}/${o.id}`, company.idCompany)}>
             Volver

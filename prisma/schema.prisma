@@ -137,6 +137,7 @@ model Company {
   otOperadores     OtOperador[]
   otAreas          OtArea[]
   otResponsables   OtResponsable[]
+  otConfig         OtConfig?
   // Vitrina Comercial (sprint V2, 2026-10-22): catálogo comercial por empresa.
   vitrinaPresentaciones VitrinaPresentacion[]
   vitrinaCodigosSap     VitrinaCodigoSap[]
@@ -4821,6 +4822,21 @@ model OtArea {
 
   @@unique([id_company, nombre], map: "UQ_ot_area_nombre")
   @@map("ot_area")
+  @@schema("dbo")
+}
+
+// Per-company Bitácora settings (case #8316, 2026-11-23). margen_superior_mm = blank area reserved
+// at the top of EVERY printed page for the batch-record header (default 40 mm = 4 cm). A missing
+// row (or a missing table, before the manual migration) means the default.
+model OtConfig {
+  id_company         Int      @id
+  margen_superior_mm Int      @default(40)
+  updated_by         String   @db.NVarChar(50)
+  updated_at         DateTime @default(dbgenerated("sysutcdatetime()")) @db.DateTime2
+
+  company Company @relation(fields: [id_company], references: [id_company], onDelete: NoAction, onUpdate: NoAction)
+
+  @@map("ot_config")
   @@schema("dbo")
 }
 
