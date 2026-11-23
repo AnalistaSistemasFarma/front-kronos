@@ -390,7 +390,7 @@ export function semanaAnterior(corte: string): { desde: string; hasta: string } 
 const PESO_CONFIANZA: Record<string, number> = { alta: 1, media: 0.85, baja: 0.6 };
 
 /** First sentence of the catalog description, cut to `max` characters. */
-function primeraFrase(v: string | null, max = 140): string {
+function primeraFrase(v: string | null, max = 160): string {
   const t = (v ?? "").replace(/\s+/g, " ").trim();
   if (!t) return "";
   const f = (t.match(/^.*?[.;](\s|$)/)?.[0] ?? t).trim().replace(/[.;]$/, "");
@@ -433,7 +433,7 @@ export function armarSemanaRelevante(
       empresa: ag.empresa,
       departamento: nombreDepto(ag.departamento),
       caso,
-      resumen: `${detalle || caso}.`,
+      resumen: /[.…!?]$/.test(detalle || caso) ? detalle || caso : `${detalle || caso}.`,
       ocurrencias: n,
       minHumano: mh,
       minDespues: md,
