@@ -55,34 +55,49 @@ function anyContains(field: string, value: string): string {
     .join(' or ');
 }
 
-/** Todas las palabras en el nombre (cualquier orden) o el texto completo en código/correo. */
-function buildFilter(q: string, withFeMail: boolean): string {
+/** Todas las palabras en el nombre (cualquier orden) o el texto completo en código/correo/NIT. */
+function buildFilter(
+  q: string,
+  opts: { withFeMail: boolean; withTaxId: boolean }
+): string {
   const words = q.split(/\s+/).filter((w) => w.length >= 2).slice(0, 4);
   const byName = words.map((w) => `(${anyContains('CardName', w)})`).join(' and ');
+  // "soul system" también busca "soulsystem" (razón social pegada).
+  const joined = words.length > 1 ? words.join('') : '';
   const lower = escapeOData(q.toLowerCase());
   const other = [
+    joined ? `(${anyContains('CardName', joined)})` : '',
     anyContains('CardCode', q),
+    opts.withTaxId ? `(${anyContains('FederalTaxID', q)})` : '',
     `contains(EmailAddress,'${lower}')`,
-    withFeMail ? `contains(${FE_MAIL_FIELD},'${lower}')` : '',
+    opts.withFeMail ? `contains(${FE_MAIL_FIELD},'${lower}')` : '',
   ].filter(Boolean);
   return `(${[byName ? `(${byName})` : '', ...other].filter(Boolean).join(' or ')}) and Valid eq 'tYES' and Frozen eq 'tNO'`;
 }
 
 async function searchPartners(sap: SapSession, q: string): Promise<SapPartner[]> {
-  const run = (withFeMail: boolean) => {
+  const run = (withFeMail: boolean, withTaxId: boolean) => {
     const select = ['CardCode', 'CardName', 'CardType', 'EmailAddress', 'ContactEmployees'];
     if (withFeMail) select.push(FE_MAIL_FIELD);
+    if (withTaxId) select.push('FederalTaxID');
     const path =
-      `BusinessPartners?$filter=${encodeURIComponent(buildFilter(q, withFeMail))}` +
+      `BusinessPartners?$filter=${encodeURIComponent(buildFilter(q, { withFeMail, withTaxId }))}` +
       `&$select=${select.join(',')}&$orderby=CardName&$top=40`;
     return sapGet<{ value?: SapPartner[] }>(sap, path);
   };
   try {
-    return (await run(true)).value ?? [];
+    return (await run(true, true)).value ?? [];
   } catch (err) {
-    // Bases SAP sin el campo de factura electrónica responden 400 al filtrarlo.
-    if (err instanceof SapError && err.status === 400) return (await run(false)).value ?? [];
-    throw err;
+    if (!(err instanceof SapError) || err.status !== 400) throw err;
+    // Bases SAP sin U_HBT_MailRecep_FE o sin FederalTaxID usable en contains.
+    try {
+      return (await run(false, true)).value ?? [];
+    } catch (err2) {
+      if (err2 instanceof SapError && err2.status === 400) {
+        return (await run(false, false)).value ?? [];
+      }
+      throw err2;
+    }
   }
 }
 

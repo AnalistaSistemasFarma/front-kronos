@@ -1,6 +1,15 @@
-import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFImage, type PDFPage } from 'pdf-lib';
+import {
+  PDFDocument,
+  StandardFonts,
+  degrees,
+  rgb,
+  type PDFFont,
+  type PDFImage,
+  type PDFPage,
+} from 'pdf-lib';
 import type { OrionAnnotationFont, OrionDocumentAnnotation } from './types';
 import { fitText, formatValidatorDate, safeText } from './validatorStamp';
+import { viewedPageSize, visualBlToDrawImage } from './pageRotation';
 
 const TEXT = rgb(0.05, 0.08, 0.15);
 const MUTED = rgb(0.4, 0.44, 0.5);
@@ -28,16 +37,22 @@ export function fitTextSize(font: PDFFont, text: string, maxWidth: number, maxHe
   return size;
 }
 
+/** Caja en coords visuales (pdf.js /Rotate), origen abajo-izquierda. */
 function boxOnPage(page: PDFPage, a: OrionDocumentAnnotation) {
-  const { width: pw, height: ph } = page.getSize();
-  const bw = (a.width / 100) * pw;
-  const bh = (a.height / 100) * ph;
-  return { bx: (a.x / 100) * pw, by: ph - (a.y / 100) * ph - bh, bw, bh };
-}
-
-function drawCaption(page: PDFPage, font: PDFFont, a: OrionDocumentAnnotation, bx: number, by: number, bw: number) {
-  const caption = fitText(font, annotationCaption(a), CAPTION_SIZE, Math.max(1, bw));
-  page.drawText(caption, { x: bx, y: by + 0.5, size: CAPTION_SIZE, font, color: MUTED });
+  const { width: mw, height: mh } = page.getSize();
+  const pageRotate = page.getRotation().angle;
+  const { width: vw, height: vh } = viewedPageSize(mw, mh, pageRotate);
+  const bw = (a.width / 100) * vw;
+  const bh = (a.height / 100) * vh;
+  return {
+    bx: (a.x / 100) * vw,
+    by: vh - (a.y / 100) * vh - bh,
+    bw,
+    bh,
+    mw,
+    mh,
+    pageRotate,
+  };
 }
 
 /** Línea base respecto al borde de arriba (igual que se ve en pantalla con line-height 1). */
@@ -49,45 +64,86 @@ const STANDARD_FONT: Record<OrionAnnotationFont, { regular: StandardFonts; bold:
   courier: { regular: StandardFonts.Courier, bold: StandardFonts.CourierBold },
 };
 
+function drawVisualText(
+  page: PDFPage,
+  left: number,
+  bottom: number,
+  text: string,
+  size: number,
+  font: PDFFont,
+  color: ReturnType<typeof rgb>,
+  mw: number,
+  mh: number,
+  pageRotate: number
+) {
+  const box = visualBlToDrawImage(left, bottom, 1, 1, mw, mh, pageRotate);
+  page.drawText(text, {
+    x: box.x,
+    y: box.y,
+    size,
+    font,
+    color,
+    rotate: degrees(box.rotate),
+  });
+}
+
 /** Texto con letra y tamaño elegidos: sale tal cual, desde la esquina de arriba de la caja. */
 function drawStyledText(page: PDFPage, a: OrionDocumentAnnotation, font: PDFFont) {
-  const { width: pw, height: ph } = page.getSize();
+  const { bx, by, bw, bh, mw, mh, pageRotate } = boxOnPage(page, a);
   const size = Number(a.fontSize);
-  const bx = (a.x / 100) * pw;
-  const top = ph - (a.y / 100) * ph;
   const text = safeText(font, String(a.text || ''));
-  // Solo se recorta si se saldría de la hoja.
-  const value = fitText(font, text, size, Math.max(1, pw - bx));
-  page.drawText(value, { x: bx, y: top - size * TEXT_BASELINE_RATIO, size, font, color: TEXT });
+  const value = fitText(font, text, size, Math.max(1, bw));
+  const top = by + bh;
+  drawVisualText(
+    page,
+    bx,
+    top - size * TEXT_BASELINE_RATIO,
+    value,
+    size,
+    font,
+    TEXT,
+    mw,
+    mh,
+    pageRotate
+  );
 }
 
 function drawTextAnnotation(page: PDFPage, a: OrionDocumentAnnotation, fonts: { regular: PDFFont; bold: PDFFont }) {
-  const { bx, by, bw, bh } = boxOnPage(page, a);
-  // La leyenda va dentro de la caja solo si queda espacio para el valor.
+  const { bx, by, bw, bh, mw, mh, pageRotate } = boxOnPage(page, a);
   const withCaption = bh >= CAPTION_SIZE + MIN_TEXT_SIZE + 3;
   const captionSpace = withCaption ? CAPTION_SIZE + 1.5 : 0;
   const text = safeText(fonts.bold, String(a.text || ''));
   const size = fitTextSize(fonts.bold, text, Math.max(1, bw), Math.max(1, bh - captionSpace));
   const value = fitText(fonts.bold, text, size, Math.max(1, bw));
   const textY = by + captionSpace + Math.max(0, (bh - captionSpace - size) / 2) + size * 0.15;
-  page.drawText(value, { x: bx, y: textY, size, font: fonts.bold, color: TEXT });
-  if (withCaption) drawCaption(page, fonts.regular, a, bx, by, bw);
+  drawVisualText(page, bx, textY, value, size, fonts.bold, TEXT, mw, mh, pageRotate);
+  if (withCaption) {
+    const caption = fitText(fonts.regular, annotationCaption(a), CAPTION_SIZE, Math.max(1, bw));
+    drawVisualText(page, bx, by + 0.5, caption, CAPTION_SIZE, fonts.regular, MUTED, mw, mh, pageRotate);
+  }
 }
 
 function drawSealAnnotation(page: PDFPage, a: OrionDocumentAnnotation, image: PDFImage, font: PDFFont) {
-  const { bx, by, bw, bh } = boxOnPage(page, a);
+  const { bx, by, bw, bh, mw, mh, pageRotate } = boxOnPage(page, a);
   const withCaption = bh >= 24;
   const captionSpace = withCaption ? CAPTION_SIZE + 1.5 : 0;
   const scale = Math.min(bw / image.width, (bh - captionSpace) / image.height);
   const w = image.width * scale;
   const h = image.height * scale;
+  const left = bx + (bw - w) / 2;
+  const bottom = by + captionSpace + (bh - captionSpace - h) / 2;
+  const box = visualBlToDrawImage(left, bottom, w, h, mw, mh, pageRotate);
   page.drawImage(image, {
-    x: bx + (bw - w) / 2,
-    y: by + captionSpace + (bh - captionSpace - h) / 2,
-    width: w,
-    height: h,
+    x: box.x,
+    y: box.y,
+    width: box.width,
+    height: box.height,
+    rotate: degrees(box.rotate),
   });
-  if (withCaption) drawCaption(page, font, a, bx, by, bw);
+  if (withCaption) {
+    const caption = fitText(font, annotationCaption(a), CAPTION_SIZE, Math.max(1, bw));
+    drawVisualText(page, bx, by + 0.5, caption, CAPTION_SIZE, font, MUTED, mw, mh, pageRotate);
+  }
 }
 
 /**
