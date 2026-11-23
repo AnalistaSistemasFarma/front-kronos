@@ -12,8 +12,6 @@ import {
 import { Bar } from "react-chartjs-2";
 import type { ChartOptions } from "chart.js";
 import "../../../lib/charts/register";
-import AgentAvatar from "../AgentAvatar";
-import CompanyLogo, { companyLogoSrc } from "../../ui/CompanyLogo";
 import { mergeChartOptionsForTheme } from "../../../lib/charts/chartColorScheme";
 import type { GraficosDto } from "../../../lib/agent-audit/automation-db";
 import {
@@ -160,7 +158,7 @@ export function GraficosMejora({
                 borderCollapse: "separate",
                 borderSpacing: 3,
                 fontSize: 12,
-                minWidth: 180 + semanas.length * 62,
+                minWidth: 120 + semanas.length * 62,
               }}
             >
               <thead>
@@ -203,60 +201,18 @@ export function GraficosMejora({
                       }}
                     >
                       {d.departamento}
-                      {(d.agentCards?.length ?? 0) > 0 ? (
+                      {d.agentes.length > 0 && (
                         <div
                           style={{
-                            display: "flex",
-                            flexWrap: "wrap",
-                            gap: "3px 8px",
-                            marginTop: 3,
-                            maxWidth: 220,
+                            fontWeight: 400,
+                            fontSize: 10,
+                            opacity: 0.65,
+                            maxWidth: 180,
                             whiteSpace: "normal",
                           }}
                         >
-                          {d.agentCards.map((a) => (
-                            <span
-                              key={a.code}
-                              style={{
-                                display: "inline-flex",
-                                alignItems: "center",
-                                gap: 4,
-                                fontWeight: 400,
-                                fontSize: 10,
-                              }}
-                            >
-                              <AgentAvatar
-                                code={a.code}
-                                displayName={a.displayName}
-                                avatarUrl={a.avatarUrl}
-                                avatarVersion={a.avatarVersion}
-                                size={20}
-                                showStatus={false}
-                                withTooltip={false}
-                              />
-                              <span style={{ opacity: 0.8 }}>{a.displayName}</span>
-                              {companyLogoSrc(a.empresa) && (
-                                <span style={{ display: "inline-flex", flexShrink: 0 }}>
-                                  <CompanyLogo name={a.empresa} height={14} />
-                                </span>
-                              )}
-                            </span>
-                          ))}
+                          {d.agentes.join(", ")}
                         </div>
-                      ) : (
-                        d.agentes.length > 0 && (
-                          <div
-                            style={{
-                              fontWeight: 400,
-                              fontSize: 10,
-                              opacity: 0.65,
-                              maxWidth: 180,
-                              whiteSpace: "normal",
-                            }}
-                          >
-                            {d.agentes.join(", ")}
-                          </div>
-                        )
                       )}
                     </td>
                     {d.celdas.map((c, i) => (
