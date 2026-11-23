@@ -1,5 +1,14 @@
-import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFImage, type PDFPage } from 'pdf-lib';
+import {
+  PDFDocument,
+  StandardFonts,
+  degrees,
+  rgb,
+  type PDFFont,
+  type PDFImage,
+  type PDFPage,
+} from 'pdf-lib';
 import type { OrionSignatureState } from './types';
+import { mapVisualBlPoint, viewedPageSize, visualBlToDrawImage } from './pageRotation';
 
 const GREEN = rgb(0.05, 0.55, 0.36);
 const TEXT = rgb(0.13, 0.16, 0.2);
@@ -189,50 +198,98 @@ function drawValidatorMark(
   assets: { font: PDFFont; bold: PDFFont; image: PDFImage | null }
 ): void {
   const { font, bold, image } = assets;
-  const { width: pw, height: ph } = page.getSize();
-  const bw = (mark.field.width / 100) * pw;
-  const bh = (mark.field.height / 100) * ph;
-  const bx = (mark.field.x / 100) * pw;
-  const by = ph - (mark.field.y / 100) * ph - bh;
+  const { width: mw, height: mh } = page.getSize();
+  const pageRotate = page.getRotation().angle;
+  // Layout en coordenadas visuales (como el canvas de pdf.js con /Rotate).
+  const { width: vw, height: vh } = viewedPageSize(mw, mh, pageRotate);
+  const bw = (mark.field.width / 100) * vw;
+  const bh = (mark.field.height / 100) * vh;
+  const bx = (mark.field.x / 100) * vw;
+  const by = vh - (mark.field.y / 100) * vh - bh;
 
-  // Visto bueno discreto: tamaños acotados aunque la caja sea grande.
   const nameSize = Math.min(5.5, Math.max(3.5, bh * 0.14));
   const dateSize = Math.max(3, nameSize - 1.3);
-  // Caja muy pequeña: sin nombre ni fecha, el chulito/firma ocupa toda la caja.
   const withText = bh >= nameSize + dateSize + 8 && bw >= 24;
   const textHeight = withText ? nameSize + dateSize + 2 : 0;
-  const graphicHeight = withText ? Math.min(16, Math.max(4, bh - textHeight - 2)) : Math.max(1, bh - 1);
+  const graphicHeight = withText
+    ? Math.min(16, Math.max(4, bh - textHeight - 2))
+    : Math.max(1, bh - 1);
   const graphicTop = withText ? by + textHeight + graphicHeight + 1 : by + bh - 0.5;
 
   if (image) {
     const scale = Math.min(Math.max(1, bw - 2) / image.width, graphicHeight / image.height);
     const w = image.width * scale;
     const h = image.height * scale;
-    page.drawImage(image, { x: bx + (bw - w) / 2, y: graphicTop - h, width: w, height: h });
+    const left = bx + (bw - w) / 2;
+    const bottom = graphicTop - h;
+    const box = visualBlToDrawImage(left, bottom, w, h, mw, mh, pageRotate);
+    page.drawImage(image, {
+      x: box.x,
+      y: box.y,
+      width: box.width,
+      height: box.height,
+      rotate: degrees(box.rotate),
+    });
   } else {
-    const size = withText ? Math.min(graphicHeight, bw * 0.3, 8) : Math.min(graphicHeight, bw - 1, 8);
-    drawCheck(page, bx + (bw - size) / 2, graphicTop - size - (graphicHeight - size) / 2, size);
+    const size = withText
+      ? Math.min(graphicHeight, bw * 0.3, 8)
+      : Math.min(graphicHeight, bw - 1, 8);
+    const left = bx + (bw - size) / 2;
+    const bottom = graphicTop - size - (graphicHeight - size) / 2;
+    drawCheckRotated(page, left, bottom, size, mw, mh, pageRotate);
   }
   if (!withText) return;
 
   const maxWidth = bw - 2;
   const name = fitText(bold, mark.name, nameSize, maxWidth);
+  const nameWidth = bold.widthOfTextAtSize(name, nameSize);
+  const nameLeft = bx + (bw - nameWidth) / 2;
+  const nameBottom = by + dateSize + 2;
+  const nameBox = visualBlToDrawImage(nameLeft, nameBottom, 1, 1, mw, mh, pageRotate);
   page.drawText(name, {
-    x: bx + (bw - bold.widthOfTextAtSize(name, nameSize)) / 2,
-    y: by + dateSize + 2,
+    x: nameBox.x,
+    y: nameBox.y,
     size: nameSize,
     font: bold,
     color: TEXT,
+    rotate: degrees(nameBox.rotate),
   });
   const date = formatValidatorDate(mark.decidedAt);
   if (date) {
     const text = fitText(font, `Validó ${date}`, dateSize, maxWidth);
+    const textWidth = font.widthOfTextAtSize(text, dateSize);
+    const dateLeft = bx + (bw - textWidth) / 2;
+    const dateBottom = by + 1;
+    const dateBox = visualBlToDrawImage(dateLeft, dateBottom, 1, 1, mw, mh, pageRotate);
     page.drawText(text, {
-      x: bx + (bw - font.widthOfTextAtSize(text, dateSize)) / 2,
-      y: by + 1,
+      x: dateBox.x,
+      y: dateBox.y,
       size: dateSize,
       font,
       color: MUTED,
+      rotate: degrees(dateBox.rotate),
     });
   }
+}
+
+/** Chulito en coords visuales; el círculo no rota, las líneas sí se proyectan a media. */
+function drawCheckRotated(
+  page: PDFPage,
+  x: number,
+  y: number,
+  size: number,
+  mediaW: number,
+  mediaH: number,
+  pageRotate: number
+) {
+  const map = (px: number, py: number) =>
+    mapVisualBlPoint(px, py, mediaW, mediaH, pageRotate);
+  const stroke = Math.max(0.8, size * 0.12);
+  const c = map(x + size / 2, y + size / 2);
+  page.drawCircle({ x: c.x, y: c.y, size: size / 2, color: GREEN });
+  const a = map(x + size * 0.26, y + size * 0.52);
+  const b = map(x + size * 0.44, y + size * 0.32);
+  const d = map(x + size * 0.76, y + size * 0.7);
+  page.drawLine({ start: a, end: b, thickness: stroke, color: rgb(1, 1, 1) });
+  page.drawLine({ start: b, end: d, thickness: stroke, color: rgb(1, 1, 1) });
 }
