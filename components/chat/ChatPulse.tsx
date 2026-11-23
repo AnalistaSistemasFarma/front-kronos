@@ -116,7 +116,8 @@ export default function ChatPulse() {
       for (const id of hilos) pedirSondeoDelHilo(id);
       avisarActividadProyectos(hilos);
       // El antirrebote de message-sound deja sonar una sola vez por ráfaga.
-      for (const e of eventos) if (mensajeFresco(e.createdAt)) avisarMensajeEntrante(e.idConversation);
+      // A muted project (2026-11-23) refreshes silently: no sound.
+      for (const e of eventos) if (!e.muted && mensajeFresco(e.createdAt)) avisarMensajeEntrante(e.idConversation);
     };
 
     const procesar = (todos: ChatPulseEvent[]) => {

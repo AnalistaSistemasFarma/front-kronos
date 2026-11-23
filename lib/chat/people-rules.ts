@@ -236,6 +236,9 @@ export interface ChatPulseEvent {
   /** Quién lo escribió o zumbó. */
   authorName: string;
   createdAt: string;
-  /** Solo en 'nudge': yo silencié los zumbidos de ese hilo. */
+  /**
+   * 'nudge': yo silencié los zumbidos de ese hilo. 'project' (2026-11-23): yo silencié las
+   * notificaciones de ese proyecto (sin sonido).
+   */
   muted: boolean;
 }

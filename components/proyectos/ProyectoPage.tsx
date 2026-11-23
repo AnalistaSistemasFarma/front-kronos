@@ -49,6 +49,7 @@ import SeccionMatrices from './matrices/SeccionMatrices';
 import { AgentesApilados, AvisoArriba, BadgeRol, CONSULTA_ESCRITORIO, Encabezado, EsqueletoFilas, type Aviso } from './ui';
 import css from './proyectos.module.css';
 import { useEstadosAgentes } from './useEstadosAgentes';
+import { BadgeSilenciado, BotonSilenciar } from './BotonSilenciar';
 import MedidorConsumo, { useConsumoAnthropic } from './MedidorConsumo';
 import type { EstadoAgenteProyectoDto } from '../../lib/proyectos/estado-agente';
 
@@ -615,6 +616,17 @@ export default function ProyectoPage({ idProject }: { idProject: number }) {
     );
   }
 
+  // «Silenciar notificaciones» (2026-11-23): per person; not offered on an archived project.
+  const botonSilenciar =
+    proyecto && !proyecto.archived ? (
+      <BotonSilenciar
+        idProject={proyecto.idProject}
+        muted={proyecto.muted === true}
+        onChange={(muted) => setProyecto((p) => (p ? { ...p, muted } : p))}
+        avisar={avisar}
+      />
+    ) : null;
+
   const cabeceraProyecto = (
     <div className={css.cabeceraProyecto}>
       <Anchor component={Link} href='/process/proyectos' size='xs' c='dimmed'>
@@ -625,14 +637,18 @@ export default function ProyectoPage({ idProject }: { idProject: number }) {
       </Anchor>
       {proyecto ? (
         <>
-          <Title order={2} fz={18} fw={700} mt={6} lineClamp={2} data-testid='proyecto-nombre'>
-            {proyecto.name}
-          </Title>
+          <Group gap={6} mt={6} wrap='nowrap' align='flex-start' justify='space-between'>
+            <Title order={2} fz={18} fw={700} lineClamp={2} style={{ minWidth: 0 }} data-testid='proyecto-nombre'>
+              {proyecto.name}
+            </Title>
+            {botonSilenciar}
+          </Group>
           <Group gap={6} mt={6} wrap='wrap'>
             <Badge size='sm' variant='light' color='blue' style={{ textTransform: 'none' }}>
               {proyecto.company.companyName}
             </Badge>
             <BadgeRol role={proyecto.myRole} />
+            {proyecto.muted && <BadgeSilenciado />}
             {proyecto.archived && (
               <Badge size='sm' variant='light' color='yellow'>
                 Archivado
@@ -749,6 +765,7 @@ export default function ProyectoPage({ idProject }: { idProject: number }) {
             </Stack>
           )}
         </Box>
+        {botonSilenciar}
         {proyecto && <BadgeRol role={proyecto.myRole} />}
       </Group>
       {proyecto && (

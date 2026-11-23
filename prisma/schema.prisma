@@ -975,6 +975,8 @@ model ChatProject {
   policyRepos   ChatProjectAgentPolicyRepo[]
   mesas ChatProjectMesa[]
   matrices ChatProjectMatrix[]
+  /// People who muted this project's notifications (2026-11-23).
+  mutes    ChatProjectMute[]
 
   @@index([id_agent, archived])
   @@index([id_company])
@@ -1065,6 +1067,28 @@ model ChatProjectRead {
   @@unique([id_conversation, id_user], map: "chat_project_read_conversation_user")
   @@index([id_user], map: "chat_project_read_id_user_idx")
   @@map("chat_project_read")
+  @@schema("dbo")
+}
+
+/// «Silenciar notificaciones» of a project, PER PERSON (2026-11-23, Nicolás
+/// Rivera, msg 38059). A row = that person muted that project: no push for the
+/// project's replies, no sound and it does not count in the header «Proyectos»
+/// icon. No row = notifications on (the default). It never affects the other
+/// members. Separate NEW table (lib/proyectos/mute.ts): if the code ships
+/// before the DDL, reads fail open (everyone keeps getting notifications).
+model ChatProjectMute {
+  id_project_mute Int      @id @default(autoincrement())
+  id_project      Int
+  /// No foreign key on purpose (like chat_project_read.id_user): a deactivated
+  /// user must not block anything, and the row grants no access.
+  id_user         String   @db.NVarChar(1000)
+  created_at      DateTime @default(now())
+
+  project ChatProject @relation(fields: [id_project], references: [id_project], onDelete: Cascade)
+
+  @@unique([id_project, id_user], map: "chat_project_mute_project_user")
+  @@index([id_user], map: "chat_project_mute_id_user_idx")
+  @@map("chat_project_mute")
   @@schema("dbo")
 }
 

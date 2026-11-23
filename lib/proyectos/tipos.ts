@@ -69,6 +69,11 @@ export interface ProyectoResumenDto {
    * cambie después llega por el pulso del chat.
    */
   trabajando?: EstadoAgenteProyectoDto[];
+  /**
+   * The person in session muted this project's notifications (2026-11-23).
+   * Optional: an older response does not carry it and it reads as not muted.
+   */
+  muted?: boolean;
 }
 
 export interface ListaProyectosDto {

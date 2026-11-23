@@ -31,6 +31,7 @@ import {
 } from '../../../../../lib/chat/attachmentStorage';
 import { notifyAgentReply } from '../../../../../lib/chat/notifyAgentReply';
 import { alPublicarAgenteEnMesa } from '../../../../../lib/proyectos/mesas';
+import { projectMutedUserIds, projectPushRecipients } from '../../../../../lib/proyectos/mute';
 import { mencionablesParaAgente } from '../../../../../lib/chat/projects';
 import type { AgenteMencionable } from '../../../../../lib/chat/groups';
 import {
@@ -371,17 +372,18 @@ export async function POST(request: NextRequest) {
     } else if (conversation.kind === 'project') {
       // En un PROYECTO se le avisa a sus miembros (la pertenencia sale de
       // chat_project_member, nunca de chat_participant).
-      const miembros = await prisma.chatProjectMember.findMany({
-        where: { id_project: conversation.idProject },
-        select: { user: { select: { email: true, isActive: true } } },
-      });
+      // «Silenciar notificaciones» (2026-11-23): whoever muted the project gets no push.
+      const [miembros, silenciados] = await Promise.all([
+        prisma.chatProjectMember.findMany({
+          where: { id_project: conversation.idProject },
+          select: { id_user: true, user: { select: { email: true, isActive: true } } },
+        }),
+        projectMutedUserIds(conversation.idProject),
+      ]);
       void notifyAgentReply({
         idConversation: conversation.id,
         idUser: null,
-        groupEmails: miembros
-          .filter((m) => m.user.isActive)
-          .map((m) => m.user.email)
-          .filter((e) => e.length > 0),
+        groupEmails: projectPushRecipients(miembros, silenciados),
         groupTitle: conversation.projectName,
         url: `/process/proyectos/${conversation.idProject}?conversacion=${conversation.id}`,
         agentCode: agent.code,
