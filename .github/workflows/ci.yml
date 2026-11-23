@@ -573,6 +573,25 @@ jobs:
           echo "IF OBJECT_ID(N'dbo.biomed_equipo', N'U') IS NULL OR OBJECT_ID(N'dbo.biomed_valor_unitario', N'U') IS NULL OR OBJECT_ID(N'dbo.biomed_equipo_evento_solo_insercion', N'TR') IS NULL OR NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'biomed_equipo_id_company_serie_key' AND is_unique = 1) THROW 50000, N'La migración del inventario biomédico no dejó sus tablas, la serie única o el disparador.', 1;" > /tmp/biomed-inv-ok.sql
           npx prisma db execute --schema prisma/schema.prisma --file /tmp/biomed-inv-ok.sql
           if npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-11-10-biomedica-inventario-PROD.sql; then echo "El script de PROD del inventario biomédico debió negarse en kronos_ci"; exit 1; fi
+          # Hoja de vida y mantenimientos biomédicos (fase 3, 2026-11-23): migración y PRUEBAS dos veces (idempotencia), objetos, disparador que impide cambiar o borrar un mantenimiento, y PROD que se niega.
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261123150000_biomedica_hoja_vida/migration.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261123150000_biomedica_hoja_vida/migration.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-11-23-biomedica-hoja-vida-PRUEBAS.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-11-23-biomedica-hoja-vida-PRUEBAS.sql
+          echo "IF OBJECT_ID(N'dbo.biomed_mantenimiento', N'U') IS NULL OR OBJECT_ID(N'dbo.biomed_mantenimiento_control', N'TR') IS NULL OR COL_LENGTH(N'dbo.biomed_equipo', N'periodicidad_mant_meses') IS NULL OR COL_LENGTH(N'dbo.biomed_registro', N'equipo_json') IS NULL THROW 50000, N'La migración de hoja de vida biomédica no dejó sus columnas, la tabla o el disparador.', 1;" > /tmp/biomed-hv-ok.sql
+          npx prisma db execute --schema prisma/schema.prisma --file /tmp/biomed-hv-ok.sql
+          echo "INSERT INTO dbo.biomed_mantenimiento (id_company, id_biomed_equipo, fecha, tipo, responsables, created_by) VALUES (3, 1, '2026-11-23', N'preventivo', N'CI', N'ci@gsslatam.com');" > /tmp/biomed-hv-ins.sql
+          npx prisma db execute --schema prisma/schema.prisma --file /tmp/biomed-hv-ins.sql
+          echo "UPDATE dbo.biomed_mantenimiento SET responsables = N'otro' WHERE created_by = N'ci@gsslatam.com';" > /tmp/biomed-hv-upd.sql
+          if npx prisma db execute --schema prisma/schema.prisma --file /tmp/biomed-hv-upd.sql; then echo "Un mantenimiento no debe poder cambiarse"; exit 1; fi
+          echo "DELETE FROM dbo.biomed_mantenimiento WHERE created_by = N'ci@gsslatam.com';" > /tmp/biomed-hv-del.sql
+          if npx prisma db execute --schema prisma/schema.prisma --file /tmp/biomed-hv-del.sql; then echo "Un mantenimiento no debe poder borrarse"; exit 1; fi
+          echo "UPDATE dbo.biomed_mantenimiento SET estado = N'anulado', anulado_por = N'ci@gsslatam.com', anulado_at = SYSUTCDATETIME(), motivo_anulacion = N'prueba CI' WHERE created_by = N'ci@gsslatam.com';" > /tmp/biomed-hv-anu.sql
+          npx prisma db execute --schema prisma/schema.prisma --file /tmp/biomed-hv-anu.sql
+          if npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-11-23-biomedica-hoja-vida-PROD.sql; then echo "El script de PROD de hoja de vida biomédica debió negarse en kronos_ci"; exit 1; fi
+          echo "EXEC sp_set_session_context N'biomedica_hoja_vida_reversa_acepta_perdida', 1;" > /tmp/biomed-hv-rev.sql && cat prisma/manual/2026-11-23-biomedica-hoja-vida-reversa.sql >> /tmp/biomed-hv-rev.sql
+          npx prisma db execute --schema prisma/schema.prisma --file /tmp/biomed-hv-rev.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261123150000_biomedica_hoja_vida/migration.sql
           # Agente de desarrollo en Proyectos (2026-10-27): migración y PRUEBAS dos veces (idempotencia), columna NOT NULL, PROD que se niega y la corrección de proyectos en modo LISTAR (no escribe).
           npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261027170000_agent_es_desarrollo/migration.sql
           npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261027170000_agent_es_desarrollo/migration.sql

@@ -45,6 +45,7 @@ import {
   IconX,
 } from '@tabler/icons-react';
 import SgcSelect from '../SgcSelect';
+import BiomedHojaVida from './BiomedHojaVida';
 import { sgcSend, useSgcFetch } from '../useSgcFetch';
 import type { AccionMovimiento, EquipoDto, EstadoEquipo, ResumenInventario } from '../../../lib/biomedica/inventario';
 
@@ -333,8 +334,8 @@ function Equipos({ idCompany, empresa, version, onCambio }: { idCompany: number;
                             <IconCopy size={16} />
                           </ActionIcon>
                         </Tooltip>
-                        <Tooltip label='Historial'>
-                          <ActionIcon variant='subtle' aria-label='Historial' onClick={() => setHistorial(e.id)}>
+                        <Tooltip label='Hoja de vida (mantenimientos, formatos y trazabilidad)'>
+                          <ActionIcon variant='subtle' aria-label='Hoja de vida' onClick={() => setHistorial(e.id)} data-testid='biomed-inv-hoja-vida'>
                             <IconHistory size={16} />
                           </ActionIcon>
                         </Tooltip>
@@ -358,7 +359,7 @@ function Equipos({ idCompany, empresa, version, onCambio }: { idCompany: number;
       {editar && <EquipoModal idCompany={idCompany} equipo={editar === 'nuevo' ? null : editar} resumen={r} onClose={() => setEditar(null)} onDone={(msg) => { setEditar(null); terminado(msg); }} />}
       {masivo && <CargueModal idCompany={idCompany} empresa={empresa} resumen={r} onClose={() => setMasivo(false)} onDone={(msg) => { setMasivo(false); terminado(msg); }} />}
       {copiar && <EquipoModal idCompany={idCompany} equipo={null} base={copiar} resumen={r} onClose={() => setCopiar(null)} onDone={(msg) => { setCopiar(null); terminado(msg); }} />}
-      {historial !== null && <HistorialModal idCompany={idCompany} idEquipo={historial} onClose={() => setHistorial(null)} />}
+      {historial !== null && <BiomedHojaVida idCompany={idCompany} idEquipo={historial} onClose={() => setHistorial(null)} onChanged={onCambio} />}
       {sap && <ArticuloSapModal idCompany={idCompany} ids={[...sel.keys()]} onClose={() => setSap(false)} onDone={(n) => { setSap(false); terminado(`Artículo de SAP actualizado en ${n.toLocaleString('es-CO')} equipo(s).`); }} />}
     </Stack>
   );
@@ -570,69 +571,6 @@ function EquipoModal({ idCompany, equipo, base, resumen, onClose, onDone }: { id
           </Button>
         </Group>
       </Stack>
-    </Modal>
-  );
-}
-
-const ACCION_HISTORIAL: Record<string, string> = {
-  alta: 'Alta',
-  carga: 'Cargue masivo',
-  carga_cambio: 'Cambio por cargue masivo',
-  edicion: 'Edición',
-  cambio_serial: 'Cambio de serial',
-  distribuir: 'Distribuido',
-  devolver: 'Devuelto a bodega',
-  faltante: 'Marcado faltante',
-  danado: 'Marcado dañado',
-  reintegrar: 'Reintegrado a bodega',
-  articulo_sap: 'Artículo de SAP',
-};
-
-function HistorialModal({ idCompany, idEquipo, onClose }: { idCompany: number; idEquipo: number; onClose: () => void }) {
-  const h = useSgcFetch<{ equipo: EquipoDto; historial: { id: number; accion: string; antes: Record<string, unknown> | null; despues: Record<string, unknown> | null; justificacion: string | null; actor: string; at: string }[] }>(`/api/biomedica/inventario/${idEquipo}?company=${idCompany}`);
-  const resumir = (o: Record<string, unknown> | null) =>
-    o
-      ? Object.entries(o)
-          .filter(([, x]) => x !== null && x !== undefined && x !== '')
-          .map(([k, x]) => `${k}: ${k === 'estado' ? (ETIQUETA[x as EstadoEquipo] ?? String(x)) : k === 'valorCobro' ? pesos(Number(x)) : String(x)}`)
-          .join(' · ')
-      : '';
-  return (
-    <Modal opened onClose={onClose} title={<Text fw={700}>Historial · {h.data?.equipo.serie ?? '…'}</Text>} size='xl' data-testid='biomed-inv-historial'>
-      {h.error ? (
-        <Alert color='orange'>{h.error}</Alert>
-      ) : !h.data ? (
-        <Group justify='center' my='md'>
-          <Loader />
-        </Group>
-      ) : (
-        <Table.ScrollContainer minWidth={700}>
-          <Table striped verticalSpacing='xs' fz='sm'>
-            <Table.Thead>
-              <Table.Tr>
-                <Table.Th>Fecha</Table.Th>
-                <Table.Th>Acción</Table.Th>
-                <Table.Th>Antes</Table.Th>
-                <Table.Th>Después</Table.Th>
-                <Table.Th>Justificación</Table.Th>
-                <Table.Th>Por</Table.Th>
-              </Table.Tr>
-            </Table.Thead>
-            <Table.Tbody>
-              {h.data.historial.map((x) => (
-                <Table.Tr key={x.id}>
-                  <Table.Td>{fecha(x.at)}</Table.Td>
-                  <Table.Td>{ACCION_HISTORIAL[x.accion] ?? x.accion}</Table.Td>
-                  <Table.Td>{resumir(x.antes)}</Table.Td>
-                  <Table.Td>{resumir(x.despues)}</Table.Td>
-                  <Table.Td>{x.justificacion ?? '—'}</Table.Td>
-                  <Table.Td>{x.actor}</Table.Td>
-                </Table.Tr>
-              ))}
-            </Table.Tbody>
-          </Table>
-        </Table.ScrollContainer>
-      )}
     </Modal>
   );
 }

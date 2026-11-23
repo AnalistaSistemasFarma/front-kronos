@@ -1,5 +1,17 @@
 import { SgcError } from '../sgc/errors';
 import type { BiomedAccess } from './access';
+import {
+  ACTIVIDAD_HOJA_VIDA,
+  ETIQUETA_RESULTADO,
+  ETIQUETA_TIPO,
+  MAX_CHEQUEO,
+  RESULTADOS_CHEQUEO,
+  TIPOS_MANTENIMIENTO,
+  etiquetaAccion,
+  type ItemChequeo,
+  type ResultadoChequeo,
+  type TipoMantenimiento,
+} from './hojaVidaTipos';
 import { ETIQUETA_CAMPO, ETIQUETA_ESTADO, historialEquipo, type BiomedDb, type EquipoDto, type EstadoEquipo, type InvActor } from './inventario';
 
 /**
@@ -14,25 +26,7 @@ import { ETIQUETA_CAMPO, ETIQUETA_ESTADO, historialEquipo, type BiomedDb, type E
  * La hoja de vida se actualiza en cada mantenimiento y en cada cambio de cliente (historial del inventario).
  */
 
-export const ACTIVIDAD_INSPECCION = 'Inspección de equipos biomédicos nuevos';
-export const ACTIVIDAD_HOJA_VIDA = 'Elaboración y actualización de hojas de vida';
-
-export const TIPOS_MANTENIMIENTO = ['preventivo', 'correctivo', 'metrologico'] as const;
-export type TipoMantenimiento = (typeof TIPOS_MANTENIMIENTO)[number];
-export const ETIQUETA_TIPO: Record<TipoMantenimiento, string> = { preventivo: 'Preventivo', correctivo: 'Correctivo', metrologico: 'Metrológico' };
-
-export const RESULTADOS_CHEQUEO = ['ok', 'no_ok', 'na'] as const;
-export type ResultadoChequeo = (typeof RESULTADOS_CHEQUEO)[number];
-export const ETIQUETA_RESULTADO: Record<ResultadoChequeo, string> = { ok: 'OK', no_ok: 'No OK', na: 'N/A' };
-/** Lista de chequeo sugerida (se puede quitar o agregar ítems en cada mantenimiento). */
-export const CHEQUEO_SUGERIDO = ['Estado físico', 'Pantalla', 'Cableado', 'Batería', 'Alarmas', 'Limpieza y desinfección'] as const;
-export const MAX_CHEQUEO = 40;
-
-export interface ItemChequeo {
-  item: string;
-  resultado: ResultadoChequeo;
-  nota: string | null;
-}
+export * from './hojaVidaTipos';
 
 export interface MantenimientoDto {
   id: number;
@@ -354,23 +348,6 @@ const esc = (v: unknown) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '
 const fechaCo = (s: string | null) => (s ? s.split('-').reverse().join('/') : '—');
 const fechaHoraCo = (s: string) => new Date(s).toLocaleString('es-CO', { timeZone: 'America/Bogota', dateStyle: 'short', timeStyle: 'short' });
 
-const ACCION_HISTORIAL: Record<string, string> = {
-  alta: 'Ingreso al inventario',
-  edicion: 'Edición de datos',
-  cambio_serial: 'Cambio de serial',
-  distribuir: 'Distribuido',
-  devolver: 'Devuelto a bodega',
-  faltante: 'Marcado faltante',
-  danado: 'Marcado dañado',
-  reintegrar: 'Reintegrado',
-  hoja_vida: 'Hoja de vida actualizada',
-  mantenimiento: 'Mantenimiento',
-  mantenimiento_anulado: 'Mantenimiento anulado',
-  articulo_sap: 'Artículo de SAP',
-  carga: 'Ingreso por cargue masivo',
-  carga_cambio: 'Actualizado por cargue masivo',
-};
-export const etiquetaAccion = (a: string) => ACCION_HISTORIAL[a] ?? a.replace(/_/g, ' ');
 
 /** Formato vigente de hojas de vida habilitado en el módulo (su código y versión van en el reporte). */
 export async function formatoHojaVida(db: BiomedDb, idCompany: number): Promise<{ code: string; title: string; version: number } | null> {

@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useMemo, useState } from 'react';
-import { Alert, Badge, Button, Card, Group, Loader, Modal, Stack, Table, Tabs, Text, TextInput } from '@mantine/core';
+import { Alert, Autocomplete, Badge, Button, Card, Group, Loader, Modal, SimpleGrid, Stack, Table, Tabs, Text, TextInput } from '@mantine/core';
 import { IconAlertTriangle, IconDevicesPc, IconFilePlus, IconLock, IconPencil, IconPlus, IconSearch, IconSettings, IconStethoscope } from '@tabler/icons-react';
 import SgcShell from '../../../../../components/sgc/SgcShell';
 import SgcSelect from '../../../../../components/sgc/SgcSelect';
@@ -10,6 +10,8 @@ import BiomedInventario from '../../../../../components/sgc/biomedica/BiomedInve
 import { sgcSend, useSgcFetch } from '../../../../../components/sgc/useSgcFetch';
 import type { BiomedAccess } from '../../../../../lib/biomedica/access';
 import type { BiomedFormatoDto, BiomedRegistroResumenDto } from '../../../../../lib/biomedica/db';
+import { ACTIVIDAD_INSPECCION } from '../../../../../lib/biomedica/hojaVidaTipos';
+import type { ResumenInventario } from '../../../../../lib/biomedica/inventario';
 import type { SgcCompanyAccess } from '../../../../../lib/sgc/permissions';
 
 /**
@@ -18,7 +20,13 @@ import type { SgcCompanyAccess } from '../../../../../lib/sgc/permissions';
  * biomédicos y Aseguramiento de Calidad. Los formatos son los VIGENTES del SGC
  * que Calidad habilita por actividad; se diligencian encima del PDF y, si el
  * formato deja de estar vigente, el borrador se bloquea.
+ * Fase 3 (2026-11-23): la «Inspección de equipos biomédicos nuevos» pide los
+ * datos del equipo (al elegir el modelo se llenan solos) y, al cerrarla, el
+ * equipo entra al inventario en bodega.
  */
+
+const VACIO_EQ = { equipo: '', marca: '', modelo: '', serie: '', codigoInterno: '', clasificacionRiesgo: '', registroSanitario: '' };
+type EquipoInspeccion = typeof VACIO_EQ;
 
 type Datos = { access: BiomedAccess; actividades: string[]; formatos: BiomedFormatoDto[]; registros: BiomedRegistroResumenDto[] };
 
@@ -31,6 +39,9 @@ function Biomedica({ company }: { company: SgcCompanyAccess }) {
   const [nuevo, setNuevo] = useState<BiomedFormatoDto | null>(null);
   const [equipo, setEquipo] = useState('');
   const [serial, setSerial] = useState('');
+  const [eqIns, setEqIns] = useState<EquipoInspeccion>(VACIO_EQ);
+  const esInspeccion = nuevo?.actividad === ACTIVIDAD_INSPECCION;
+  const resumenInv = useSgcFetch<{ resumen: ResumenInventario }>(esInspeccion ? `/api/biomedica/inventario?company=${company.idCompany}&resumen=1&pageSize=1` : null);
   const [abierto, setAbierto] = useState<number | null>(null);
   const [cfgDoc, setCfgDoc] = useState<string | null>(null);
   const [cfgAct, setCfgAct] = useState<string | null>(null);
@@ -64,10 +75,15 @@ function Biomedica({ company }: { company: SgcCompanyAccess }) {
     setBusy(true);
     setError(null);
     try {
-      const r = await sgcSend<{ id: number }>('/api/biomedica/registros', 'POST', { company: company.idCompany, idFormato: nuevo.id, equipo, serial });
+      const r = await sgcSend<{ id: number }>(
+        '/api/biomedica/registros',
+        'POST',
+        esInspeccion ? { company: company.idCompany, idFormato: nuevo.id, equipoDatos: eqIns } : { company: company.idCompany, idFormato: nuevo.id, equipo, serial }
+      );
       setNuevo(null);
       setEquipo('');
       setSerial('');
+      setEqIns(VACIO_EQ);
       datos.reload();
       setAbierto(r.id);
     } catch (e) {
@@ -239,18 +255,32 @@ function Biomedica({ company }: { company: SgcCompanyAccess }) {
         )}
       </Tabs>
 
-      <Modal opened={Boolean(nuevo)} onClose={() => setNuevo(null)} title={nuevo ? `Diligenciar ${nuevo.code}` : ''}>
+      <Modal opened={Boolean(nuevo)} onClose={() => setNuevo(null)} title={nuevo ? `Diligenciar ${nuevo.code}` : ''} size={esInspeccion ? 'lg' : 'md'}>
         <Stack gap='sm'>
           <Text size='sm' c='dimmed'>
             Se diligencia la versión vigente ({nuevo?.vigente ? `V${nuevo.vigente.versionNumber}` : '—'}). El formato del SGC no cambia: lo escrito va encima.
           </Text>
-          <TextInput autoComplete='off' data-1p-ignore='true' data-lpignore='true' label='Equipo' required value={equipo} onChange={(e) => setEquipo(e.currentTarget.value)} data-testid='biomed-equipo' />
-          <TextInput autoComplete='off' data-1p-ignore='true' data-lpignore='true' label='Serial (opcional)' value={serial} onChange={(e) => setSerial(e.currentTarget.value)} data-testid='biomed-serial' />
+          {esInspeccion ? (
+            <InspeccionCampos v={eqIns} onChange={setEqIns} resumen={resumenInv.data?.resumen ?? null} />
+          ) : (
+            <>
+              <TextInput autoComplete='off' data-1p-ignore='true' data-lpignore='true' label='Equipo' required value={equipo} onChange={(e) => setEquipo(e.currentTarget.value)} data-testid='biomed-equipo' />
+              <TextInput autoComplete='off' data-1p-ignore='true' data-lpignore='true' label='Serial (opcional)' value={serial} onChange={(e) => setSerial(e.currentTarget.value)} data-testid='biomed-serial' />
+              <Text size='xs' c='dimmed'>
+                Si el serial es de un equipo del inventario, el formato queda en su hoja de vida.
+              </Text>
+            </>
+          )}
+          {error && (
+            <Alert color='red' icon={<IconAlertTriangle size={16} />}>
+              {error}
+            </Alert>
+          )}
           <Group justify='flex-end'>
             <Button variant='default' onClick={() => setNuevo(null)}>
               Cancelar
             </Button>
-            <Button disabled={equipo.trim().length < 2} loading={busy} onClick={() => void crear()} data-testid='biomed-crear'>
+            <Button disabled={esInspeccion ? eqIns.equipo.trim().length < 2 || !eqIns.serie.trim() : equipo.trim().length < 2} loading={busy} onClick={() => void crear()} data-testid='biomed-crear'>
               Diligenciar
             </Button>
           </Group>
@@ -258,6 +288,43 @@ function Biomedica({ company }: { company: SgcCompanyAccess }) {
       </Modal>
 
       {abierto !== null && <BiomedEditor idCompany={company.idCompany} idRegistro={abierto} onClose={() => setAbierto(null)} onChanged={() => datos.reload()} />}
+    </Stack>
+  );
+}
+
+/** Datos del equipo NUEVO que se inspecciona: al elegir un modelo ya usado se llenan los demás. */
+function InspeccionCampos({ v, onChange, resumen }: { v: EquipoInspeccion; onChange: (v: EquipoInspeccion) => void; resumen: ResumenInventario | null }) {
+  const set = (k: keyof EquipoInspeccion, x: string) => {
+    const p = k === 'modelo' ? resumen?.plantillas?.[x] : undefined;
+    onChange({
+      ...v,
+      [k]: x,
+      ...(p
+        ? {
+            equipo: v.equipo || p.equipo || '',
+            marca: v.marca || p.marca || '',
+            codigoInterno: v.codigoInterno || p.codigoInterno || '',
+            clasificacionRiesgo: v.clasificacionRiesgo || p.clasificacionRiesgo || '',
+            registroSanitario: v.registroSanitario || p.registroSanitario || '',
+          }
+        : {}),
+    });
+  };
+  const campo = { autoComplete: 'off', 'data-1p-ignore': 'true', 'data-lpignore': 'true' } as const;
+  return (
+    <Stack gap='xs' data-testid='biomed-inspeccion-campos'>
+      <Alert color='blue' variant='light' p='xs'>
+        <Text size='sm'>Al cerrar la inspección, el equipo entra al inventario en bodega con su hoja de vida.</Text>
+      </Alert>
+      <SimpleGrid cols={2} spacing='xs'>
+        <Autocomplete label='Modelo' data={resumen?.modelos ?? []} value={v.modelo} onChange={(x) => set('modelo', x)} limit={30} {...campo} data-testid='biomed-ins-modelo' />
+        <TextInput label='Serie' required value={v.serie} onChange={(e) => set('serie', e.currentTarget.value)} {...campo} data-testid='biomed-ins-serie' />
+        <Autocomplete label='Equipo' required data={resumen?.equipos ?? []} value={v.equipo} onChange={(x) => set('equipo', x)} limit={30} {...campo} data-testid='biomed-ins-equipo' />
+        <Autocomplete label='Marca' data={resumen?.marcas ?? []} value={v.marca} onChange={(x) => set('marca', x)} limit={30} {...campo} />
+        <Autocomplete label='Código interno' data={resumen?.codigos ?? []} value={v.codigoInterno} onChange={(x) => set('codigoInterno', x)} limit={30} {...campo} />
+        <Autocomplete label='Clasificación de riesgo' data={resumen?.clasificaciones ?? []} value={v.clasificacionRiesgo} onChange={(x) => set('clasificacionRiesgo', x)} limit={30} {...campo} />
+        <TextInput label='Registro sanitario' value={v.registroSanitario} onChange={(e) => set('registroSanitario', e.currentTarget.value)} {...campo} />
+      </SimpleGrid>
     </Stack>
   );
 }

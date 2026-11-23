@@ -332,7 +332,7 @@ export async function closeRegistro(db: BiomedDb, access: BiomedAccess, idRegist
   }
   await db.biomedRegistro.update({ where: { id_biomed_registro: r.id_biomed_registro }, data: { estado: 'cerrado', closed_by: email, closed_at: now, updated_by: email, updated_at: now } });
   await evento(db, access.idCompany, 'registro.cerrado', actor, `${r.equipo}`, r.id_biomed_registro);
-  return { closed: true, idEquipo: r.id_biomed_equipo ?? null };
+  return { closed: true };
 }
 
 /**
