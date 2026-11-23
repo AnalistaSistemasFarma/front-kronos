@@ -19,7 +19,7 @@ import {
   Tooltip,
   UnstyledButton,
 } from '@mantine/core';
-import { IconArrowDown, IconArrowUp, IconCheck, IconClock, IconX } from '@tabler/icons-react';
+import { IconArrowDown, IconArrowUp, IconCheck, IconClock, IconPencil, IconX } from '@tabler/icons-react';
 import { useCallback, useEffect, useState } from 'react';
 import type { OrionParticipant, OrionParticipantType } from '../../lib/orion/participants';
 import {
@@ -177,11 +177,15 @@ export function PartnerSearch({
   };
 
   if (pending) {
+    const hasSapEmail = Boolean(pending.email);
     return (
       <Stack gap={4}>
         <Text size='xs'>
-          <b>{pending.cardName}</b> · {pending.cardCode} no tiene correo en SAP. Escriba el correo
-          donde recibirá la invitación a firmar:
+          <b>{pending.cardName}</b>
+          {pending.cardCode ? ` · ${pending.cardCode}` : ''}
+          {hasSapEmail
+            ? '. Confirme o cambie el correo donde recibirá la invitación a firmar:'
+            : ' no tiene correo en SAP. Escriba el correo donde recibirá la invitación a firmar:'}
         </Text>
         <Group gap='xs' wrap='nowrap'>
           <TextInput
@@ -225,8 +229,11 @@ export function PartnerSearch({
     try {
       setQ('');
       setOptions([]);
-      if (!match.email) {
+      // Socios SAP: siempre confirmar correo (permite usar el suyo en pruebas).
+      // Usuarios SynerLink con correo: se asignan directo.
+      if (match.source === 'sap' || !match.email) {
         setPending(match);
+        setPendingEmail(match.email || '');
         return;
       }
       onPick(match);
@@ -332,6 +339,9 @@ export default function OrionSignerAssignment({
   readOnly = false,
 }: Props) {
   const [slotSource, setSlotSource] = useState<Record<number, 'internal' | 'external'>>({});
+  const [editingEmailOrder, setEditingEmailOrder] = useState<number | null>(null);
+  const [editingEmailValue, setEditingEmailValue] = useState('');
+  const [editingEmailError, setEditingEmailError] = useState<string | null>(null);
 
   const slots = Array.from({ length: signerCount }, (_, idx) => {
     const order = idx + 1;
@@ -422,43 +432,136 @@ export default function OrionSignerAssignment({
 
                   <Box style={{ flex: 1, minWidth: 0 }}>
                     {person.email ? (
-                      <Group justify='space-between' wrap='nowrap' gap='xs' mb={6}>
-                        <Box style={{ minWidth: 0 }}>
-                          <Group gap={6} mb={2}>
-                            <Text size='sm' fw={700} lineClamp={1}>
-                              {person.name}
-                            </Text>
-                            <Badge size='xs' variant='light' color={person.type === 'external' ? 'orange' : 'blue'}>
-                              {person.type === 'external' ? 'Externo' : 'Interno'}
-                            </Badge>
-                          </Group>
-                          <Text size='xs' c='dimmed' lineClamp={1}>
-                            {person.email}
-                            {person.cardCode ? ` · ${person.cardCode}` : ''}
-                          </Text>
-                        </Box>
-                        <Group gap={6} style={{ flexShrink: 0 }}>
-                          <Badge
-                            size='sm'
-                            variant='light'
-                            color={status.color}
-                            leftSection={status.done ? <IconCheck size={12} /> : <IconClock size={12} />}
-                          >
-                            {status.label}
-                          </Badge>
-                          <Tooltip label='Quitar firmante'>
-                            <ActionIcon
+                      <Stack gap={6} mb={6}>
+                        <Group justify='space-between' wrap='nowrap' gap='xs'>
+                          <Box style={{ minWidth: 0 }}>
+                            <Group gap={6} mb={2}>
+                              <Text size='sm' fw={700} lineClamp={1}>
+                                {person.name}
+                              </Text>
+                              <Badge
+                                size='xs'
+                                variant='light'
+                                color={person.type === 'external' ? 'orange' : 'blue'}
+                              >
+                                {person.type === 'external' ? 'Externo' : 'Interno'}
+                              </Badge>
+                            </Group>
+                            {editingEmailOrder === person.order ? null : (
+                              <Text size='xs' c='dimmed' lineClamp={1}>
+                                {person.email}
+                                {person.cardCode ? ` · ${person.cardCode}` : ''}
+                              </Text>
+                            )}
+                          </Box>
+                          <Group gap={6} style={{ flexShrink: 0 }}>
+                            <Badge
                               size='sm'
-                              variant='subtle'
-                              color='red'
-                              disabled={readOnly}
-                              onClick={() => onClear(person.order)}
+                              variant='light'
+                              color={status.color}
+                              leftSection={status.done ? <IconCheck size={12} /> : <IconClock size={12} />}
                             >
-                              <IconX size={14} />
-                            </ActionIcon>
-                          </Tooltip>
+                              {status.label}
+                            </Badge>
+                            {person.type === 'external' && !readOnly ? (
+                              <Tooltip label='Cambiar correo de invitación'>
+                                <ActionIcon
+                                  size='sm'
+                                  variant='subtle'
+                                  color='gray'
+                                  onClick={() => {
+                                    setEditingEmailOrder(person.order);
+                                    setEditingEmailValue(person.email);
+                                    setEditingEmailError(null);
+                                  }}
+                                >
+                                  <IconPencil size={14} />
+                                </ActionIcon>
+                              </Tooltip>
+                            ) : null}
+                            <Tooltip label='Quitar firmante'>
+                              <ActionIcon
+                                size='sm'
+                                variant='subtle'
+                                color='red'
+                                disabled={readOnly}
+                                onClick={() => {
+                                  setEditingEmailOrder(null);
+                                  onClear(person.order);
+                                }}
+                              >
+                                <IconX size={14} />
+                              </ActionIcon>
+                            </Tooltip>
+                          </Group>
                         </Group>
-                      </Group>
+                        {editingEmailOrder === person.order ? (
+                          <Stack gap={4}>
+                            <Text size='xs' c='dimmed'>
+                              Correo donde llegará la invitación a firmar
+                              {person.cardCode ? ` · ${person.cardCode}` : ''}
+                            </Text>
+                            <Group gap='xs' wrap='nowrap'>
+                              <TextInput
+                                size='xs'
+                                value={editingEmailValue}
+                                onChange={(e) => setEditingEmailValue(e.currentTarget.value)}
+                                onKeyDown={(e) => {
+                                  if (e.key !== 'Enter') return;
+                                  const email = editingEmailValue.trim().toLowerCase();
+                                  if (!EMAIL_RE.test(email)) {
+                                    setEditingEmailError('Escriba un correo válido.');
+                                    return;
+                                  }
+                                  onAssign(person.order, email, person.name, {
+                                    type: 'external',
+                                    cardCode: person.cardCode ?? null,
+                                  });
+                                  setEditingEmailOrder(null);
+                                  setEditingEmailError(null);
+                                }}
+                                style={{ flex: 1 }}
+                                autoFocus
+                                aria-label='Correo de invitación'
+                              />
+                              <Button
+                                size='xs'
+                                onClick={() => {
+                                  const email = editingEmailValue.trim().toLowerCase();
+                                  if (!EMAIL_RE.test(email)) {
+                                    setEditingEmailError('Escriba un correo válido.');
+                                    return;
+                                  }
+                                  onAssign(person.order, email, person.name, {
+                                    type: 'external',
+                                    cardCode: person.cardCode ?? null,
+                                  });
+                                  setEditingEmailOrder(null);
+                                  setEditingEmailError(null);
+                                }}
+                              >
+                                Guardar
+                              </Button>
+                              <Button
+                                size='xs'
+                                variant='subtle'
+                                color='gray'
+                                onClick={() => {
+                                  setEditingEmailOrder(null);
+                                  setEditingEmailError(null);
+                                }}
+                              >
+                                Cancelar
+                              </Button>
+                            </Group>
+                            {editingEmailError ? (
+                              <Text size='xs' c='red'>
+                                {editingEmailError}
+                              </Text>
+                            ) : null}
+                          </Stack>
+                        ) : null}
+                      </Stack>
                     ) : (
                       <Stack gap='xs'>
                         <SegmentedControl
