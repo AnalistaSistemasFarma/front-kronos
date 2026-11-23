@@ -15,6 +15,7 @@ import type { AccesoConfigDto } from '../../lib/proyectos/config-agentes-tipos';
 import css from './proyectos.module.css';
 import { LineaEstadoAgente } from './EstadoAgente';
 import { useEstadosAgentes } from './useEstadosAgentes';
+import { BadgeSilenciado } from './BotonSilenciar';
 import { resumenTrabajando, vistaEstadoAgente, type EstadoAgenteProyectoDto } from '../../lib/proyectos/estado-agente';
 
 /**
@@ -57,6 +58,7 @@ function TarjetaProyecto({ p, onAbrir, estados }: { p: ProyectoResumenDto; onAbr
         <Badge size='sm' variant='outline' color='gray' style={{ textTransform: 'none' }}>
           {p.profile.label}
         </Badge>
+        {p.muted && <BadgeSilenciado />}
         {p.archived && (
           <Badge size='sm' variant='light' color='yellow'>
             Archivado
