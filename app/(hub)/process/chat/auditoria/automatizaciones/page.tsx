@@ -31,6 +31,7 @@ import {
 } from "@tabler/icons-react";
 import type { IndicadorDto } from "../../../../../../lib/agent-audit/automation-db";
 import { GraficosMejora } from "../../../../../../components/chat/auditoria/GraficosMejora";
+import CompanyLogo from "../../../../../../components/ui/CompanyLogo";
 
 /**
  * AUDITORÍA DE AGENTES → INDICADOR DE AUTOMATIZACIONES (Nicolás, 2026-10-30).
@@ -58,6 +59,22 @@ const fechaCorta = (iso: string | null) => {
   const [a, m, d] = iso.slice(0, 10).split("-");
   return `${d}/${m}/${a}`;
 };
+const MESES = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"];
+/** «16 al 22 de noviembre de 2026» (or across months/years when needed). */
+const rangoSemana = (desde: string, hasta: string) => {
+  const [a1, m1, d1] = desde.split("-").map(Number);
+  const [a2, m2, d2] = hasta.split("-").map(Number);
+  if (a1 === a2 && m1 === m2) return `${d1} al ${d2} de ${MESES[m2 - 1]} de ${a2}`;
+  if (a1 === a2) return `${d1} de ${MESES[m1 - 1]} al ${d2} de ${MESES[m2 - 1]} de ${a2}`;
+  return `${d1} de ${MESES[m1 - 1]} de ${a1} al ${d2} de ${MESES[m2 - 1]} de ${a2}`;
+};
+/** Small company logo next to an agent name (no logo → nothing; the badge keeps the name). */
+const LogoEmpresa = ({ empresa }: { empresa: string | null }) =>
+  empresa ? (
+    <span style={{ display: "inline-flex", flexShrink: 0 }}>
+      <CompanyLogo name={empresa} height={18} />
+    </span>
+  ) : null;
 const fechaHora = (iso: string | null) =>
   iso
     ? new Date(iso).toLocaleString("es-CO", {
@@ -449,7 +466,71 @@ export default function IndicadorAutomatizacionesPage() {
               </Card>
             )}
 
-            {datos.casosRelevantes.length > 0 && (
+            {datos.semanaRelevante && datos.semanaRelevante.casos.length > 0 ? (
+              <Card
+                withBorder
+                radius="md"
+                padding="md"
+                mb="md"
+                className="chat-surface"
+                data-testid="casos-semana"
+              >
+                <Text fw={600} size="sm" mb={2}>
+                  Casos de uso más relevantes · semana del{" "}
+                  {rangoSemana(datos.semanaRelevante.desde, datos.semanaRelevante.hasta)}
+                </Text>
+                <Text size="xs" c="dimmed" mb={6}>
+                  El caso que más capacidad liberó en cada agente esa semana
+                  (horas liberadas ponderadas por la confianza del supuesto).
+                  Se recalcula solo cada lunes con el análisis semanal.
+                </Text>
+                <ScrollArea type="auto">
+                  <Table striped verticalSpacing={6} fz="sm" miw={640}>
+                    <Table.Thead>
+                      <Table.Tr>
+                        <Table.Th>Agente</Table.Th>
+                        <Table.Th>Caso de uso de la semana</Table.Th>
+                        <Table.Th ta="right">Veces</Table.Th>
+                        <Table.Th ta="right">Liberadas</Table.Th>
+                      </Table.Tr>
+                    </Table.Thead>
+                    <Table.Tbody>
+                      {datos.semanaRelevante.casos.map((c) => (
+                        <Table.Tr key={c.code}>
+                          <Table.Td style={{ minWidth: 170 }}>
+                            <Group gap={6} wrap="nowrap">
+                              <LogoEmpresa empresa={c.empresa} />
+                              <div>
+                                <Link
+                                  href={`/process/chat/auditoria/automatizaciones/${encodeURIComponent(c.code)}`}
+                                >
+                                  {c.agente}
+                                </Link>
+                                <Text size="xs" c="dimmed">
+                                  {c.departamento}
+                                </Text>
+                              </div>
+                            </Group>
+                          </Table.Td>
+                          <Table.Td>
+                            <Text size="sm" fw={600}>
+                              {c.caso}
+                            </Text>
+                            <Text size="xs" c="dimmed">
+                              {c.resumen}
+                            </Text>
+                          </Table.Td>
+                          <Table.Td ta="right">{h(c.ocurrencias)}</Table.Td>
+                          <Table.Td ta="right" fw={700} c="green" style={{ whiteSpace: "nowrap" }}>
+                            {h(c.horasLiberadas, 1)} h
+                          </Table.Td>
+                        </Table.Tr>
+                      ))}
+                    </Table.Tbody>
+                  </Table>
+                </ScrollArea>
+              </Card>
+            ) : datos.casosRelevantes.length > 0 ? (
               <Card
                 withBorder
                 radius="md"
@@ -461,7 +542,9 @@ export default function IndicadorAutomatizacionesPage() {
                   Casos de uso más relevantes
                 </Text>
                 <Text size="xs" c="dimmed" mb={6}>
-                  Los que más capacidad liberan por mes.
+                  {datos.semanaRelevante
+                    ? `Sin casos medidos en la semana del ${rangoSemana(datos.semanaRelevante.desde, datos.semanaRelevante.hasta)}; se muestran los que más capacidad liberan por mes.`
+                    : "Los que más capacidad liberan por mes."}
                 </Text>
                 <ScrollArea type="auto">
                   <Table striped verticalSpacing={6} fz="sm">
@@ -499,7 +582,7 @@ export default function IndicadorAutomatizacionesPage() {
                   </Table>
                 </ScrollArea>
               </Card>
-            )}
+            ) : null}
 
             {datos.graficos && (
               <GraficosMejora
@@ -537,9 +620,12 @@ export default function IndicadorAutomatizacionesPage() {
                     {agentes.map((a) => (
                       <Table.Tr key={a.idAgent}>
                         <Table.Td>
-                          <Text size="sm" fw={600}>
-                            {a.displayName}
-                          </Text>
+                          <Group gap={6} wrap="nowrap">
+                            <LogoEmpresa empresa={a.empresa} />
+                            <Text size="sm" fw={600}>
+                              {a.displayName}
+                            </Text>
+                          </Group>
                           <Group gap={4}>
                             {a.empresa && (
                               <Badge size="xs" variant="light" color="indigo">

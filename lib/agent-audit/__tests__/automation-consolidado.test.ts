@@ -8,7 +8,9 @@ vi.mock('../inventory', () => ({ ocultarSecretos: (x: unknown) => x }));
 import {
   armarDetalleSemana,
   armarGraficos,
+  armarSemanaRelevante,
   consolidarDepartamentos,
+  semanaAnterior,
   type AgenteIndicadorDto,
 } from '../automation-db';
 
@@ -82,5 +84,53 @@ describe('armarDetalleSemana (clic en una celda del mapa de calor, 2026-11-10)',
     expect(d.items[0].pasos).toEqual([{ paso: 'Buscar datos', minutos: 45 }]);
     expect(d.ocurrencias).toBe(8);
     expect(d.agentes.map((a) => a.code)).toEqual(['pedroloro', 'cosmo']);
+  });
+});
+
+describe('semanaAnterior', () => {
+  it('returns the last full Monday-Sunday week before the cut', () => {
+    expect(semanaAnterior('2026-11-23')).toEqual({ desde: '2026-11-16', hasta: '2026-11-22' });
+    expect(semanaAnterior('2026-11-26')).toEqual({ desde: '2026-11-16', hasta: '2026-11-22' });
+    expect(semanaAnterior('2026-11-22')).toEqual({ desde: '2026-11-09', hasta: '2026-11-15' });
+  });
+});
+
+describe('armarSemanaRelevante', () => {
+  const sem = (n: number, inicio = '2026-11-16') => JSON.stringify([{ inicio: '2026-11-09', ocurrencias: 50 }, { inicio, ocurrencias: n }]);
+  it('picks one case per agent by hours freed in the previous week weighted by confidence', () => {
+    const r = armarSemanaRelevante(
+      [
+        agente({ idAgent: 1, code: 'doki', displayName: 'Doki', empresa: 'ONELATAMPHARMA', departamento: 'Dirección técnica' }),
+        agente({ idAgent: 2, code: 'luna', displayName: 'Luna' }),
+        agente({ idAgent: 3, code: 'tesa', displayName: 'Tesa' }),
+      ],
+      [
+        // Doki: 14 × 48 min = 11,2 h (media) beats 7 × 16 min.
+        { id_agent: 1, caso: 'Ajuste de documentos', descripcion: 'Ajusta formatos a la plantilla. Incluye logo.', confianza: 'media', min_humano: 60, min_despues: 12, semanas_json: sem(14) },
+        { id_agent: 1, caso: 'INVIMA', descripcion: 'Valida registros.', confianza: 'alta', min_humano: 20, min_despues: 4, semanas_json: sem(7) },
+        // Luna: same hours, the «alta» one wins.
+        { id_agent: 2, caso: 'Baja', descripcion: null, confianza: 'baja', min_humano: 30, min_despues: 0, semanas_json: sem(2) },
+        { id_agent: 2, caso: 'Alta', descripcion: null, confianza: 'alta', min_humano: 30, min_despues: 0, semanas_json: sem(2) },
+        // Tesa: nothing in the previous week (only the week before) → not listed.
+        { id_agent: 3, caso: 'Viejo', descripcion: null, confianza: 'alta', min_humano: 30, min_despues: 0, semanas_json: sem(0) },
+        // Out of scope agent → ignored.
+        { id_agent: 9, caso: 'Ajeno', descripcion: null, confianza: 'alta', min_humano: 300, min_despues: 0, semanas_json: sem(9) },
+      ],
+      '2026-11-23',
+    );
+    expect(r.desde).toBe('2026-11-16');
+    expect(r.hasta).toBe('2026-11-22');
+    expect(r.casos.map((c) => [c.code, c.caso])).toEqual([
+      ['doki', 'Ajuste de documentos'],
+      ['luna', 'Alta'],
+    ]);
+    expect(r.casos[0]).toMatchObject({
+      empresa: 'ONELATAMPHARMA',
+      departamento: 'DIRECCIÓN TÉCNICA',
+      ocurrencias: 14,
+      horasLiberadas: 11.2,
+      resumen: 'Ajusta formatos a la plantilla.',
+    });
+    expect(r.casos[1].resumen).toBe('Alta.');
   });
 });
