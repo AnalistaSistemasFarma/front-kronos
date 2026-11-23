@@ -68,6 +68,8 @@ describe('armarDetalleSemana (clic en una celda del mapa de calor, 2026-11-10)',
     const g = armarGraficos(agentes, casos);
     const fila = g.departamentos.find((d) => d.departamento === 'GERENCIA')!;
     expect(fila.agentes).toEqual(expect.arrayContaining(['Cosmo', 'Pedro loro']));
+    expect(fila.agentCards.map((x) => x.code)).toEqual(fila.agentes.map((n) => (n === 'Cosmo' ? 'cosmo' : 'pedroloro')));
+    expect(fila.agentCards[0]).toMatchObject({ empresa: 'OLP', avatarUrl: null, avatarVersion: null });
     const c = fila.celdas.find((x) => x.semana === '2026-11-02')!;
     const d = armarDetalleSemana(agentes, casos, 'GERENCIA', '2026-11-02', '2026-11-09');
     expect(d.horasSinIA).toBe(c.horasSinIA);
