@@ -463,7 +463,7 @@ export default function OrionSignerAssignment({
                             >
                               {status.label}
                             </Badge>
-                            {person.type === 'external' && !readOnly ? (
+                            {person.type === 'external' && !readOnly && status.label !== 'Firmado' ? (
                               <Tooltip label='Cambiar correo de invitación'>
                                 <ActionIcon
                                   size='sm'
