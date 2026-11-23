@@ -444,7 +444,8 @@ export function armarSemanaRelevante(
   return {
     desde,
     hasta,
-    casos: [...mejor.values()].sort((a, b) => b.puntaje - a.puntaje || a.agente.localeCompare(b.agente)),
+    // Listed by hours freed (the column people read); the score only picks the case of each agent.
+    casos: [...mejor.values()].sort((a, b) => b.horasLiberadas - a.horasLiberadas || b.puntaje - a.puntaje || a.agente.localeCompare(b.agente)),
   };
 }
 
