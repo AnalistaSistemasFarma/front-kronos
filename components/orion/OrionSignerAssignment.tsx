@@ -307,9 +307,9 @@ export function PartnerSearch({
       ) : null}
       {!loading && q.trim().length >= 2 && options.length === 0 && !searchError ? (
         <Text size='xs' c='dimmed'>
-          Sin socios activos en SAP de esta empresa. Pruebe con «soul», el NIT
-          900376741 o el código PN900376741 (Ryan). El socio debe existir en el
-          SAP de la compañía de la solicitud.
+          Sin socios activos en SAP de esta empresa. Pruebe con parte del nombre,
+          el NIT, el código o el correo. El socio debe existir en el SAP de la
+          compañía de la solicitud.
         </Text>
       ) : null}
     </Stack>
