@@ -674,7 +674,7 @@ jobs:
         run: |
           set -e
           # Banderas de sesión con las que cada reversa acepta sus pérdidas (datos de prueba).
-          FLAGS="sgc_reversa_pendientes_archivo sgc_reversa_padres sgc_reversa_propuestas sgc_reversa_recapacitaciones sgc_reversa_flujo_s10 sgc_reversa_copias sgc_reversa_sustitutos sgc_reversa_firma_propia sgc_reversa_modelo_roles sgc_reversa_lideres_departamento sgc_reversa_encabezados sgc_reversa_evaluaciones sgc_reversa_generador sgc_reversa_generador_guia sgc_reversa_padres_hijos chat_proyectos_reversa_acepta_perdida proyectos_modulo_reversa_acepta_perdida proyectos_cronograma_reversa_acepta_perdida proyectos_equipo_reversa_acepta_perdida proyectos_no_leidos_reversa_acepta_perdida chat_reacciones_reversa_acepta_perdida proyectos_permisos_agentes_reversa_acepta_perdida proyectos_config_agentes_reversa_acepta_perdida chat_stickers_personales_reversa_acepta_perdida vitrina_reversa_acepta_perdida proyectos_archivos_agente_reversa_acepta_perdida vitrina_lineas_reversa_acepta_perdida vitrina_modelo3d_reversa_acepta_perdida proyectos_mesas_reversa_acepta_perdida proyectos_matrices_reversa_acepta_perdida proyectos_carpetas_reversa_acepta_perdida biomedica_reversa_acepta_perdida biomedica_inventario_reversa_acepta_perdida"
+          FLAGS="sgc_reversa_pendientes_archivo sgc_reversa_padres sgc_reversa_propuestas sgc_reversa_recapacitaciones sgc_reversa_flujo_s10 sgc_reversa_copias sgc_reversa_sustitutos sgc_reversa_firma_propia sgc_reversa_modelo_roles sgc_reversa_lideres_departamento sgc_reversa_encabezados sgc_reversa_evaluaciones sgc_reversa_generador sgc_reversa_generador_guia sgc_reversa_padres_hijos chat_proyectos_reversa_acepta_perdida proyectos_modulo_reversa_acepta_perdida proyectos_cronograma_reversa_acepta_perdida proyectos_equipo_reversa_acepta_perdida proyectos_no_leidos_reversa_acepta_perdida chat_reacciones_reversa_acepta_perdida proyectos_permisos_agentes_reversa_acepta_perdida proyectos_config_agentes_reversa_acepta_perdida chat_stickers_personales_reversa_acepta_perdida vitrina_reversa_acepta_perdida proyectos_archivos_agente_reversa_acepta_perdida vitrina_lineas_reversa_acepta_perdida vitrina_modelo3d_reversa_acepta_perdida proyectos_mesas_reversa_acepta_perdida proyectos_matrices_reversa_acepta_perdida proyectos_carpetas_reversa_acepta_perdida biomedica_reversa_acepta_perdida biomedica_inventario_reversa_acepta_perdida proyectos_silenciar_reversa_acepta_perdida"
           reversa() {
             { for f in $FLAGS; do printf "EXEC sp_set_session_context N'%s', 1;\n" "$f"; done; cat "$1"; } > /tmp/reversa.sql
             npx prisma db execute --schema prisma/schema.prisma --file /tmp/reversa.sql
@@ -714,6 +714,17 @@ jobs:
           echo "IF OBJECT_ID(N'dbo.biomed_registro', N'U') IS NOT NULL OR EXISTS (SELECT 1 FROM dbo.subprocess WHERE subprocess_url = N'/process/sgc-documental/biomedica') THROW 50000, N'La reversa de Ingeniería biomédica no quitó sus tablas o su permiso.', 1;" > /tmp/biomedica-quitado.sql
           npx prisma db execute --schema prisma/schema.prisma --file /tmp/biomedica-quitado.sql
           migra 20261106150000_biomedica
+          # Project mute (2026-11-23): chat_project_mute points to chat_project, so its reversal goes FIRST; with a test row,
+          # without the flag it must refuse. It is migrated again at the end, with the F1.
+          echo "INSERT INTO dbo.chat_project_mute (id_project, id_user) SELECT TOP (1) id_project, N'ci-mute' FROM dbo.chat_project;" > /tmp/mute-dato.sql
+          npx prisma db execute --schema prisma/schema.prisma --file /tmp/mute-dato.sql
+          if npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-11-23-proyectos-silenciar-reversa.sql; then
+            echo "IF EXISTS (SELECT 1 FROM dbo.chat_project) THROW 50000, N'The project mute reversal should have refused without its flag.', 1;" > /tmp/mute-nego.sql
+            npx prisma db execute --schema prisma/schema.prisma --file /tmp/mute-nego.sql
+          fi
+          reversa prisma/manual/2026-11-23-proyectos-silenciar-reversa.sql
+          echo "IF OBJECT_ID(N'dbo.chat_project_mute', N'U') IS NOT NULL THROW 50000, N'The project mute reversal did not drop chat_project_mute.', 1;" > /tmp/mute-quitado.sql
+          npx prisma db execute --schema prisma/schema.prisma --file /tmp/mute-quitado.sql
           # Matrices de Proyectos (2026-11-05): apuntan a chat_project, así que su reversa va PRIMERO; con una matriz de
           # prueba, sin la bandera debe negarse. Se vuelve a migrar al final, con la F1.
           echo "INSERT INTO dbo.chat_project_matrix (id_project, name) SELECT TOP (1) id_project, N'ci' FROM dbo.chat_project;" > /tmp/matrices-dato.sql
@@ -835,6 +846,7 @@ jobs:
           migra 20261104200000_chat_project_mesas
           migra 20261105150000_chat_project_matrices
           migra 20261106120000_chat_project_folders
+          migra 20261123200000_chat_project_mute
           # Padres e hijos (2026-10-19): con tipos padre marcados y relaciones creadas solas (integración), sin la bandera debe negarse.
           if npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-10-19-sgc-padres-hijos-reversa.sql; then echo "La reversa de padres e hijos debió negarse sin su bandera"; exit 1; fi
           reversa prisma/manual/2026-10-19-sgc-padres-hijos-reversa.sql
