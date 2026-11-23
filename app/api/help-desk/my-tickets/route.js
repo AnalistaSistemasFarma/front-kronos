@@ -6,9 +6,10 @@ import { authOptions } from '../../auth/[...nextauth]/route';
 import { checkHelpDeskRequesterAccess } from '../../../../lib/help-desk/access';
 import {
   MY_TICKETS_EMAIL_SEARCH_SQL,
-  MY_TICKETS_SCOPE_SQL,
+  MY_TICKETS_SCOPE_PRELUDE_SQL,
   CASE_CONTACT_EMAIL_SQL,
-  REQUESTER_EMAIL_SQL,
+  MY_TICKETS_REQUESTER_EMAIL_JOIN,
+  MY_TICKETS_REQUESTER_EMAIL_SQL,
   REQUESTER_JOINS,
   REQUESTER_NAME_SQL,
 } from '../../../../lib/help-desk/requesterSql';
@@ -61,7 +62,10 @@ export async function GET(req) {
       email: userEmail,
     };
 
+    // Identity + matching case ids are resolved once (see MY_TICKETS_SCOPE_PRELUDE_SQL);
+    // the previous per-row scope filter took ~32 s and hit the 15 s timeout.
     let query = `
+      ${MY_TICKETS_SCOPE_PRELUDE_SQL}
       SELECT
         c.case_type, c.creation_date, c.description, c.end_date,
         c.id_case, c.id_department, c.id_technical, c.place,
@@ -71,16 +75,9 @@ export async function GET(req) {
         a.activity, sc.status, u.name AS nombreTecnico, d.department,
         sc.id_status_case, c.resolution, co.company, co.id_company,
         ${REQUESTER_NAME_SQL} AS requester_name,
-        ${REQUESTER_EMAIL_SQL} AS requester_email,
+        ${MY_TICKETS_REQUESTER_EMAIL_SQL} AS requester_email,
         CASE
-          WHEN EXISTS (
-            SELECT 1
-            FROM subprocess_user_company suc_me
-            INNER JOIN company_user cu_me ON cu_me.id_company_user = suc_me.id_company_user
-            INNER JOIN [user] u_me ON u_me.id = cu_me.id_user
-            WHERE LOWER(LTRIM(RTRIM(u_me.email))) = LOWER(LTRIM(RTRIM(@user_email)))
-              AND suc_me.id_subprocess_user_company = c.id_technical
-          ) THEN 1 ELSE 0
+          WHEN c.id_technical IN (SELECT id FROM @my_tickets_suc) THEN 1 ELSE 0
         END AS is_assigned_to_me
       FROM [case] c
       LEFT JOIN category_case cc ON cc.id_case = c.id_case
@@ -91,10 +88,11 @@ export async function GET(req) {
       INNER JOIN department d ON d.id_department = c.id_department
       LEFT JOIN subprocess_user_company suc ON suc.id_subprocess_user_company = c.id_technical
       LEFT JOIN company_user cu ON cu.id_company_user = suc.id_company_user
-      LEFT JOIN [user] u ON CAST(u.id AS NVARCHAR(255)) = CAST(cu.id_user AS NVARCHAR(255))
+      LEFT JOIN [user] u ON u.id = cu.id_user
       ${REQUESTER_JOINS}
+      ${MY_TICKETS_REQUESTER_EMAIL_JOIN}
       LEFT JOIN company co ON co.id_company = c.company
-      WHERE ${MY_TICKETS_SCOPE_SQL}
+      WHERE c.id_case IN (SELECT id_case FROM @my_tickets_ids)
     `;
 
     if (email_search) {
