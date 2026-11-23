@@ -26,6 +26,11 @@ import type { SgcUploader } from './documents';
  * → Chrome, nunca pasa por Word) y el ORIGINAL se guarda junto a él con su
  * huella SHA-256 (document_version.source_*).
  *
+ * 2026-11-23 (Calidad OLP: «el procedimiento perdió el formato»): un Word lo
+ * convierte primero Microsoft (fiel a Word: encabezado y pie de página,
+ * numeración multinivel, fuentes y tamaños); mammoth → Chrome queda solo como
+ * respaldo si Microsoft falla.
+ *
  * 2026-10-21 (Calidad OLP): un Excel se puede INSPECCIONAR y PREVISUALIZAR
  * con ajustes de presentación antes de cargarlo (nada se guarda); al cargarlo,
  * los ajustes elegidos quedan en la descripción de la versión y en la
@@ -46,10 +51,20 @@ export interface SgcBulkConvertDeps {
  */
 async function excelByMicrosoft(db: SgcDb, idCompany: number, convert: SgcBulkConvertDeps, fileName: string, bytes: Uint8Array, settings: SgcSheetSettings | null): Promise<Uint8Array | null> {
   if (!convert.officeToPdf || !microsoftCanApply(settings)) return null;
+  return officeByMicrosoft(db, idCompany, convert, fileName, await prepareXlsxForMicrosoft(bytes, settings));
+}
+
+/** 2026-11-23: conversión de Microsoft de un Word de la carga inicial, tal cual. Devuelve null si no aplica o falló. */
+export async function wordByMicrosoft(db: SgcDb, idCompany: number, convert: SgcBulkConvertDeps, fileName: string, bytes: Uint8Array): Promise<Uint8Array | null> {
+  if (!convert.officeToPdf) return null;
+  return officeByMicrosoft(db, idCompany, convert, fileName, bytes);
+}
+
+async function officeByMicrosoft(db: SgcDb, idCompany: number, convert: SgcBulkConvertDeps, fileName: string, bytes: Uint8Array): Promise<Uint8Array | null> {
   const config = await db.sgcCompanyConfig.findUnique({ where: { id_company: idCompany }, select: { storage_root: true } });
-  if (!config?.storage_root) return null;
+  if (!config?.storage_root || !convert.officeToPdf) return null;
   try {
-    const pdf = await convert.officeToPdf(config.storage_root, fileName, await prepareXlsxForMicrosoft(bytes, settings));
+    const pdf = await convert.officeToPdf(config.storage_root, fileName, bytes);
     return isPdf(pdf) ? pdf : null;
   } catch (e) {
     console.warn('[sgc/carga] la conversión de Microsoft falló; se usa la de SynerLink', e);
@@ -147,7 +162,7 @@ export async function uploadBulkFile(
       if (problem) return fail(problem, match);
     }
     try {
-      const byMicrosoft = kind === 'xlsx' ? await excelByMicrosoft(db, idCompany, convert, fileName, file.bytes, sheetSettings) : null;
+      const byMicrosoft = kind === 'xlsx' ? await excelByMicrosoft(db, idCompany, convert, fileName, file.bytes, sheetSettings) : await wordByMicrosoft(db, idCompany, convert, fileName, file.bytes);
       if (byMicrosoft) pdfBytes = byMicrosoft;
       else {
         const html = kind === 'docx' ? { html: await convert.docxToHtml(file.bytes), css: undefined, layout: undefined } : await xlsxToSheet(file.bytes, sheetSettings ?? undefined);
