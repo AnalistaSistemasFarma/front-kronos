@@ -17,6 +17,7 @@ import {
   TextInput,
   ThemeIcon,
   Tooltip,
+  UnstyledButton,
 } from '@mantine/core';
 import { IconArrowDown, IconArrowUp, IconCheck, IconClock, IconX } from '@tabler/icons-react';
 import { useCallback, useEffect, useState } from 'react';
@@ -220,37 +221,73 @@ export function PartnerSearch({
     );
   }
 
+  const pick = (match: PartnerOption) => {
+    try {
+      setQ('');
+      setOptions([]);
+      if (!match.email) {
+        setPending(match);
+        return;
+      }
+      onPick(match);
+    } catch (err) {
+      console.error('[orion] PartnerSearch pick', err);
+      setSearchError('No se pudo asignar este socio. Intente de nuevo.');
+    }
+  };
+
   return (
     <Stack gap={4}>
-      <Autocomplete
+      <TextInput
         placeholder={
           companyId
-            ? 'Buscar socio por nombre, código o correo…'
+            ? 'Buscar socio por nombre, NIT, código o correo…'
             : 'Falta empresa de la solicitud para buscar socios'
         }
-        data={options.map((o) => ({ value: o.value, label: o.label }))}
         value={q}
-        onChange={setQ}
+        onChange={(e) => setQ(e.currentTarget.value)}
         disabled={disabled || !companyId}
-        limit={25}
         rightSection={loading ? <Loader size={14} /> : null}
-        onOptionSubmit={(value) => {
-          try {
-            const match = options.find((o) => o.value === value);
-            if (!match) return;
-            setQ('');
-            setOptions([]);
-            if (!match.email) {
-              setPending(match);
-              return;
-            }
-            onPick(match);
-          } catch (err) {
-            console.error('[orion] PartnerSearch onOptionSubmit', err);
-            setSearchError('No se pudo asignar este socio. Intente de nuevo.');
-          }
-        }}
       />
+      {options.length > 0 ? (
+        <Stack
+          gap={2}
+          style={{
+            maxHeight: 180,
+            overflowY: 'auto',
+            border: '1px solid var(--mantine-color-default-border)',
+            borderRadius: 8,
+            padding: 4,
+          }}
+        >
+          {options.map((o) => (
+            <UnstyledButton
+              key={o.value}
+              onClick={() => pick(o)}
+              disabled={disabled}
+              style={{
+                display: 'block',
+                width: '100%',
+                textAlign: 'left',
+                padding: '6px 8px',
+                borderRadius: 6,
+                fontSize: 12,
+                lineHeight: 1.35,
+              }}
+              className='orion-partner-option'
+            >
+              <Text size='xs' fw={600}>
+                {o.cardName}
+              </Text>
+              <Text size='xs' c='dimmed'>
+                {o.cardCode}
+                {o.email ? ` · ${o.email}` : ' · sin correo en SAP'}
+                {o.source === 'user' ? ' · Usuario SynerLink' : ''}
+              </Text>
+            </UnstyledButton>
+          ))}
+        </Stack>
+      ) : null}
       {searchError ? (
         <Text size='xs' c='red'>
           {searchError}
@@ -263,7 +300,9 @@ export function PartnerSearch({
       ) : null}
       {!loading && q.trim().length >= 2 && options.length === 0 && !searchError ? (
         <Text size='xs' c='dimmed'>
-          Sin socios activos en SAP que coincidan.
+          Sin socios activos en SAP de esta empresa. Pruebe con «soul», el NIT
+          900376741 o el código PN900376741 (Ryan). El socio debe existir en el
+          SAP de la compañía de la solicitud.
         </Text>
       ) : null}
     </Stack>
