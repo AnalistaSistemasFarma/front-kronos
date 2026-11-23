@@ -19,6 +19,7 @@ import {
   type OtFirmaRol,
   type OtMetodoConfirmacion,
 } from './firmas';
+import { normalizarMargenSuperiorMm, OT_MARGEN_SUPERIOR_DEFAULT_MM } from './impresion';
 import { assertPinUsable, compararPin, hashPin, mensajePinIncorrecto } from './pin';
 import {
   assertActividadRegistrable,
@@ -1154,4 +1155,38 @@ export async function cambiarArea(db: OtDb, input: CambioAreaInput) {
   });
   if (res.count === 0) throw new OtError('Área no encontrada.', 404);
   return db.otArea.findFirst({ where: { id_area: input.idArea, id_company: input.idCompany }, select: AREA_SELECT });
+}
+
+/**
+ * Per-company print settings (case #8316, 2026-11-23): blank area reserved at the top of every
+ * printed page for the batch-record header. No row → default (4 cm). While the manual migration
+ * has not created ot_config yet (Prisma P2021), reads also fall back to the default so the
+ * report keeps printing.
+ */
+export async function getOtConfig(db: OtDb, idCompany: number): Promise<{ margenSuperiorMm: number; personalizado: boolean }> {
+  try {
+    const row = await db.otConfig.findUnique({ where: { id_company: idCompany }, select: { margen_superior_mm: true } });
+    if (!row) return { margenSuperiorMm: OT_MARGEN_SUPERIOR_DEFAULT_MM, personalizado: false };
+    return { margenSuperiorMm: normalizarMargenSuperiorMm(row.margen_superior_mm), personalizado: true };
+  } catch (error) {
+    if ((error as { code?: string } | null)?.code === 'P2021') return { margenSuperiorMm: OT_MARGEN_SUPERIOR_DEFAULT_MM, personalizado: false };
+    throw error;
+  }
+}
+
+export async function setOtMargenSuperior(db: OtDb, idCompany: number, margenSuperiorMm: number, actor: OtActor) {
+  const mm = normalizarMargenSuperiorMm(margenSuperiorMm);
+  try {
+    await db.otConfig.upsert({
+      where: { id_company: idCompany },
+      create: { id_company: idCompany, margen_superior_mm: mm, updated_by: actor.idUser },
+      update: { margen_superior_mm: mm, updated_by: actor.idUser, updated_at: new Date() },
+    });
+  } catch (error) {
+    if ((error as { code?: string } | null)?.code === 'P2021') {
+      throw new OtError('La configuración de impresión aún no está disponible en esta base (falta el pase de ot_config).', 503);
+    }
+    throw error;
+  }
+  return { margenSuperiorMm: mm, personalizado: true };
 }

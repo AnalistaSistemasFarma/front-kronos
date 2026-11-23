@@ -9,7 +9,7 @@ const m = vi.hoisted(() => {
     'crearRegistro', 'confirmarVistoBueno', 'prepararConfirmante', 'listActividades', 'crearActividad', 'cambiarActividad', 'listUsuariosEmpresa', 'buscarOps',
     'datosAviso', 'createAndSendNotifications', 'listOperadores', 'crearOperador', 'cambiarOperador', 'agregarOperadores', 'listAreas', 'crearArea', 'cambiarArea',
     'listSupervisoresEmpresa', 'listResponsables', 'listResponsablesEmpresa', 'listCandidatosResponsable', 'asignarResponsable', 'cambiarResponsable', 'importarOperadores', 'estadoPin', 'configurarPin', 'listPinsEmpresa', 'restablecerPin', 'verificarPassword',
-    'empresasComoJefe', 'puedeAbrirComoJefe',
+    'empresasComoJefe', 'puedeAbrirComoJefe', 'getOtConfig', 'setOtMargenSuperior',
   ] as const;
   return Object.fromEntries(names.map((n) => [n, vi.fn()])) as Record<(typeof names)[number], ReturnType<typeof vi.fn>>;
 });
@@ -27,6 +27,7 @@ vi.mock('../../../../lib/bitacora-proceso/db', () => ({
   listResponsables: m.listResponsables, listResponsablesEmpresa: m.listResponsablesEmpresa, listCandidatosResponsable: m.listCandidatosResponsable,
   asignarResponsable: m.asignarResponsable, cambiarResponsable: m.cambiarResponsable,
   empresasComoJefe: m.empresasComoJefe, puedeAbrirComoJefe: m.puedeAbrirComoJefe,
+  getOtConfig: m.getOtConfig, setOtMargenSuperior: m.setOtMargenSuperior,
 }));
 // El notificador compartido (campana + push): se simula para ver QUÉ se avisa y a QUIÉN.
 vi.mock('../../../../lib/notifications.js', () => ({ createAndSendNotifications: m.createAndSendNotifications }));
@@ -52,6 +53,7 @@ import * as areas from '../areas/route';
 import * as supervisores from '../supervisores/route';
 import * as responsables from '../responsables/route';
 import * as operadoresOrden from '../[id]/operadores/route';
+import * as config from '../config/route';
 
 const FARMA = 1;
 const operario = { idCompany: FARMA, companyName: 'FARMALOGICA S.A.', canOperate: true, canManage: false };
@@ -465,5 +467,48 @@ describe('Bitácora de Proceso · rutas', () => {
     const falta = await registros.POST(send('POST', { id_actividad: 9, id_operador: 7 }, '?company=1'), params('5'));
     expect(falta.status).toBe(400);
     expect((await falta.json()).error).toMatch(/texto libre/);
+  });
+});
+
+describe('config (margen superior para el encabezado batch, caso #8316)', () => {
+  it('GET: anyone with the module reads the company margin (default 4 cm)', async () => {
+    asUser([operario]);
+    m.getOtConfig.mockResolvedValue({ margenSuperiorMm: 40, personalizado: false });
+    const res = await config.GET(get(`/bitacora-proceso/config?company=${FARMA}`));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ config: { margenSuperiorMm: 40, personalizado: false, margenSuperiorCm: 4 } });
+    expect(m.getOtConfig).toHaveBeenCalledWith({ tag: 'prisma' }, FARMA);
+  });
+
+  it('GET: another company is rejected', async () => {
+    asUser([operario]);
+    const res = await config.GET(get('/bitacora-proceso/config?company=2'));
+    expect(res.status).toBe(403);
+    expect(m.getOtConfig).not.toHaveBeenCalled();
+  });
+
+  it('PATCH: only Gestión changes it', async () => {
+    asUser([operario]);
+    const res = await config.PATCH(send('PATCH', { company: FARMA, margen_superior_cm: 5 }));
+    expect(res.status).toBe(403);
+    expect(m.setOtMargenSuperior).not.toHaveBeenCalled();
+  });
+
+  it('PATCH: saves the margin in mm (accepts a comma decimal)', async () => {
+    asUser([supervisor]);
+    m.setOtMargenSuperior.mockResolvedValue({ margenSuperiorMm: 45, personalizado: true });
+    const res = await config.PATCH(send('PATCH', { company: FARMA, margen_superior_cm: '4,5' }));
+    expect(res.status).toBe(200);
+    expect(m.setOtMargenSuperior).toHaveBeenCalledWith({ tag: 'prisma' }, FARMA, 45, expect.objectContaining({ idUser: 'u1' }));
+    expect((await res.json()).config.margenSuperiorCm).toBe(4.5);
+  });
+
+  it('PATCH: out-of-range or non-numeric values are rejected', async () => {
+    asUser([supervisor]);
+    for (const v of [-1, 12.5, 'abc', null]) {
+      const res = await config.PATCH(send('PATCH', { company: FARMA, margen_superior_cm: v }));
+      expect(res.status).toBe(400);
+    }
+    expect(m.setOtMargenSuperior).not.toHaveBeenCalled();
   });
 });
