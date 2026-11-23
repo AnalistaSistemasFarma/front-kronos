@@ -75,9 +75,6 @@ export interface AgenteIndicadorDto {
   displayName: string;
   empresa: string | null;
   departamento: string | null;
-  /** Same image as the Chat module (agentAvatarSrc); initials fallback when both are empty. */
-  avatarUrl?: string | null;
-  avatarVersion?: number | null;
   casos: number;
   casosValidos: number;
   ocurrencias: number;
@@ -99,14 +96,6 @@ export interface CorridaDto {
   tareasSinClasificar: number | null;
   error: string | null;
 }
-/** One agent in a heat map row: avatar (as in the Chat module) plus its primary company. */
-export interface HeatmapAgentDto {
-  code: string;
-  displayName: string;
-  empresa: string | null;
-  avatarUrl: string | null;
-  avatarVersion: number | null;
-}
 /** Mapa de calor (% de mejora por departamento y semana) y barras por departamento. */
 export interface GraficosDto {
   semanas: string[];
@@ -114,8 +103,6 @@ export interface GraficosDto {
     departamento: string;
     /** Nombre visible de los agentes que suman en esa fila (2026-11-10). */
     agentes: string[];
-    /** Same agents with what the heat map needs to draw their avatar and company logo (2026-11-23). */
-    agentCards: HeatmapAgentDto[];
     horasSinIA: number;
     horasConIA: number;
     mejora: number | null;
@@ -244,8 +231,7 @@ export async function leerIndicador(
         .input("email", sql.NVarChar(200), email.trim().toLowerCase()).query(`
         DECLARE @corte DATE = (SELECT MAX(corte) FROM dbo.agent_automation_case);
         ${SQL_DEPTO_MANUAL}
-        SELECT c.id_agent, a.code, a.display_name, a.avatar_url, a.avatar_updated_at,
-               LTRIM(RTRIM(co.company)) AS empresa,
+        SELECT c.id_agent, a.code, a.display_name, LTRIM(RTRIM(co.company)) AS empresa,
                COALESCE((SELECT dm.departamento FROM @depto dm WHERE dm.id_agent = a.id_agent),
                         (SELECT TOP 1 su.departamento FROM dbo.agent_use_summary su
                           WHERE su.id_agent = a.id_agent ORDER BY su.corte DESC)) AS departamento,
@@ -260,7 +246,7 @@ export async function leerIndicador(
         LEFT JOIN dbo.company co ON co.id_company = ac.id_company
         LEFT JOIN dbo.agent_memory_setting ms ON ms.id_agent = a.id_agent
         WHERE c.corte = @corte AND a.is_active = 1 AND ${FILTRO_PERSONAL}
-        GROUP BY c.id_agent, a.code, a.display_name, a.avatar_url, a.avatar_updated_at, co.company, a.id_agent;
+        GROUP BY c.id_agent, a.code, a.display_name, co.company, a.id_agent;
 
         SELECT TOP 1 * FROM dbo.agent_automation_run WHERE status IN ('terminado','fallido')
           ORDER BY COALESCE(finished_at, requested_at) DESC;
@@ -307,8 +293,6 @@ export async function leerIndicador(
         displayName: String(f.display_name),
         empresa: txt(f.empresa),
         departamento: nombreDepto(txt(f.departamento)),
-        avatarUrl: txt(f.avatar_url),
-        avatarVersion: f.avatar_updated_at instanceof Date ? f.avatar_updated_at.getTime() : null,
         casos: Number(f.casos ?? 0),
         casosValidos: Number(f.validos ?? 0),
         ocurrencias: Number(f.ocurrencias ?? 0),
@@ -519,20 +503,12 @@ export function armarGraficos(
   return {
     semanas: lista,
     departamentos: [...tot.entries()]
-      .map(([departamento, t]) => {
-        const deRow = agentes
-          .filter((a) => depto.get(a.idAgent) === departamento)
-          .sort((a, b) => b.horasAhorradas - a.horasAhorradas);
-        return {
+      .map(([departamento, t]) => ({
         departamento,
-        agentes: deRow.map((a) => a.displayName),
-        agentCards: deRow.map((a) => ({
-          code: a.code,
-          displayName: a.displayName,
-          empresa: a.empresa,
-          avatarUrl: a.avatarUrl ?? null,
-          avatarVersion: a.avatarVersion ?? null,
-        })),
+        agentes: agentes
+          .filter((a) => depto.get(a.idAgent) === departamento)
+          .sort((a, b) => b.horasAhorradas - a.horasAhorradas)
+          .map((a) => a.displayName),
         horasSinIA: r1(t.sin),
         horasConIA: r1(t.con),
         mejora: pct(t.sin, t.con),
@@ -545,8 +521,7 @@ export function armarGraficos(
             mejora: pct(x.sin, x.con),
           };
         }),
-        };
-      })
+      }))
       .filter((d) => d.horasSinIA > 0)
       .sort((a, b) => b.horasSinIA - a.horasSinIA),
   };
