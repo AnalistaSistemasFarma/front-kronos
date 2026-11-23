@@ -367,6 +367,8 @@ const ACCION_HISTORIAL: Record<string, string> = {
   mantenimiento: 'Mantenimiento',
   mantenimiento_anulado: 'Mantenimiento anulado',
   articulo_sap: 'Artículo de SAP',
+  carga: 'Ingreso por cargue masivo',
+  carga_cambio: 'Actualizado por cargue masivo',
 };
 export const etiquetaAccion = (a: string) => ACCION_HISTORIAL[a] ?? a.replace(/_/g, ' ');
 
