@@ -57,6 +57,7 @@ import {
   IconDeviceSdCard,
   IconEdit,
   IconArrowLeft,
+  IconArrowRight,
   IconFlag,
   IconDeviceFloppy,
   IconInfoCircle,
@@ -207,6 +208,8 @@ interface AssetFormData {
 }
 
 const ASSET_STORAGE_KEY = 'selectedAsset';
+// Lista que estaba visible en Activos al abrir este detalle (para anterior / siguiente).
+const ASSETS_LIST_STORAGE_KEY = 'assetsList';
 
 const toOptions = (values: string[]) => values.map((v) => ({ value: v, label: v }));
 
@@ -671,6 +674,7 @@ function ViewAsset() {
   const assetId = searchParams.get('id');
 
   const [asset, setAsset] = useState<Asset | null>(null);
+  const [assetsList, setAssetsList] = useState<Asset[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -741,6 +745,25 @@ function ViewAsset() {
 
     fetchAsset(assetId);
   }, [session, status, router, assetId]);
+
+  useEffect(() => {
+    try {
+      const raw = sessionStorage.getItem(ASSETS_LIST_STORAGE_KEY);
+      const list: unknown = raw ? JSON.parse(raw) : [];
+      setAssetsList(Array.isArray(list) ? (list as Asset[]) : []);
+    } catch {
+      setAssetsList([]);
+    }
+  }, []);
+
+  const currentAssetIndex = asset ? assetsList.findIndex((a) => a.id === asset.id) : -1;
+
+  const navigateToAsset = (index: number) => {
+    const target = assetsList[index];
+    if (!target) return;
+    sessionStorage.setItem(ASSET_STORAGE_KEY, JSON.stringify(target));
+    router.push(`/process/help-desk/view-asset?id=${target.id}`);
+  };
 
   useEffect(() => {
     if (asset?.id) {
@@ -1007,6 +1030,16 @@ function ViewAsset() {
       };
       setAsset(updated);
       sessionStorage.setItem(ASSET_STORAGE_KEY, JSON.stringify(updated));
+      // Que las flechas no vuelvan a mostrar la versión anterior de este activo.
+      if (assetsList.some((a) => a.id === updated.id)) {
+        const nextList = assetsList.map((a) => (a.id === updated.id ? updated : a));
+        setAssetsList(nextList);
+        try {
+          sessionStorage.setItem(ASSETS_LIST_STORAGE_KEY, JSON.stringify(nextList));
+        } catch {
+          // Sin espacio: las flechas siguen funcionando con la lista en memoria.
+        }
+      }
       toast.success('Activo actualizado correctamente.');
 
       const changeLines = buildAssetChangeLines(asset, updated);
@@ -1429,6 +1462,38 @@ function ViewAsset() {
               Volver
             </Button>
           </Flex>
+
+          {currentAssetIndex >= 0 && assetsList.length > 1 && (
+            <Flex justify='space-between' align='center' mt='md'>
+              <Tooltip label={editing ? 'Guarda o cancela la edición para cambiar de activo' : 'Activo anterior'}>
+                <ActionIcon
+                  variant='subtle'
+                  size='lg'
+                  onClick={() => navigateToAsset(currentAssetIndex - 1)}
+                  disabled={currentAssetIndex === 0 || editing}
+                  aria-label='Activo anterior'
+                >
+                  <IconArrowLeft size={24} />
+                </ActionIcon>
+              </Tooltip>
+
+              <Text size='sm' c='dimmed'>
+                {`${currentAssetIndex + 1} de ${assetsList.length}`}
+              </Text>
+
+              <Tooltip label={editing ? 'Guarda o cancela la edición para cambiar de activo' : 'Siguiente activo'}>
+                <ActionIcon
+                  variant='subtle'
+                  size='lg'
+                  onClick={() => navigateToAsset(currentAssetIndex + 1)}
+                  disabled={currentAssetIndex === assetsList.length - 1 || editing}
+                  aria-label='Siguiente activo'
+                >
+                  <IconArrowRight size={24} />
+                </ActionIcon>
+              </Tooltip>
+            </Flex>
+          )}
         </Card>
 
         {error && (
@@ -1779,7 +1844,7 @@ function ViewAsset() {
                             value={form.factura}
                             onChange={(e) => handleFormChange('factura', e.target.value)}
                             error={formErrors.factura}
-                            maxLength={1000}
+                            maxLength={2000}
                             leftSection={<IconLink size={16} />}
                           />
                         ) : (
@@ -1850,7 +1915,7 @@ function ViewAsset() {
                               placeholder='Referencia o enlace del acta de salida'
                               value={form.acta_salida}
                               onChange={(e) => handleFormChange('acta_salida', e.target.value)}
-                              maxLength={1000}
+                              maxLength={2000}
                               leftSection={<IconFileCertificate size={16} />}
                             />
                           ) : (

@@ -1,6 +1,7 @@
 'use client';
 
 import { useMemo } from 'react';
+import { useRouter } from 'next/navigation';
 import {
   IconCalendarCheck,
   IconClipboardList,
@@ -12,6 +13,9 @@ import { SolicitadoActividadesView } from './SolicitadoActividadesView';
 import { SolicitadoProcesosView } from './SolicitadoAnalyticsView';
 import { STALE_DAYS, daysSince } from '../../lib/request-general/teamWorkload';
 import { KpiTile, PanelSection, ToneChip, panelStyles as s } from '../ui/panel/Panel';
+import { SlaSummaryCards } from './sla/SlaSummaryCards';
+import { useSlaSummary } from './sla/useSlaSummary';
+import { emptyInboxSlaCounts } from '../../lib/requests-general/slaInbox';
 
 function isClosedStatus(status?: string | null): boolean {
   const v = String(status ?? '').toLowerCase();
@@ -29,6 +33,9 @@ function isResolvedStatus(status?: string | null): boolean {
  */
 export function PersonalWorkView() {
   const { allActivities, allRequests, activities, appliedRange } = useSolicitadoData();
+  const router = useRouter();
+  // SLA (ANS) of my assigned-requests inbox; a card opens the inbox filtered by it.
+  const { data: slaSummary } = useSlaSummary();
 
   const summary = useMemo(() => {
     const now = new Date();
@@ -48,6 +55,16 @@ export function PersonalWorkView() {
 
   return (
     <>
+      <SlaSummaryCards
+        available={Boolean(slaSummary?.available)}
+        counts={slaSummary?.counts ?? emptyInboxSlaCounts()}
+        breakdown={slaSummary?.breakdown}
+        selected={null}
+        onSelect={(state) => {
+          if (state) router.push(`/process/request-general/assigned-requests?sla=${state}`);
+        }}
+      />
+
       <PanelSection title='Resumen' hint={`Pendientes: hoy · Completadas: ${appliedRange}`}>
         <div className={s.grid4}>
           <KpiTile

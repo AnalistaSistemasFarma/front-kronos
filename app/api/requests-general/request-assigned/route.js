@@ -140,6 +140,8 @@ export async function GET(req) {
         u.email,
         users_proc.[user],
         users_proc.id_assigned_process_category,
+        u.image AS requester_image,
+        first_proc.image AS user_image,
         users_cat.users_category,
         u.phone,
         u.identification
@@ -162,6 +164,14 @@ export async function GET(req) {
                 FOR XML PATH(''), TYPE
             ).value('.', 'NVARCHAR(MAX)'), 1, 2, '') AS id_assigned_process_category
       ) users_proc
+      OUTER APPLY (
+        -- Foto del primer responsable del proceso (para el avatar de «Asignado»).
+        SELECT TOP 1 u4.image
+        FROM user_process_category_request_general upcrg4
+        INNER JOIN [user] u4 ON u4.id = upcrg4.id_user
+        WHERE upcrg4.id_process_category = pc.id
+        ORDER BY u4.name
+      ) first_proc
       OUTER APPLY (
         SELECT
           STUFF((

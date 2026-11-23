@@ -31,6 +31,7 @@ import { spawn } from 'node:child_process';
 import { HERRAMIENTAS_PROHIBIDAS } from './config.mjs';
 import { entornoTopes, HERRAMIENTAS_SUBAGENTE, revisarAgentesInit } from './equipo.mjs';
 import { NEGADAS_COMPLETO, revisarInitCompleto } from './orus-completo.mjs';
+import { etiquetaHerramienta as etiquetaDetallada } from './openclaw/actividad.mjs';
 
 /** Herramientas de archivos: lectura libre dentro del hilo, escritura solo en ./trabajo. */
 export const HERRAMIENTAS_BASE = ['Read', 'Glob', 'Grep', 'Edit', 'Write', 'TodoWrite'];
@@ -53,7 +54,7 @@ export const SETTINGS_HIJO = {
  * fija el id con --session-id (así el puente lo conoce de antemano); después,
  * --resume con ese mismo id.
  */
-export function armarArgumentos({ perfil, sesion, rutaMcp, rutaSistema, dirArchivos, modelo, presupuestoUsd, equipo = null, codigo = null, plugins = null, objetivo = false, lectura = null }) {
+export function armarArgumentos({ perfil, sesion, rutaMcp, rutaSistema, dirArchivos, modelo, presupuestoUsd, equipo = null, codigo = null, plugins = null, objetivo = false, lectura = null, scripts = null }) {
   if (!perfil) throw new Error('Falta el perfil.');
   if (!sesion?.id || !/^[0-9a-f-]{36}$/i.test(sesion.id)) throw new Error('session id inválido.');
 
@@ -66,9 +67,12 @@ export function armarArgumentos({ perfil, sesion, rutaMcp, rutaSistema, dirArchi
   // codigo.mjs (git/gh/npm/npx/node) y dentro del sandbox de Claude Code.
   // Skills (2026-10-21): en --restricted solo entran por --plugin-dir; con plugins, la herramienta Skill.
   const skill = plugins?.dirs?.length ? ['Skill'] : [];
-  const tools = [...HERRAMIENTAS_BASE, ...web, ...skill, ...(equipo ? equipo.tools : []), ...(codigo ? codigo.tools : [])];
-  const permitidas = [...PERMITIDAS_BASE, ...web, ...skill, ...perfil.herramientas, ...(equipo ? equipo.permitidas : []), ...(codigo ? codigo.permitidas : [])];
-  const exentas = [...(equipo ? HERRAMIENTAS_SUBAGENTE : []), ...(codigo ? HERRAMIENTAS_CODIGO : [])];
+  // Skill scripts (chat-parity.mjs, 2026-11-19): Bash ONLY for `<interpreter> <skills root>/…`,
+  // re-checked by a hook; without code access, inside a sandbox with no network.
+  const bashScripts = scripts && !codigo ? HERRAMIENTAS_CODIGO : [];
+  const tools = [...HERRAMIENTAS_BASE, ...web, ...skill, ...(equipo ? equipo.tools : []), ...(codigo ? codigo.tools : []), ...bashScripts];
+  const permitidas = [...PERMITIDAS_BASE, ...web, ...skill, ...perfil.herramientas, ...(equipo ? equipo.permitidas : []), ...(codigo ? codigo.permitidas : []), ...(scripts ? scripts.rules : [])];
+  const exentas = [...(equipo ? HERRAMIENTAS_SUBAGENTE : []), ...(codigo || scripts ? HERRAMIENTAS_CODIGO : [])];
   const prohibidas = [
     ...HERRAMIENTAS_PROHIBIDAS.filter((h) => !exentas.includes(h)),
     ...(equipo ? equipo.prohibidas : []),
@@ -79,15 +83,20 @@ export function armarArgumentos({ perfil, sesion, rutaMcp, rutaSistema, dirArchi
   // Sin sandbox SOLO con terminal completa (turno de operador en un proyecto con la bandera).
   if (codigo && !codigo.sandbox?.enabled && codigo.terminalCompleta !== true) throw new Error('Turno con código sin sandbox: no se arma.');
   if (codigo && !codigo.hooks?.PreToolUse?.length) throw new Error('Turno con código sin el hook de subagentes: no se arma.');
+  if (scripts && (!scripts.hook || !scripts.rules?.length)) throw new Error('Skill scripts without their hook or rules: not built.');
+  if (scripts && !codigo && !scripts.sandbox?.enabled) throw new Error('Skill scripts without sandbox: not built.');
   // Con código: sandbox y el ÚNICO hook (subagentes solo git de lectura); nada más.
   // /goal (comandos.mjs): Claude Code lo evalúa con un hook de sesión y se niega a correr con
   // disableAllHooks. Solo en turnos con objetivo se prenden los hooks, y SIN ningún hook propio:
   // --restricted ya ignora los settings de usuario/proyecto/local, así que no entra otro.
+  const conScripts = (hooks) => (scripts ? { ...hooks, PreToolUse: [...(hooks?.PreToolUse ?? []), scripts.hook] } : hooks);
   const settings = codigo
-    ? { ...SETTINGS_HIJO, disableAllHooks: false, hooks: codigo.hooks ?? {}, sandbox: codigo.sandbox }
-    : objetivo
-      ? { ...SETTINGS_HIJO, disableAllHooks: false, hooks: {} }
-      : SETTINGS_HIJO;
+    ? { ...SETTINGS_HIJO, disableAllHooks: false, hooks: conScripts(codigo.hooks ?? {}), sandbox: codigo.sandbox }
+    : scripts
+      ? { ...SETTINGS_HIJO, disableAllHooks: false, hooks: conScripts({}), sandbox: scripts.sandbox }
+      : objetivo
+        ? { ...SETTINGS_HIJO, disableAllHooks: false, hooks: {} }
+        : SETTINGS_HIJO;
 
   const args = [
     '-p',
@@ -274,14 +283,14 @@ export function armarEntorno({ path, home, configClaudeDir, credencial }, topes 
  * prohibida, con permisos abiertos o con un conector que el perfil no
  * declara, el turno se aborta. Devuelve la lista de problemas (vacía = bien).
  */
-export function revisarInit(evento, perfil, equipo = null, codigo = null) {
+export function revisarInit(evento, perfil, equipo = null, codigo = null, scripts = null) {
   const problemas = [];
   const herramientas = Array.isArray(evento?.tools) ? evento.tools : [];
   for (const h of herramientas) {
     // Con equipo aprobado, la herramienta de subagentes es la única excepción.
     if (equipo && HERRAMIENTAS_SUBAGENTE.includes(h)) continue;
     // Con código vinculado, Bash (con sus reglas y el sandbox).
-    if (codigo && HERRAMIENTAS_CODIGO.includes(h)) continue;
+    if ((codigo || scripts) && HERRAMIENTAS_CODIGO.includes(h)) continue;
     if (HERRAMIENTAS_PROHIBIDAS.includes(h)) problemas.push(`herramienta prohibida: ${h}`);
   }
   if (equipo) problemas.push(...revisarAgentesInit(evento, equipo));
@@ -297,15 +306,31 @@ export function revisarInit(evento, perfil, equipo = null, codigo = null) {
   return problemas;
 }
 
-/** Etiqueta corta y en español para el indicador, a partir de un tool_use. */
-export function etiquetaHerramienta(nombre) {
+/**
+ * Etiqueta en español para el indicador, a partir de un tool_use (nombre + entrada).
+ * Con la entrada dice QUÉ se está haciendo, igual que el chat normal y los agentes openclaw
+ * (2026-11-10, Nicolás Rivera: «eso no es tan diciente que diga ejecutando comandos… sé que
+ * estás trabajando pero no sé en qué»): la descripción del comando, el archivo o la búsqueda.
+ * Del comando de terminal solo se muestra su descripción, nunca el comando: el hilo es compartido.
+ */
+export function etiquetaHerramienta(nombre, entrada) {
   if (!nombre) return 'Trabajando…';
+  const conEntrada = entrada && typeof entrada === 'object' && Object.keys(entrada).length > 0;
   if (nombre.startsWith('mcp__')) {
     const [, servidor] = nombre.split('__');
-    if (servidor?.startsWith('sap')) return 'Consultando SAP…';
     if (servidor === 'kronos-pruebas-sql') return 'Trabajando en la base de PRUEBAS…';
     if (servidor === 'synerlink-testing-web') return nombre.endsWith('testing_captura') ? 'Tomando una captura de testing…' : 'Revisando testing como usuario QA…';
+    if (conEntrada) {
+      const detallada = etiquetaDetallada(nombre, entrada);
+      if (detallada) return detallada;
+    }
+    if (servidor?.startsWith('sap')) return 'Consultando SAP…';
     return `Consultando ${servidor}…`;
+  }
+  if (conEntrada) {
+    const args = nombre === 'Bash' ? { description: entrada.description } : entrada;
+    const detallada = nombre === 'Bash' && !entrada.description ? '' : etiquetaDetallada(nombre, args);
+    if (detallada) return detallada;
   }
   const mapa = {
     Read: 'Leyendo archivos del proyecto…',
@@ -321,7 +346,7 @@ export function etiquetaHerramienta(nombre) {
     Agent: 'Repartiendo el trabajo entre el equipo…',
     Task: 'Repartiendo el trabajo entre el equipo…',
   };
-  return mapa[nombre] ?? 'Trabajando…';
+  return mapa[nombre] ?? `Usando ${String(nombre).slice(0, 60)}…`;
 }
 
 /**
@@ -340,7 +365,10 @@ export function acumularEvento(acc, evento) {
     if (modelo) out.modelos = [...new Set([...(out.modelos ?? []), modelo])];
     const contenido = Array.isArray(evento.message?.content) ? evento.message.content : [];
     const usos = contenido.filter((c) => c?.type === 'tool_use');
-    if (usos.length > 0) out.ultimaHerramienta = usos[usos.length - 1].name;
+    if (usos.length > 0) {
+      out.ultimaHerramienta = usos[usos.length - 1].name;
+      out.ultimaEntrada = usos[usos.length - 1].input ?? null;
+    }
     // Para los avisos de progreso y el mensaje de corte (progreso.mjs): el último texto
     // del hilo PRINCIPAL (lo de los subagentes no) y los archivos que tocó con Write/Edit.
     if (!evento.parent_tool_use_id) {
@@ -407,7 +435,7 @@ export function esRevisionObjetivo(evento) {
  * evento (para mover el indicador). Mata el proceso si se pasa del tope o si
  * `revisarInit` encuentra un problema.
  */
-export function correrTurno({ bin, args, env, cwd, prompt, perfil, equipo = null, codigo: accesoCodigo = null, completo = null, vigia = null, timeoutMs, maxRevisionesObjetivo = 0, alEvento = () => {}, spawnImpl = spawn }) {
+export function correrTurno({ bin, args, env, cwd, prompt, perfil, equipo = null, codigo: accesoCodigo = null, scripts = null, completo = null, vigia = null, timeoutMs, maxRevisionesObjetivo = 0, alEvento = () => {}, spawnImpl = spawn }) {
   return new Promise((resolve) => {
     const hijo = spawnImpl(bin, args, { cwd, env, stdio: ['pipe', 'pipe', 'pipe'] });
     let acc = { apiMessages: 0, apiMessagesSubagents: 0, modelos: [] };
@@ -449,7 +477,7 @@ export function correrTurno({ bin, args, env, cwd, prompt, perfil, equipo = null
         acc = acumularEvento(acc, evento);
         if (evento.type === 'system' && evento.subtype === 'init') {
           // Modo Orus completo: la excepción documentada (orus-completo.mjs); los demás turnos, la guarda de siempre.
-          const problemas = completo?.activo ? revisarInitCompleto(evento, completo) : revisarInit(evento, perfil, equipo, accesoCodigo);
+          const problemas = completo?.activo ? revisarInitCompleto(evento, completo) : revisarInit(evento, perfil, equipo, accesoCodigo, scripts);
           if (problemas.length > 0) matar(`arranque inseguro: ${problemas.join('; ')}`);
         }
         // /goal: si el evaluador sigue diciendo «no cumplido», el turno no gira sin fin (p. ej. un

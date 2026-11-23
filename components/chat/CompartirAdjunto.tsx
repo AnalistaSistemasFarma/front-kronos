@@ -26,6 +26,7 @@ import {
   IconBriefcase,
   IconDownload,
   IconMessageForward,
+  IconRobot,
   IconSearch,
   IconShare,
   IconUser,
@@ -37,6 +38,8 @@ import {
   AVISO_HOJA_FALLO,
   ETIQUETA_TIPO,
   MAX_NOTA_REENVIO,
+  destinationKey,
+  forwardRequestBody,
   accionTrasErrorCompartir,
   elegirEstrategiaCompartir,
   enlaceWhatsApp,
@@ -187,11 +190,12 @@ export default function CompartirAdjunto({ adjunto, onAviso }: { adjunto: Adjunt
 
       {reenviar && (
         <ReenviarModal
-          adjunto={adjunto}
+          titulo={`Reenviar «${adjunto.fileName}»`}
+          url={urlReenviarAdjunto(adjunto.downloadUrl, adjunto.id)}
           onClose={() => setReenviar(false)}
-          onListo={(texto) => {
+          onListo={(elegido) => {
             setReenviar(false);
-            onAviso({ color: 'green', texto });
+            onAviso({ color: 'green', texto: mensajeReenviado(adjunto.fileName, elegido) });
           }}
         />
       )}
@@ -254,9 +258,25 @@ const ICONO_TIPO: Record<TipoDestino, typeof IconUser> = {
   persona: IconUser,
   grupo: IconUsersGroup,
   proyecto: IconBriefcase,
+  agente: IconRobot,
 };
 
-function ReenviarModal({ adjunto, onClose, onListo }: { adjunto: AdjuntoVisor; onClose: () => void; onListo: (texto: string) => void }) {
+/**
+ * Elegir a dónde reenviar y reenviar. Lo usan los adjuntos (visor) y los
+ * MENSAJES del chat (2026-11-17): `url` responde GET { destinos } y POST
+ * { idConversation, body? }; cada ruta repite sus dos puertas.
+ */
+export function ReenviarModal({
+  titulo,
+  url,
+  onClose,
+  onListo,
+}: {
+  titulo: string;
+  url: string;
+  onClose: () => void;
+  onListo: (elegido: DestinoReenvio) => void;
+}) {
   const movil = useMediaQuery('(max-width: 768px)') ?? false;
   const [destinos, setDestinos] = useState<DestinoReenvio[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -265,7 +285,6 @@ function ReenviarModal({ adjunto, onClose, onListo }: { adjunto: AdjuntoVisor; o
   const [elegido, setElegido] = useState<DestinoReenvio | null>(null);
   const [nota, setNota] = useState('');
   const [enviando, setEnviando] = useState(false);
-  const url = urlReenviarAdjunto(adjunto.downloadUrl, adjunto.id);
 
   useEffect(() => {
     const ctrl = new AbortController();
@@ -283,6 +302,7 @@ function ReenviarModal({ adjunto, onClose, onListo }: { adjunto: AdjuntoVisor; o
   }, [url]);
 
   const visibles = useMemo(() => filtrarDestinos(destinos ?? [], busqueda, tipo), [destinos, busqueda, tipo]);
+  const hasAgents = useMemo(() => (destinos ?? []).some((d) => d.tipo === 'agente'), [destinos]);
 
   const enviar = async () => {
     if (!elegido || enviando) return;
@@ -291,13 +311,13 @@ function ReenviarModal({ adjunto, onClose, onListo }: { adjunto: AdjuntoVisor; o
     try {
       const res = await chatFetch(url, {
         method: 'POST',
-        body: JSON.stringify({ idConversation: elegido.idConversation, body: nota.trim() || undefined }),
+        body: JSON.stringify(forwardRequestBody(elegido, nota)),
       });
       const datos = (await res.json().catch(() => null)) as { error?: string } | null;
-      if (!res.ok) throw new Error(datos?.error || 'No se pudo reenviar el archivo.');
-      onListo(mensajeReenviado(adjunto.fileName, elegido));
+      if (!res.ok) throw new Error(datos?.error || 'No se pudo reenviar.');
+      onListo(elegido);
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'No se pudo reenviar el archivo.');
+      setError(e instanceof Error ? e.message : 'No se pudo reenviar.');
       setEnviando(false);
     }
   };
@@ -306,7 +326,7 @@ function ReenviarModal({ adjunto, onClose, onListo }: { adjunto: AdjuntoVisor; o
     <Modal
       opened
       onClose={onClose}
-      title={`Reenviar «${adjunto.fileName}»`}
+      title={titulo}
       centered
       fullScreen={movil}
       size='md'
@@ -321,7 +341,7 @@ function ReenviarModal({ adjunto, onClose, onListo }: { adjunto: AdjuntoVisor; o
           </Alert>
         )}
         <TextInput
-          placeholder='Buscar persona, grupo o proyecto'
+          placeholder={hasAgents ? 'Buscar persona, grupo, proyecto o agente' : 'Buscar persona, grupo o proyecto'}
           leftSection={<IconSearch size={16} />}
           value={busqueda}
           onChange={(e) => setBusqueda(e.currentTarget.value)}
@@ -337,6 +357,8 @@ function ReenviarModal({ adjunto, onClose, onListo }: { adjunto: AdjuntoVisor; o
             { value: 'persona', label: 'Personas' },
             { value: 'grupo', label: 'Grupos' },
             { value: 'proyecto', label: 'Proyectos' },
+            // Agents only exist as a target when forwarding a MESSAGE (2026-11-18).
+            ...(hasAgents ? [{ value: 'agente', label: 'Agentes' }] : []),
           ]}
           aria-label='Tipo de destino'
         />
@@ -355,10 +377,11 @@ function ReenviarModal({ adjunto, onClose, onListo }: { adjunto: AdjuntoVisor; o
             <Stack gap={4} role='listbox' aria-label='Destinos'>
               {visibles.map((d) => {
                 const Icono = ICONO_TIPO[d.tipo];
-                const activo = elegido?.idConversation === d.idConversation;
+                const clave = destinationKey(d);
+                const activo = elegido !== null && destinationKey(elegido) === clave;
                 return (
                   <UnstyledButton
-                    key={d.idConversation}
+                    key={clave}
                     role='option'
                     aria-selected={activo}
                     onClick={() => setElegido(d)}

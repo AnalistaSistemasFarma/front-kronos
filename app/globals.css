@@ -3121,6 +3121,30 @@ body.chat-inmersivo .chat-page-thread--completa {
    instante. El movimiento del teclado del sistema ya da la sensación de
    continuidad; no hacía falta duplicarla. */
 
+/* Chat landing (folder grid) on phones and tablets: this page is rendered
+   inside AppHubShell's <main class="app-page-shell">, which already reserves
+   the header height. Its own `app-page-shell` wrapper reserved it a second
+   time, leaving a ~64px empty band under the header on mobile (2026-11-19).
+   Desktop keeps its current spacing. */
+/* Chat landing toolbar: the search box grows into the free width of the row
+   but never collapses below a usable size. */
+.chat-toolbar-search {
+  min-width: 160px;
+}
+
+@media (min-width: 48em) {
+  .chat-toolbar-search {
+    min-width: 240px;
+  }
+}
+
+@media (max-width: 992px) {
+  .app-page-shell .app-page-shell.chat-hub {
+    padding-top: 0;
+    min-height: 0;
+  }
+}
+
 .chat-page-shell--completa {
   max-width: none;
   margin: 0;
@@ -3340,6 +3364,18 @@ body.chat-inmersivo .chat-page-thread--completa {
 .chat-reaccionar-btn:focus-visible,
 .chat-reaccionar-btn--abierto {
   opacity: 1;
+}
+
+/* Aviso de «mensaje reenviado» (2026-11-17): arriba y al centro, visible sin
+   desplazarse; se va solo a los 4 s. */
+.chat-aviso-reenvio {
+  position: fixed;
+  top: calc(env(safe-area-inset-top, 0px) + 72px);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 420;
+  max-width: min(92vw, 420px);
+  box-shadow: var(--mantine-shadow-md);
 }
 
 /* `.chat-msg .chat-reaccionar-btn` y no solo la clase: los estilos de Mantine
@@ -3850,12 +3886,24 @@ button.chat-galeria__archivo {
   background-color: var(--app-surface, var(--surface));
 }
 
-.chat-visor__pestanas-lista {
+/* Mantine's Tabs root sets `display: var(--tabs-display)` (block for horizontal
+   tabs) and its stylesheet loads after this one, so the single-class rule above
+   lost: the panel never stretched and the sheet iframe fell back to the
+   browser's default 150px height. Same for the panel's `flex-grow:
+   var(--tabs-panel-grow)` below. Two classes win regardless of load order. */
+.chat-visor__hoja .chat-visor__pestanas {
+  display: flex;
+  flex-direction: column;
+}
+
+/* Also double-class: Mantine's `flex-wrap: wrap` on the list wrapped the tabs to two rows on the phone. */
+.chat-visor__hoja .chat-visor__pestanas-lista {
   flex-wrap: nowrap;
+  flex-shrink: 0;
   overflow-x: auto;
 }
 
-.chat-visor__pestana {
+.chat-visor__hoja .chat-visor__pestana {
   flex: 1;
   min-height: 0;
 }

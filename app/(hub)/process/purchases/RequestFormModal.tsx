@@ -167,7 +167,7 @@ export default function RequestFormModal({
 
   const save = async () => {
     if (!companyId) {
-      setError('Seleccione la empresa.');
+      setError('Seleccione la compañía.');
       return;
     }
     setSaving(true);
@@ -255,7 +255,7 @@ export default function RequestFormModal({
 
           <Group grow align="flex-start">
             <Select
-              label="Empresa"
+              label="Compañía"
               data={companies.map((c) => ({ value: String(c.idCompany), label: c.companyName }))}
               value={companyId}
               onChange={setCompanyId}

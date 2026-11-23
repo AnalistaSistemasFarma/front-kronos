@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
-import { acumularEvento, armarArgumentos, armarEntorno, correrTurno, revisarInit } from '../src/claude.mjs';
+import { acumularEvento, armarArgumentos, armarEntorno, correrTurno, etiquetaHerramienta, revisarInit } from '../src/claude.mjs';
 import { HERRAMIENTAS_PROHIBIDAS } from '../src/config.mjs';
 
 const SESION = { id: '11111111-2222-3333-4444-555555555555', nueva: false };
@@ -162,4 +162,34 @@ test('correrTurno devuelve el resultado de un turno normal', async () => {
   });
   assert.equal(r.abortado, null);
   assert.equal(r.resultado.texto, 'Listo');
+});
+
+test('indicador descriptivo: dice qué hace cada paso y nunca muestra el comando', () => {
+  const bash = etiquetaHerramienta('Bash', { command: 'source ~/.horus/.env && curl -H "Authorization: Bearer x" https://a', description: 'Publicar el corte en PRUEBAS' });
+  assert.match(bash, /Publicar el corte en PRUEBAS/);
+  assert.doesNotMatch(bash, /curl|Bearer|\.env/);
+  assert.equal(etiquetaHerramienta('Bash', { command: 'ls' }), 'Ejecutando comandos…');
+  assert.equal(etiquetaHerramienta('Bash'), 'Ejecutando comandos…');
+  assert.match(etiquetaHerramienta('Read', { file_path: '/Users/x/proyecto/informe.md' }), /informe\.md/);
+  assert.doesNotMatch(etiquetaHerramienta('Read', { file_path: '/Users/x/proyecto/informe.md' }), /Users/);
+  assert.match(etiquetaHerramienta('Agent', { description: 'Medir uso de agentes', prompt: '…' }), /Medir uso de agentes/);
+  assert.equal(etiquetaHerramienta('mcp__kronos-pruebas-sql__pruebas_sql_consultar', { sql: 'SELECT 1' }), 'Trabajando en la base de PRUEBAS…');
+});
+
+test('acumularEvento guarda la entrada de la última herramienta', () => {
+  const acc = acumularEvento({}, { type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Bash', input: { description: 'Listar archivos' } }] } });
+  assert.equal(acc.ultimaHerramienta, 'Bash');
+  assert.deepEqual(acc.ultimaEntrada, { description: 'Listar archivos' });
+});
+
+test('etiquetaHerramienta: new connectors get a Spanish label, never the generic one', async () => {
+  const { etiquetaHerramienta: deOpenclaw } = await import('../src/openclaw/actividad.mjs');
+  assert.match(deOpenclaw('infralectura__infra_servicios', { servidor: 'serfarma05' }), /^🖥️ Revisando servidores: serfarma05/);
+  assert.match(deOpenclaw('kronospruebas-senhatsumi__kronos_pruebas_sql_escribir', { sql: 'UPDATE x' }), /^🧪 Escribiendo en la base de PRUEBAS/);
+  assert.doesNotMatch(deOpenclaw('kronospruebas-senhatsumi__kronos_pruebas_sql_escribir', { sql: 'UPDATE x' }), /UPDATE/);
+  assert.match(deOpenclaw('lectorexcel-senhatsumi__documento_leer', { ruta: '/Users/x/inbox/acta.docx' }), /^📄 Leyendo documento/);
+  assert.match(deOpenclaw('mcp__sapbo-onelatampharma__sap_query', { entity: 'Items' }), /^🧾 Consultando SAP de OLP: Items/);
+  assert.match(deOpenclaw('mcp__nuevo-conector__hacer_algo', {}), /^🔌 Usando hacer_algo de nuevo-conector/);
+  assert.match(etiquetaHerramienta('mcp__infralectura__infra_disco', { servidor: 'serfarma07' }), /Revisando servidores/);
+  assert.equal(etiquetaHerramienta('Monitor'), 'Usando Monitor…');
 });

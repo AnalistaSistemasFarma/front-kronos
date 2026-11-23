@@ -46,6 +46,8 @@ interface Props {
   subject?: string;
   /** Editar un borrador ya creado (desde su solicitud «En Borrador»). */
   edit?: { docEntry: number } | null;
+  /** Duplicar una solicitud anterior (SAPSEND) como solicitud NUEVA: se copian comentarios y líneas. */
+  duplicate?: { docEntry: number } | null;
   /** Termino (ok) o quedo el borrador creado con un aviso (warning). */
   onDone: (result: { ok: boolean; message: string }) => void;
 }
@@ -182,7 +184,7 @@ function colWidth(field: LineField, base: number): number {
   return Math.max(base, 110);
 }
 
-export default function PurchaseInlineForm({ companyId, edit, onDone }: Props) {
+export default function PurchaseInlineForm({ companyId, edit, duplicate, onDone }: Props) {
   const [readiness, setReadiness] = useState<Readiness>('loading');
   const [comments, setComments] = useState('');
   const [requiredDate, setRequiredDate] = useState('');
@@ -208,21 +210,31 @@ export default function PurchaseInlineForm({ companyId, edit, onDone }: Props) {
   const [massVendorTarget, setMassVendorTarget] = useState<string>('all');
   const [massVendorSearch, setMassVendorSearch] = useState<string | null>(null);
 
-  // Edición: carga el borrador.
+  // Edición o duplicado: carga el borrador.
   useEffect(() => {
-    if (!edit) return;
+    const source = edit ?? duplicate;
+    if (!source) return;
     let cancelled = false;
     setLoadingEdit(true);
-    fetch(`/api/purchases/item?companyId=${companyId}&docEntry=${edit.docEntry}`)
+    fetch(
+      edit
+        ? `/api/purchases/item?companyId=${companyId}&docEntry=${source.docEntry}`
+        : `/api/purchases/previous/item?companyId=${companyId}&docEntry=${source.docEntry}`
+    )
       .then(async (res) => {
         const data = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(data.error || 'No se pudo cargar la solicitud');
         if (cancelled) return;
         const item = data.item ?? {};
         setComments(String(item.Comments ?? ''));
-        setRequiredDate(String(item.RequriedDate ?? '').slice(0, 10));
+        // Al duplicar, las fechas se ponen de nuevo (como SAPSEND).
+        setRequiredDate(edit ? String(item.RequriedDate ?? '').slice(0, 10) : '');
         const docLines: Record<string, unknown>[] = Array.isArray(item.DocumentLines) ? item.DocumentLines : [];
-        setLines(docLines.length ? docLines.map(toFormLine) : [{}]);
+        const formLines = docLines.map(toFormLine).map((l) => {
+          if (!edit) delete l.RequiredDate;
+          return l;
+        });
+        setLines(formLines.length ? formLines : [{}]);
       })
       .catch((e: Error) => {
         if (!cancelled) toast.error(e.message);
@@ -233,7 +245,7 @@ export default function PurchaseInlineForm({ companyId, edit, onDone }: Props) {
     return () => {
       cancelled = true;
     };
-  }, [edit, companyId]);
+  }, [edit, duplicate, companyId]);
   /** Campos de búsqueda con texto escrito pero sin elegir de la lista («línea-campo»). */
   const [notFromList, setNotFromList] = useState<Set<string>>(new Set());
   const markNotFromList = (key: string, invalid: boolean) =>
@@ -478,22 +490,22 @@ export default function PurchaseInlineForm({ companyId, edit, onDone }: Props) {
   if (readiness === 'no-write') {
     return (
       <Alert color="yellow" title="Solicitud de compra">
-        No tiene permiso para crear solicitudes de compra en esta empresa («Compras · Gestionar solicitudes»).
+        No tiene permiso para crear solicitudes de compra en esta compañía («Compras · Gestionar solicitudes»).
       </Alert>
     );
   }
   if (readiness === 'no-profile') {
     return (
-      <Alert color="yellow" title="Falta su perfil de SAPSEND en esta empresa">
+      <Alert color="yellow" title="Falta su perfil de SAPSEND en esta compañía">
         Para crear solicitudes de compra su usuario necesita el ID de usuario y el ID de departamento de SAPSEND de esta
-        empresa. Pídale a Tecnología que los registre en Administración → Usuarios → «SAPSEND por empresa».
+        compañía. Pídale a Tecnología que los registre en Administración → Usuarios → «SAPSEND por empresa».
       </Alert>
     );
   }
   if (readiness === 'no-sap') {
     return (
       <Alert color="yellow" title="Solicitud de compra">
-        Esta empresa no tiene conexión a SAP configurada; no se pueden crear solicitudes de compra.
+        Esta compañía no tiene conexión a SAP configurada; no se pueden crear solicitudes de compra.
       </Alert>
     );
   }
@@ -773,7 +785,7 @@ export default function PurchaseInlineForm({ companyId, edit, onDone }: Props) {
           if (bulkDone) onDone({ ok: true, message: 'Carga masiva procesada: las solicitudes quedaron en Mis solicitudes.' });
         }}
         onDone={() => setBulkDone(true)}
-        companies={[{ idCompany: Number(companyId), companyName: companyName || 'Empresa' }]}
+        companies={[{ idCompany: Number(companyId), companyName: companyName || 'Compañía' }]}
       />
     </Stack>
   );

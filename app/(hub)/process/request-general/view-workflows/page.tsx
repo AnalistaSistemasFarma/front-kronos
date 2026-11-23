@@ -70,6 +70,7 @@ import {
 import TableColumnsEditor from '../_components/TableColumnsEditor';
 import WorkflowValidatorsModal from '../../../../../components/request-general/WorkflowValidatorsModal';
 import BotonMejoraContinua from '../../../../../components/request-general/BotonMejoraContinua';
+import { ProcessSlaCard } from '../../../../../components/request-general/sla/ProcessSlaCard';
 import { FlowConnector } from '../../../../../components/ui/flow/FlowConnector';
 import { SapTaskActionPicker, SapTaskCardInfo } from '../../../../../components/workflow-sap/SapTaskObject';
 import {
@@ -78,6 +79,10 @@ import {
   useWorkflowSapConfig,
   type TaskSapInfo,
 } from '../../../../../components/workflow-sap/TaskSapConfig';
+import {
+  TaskDocTemplateCardInfo,
+  TaskDocTemplateConfigModal,
+} from '../../../../../components/workflow-doc/TaskDocTemplateConfig';
 import toast from 'react-hot-toast';
 // WorkflowDiagram deshabilitado temporalmente (2026-09-02): el diagrama se veía
 // desordenado (ramas cruzadas) a criterio de producto. Pendiente rediseño.
@@ -117,7 +122,7 @@ interface Task {
   conditions: number[];
   display_order?: number | null;
   /** Objeto del flujo: tarea de persona, autorización o tarea SAP (la ejecuta el sistema). */
-  task_kind?: 'normal' | 'authorization' | 'sap_executor';
+  task_kind?: 'normal' | 'authorization' | 'sap_executor' | 'doc_template';
   /** Acción del catálogo SAP (solo tareas SAP). */
   sap_action_key?: string | null;
   /** Cuándo se ejecuta la tarea SAP: en su turno o solo si la autorización anterior se rechaza / se cotiza. */
@@ -206,6 +211,7 @@ function ViewWorkFlowPage() {
   // Configuracion SAP de las tareas (tareas «Ejecutora SAP» y efectos SAP de autorizaciones).
   const sapConfig = useWorkflowSapConfig(workflow?.id ?? null);
   const [sapTask, setSapTask] = useState<TaskSapInfo | null>(null);
+  const [docTemplateTask, setDocTemplateTask] = useState<{ id: number; task: string } | null>(null);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingTasks, setLoadingTasks] = useState(false);
@@ -271,7 +277,7 @@ function ViewWorkFlowPage() {
     id_linked_process: '',
     closes_request: false,
     conditions: [] as number[],
-    task_kind: 'normal' as 'normal' | 'sap_executor',
+    task_kind: 'normal' as 'normal' | 'sap_executor' | 'doc_template',
     sap_action_key: '',
     sap_trigger: 'on_execute' as 'on_execute' | 'on_reject' | 'on_quote',
   });
@@ -424,7 +430,11 @@ if (session?.user?.id) return session.user.id as unknown as number;
           id_linked_process: t.id_linked_process ?? null,
           closes_request: Boolean(t.closes_request),
           conditions: Array.isArray(t.conditions) ? t.conditions : [],
-          task_kind: t.is_authorization ? 'authorization' : t.task_kind === 'sap_executor' ? 'sap_executor' : 'normal',
+          task_kind: t.is_authorization
+            ? 'authorization'
+            : t.task_kind === 'sap_executor' || t.task_kind === 'doc_template'
+              ? t.task_kind
+              : 'normal',
           sap_action_key: t.sap_action_key ?? null,
           sap_trigger: t.task_kind === 'sap_executor' ? (t.sap_trigger ?? 'on_execute') : null,
         }))
@@ -659,7 +669,13 @@ if (session?.user?.id) return session.user.id as unknown as number;
         : null,
       closes_request: newTaskForm.closes_request,
       conditions: newTaskForm.conditions,
-      task_kind: isSapTask ? 'sap_executor' : newTaskForm.is_authorization ? 'authorization' : 'normal',
+      task_kind: isSapTask
+        ? 'sap_executor'
+        : newTaskForm.task_kind === 'doc_template'
+          ? 'doc_template'
+          : newTaskForm.is_authorization
+            ? 'authorization'
+            : 'normal',
       sap_action_key: isSapTask ? newTaskForm.sap_action_key : null,
       sap_trigger: isSapTask ? newTaskForm.sap_trigger : null,
     };
@@ -1790,6 +1806,9 @@ if (session?.user?.id) return session.user.id as unknown as number;
                     </Stack>
                   </Card>
 
+                  {/* SLA (ANS) of the subprocess: own load/save, independent of the edit mode. */}
+                  <ProcessSlaCard processId={workflow.id} />
+
                   {/* Formulario externo: expone este flujo en una página pública SIN login. */}
                   <Card withBorder radius='md' p='md'>
                     <Stack gap='sm'>
@@ -2076,6 +2095,12 @@ if (session?.user?.id) return session.user.id as unknown as number;
                                         )}
                                         {task.task_kind === 'sap_executor' && (
                                           <SapTaskCardInfo actionKey={task.sap_action_key} />
+                                        )}
+                                        {task.task_kind === 'doc_template' && (
+                                          <TaskDocTemplateCardInfo
+                                            idTask={task.id}
+                                            onConfigure={() => setDocTemplateTask({ id: task.id, task: task.task })}
+                                          />
                                         )}
 
                                         {task.id_linked_process && (
@@ -3057,6 +3082,7 @@ if (session?.user?.id) return session.user.id as unknown as number;
         </Modal>
 
         <TaskSapConfigModal info={sapTask} onClose={() => setSapTask(null)} onSaved={sapConfig.reload} />
+        <TaskDocTemplateConfigModal task={docTemplateTask} onClose={() => setDocTemplateTask(null)} />
       <WorkflowValidatorsModal
           opened={validatorsModalOpened}
           onClose={() => setValidatorsModalOpened(false)}
@@ -3099,11 +3125,19 @@ if (session?.user?.id) return session.user.id as unknown as number;
           <Stack gap='lg'>
             <SegmentedControl
               fullWidth
-              value={newTaskForm.task_kind === 'sap_executor' ? 'sap' : newTaskForm.is_authorization ? 'auth' : 'task'}
+              value={
+                newTaskForm.task_kind === 'sap_executor'
+                  ? 'sap'
+                  : newTaskForm.task_kind === 'doc_template'
+                    ? 'doc'
+                    : newTaskForm.is_authorization
+                      ? 'auth'
+                      : 'task'
+              }
               onChange={(v) =>
                 setNewTaskForm({
                   ...newTaskForm,
-                  task_kind: v === 'sap' ? 'sap_executor' : 'normal',
+                  task_kind: v === 'sap' ? 'sap_executor' : v === 'doc' ? 'doc_template' : 'normal',
                   is_authorization: v === 'auth',
                   type_authorization: v === 'auth' ? newTaskForm.type_authorization : '',
                   sap_action_key: v === 'sap' ? newTaskForm.sap_action_key : '',
@@ -3113,8 +3147,16 @@ if (session?.user?.id) return session.user.id as unknown as number;
                 { label: 'Tarea', value: 'task' },
                 { label: 'Autorización', value: 'auth' },
                 { label: 'Tarea SAP', value: 'sap' },
+                { label: 'Plantilla de documento', value: 'doc' },
               ]}
             />
+            {newTaskForm.task_kind === 'doc_template' && (
+              <Alert color='violet' variant='light' icon={<IconFileText size={16} />}>
+                Genera un documento con los valores del formulario y lo deja en los adjuntos de la solicitud. En modo
+                automático no necesita responsable. Guarde el flujo y luego use «Configurar plantilla» en la tarjeta de
+                la tarea.
+              </Alert>
+            )}
             {newTaskForm.task_kind === 'sap_executor' && (
               <SapTaskActionPicker
                 value={newTaskForm.sap_action_key}

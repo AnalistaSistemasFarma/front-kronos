@@ -667,9 +667,53 @@ export function cargarConfig(env = process.env) {
         .map((x) => x.trim())
         .filter(Boolean),
       engramProyecto: (env.HILOS_CONECTORES_AGENTE_ENGRAM_PROYECTO ?? '').trim() || null,
+      // Engram of the agent (2026-11-19): its binary and ITS OWN base, as in its chat (never another agent's).
+      engramBin: rutaOpcional('HILOS_CONECTORES_AGENTE_ENGRAM_BIN'),
+      engramDataDir: rutaOpcional('HILOS_CONECTORES_AGENTE_ENGRAM_DATA_DIR'),
+      engramPort: (env.HILOS_CONECTORES_AGENTE_ENGRAM_PORT ?? '').trim() || null,
     };
+    if (conectoresAgente.engramPort && !/^[0-9]{2,5}$/.test(conectoresAgente.engramPort)) throw new ErrorConfig('HILOS_CONECTORES_AGENTE_ENGRAM_PORT debe ser un número de puerto.');
     if (conectoresAgente.engramProyecto && !/^[A-Za-z0-9._-]{1,100}$/.test(conectoresAgente.engramProyecto)) {
       throw new ErrorConfig('HILOS_CONECTORES_AGENTE_ENGRAM_PROYECTO solo admite letras, números, punto, guion y guion bajo.');
+    }
+  }
+
+  // Chat parity (chat-parity.mjs, 2026-11-19): the agent's chat skills synced at turn start and its
+  // skill scripts runnable. ON by default for the Claude Code runner when the agent's chat config is
+  // known (HILOS_CONECTORES_AGENTE_CONFIG_DIR) or explicit sources are given.
+  //   HILOS_SKILLS_AGENTE           'si' (default) or 'no'
+  //   HILOS_SKILLS_AGENTE_FUENTES   skill folders (comma, absolute); default <config>/skills + <work dir>/.claude/skills
+  //   HILOS_SKILLS_AGENTE_NOMBRE    plugin name (default: HILOS_AGENTE); replaces a mounted plugin with that name
+  //   HILOS_SKILLS_AGENTE_EXCLUIR   extra skills left out (comma)
+  //   HILOS_SCRIPTS_SKILL           'si' (default) or 'no'
+  //   HILOS_SCRIPTS_SKILL_INTERPRETES  absolute interpreters (comma); default: python3 and the bridge's node
+  //   HILOS_CONECTORES_AGENTE_ENGRAM_BIN / _ENGRAM_DATA_DIR / _ENGRAM_PORT  engram of the agent (its own base)
+  let skillsAgente = null;
+  let skillScripts = null;
+  if (runner !== 'openclaw') {
+    const siNo = (nombre) => {
+      const v = (env[nombre] ?? 'si').trim().toLowerCase() || 'si';
+      if (!['si', 'no'].includes(v)) throw new ErrorConfig(`${nombre} debe ser «si» o «no».`);
+      return v === 'si';
+    };
+    const lista = (nombre) =>
+      (env[nombre] ?? '')
+        .split(',')
+        .map((x) => x.trim())
+        .filter(Boolean);
+    const fuentes = lista('HILOS_SKILLS_AGENTE_FUENTES');
+    for (const f of fuentes) if (!path.isAbsolute(f)) throw new ErrorConfig('HILOS_SKILLS_AGENTE_FUENTES: rutas absolutas.');
+    const configAgente = (env.HILOS_CONECTORES_AGENTE_CONFIG_DIR ?? '').trim() || null;
+    if (siNo('HILOS_SKILLS_AGENTE') && (fuentes.length || configAgente)) {
+      const nombre = ((env.HILOS_SKILLS_AGENTE_NOMBRE ?? '').trim() || agente).toLowerCase();
+      if (!/^[a-z][a-z0-9-]{0,39}$/.test(nombre)) throw new ErrorConfig('HILOS_SKILLS_AGENTE_NOMBRE: minúsculas, números y guiones.');
+      skillsAgente = { fuentes, configDir: configAgente, workDir: (env.HILOS_CONECTORES_AGENTE_PROYECTO ?? '').trim() || null, nombre, excluir: lista('HILOS_SKILLS_AGENTE_EXCLUIR') };
+    }
+    if (skillsAgente && siNo('HILOS_SCRIPTS_SKILL')) {
+      const interpretes = lista('HILOS_SCRIPTS_SKILL_INTERPRETES');
+      for (const i of interpretes) if (!path.isAbsolute(i) || /\s/.test(i)) throw new ErrorConfig('HILOS_SCRIPTS_SKILL_INTERPRETES: rutas absolutas sin espacios.');
+      const porDefecto = ['/opt/homebrew/bin/python3', '/usr/local/bin/python3', '/usr/bin/python3'].filter((p) => existsSync(p)).slice(0, 1);
+      skillScripts = { enabled: true, interpreters: interpretes.length ? interpretes : [...porDefecto, process.execPath].filter((p) => !/\s/.test(p)) };
     }
   }
 
@@ -738,6 +782,8 @@ export function cargarConfig(env = process.env) {
     pruebasKronos: { habilitado: pruebasModo === 'si' && runner === 'claude', base: new URL(pruebasWeb).origin },
     orusCompleto,
     conectoresAgente,
+    skillsAgente,
+    skillScripts,
     // Para el entorno del hijo: solo lo indispensable del entorno propio.
     path: env.PATH ?? '/usr/bin:/bin',
     home: env.HOME ?? homedir(),

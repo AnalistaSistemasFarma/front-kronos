@@ -169,6 +169,9 @@ export interface ChatAuthorDto {
   id: string | number;
   name: string;
   avatarUrl: string | null;
+  /** Solo agentes: su código y la versión de la foto SUBIDA (ver `agentAvatarSrc`). */
+  code?: string;
+  avatarVersion?: number | null;
 }
 
 /**

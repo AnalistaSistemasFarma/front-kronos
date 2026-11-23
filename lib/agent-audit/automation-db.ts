@@ -143,6 +143,35 @@ export interface CasoRelevanteDto {
   horasPeriodo: number;
   horasMes: number;
 }
+/**
+ * MOST RELEVANT CASE OF THE PREVIOUS WEEK, per agent (Nicolás Rivera, 2026-11-23, conv 1 msg 37558).
+ * Derived from the weekly counts (semanas_json) that the weekly analyzer stores with each case:
+ * for the last full week (Monday to Sunday, Colombia time) before the cut, the case of each agent
+ * with the highest relevance score = hours freed that week × confidence weight. The summary line
+ * comes from the catalog (case name + description), never from the chat text, so it carries no
+ * personal or sensitive data.
+ */
+export interface CasoSemanaDto {
+  code: string;
+  agente: string;
+  empresa: string | null;
+  departamento: string;
+  caso: string;
+  /** One short Spanish line (from the catalog description) of what the agent did. */
+  resumen: string;
+  ocurrencias: number;
+  minHumano: number;
+  minDespues: number;
+  horasLiberadas: number;
+  puntaje: number;
+}
+export interface SemanaRelevanteDto {
+  /** Monday of the week (YYYY-MM-DD). */
+  desde: string;
+  /** Sunday of the week (YYYY-MM-DD). */
+  hasta: string;
+  casos: CasoSemanaDto[];
+}
 export interface IndicadorDto {
   corte: string | null;
   periodoDesde: string | null;
@@ -150,6 +179,8 @@ export interface IndicadorDto {
   agentes: AgenteIndicadorDto[];
   departamentos: DepartamentoIndicadorDto[];
   casosRelevantes: CasoRelevanteDto[];
+  /** Most relevant case of the previous full week, one per agent (null without a cut). */
+  semanaRelevante: SemanaRelevanteDto | null;
   /** Agentes activos (en su alcance) que todavía no tienen casos medidos en este corte. */
   sinMedir: { code: string; displayName: string }[];
   ultima: CorridaDto | null;
@@ -223,7 +254,7 @@ export async function leerIndicador(
           ORDER BY requested_at DESC;
 
         -- Casos válidos con su detalle por semana (gráficos).
-        SELECT c.id_agent, c.min_humano, c.min_despues, c.semanas_json
+        SELECT c.id_agent, c.caso, c.descripcion, c.confianza, c.min_humano, c.min_despues, c.semanas_json
         FROM dbo.agent_automation_case c
         WHERE c.corte = @corte AND c.valido = 1;
 
@@ -290,6 +321,7 @@ export async function leerIndicador(
       graficos: armarGraficos(agentes, sets[3] ?? []),
       departamentos: consolidarDepartamentos(agentes),
       casosRelevantes: casosRelevantes(agentes, sets[4] ?? [], alcance),
+      semanaRelevante: corte ? armarSemanaRelevante(agentes, sets[3] ?? [], corte) : null,
       sinMedir: (sets[5] ?? [])
         .filter((f) => agentInScope(alcance, Number(f.id_agent)))
         .map((f) => ({ code: String(f.code), displayName: String(f.display_name) })),
@@ -345,6 +377,77 @@ function casosRelevantes(agentes: AgenteIndicadorDto[], filas: Fila[], alcance: 
 }
 
 const SIN_DEPTO = "Sin departamento";
+
+/** Monday (YYYY-MM-DD) of the last full week before the cut date. */
+export function semanaAnterior(corte: string): { desde: string; hasta: string } {
+  const d = new Date(`${corte.slice(0, 10)}T00:00:00Z`);
+  const lunesActual = d.getTime() - ((d.getUTCDay() + 6) % 7) * 86_400_000;
+  const desde = new Date(lunesActual - 7 * 86_400_000).toISOString().slice(0, 10);
+  const hasta = new Date(lunesActual - 86_400_000).toISOString().slice(0, 10);
+  return { desde, hasta };
+}
+
+const PESO_CONFIANZA: Record<string, number> = { alta: 1, media: 0.85, baja: 0.6 };
+
+/** First sentence of the catalog description, cut to `max` characters. */
+function primeraFrase(v: string | null, max = 160): string {
+  const t = (v ?? "").replace(/\s+/g, " ").trim();
+  if (!t) return "";
+  const f = (t.match(/^.*?[.;](\s|$)/)?.[0] ?? t).trim().replace(/[.;]$/, "");
+  return f.length > max ? `${f.slice(0, max - 1).trimEnd()}…` : f;
+}
+
+
+/**
+ * Picks, for each agent in scope, the case that freed the most capacity in the previous full week.
+ * Score = hours freed that week × confidence weight (alta 1 · media 0,85 · baja 0,6 · none 0,75);
+ * ties go to the case asked more times. Pure, for tests.
+ */
+export function armarSemanaRelevante(
+  agentes: AgenteIndicadorDto[],
+  casos: Fila[],
+  corte: string,
+): SemanaRelevanteDto {
+  const { desde, hasta } = semanaAnterior(corte);
+  const porId = new Map(agentes.map((a) => [a.idAgent, a]));
+  const mejor = new Map<number, CasoSemanaDto>();
+  for (const c of casos) {
+    const ag = porId.get(Number(c.id_agent));
+    if (!ag) continue; // out of scope or someone else's personal agent
+    const n = semanasDeCaso(c.semanas_json)
+      .filter((w) => w.inicio === desde)
+      .reduce((acc, w) => acc + w.ocurrencias, 0);
+    if (!n) continue;
+    const mh = Number(c.min_humano ?? 0);
+    const md = Number(c.min_despues ?? 0);
+    const horas = (n * Math.max(0, mh - md)) / 60;
+    if (horas <= 0) continue;
+    const puntaje = horas * (PESO_CONFIANZA[String(c.confianza ?? "")] ?? 0.75);
+    const prev = mejor.get(ag.idAgent);
+    if (prev && (prev.puntaje > puntaje || (prev.puntaje === puntaje && prev.ocurrencias >= n))) continue;
+    const caso = String(c.caso ?? "").trim();
+    const detalle = primeraFrase(txt(c.descripcion));
+    mejor.set(ag.idAgent, {
+      code: ag.code,
+      agente: ag.displayName,
+      empresa: ag.empresa,
+      departamento: nombreDepto(ag.departamento),
+      caso,
+      resumen: /[.…!?]$/.test(detalle || caso) ? detalle || caso : `${detalle || caso}.`,
+      ocurrencias: n,
+      minHumano: mh,
+      minDespues: md,
+      horasLiberadas: r1(horas),
+      puntaje: Math.round(puntaje * 100) / 100,
+    });
+  }
+  return {
+    desde,
+    hasta,
+    // Listed by hours freed (the column people read); the score only picks the case of each agent.
+    casos: [...mejor.values()].sort((a, b) => b.horasLiberadas - a.horasLiberadas || b.puntaje - a.puntaje || a.agente.localeCompare(b.agente)),
+  };
+}
 
 /** «SISTEMAS 🖥️» → «SISTEMAS»; vacío o «Pendiente…» → «Sin departamento». */
 function nombreDepto(v: string | null): string {

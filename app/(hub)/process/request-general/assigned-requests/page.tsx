@@ -32,6 +32,7 @@ import {
   SegmentedControl,
 } from '@mantine/core';
 import {
+  IconHistory,
   IconCalendar,
   IconUser,
   IconBuilding,
@@ -87,6 +88,19 @@ import {
 } from '../../../../../lib/requests-general/requestListNav';
 import { filterByText, requestSearchParts } from '../../../../../lib/requests-general/textSearch';
 import { RequestListFilters } from '../../../../../components/request-general/list/RequestListFilters';
+import { SlaSummaryCards } from '../../../../../components/request-general/sla/SlaSummaryCards';
+import { DueBadge } from '../../../../../components/request-general/sla/SlaBadge';
+import { useSlaSummary } from '../../../../../components/request-general/sla/useSlaSummary';
+import { useIndicatorPrefs } from '../../../../../components/request-general/sla/useIndicatorPrefs';
+import {
+  countInboxSla,
+  dueSortForSlaFilter,
+  inboxItemRemainingHours,
+  inboxItemSlaState,
+  sortByDue,
+  type InboxSlaItem,
+  type InboxSlaState,
+} from '../../../../../lib/requests-general/slaInbox';
 import {
   ASSIGNED_STATE_OPTIONS,
   EMPTY_LIST_FILTERS,
@@ -111,6 +125,22 @@ import { downloadWorkbook } from '@/lib/dashboard/excel/excelHelpers';
 import { formatEstimatedPaymentDateShort } from '@/lib/treasury/estimatedPaymentDate';
 import { parseTableValue, parseTableConfig } from '@/lib/requests-general/tableField';
 import { createPrerenderSearchParamsForClientPage } from 'next/dist/server/request/search-params';
+import CompanyLogo from '../../../../../components/ui/CompanyLogo';
+import PreviousPurchasesModal from '../../purchases/PreviousPurchasesModal';
+import PersonLine from '../../../../../components/ui/PersonLine';
+import {
+  RequestCompanyCell,
+  RequestStatusBadge,
+  RequestTypeBadge,
+  formatRequestDate,
+  requestStatusColor,
+  requestStatusIcon,
+  taskVisual,
+} from '../../../../../components/request-general/list/RequestRowParts';
+import { ResizableTh, useColumnWidths } from '../../../../../components/ui/ResizableTh';
+import { useUiPreference } from '../../../../../components/ui/useUiPreference';
+import { PREF_COMPANY_COLORS } from '../../../../../lib/ui/preferences';
+import { companyRowStyle } from '../../../../../lib/ui/companyColors';
 
 const ITEMS_PER_PAGE = 100;
 
@@ -132,6 +162,8 @@ interface Ticket {
   identification: string;
   id_status_case?: number;
   users_category?: string | null;
+  requester_image?: string | null;
+  user_image?: string | null;
 }
 
 interface RequestTask {
@@ -161,6 +193,8 @@ interface AssignedTask {
   status_task: string;
   assigned: string;
   category?: string | null;
+  requester_image?: string | null;
+  assigned_image?: string | null;
 }
 
 type AssignedItem =
@@ -236,6 +270,10 @@ function RequestBoard() {
   const [teamCount, setTeamCount] = useState<number | null>(null);
   const [tasksByRequest, setTasksByRequest] = useState<Record<number, RequestTask[]>>({});
   const [loading, setLoading] = useState(true);
+  const [previousOpen, setPreviousOpen] = useState(false);
+  /** Preferencias del usuario (Perfil): fondo por compañía y anchos de columna. */
+  const [companyColors] = useUiPreference<boolean>(PREF_COMPANY_COLORS, false);
+  const colWidths = useColumnWidths('asignadas', { id: 90, asunto: 340, compania: 190, estado: 150, fecha: 170, personas: 300 });
   const [exporting, setExporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [formData, setFormData] = useState({
@@ -261,6 +299,21 @@ function RequestBoard() {
   // y tareas a la vez) y todo se filtra en el navegador sobre la lista COMPLETA, no por página.
   // La paginación solo reparte lo ya filtrado para pintarlo.
   const [filters, setFilters] = useState<ListFilters>(EMPTY_LIST_FILTERS);
+  // SLA (ANS) widget: card filter, also reachable from the dashboard with ?sla=overdue.
+  const [slaFilter, setSlaFilter] = useState<InboxSlaState | null>(() => {
+    const v = searchParams.get('sla');
+    return v === 'overdue' || v === 'near_due' || v === 'on_time' || v === 'no_sla' || v === 'paused' ? v : null;
+  });
+  // «Vencidos» / «Próximos a vencer» list the most urgent first; no card = default order.
+  const dueSort = dueSortForSlaFilter(slaFilter);
+  const [slaRefreshKey, setSlaRefreshKey] = useState(0);
+  const { data: slaSummary } = useSlaSummary(slaRefreshKey);
+  // Status cards the user hid from the gear of the ANS row (saved per user).
+  const { prefs: indicatorPrefs } = useIndicatorPrefs();
+  const hiddenStatusTiles = useMemo(
+    () => indicatorPrefs.hiddenCards.filter((c) => c.startsWith('status.')).map((c) => c.slice('status.'.length)),
+    [indicatorPrefs]
+  );
   const [currentPage, setCurrentPage] = useState(1);
   const [searchInput, setSearchInput] = useState('');
   const deferredSearch = useDeferredValue(searchInput);
@@ -322,12 +375,31 @@ function RequestBoard() {
     [allEntries]
   );
   // Buscador + filtros del panel (sin estado ni tipo): base de las tarjetas y las pestañas.
-  const matchingEntries = useMemo(
+  const panelEntries = useMemo(
     () =>
       filterByText(allEntries, deferredSearch, (e) => e.parts).filter((e) =>
         matchesListFilters(e.row, filters, { ignoreStatus: true })
       ),
     [allEntries, deferredSearch, filters]
+  );
+  // ANS row: counter and filter share `inboxItemSlaState`, over the same rows the
+  // «Pendientes» card counts (requests + tasks), so a tile shows exactly what it filters.
+  const slaByRequest = slaSummary?.byRequest ?? {};
+  const slaItemState = (e: AssignedEntry) =>
+    inboxItemSlaState({ kind: e.item.kind, requestId: e.row.requestId, group: e.row.group }, slaByRequest);
+  const slaCounts = useMemo(
+    () =>
+      countInboxSla(
+        panelEntries
+          .filter((e) => entryOfType(e, typeFilter))
+          .map((e) => ({ kind: e.item.kind, requestId: e.row.requestId, group: e.row.group })),
+        slaByRequest
+      ),
+    [panelEntries, typeFilter, slaSummary]
+  );
+  const matchingEntries = useMemo(
+    () => (slaFilter ? panelEntries.filter((e) => slaItemState(e) === slaFilter) : panelEntries),
+    [panelEntries, slaFilter, slaSummary]
   );
   const typedEntries = useMemo(
     () => matchingEntries.filter((e) => entryOfType(e, typeFilter)),
@@ -346,8 +418,13 @@ function RequestBoard() {
     return hints;
   }, [typedEntries, typeFilter]);
   const visibleEntries = useMemo(
-    () => typedEntries.filter((e) => matchesListFilters(e.row, filters)),
-    [typedEntries, filters]
+    () =>
+      sortByDue(
+        typedEntries.filter((e) => matchesListFilters(e.row, filters)),
+        (e) => inboxItemRemainingHours({ kind: e.item.kind, requestId: e.row.requestId, group: e.row.group }, slaByRequest),
+        dueSort
+      ),
+    [typedEntries, filters, dueSort, slaSummary]
   );
   // Pestañas Todos / Solicitudes / Tareas con el estado elegido.
   const kindCounts = useMemo(() => {
@@ -368,7 +445,25 @@ function RequestBoard() {
   // Al cambiar filtros, búsqueda o tipo se vuelve a la primera página.
   useEffect(() => {
     setCurrentPage(1);
-  }, [filters, deferredSearch, typeFilter]);
+  }, [filters, deferredSearch, typeFilter, dueSort]);
+
+  // SLA of a list row (a task carries the clock of its request): bucket + remaining time.
+  const rowSlaItem = (item: AssignedItem): InboxSlaItem =>
+    item.kind === 'task'
+      ? {
+          kind: 'task',
+          requestId: (item.data as AssignedTask).id_request_general,
+          group: statusGroupOf((item.data as AssignedTask).id_status, (item.data as AssignedTask).status_task),
+        }
+      : {
+          kind: 'request',
+          requestId: (item.data as Ticket).id,
+          group: statusGroupOf((item.data as Ticket).id_status_case, (item.data as Ticket).status),
+        };
+  const rowSla = (item: AssignedItem) => {
+    const it = rowSlaItem(item);
+    return { state: inboxItemSlaState(it, slaByRequest), info: slaByRequest[Number(it.requestId)] };
+  };
 
   const fetchOpenScopeTasks = async () => {
     try {
@@ -556,6 +651,7 @@ function RequestBoard() {
       } else {
         setError(null);
         setLastUpdated(new Date());
+        setSlaRefreshKey((k) => k + 1);
       }
     } catch (err) {
       console.error('Error fetching assigned tickets:', err);
@@ -765,49 +861,10 @@ function RequestBoard() {
     return null;
   }
 
-  const getStatusColor = (status: string) => {
-    switch (status?.toLowerCase()) {
-      case 'abierto':
-        return 'blue';
-      case 'cancelado':
-        return 'red';
-      case 'resuelto':
-        return 'green';
-      case 'devuelta':
-      case 'devuelto':
-        return 'orange';
-      default:
-        return 'gray';
-    }
-  };
-
-  const getStatusIcon = (status: string) => {
-    switch (status?.toLowerCase()) {
-      case 'sin empezar':
-        return IconClock;
-      case 'abierto':
-        return IconProgress;
-      case 'cancelado':
-        return IconX;
-      case 'resuelto':
-        return IconCircleCheckFilled;
-      default:
-        return IconClock;
-    }
-  };
-
-  const getTaskVisual = (status: string) => {
-    switch (status?.toLowerCase()) {
-      case 'resuelto':
-        return { color: 'green', Icon: IconCircleCheckFilled };
-      case 'abierto':
-        return { color: 'orange', Icon: IconCircleDot };
-      case 'sin empezar':
-        return { color: 'gray', Icon: IconCircle };
-      default:
-        return { color: 'red', Icon: IconCircle };
-    }
-  };
+  // Shared with «Solicitudes generales» (RequestRowParts) so both tables look the same.
+  const getStatusColor = requestStatusColor;
+  const getStatusIcon = requestStatusIcon;
+  const getTaskVisual = taskVisual;
 
   const getTasksProgress = (tasks: RequestTask[]) => getSimplifiedTasksProgress(tasks);
 
@@ -1127,83 +1184,24 @@ function RequestBoard() {
     }
   }
 
-  const formatAssignedDate = (raw: string) => {
-    if (!raw) return 'Sin fecha';
-
-    const date = new Date(raw);
-    if (isNaN(date.getTime())) return 'Fecha inválida';
-
-    const adjusted = new Date(date.getTime() + 5 * 60 * 60 * 1000);
-
-    return new Intl.DateTimeFormat('es-CO', {
-      day: 'numeric',
-      month: 'long',
-      year: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-      hour12: true,
-    }).format(adjusted);
-  };
+  const formatAssignedDate = (raw: string) => formatRequestDate(raw);
 
   // Misma columna que Panel, Visor y Mis solicitudes (Compañía / Categoría); aquí se suma el
   // proceso en la línea gris porque en Asignadas se trabaja por proceso.
   const renderCompanyCell = (company: string, category?: string | null, process?: string | null) => (
-    <Stack gap={2}>
-      <Group gap={4} wrap='nowrap'>
-        <IconBuilding size={14} className='text-gray-400' />
-        <Text size='sm' fw={500}>
-          {company}
-        </Text>
-      </Group>
-      <Text size='xs' c='dimmed'>
-        {[category, process].filter(Boolean).join(' · ')}
-      </Text>
-    </Stack>
+    <RequestCompanyCell company={company} category={category} process={process} />
   );
 
   // Etiqueta pequeña que dice qué es cada fila (va debajo del ID): «Solicitud» azul o «Tarea» morada.
-  const renderTypeBadge = (kind: AssignedItem['kind']) =>
-    kind === 'request' ? (
-      <Badge
-        variant='light'
-        color='blue'
-        size='xs'
-        leftSection={<IconTicket size={12} />}
-        styles={{ root: { textTransform: 'none' }, label: { overflow: 'visible' } }}
-      >
-        Solicitud
-      </Badge>
-    ) : (
-      <Badge
-        variant='light'
-        color='violet'
-        size='xs'
-        leftSection={<IconListCheck size={12} />}
-        styles={{ root: { textTransform: 'none' }, label: { overflow: 'visible' } }}
-      >
-        Tarea
-      </Badge>
-    );
+  const renderTypeBadge = (kind: AssignedItem['kind']) => <RequestTypeBadge kind={kind} />;
 
-  const renderStatusBadge = (status: string) => {
-    const StatusIcon = getStatusIcon(status);
-    return (
-      <Badge
-        color={getStatusColor(status)}
-        variant='light'
-        size='sm'
-        leftSection={<StatusIcon size={12} />}
-        styles={{ label: { overflow: 'visible' } }}
-      >
-        {status}
-      </Badge>
-    );
-  };
+  const renderStatusBadge = (status: string) => <RequestStatusBadge status={status} />;
 
   const renderTaskRow = (key: string, task: AssignedTask) => (
     <Table.Tr
       key={key}
       className='cursor-pointer transition-colors'
+      style={companyRowStyle(task.company, companyColors)}
       onClick={() =>
         openFromList(
           { kind: 'task', key, data: task, createdAt: task.created_at },
@@ -1219,7 +1217,7 @@ function RequestBoard() {
           {renderTypeBadge('task')}
         </Stack>
       </Table.Td>
-      <Table.Td style={{ minWidth: 240, maxWidth: 320 }}>
+      <Table.Td>
         <Text size='sm' fw={600} lineClamp={2}>
           {task.task}
         </Text>
@@ -1231,7 +1229,12 @@ function RequestBoard() {
         </div>
       </Table.Td>
       <Table.Td>{renderCompanyCell(task.company, task.category, task.process)}</Table.Td>
-      <Table.Td style={{ whiteSpace: 'nowrap' }}>{renderStatusBadge(task.status_task)}</Table.Td>
+      <Table.Td style={{ whiteSpace: 'nowrap' }}>
+        <Stack gap={4} align='flex-start'>
+          {renderStatusBadge(task.status_task)}
+          <DueBadge {...rowSla({ kind: 'task', key, data: task, createdAt: task.created_at })} />
+        </Stack>
+      </Table.Td>
       <Table.Td>
         <Group gap={4} wrap='nowrap' align='flex-start'>
           <IconCalendarEvent size={14} className='text-gray-400' style={{ marginTop: 2 }} />
@@ -1242,16 +1245,8 @@ function RequestBoard() {
       </Table.Td>
       <Table.Td>
         <Stack gap={4}>
-          <Group gap={4} wrap='nowrap'>
-            <IconUser size={14} className='text-gray-400' />
-            <Text size='sm'>{task.name_requester}</Text>
-          </Group>
-          <Group gap={4} wrap='nowrap'>
-            <IconUserCheck size={14} className='text-gray-400' />
-            <Text size='sm' c='dimmed'>
-              {task.assigned}
-            </Text>
-          </Group>
+          <PersonLine name={task.name_requester} image={task.requester_image} role='requester' />
+          <PersonLine name={task.assigned} image={task.assigned_image} dimmed role='assignee' />
         </Stack>
       </Table.Td>
     </Table.Tr>
@@ -1281,8 +1276,39 @@ function RequestBoard() {
               Descargar Excel
             </Button>
             <WorkloadDistribution onReassigned={() => fetchTickets()} />
+            {/* Provisional: solicitudes de compra creadas antes en SAPSEND (todas las compañías), para consultar y duplicar. */}
+            <Button
+              variant='light'
+              color='grape'
+              radius='xl'
+              leftSection={<IconHistory size={16} />}
+              onClick={() => setPreviousOpen(true)}
+            >
+              Solicitudes de compra anteriores
+            </Button>
           </>
         }
+      />
+      <PreviousPurchasesModal
+        opened={previousOpen}
+        onClose={() => setPreviousOpen(false)}
+        onCreated={(message) => {
+          setPreviousOpen(false);
+          toast.success(message);
+          fetchTickets();
+        }}
+      />
+
+      <SlaSummaryCards
+        available={Boolean(slaSummary?.available)}
+        counts={slaCounts.counts}
+        breakdown={slaCounts.breakdown}
+        showStatusOptions
+        selected={slaFilter}
+        onSelect={(state) => {
+          setSlaFilter(state);
+          setCurrentPage(1);
+        }}
       />
 
       <RequestListFilters
@@ -1291,6 +1317,7 @@ function RequestBoard() {
         onClear={clearListFilters}
         counts={statusCounts}
         showReturned
+        hiddenTiles={hiddenStatusTiles}
         hints={statusHints}
         options={listOptions}
         progress={globalProgress}
@@ -1409,7 +1436,7 @@ function RequestBoard() {
                     onKeyDown={(e) => {
                       if (e.key === 'Enter') open();
                     }}
-                    style={{ cursor: 'pointer' }}
+                    style={{ cursor: 'pointer', ...companyRowStyle(isTask ? t!.company : r!.company, companyColors) }}
                   >
                     <Group justify='space-between' wrap='nowrap' gap='xs' mb={4}>
                       <Group gap={6} wrap='nowrap' style={{ minWidth: 0 }}>
@@ -1418,7 +1445,10 @@ function RequestBoard() {
                           #{isTask ? t!.id_request_general : r!.id}
                         </Text>
                       </Group>
-                      {renderStatusBadge(isTask ? t!.status_task : r!.status)}
+                      <Group gap={4} wrap='nowrap'>
+                        <DueBadge {...rowSla(item)} />
+                        {renderStatusBadge(isTask ? t!.status_task : r!.status)}
+                      </Group>
                     </Group>
                     <Text size='sm' fw={600} lineClamp={2} style={{ overflowWrap: 'anywhere' }}>
                       {isTask ? t!.task : r!.subject}
@@ -1437,14 +1467,19 @@ function RequestBoard() {
                         <RequestProgressBar {...progress} />
                       </div>
                     ) : null}
-                    <Text size='xs' c='dimmed' mt={6} style={{ overflowWrap: 'anywhere' }}>
-                      {[isTask ? null : r!.process, isTask ? t!.company : r!.company, formatAssignedDate(isTask ? t!.created_at : r!.created_at)]
-                        .filter(Boolean)
-                        .join(' · ')}
-                    </Text>
-                    <Text size='xs' c='dimmed' style={{ overflowWrap: 'anywhere' }}>
-                      {isTask ? t!.name_requester : r!.requester} → {isTask ? t!.assigned : r!.user}
-                    </Text>
+                    {/* Igual que en la tabla: logo de la compañía y fotos de solicitante y asignado. */}
+                    <Group gap={8} mt={6} wrap='nowrap' align='center'>
+                      <CompanyLogo name={isTask ? t!.company : r!.company} height={24} />
+                      <Text size='xs' c='dimmed' style={{ overflowWrap: 'anywhere' }}>
+                        {[isTask ? null : r!.process, formatAssignedDate(isTask ? t!.created_at : r!.created_at)]
+                          .filter(Boolean)
+                          .join(' · ')}
+                      </Text>
+                    </Group>
+                    <Stack gap={4} mt={6}>
+                      <PersonLine name={isTask ? t!.name_requester : r!.requester} image={isTask ? t!.requester_image : r!.requester_image} role='requester' />
+                      <PersonLine name={isTask ? t!.assigned : r!.user} image={isTask ? t!.assigned_image : r!.user_image} dimmed role='assignee' />
+                    </Stack>
                   </Paper>
                 );
               })
@@ -1452,15 +1487,15 @@ function RequestBoard() {
           </Stack>
 
           <Box visibleFrom='md' className='overflow-x-auto'>
-            <Table striped highlightOnHover>
+            <Table striped={!companyColors} highlightOnHover style={{ tableLayout: 'fixed', minWidth: colWidths.total }}>
               <Table.Thead>
                 <Table.Tr>
-                  <Table.Th>ID</Table.Th>
-                  <Table.Th>Asunto</Table.Th>
-                  <Table.Th>Compañía / Categoría</Table.Th>
-                  <Table.Th>Estado</Table.Th>
-                  <Table.Th>Fecha</Table.Th>
-                  <Table.Th>Solicitante / Asignado</Table.Th>
+                  <ResizableTh col='id' width={colWidths.widths.id} onResize={colWidths.setWidth}>ID</ResizableTh>
+                  <ResizableTh col='asunto' width={colWidths.widths.asunto} onResize={colWidths.setWidth}>Asunto</ResizableTh>
+                  <ResizableTh col='compania' width={colWidths.widths.compania} onResize={colWidths.setWidth}>Compañía / Categoría</ResizableTh>
+                  <ResizableTh col='estado' width={colWidths.widths.estado} onResize={colWidths.setWidth}>Estado</ResizableTh>
+                  <ResizableTh col='fecha' width={colWidths.widths.fecha} onResize={colWidths.setWidth}>Fecha</ResizableTh>
+                  <ResizableTh col='personas' width={colWidths.widths.personas} onResize={colWidths.setWidth}>Solicitante / Asignado</ResizableTh>
                 </Table.Tr>
               </Table.Thead>
               <Table.Tbody>
@@ -1492,6 +1527,7 @@ function RequestBoard() {
                     <Table.Tr
                       key={item.key}
                       className='cursor-pointer transition-colors'
+                      style={companyRowStyle(ticket.company, companyColors)}
                       onClick={() =>
                         openFromList(
                           item,
@@ -1507,7 +1543,7 @@ function RequestBoard() {
                           {renderTypeBadge('request')}
                         </Stack>
                       </Table.Td>
-                      <Table.Td style={{ minWidth: 240, maxWidth: 320 }}>
+                      <Table.Td>
                         <Text size='sm' fw={500} lineClamp={2}>
                           {ticket.subject}
                         </Text>
@@ -1559,7 +1595,10 @@ function RequestBoard() {
                       </Table.Td>
                       <Table.Td>{renderCompanyCell(ticket.company, ticket.category, ticket.process)}</Table.Td>
                       <Table.Td style={{ whiteSpace: 'nowrap' }}>
-                        {renderStatusBadge(ticket.status)}
+                        <Stack gap={4} align='flex-start'>
+                          {renderStatusBadge(ticket.status)}
+                          <DueBadge {...rowSla(item)} />
+                        </Stack>
                       </Table.Td>
                       <Table.Td>
                         <Group gap={4} wrap='nowrap' align='flex-start'>
@@ -1571,16 +1610,8 @@ function RequestBoard() {
                       </Table.Td>
                       <Table.Td>
                         <Stack gap={4}>
-                          <Group gap={4} wrap='nowrap'>
-                            <IconUser size={14} className='text-gray-400' />
-                            <Text size='sm'>{ticket.requester}</Text>
-                          </Group>
-                          <Group gap={4} wrap='nowrap'>
-                            <IconUserCheck size={14} className='text-gray-400' />
-                            <Text size='sm' c='dimmed'>
-                              {ticket.user}
-                            </Text>
-                          </Group>
+                          <PersonLine name={ticket.requester} image={ticket.requester_image} role='requester' />
+                          <PersonLine name={ticket.user} image={ticket.user_image} dimmed role='assignee' />
                         </Stack>
                       </Table.Td>
                     </Table.Tr>

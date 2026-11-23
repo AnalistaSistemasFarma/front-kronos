@@ -20,6 +20,16 @@ export async function POST(req) {
     try {
       await transaction.begin();
 
+      // Cierra actas previas activas del mismo activo para no bloquear
+      // "Crear Acta" ni dejar firmas huérfanas sin devolución.
+      const closePrevious = new sql.Request(transaction);
+      closePrevious.input('id_assets', sql.Int, id_assets);
+      await closePrevious.query(`
+        UPDATE document_signatures
+        SET active_minute = 0
+        WHERE id_assets = @id_assets AND active_minute = 1;
+      `);
+
       const insertCreateUserQuery = `
         INSERT INTO document_signatures (
           signature_received,
@@ -27,7 +37,8 @@ export async function POST(req) {
           name_technical_delivery,
           id_assets,
           id_user,
-          place
+          place,
+          active_minute
         )
         OUTPUT INSERTED.id
         VALUES (
@@ -36,7 +47,8 @@ export async function POST(req) {
           @nombre_tecnico_entrego,
           @id_assets,
           @id_user_asset,
-          @sede
+          @sede,
+          1
         );
       `;
 
