@@ -235,7 +235,7 @@ function ToastCard({ toast }: { toast: InAppToast }) {
         </button>
       </div>
 
-      {toast.media ? (
+      {toast.media && (
         <div className={styles.mediaBox}>
           {/* eslint-disable-next-line @next/next/no-img-element -- same-origin chat media, sized by CSS */}
           <img
@@ -245,7 +245,8 @@ function ToastCard({ toast }: { toast: InAppToast }) {
             loading='lazy'
           />
         </div>
-      ) : toast.emojiOnly ? (
+      )}
+      {toast.emojiOnly ? (
         <p key={revision} className={styles.emojiBig} aria-label={toast.preview ?? undefined}>
           {toast.emojiOnly}
         </p>

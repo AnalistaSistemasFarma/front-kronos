@@ -9,6 +9,7 @@ import {
   addToStack,
   mediaFromMessage,
   mediaLabel,
+  previewNeedsMedia,
   removeFromStack,
   samePage,
   withExpressiveContent,
@@ -105,28 +106,45 @@ export function dismissMatchingSystemNotifications(url: string | null): void {
   window.setTimeout(() => void pass(), SECOND_PASS_MS);
 }
 
+/** Patches a card that is still on screen (same key), e.g. to add the thumbnail once it is known. */
+export function updateInAppToast(key: string, patch: Partial<InAppToast>): void {
+  const index = stack.findIndex((t) => t.key === key);
+  if (index < 0) return;
+  stack = stack.map((t, i) => (i === index ? withExpressiveContent({ ...t, ...patch }) : t));
+  emit();
+}
+
+/** The attachment row of an agent reply can land ~1-2 s after the message: one more look then. */
+const MEDIA_RETRY_MS = 2_500;
+
 /**
- * Message without text (sticker, GIF or image only): read the last message of the conversation with
- * the existing, access-checked chat API and show the sticker/thumbnail instead of «Envió un archivo».
- * Falls back to the text card on any error.
+ * Chat/project card (2026-11-24, msgs 38382 and 1086): the card shows at once with the text, and
+ * then reads the last message with the existing, access-checked chat API. If it carries a sticker,
+ * GIF or image (alone or WITH text), the thumbnail is added to the same card; the text stays,
+ * except the «[Sticker: …]» / «Envió un archivo» stand-ins, which become a short label.
  */
-export async function showInAppToastWithMedia(toast: InAppToast | null, conversationId: number): Promise<void> {
+export function showInAppToastWithMedia(toast: InAppToast | null, conversationId: number): void {
   if (!toast) return;
-  try {
-    const res = await fetch(`/api/chat/conversations/${conversationId}/messages?limit=1`, {
-      credentials: 'same-origin',
-      cache: 'no-store',
-      headers: { Accept: 'application/json' },
-    });
-    const data = res.ok ? ((await res.json()) as { messages?: MessageMediaInput[] }) : null;
-    const last = data?.messages?.[0];
-    const media = mediaFromMessage(last);
-    if (last && media) {
-      showInAppToast({ ...toast, media, preview: mediaLabel(last) });
-      return;
+  const standIn = previewNeedsMedia(toast.preview);
+  if (!showInAppToast(toast)) return;
+  const look = async (retry: boolean): Promise<void> => {
+    try {
+      const res = await fetch(`/api/chat/conversations/${conversationId}/messages?limit=1`, {
+        credentials: 'same-origin',
+        cache: 'no-store',
+        headers: { Accept: 'application/json' },
+      });
+      const data = res.ok ? ((await res.json()) as { messages?: MessageMediaInput[] }) : null;
+      const last = data?.messages?.[0];
+      const media = mediaFromMessage(last);
+      if (last && media) {
+        updateInAppToast(toast.key, { media, preview: standIn ? mediaLabel(last) : toast.preview });
+        return;
+      }
+    } catch {
+      /* the text card stays */
     }
-  } catch {
-    /* text card below */
-  }
-  showInAppToast(toast);
+    if (retry) window.setTimeout(() => void look(false), MEDIA_RETRY_MS);
+  };
+  void look(true);
 }
