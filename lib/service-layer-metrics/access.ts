@@ -1,21 +1,12 @@
 import { prisma } from '../prisma';
 
 /**
- * Resolución de permisos del módulo "Métricas del Service Layer" (OLP).
+ * Permisos del "Monitor Service Layer".
  *
- * Mismo patrón que lib/organigrama/access.ts: un solo subproceso
- * ('/process/service-layer-metrics') sembrado en subprocess_user_company.
- * Un único nivel de acceso (ver): es información operativa/técnica interna
- * de infraestructura (conteo de tráfico del SAP Service Layer), sin datos
- * de negocio ni información personal — pero igual queda restringida
- * (no visible para cualquier usuario) porque hoy solo tiene sentido para
- * quien da soporte técnico/infra, a diferencia de un módulo de negocio
- * abierto a toda la operación.
- *
- * A diferencia de Organigrama/Registros Sanitarios, este módulo NO es
- * multiempresa: hoy solo existe data de OLP (ver ServiceLayerDailyMetric.company
- * en schema.prisma), así que no hace falta resolver una lista de empresas,
- * solo un booleano de acceso al módulo.
+ * Subproceso '/process/service-layer-metrics' en subprocess_user_company.
+ * Incluye: (1) foto en vivo de TODAS las empresas con sap_endpoints
+ * (concurrencia/latencia desde SynerLink) y (2) histórico diario OLP.
+ * Un solo booleano de acceso (información técnica/operativa).
  */
 export const SERVICE_LAYER_METRICS_ACCESS_URL = '/process/service-layer-metrics';
 

@@ -4,6 +4,7 @@ import { CHAT_MODULE_URL } from '../../../../lib/chat/access';
 import { visiblePeopleConversationIds } from '../../../../lib/chat/people';
 import { projectModuleCompanies } from '../../../../lib/chat/projects';
 import { whereConversacionesVisibles, whereMensajesQueCuentan } from '../../../../lib/proyectos/no-leidos';
+import { mutedProjectIds } from '../../../../lib/proyectos/mute';
 import { MAX_ESTADOS, cursorDeEstado, type EstadoAgenteProyectoDto } from '../../../../lib/proyectos/estado-agente';
 import { estadosCambiadosVisibles, marcaGlobalEstados } from '../../../../lib/proyectos/estado-agente-servidor';
 import { tablaAusente } from '../../../../lib/chat/message-extras';
@@ -174,7 +175,7 @@ export async function GET(request: NextRequest) {
           event_type: true,
           created_at: true,
           role: true,
-          conversation: { select: { kind: true } },
+          conversation: { select: { kind: true, id_project: true } },
           userAuthor: { select: { name: true, email: true } },
           agentAuthor: { select: { display_name: true } },
         },
@@ -267,6 +268,9 @@ export async function GET(request: NextRequest) {
       : [];
     const silenciado = new Map(silencios.map((s) => [s.id_conversation, s.nudges_muted]));
 
+    // «Silenciar notificaciones» (2026-11-23): the event still arrives (the icon and the open thread
+    // refresh) but flagged `muted`, so the browser does not play the sound.
+    const proyectosSilenciados = deProyecto.length > 0 ? await mutedProjectIds(user.id) : new Set<number>();
     const eventosProyecto: ChatPulseEvent[] = deProyecto.map((f) => ({
       type: 'project' as const,
       idConversation: f.id_conversation,
@@ -276,7 +280,7 @@ export async function GET(request: NextRequest) {
           ? f.agentAuthor?.display_name?.trim() || 'El asistente'
           : f.userAuthor?.name?.trim() || f.userAuthor?.email || 'Alguien',
       createdAt: f.created_at.toISOString(),
-      muted: false,
+      muted: f.conversation.id_project !== null && proyectosSilenciados.has(f.conversation.id_project),
     }));
 
     const events: ChatPulseEvent[] = dePersonas

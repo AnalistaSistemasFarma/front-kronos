@@ -1,4 +1,5 @@
 import * as https from 'https';
+import { beginSapCall, noteSapLogin, noteSapLogout } from './callMetrics';
 
 /**
  * Cliente server-side del SAP Service Layer (OData v1).
@@ -10,6 +11,9 @@ import * as https from 'https';
  * Los Service Layer de las empresas usan certificados autofirmados, por eso el
  * agente HTTPS deshabilita la verificacion TLS (igual que SAPSEND y el modulo
  * de compras actual).
+ *
+ * Cada llamada se registra en callMetrics (concurrencia/latencia) para el
+ * monitor Service Layer.
  */
 
 const sapAgent = new https.Agent({ rejectUnauthorized: false });
@@ -44,7 +48,7 @@ interface SapFetchResponse {
  * failed", 2026-09-17). `https.request` si respeta `agent`, por eso este
  * wrapper delega en el modulo `https` en vez de `fetch`.
  */
-function sapFetch(url: string, init: SapFetchInit): Promise<SapFetchResponse> {
+function sapFetchRaw(url: string, init: SapFetchInit): Promise<SapFetchResponse> {
   return new Promise((resolve, reject) => {
     const u = new URL(url);
     const req = https.request(
@@ -78,6 +82,23 @@ function sapFetch(url: string, init: SapFetchInit): Promise<SapFetchResponse> {
     if (init.body) req.write(init.body);
     req.end();
   });
+}
+
+/** sapFetch con métricas de concurrencia/latencia por CompanyDB. */
+async function sapFetch(
+  url: string,
+  init: SapFetchInit,
+  companyDB = '(sin-db)'
+): Promise<SapFetchResponse> {
+  const end = beginSapCall(url, companyDB);
+  try {
+    const res = await sapFetchRaw(url, init);
+    end(res.status);
+    return res;
+  } catch (err) {
+    end(0);
+    throw err;
+  }
 }
 
 export class SapError extends Error {
@@ -144,11 +165,17 @@ export interface SapSession {
   sessionId: string;
   baseUrl: string;
   expiresAt: number;
+  /** CompanyDB usada en el Login; alimenta el monitor de concurrencia. */
+  companyDB: string;
 }
 
 /** Quita barras finales para construir las URLs de forma consistente. */
 function normalizeBase(baseUrl: string): string {
   return baseUrl.replace(/\/+$/, '');
+}
+
+function dbOf(session: SapSession): string {
+  return session.companyDB || '(sin-db)';
 }
 
 /**
@@ -157,16 +184,21 @@ function normalizeBase(baseUrl: string): string {
  */
 export async function sapLogin(creds: SapCredentials): Promise<SapSession> {
   const baseUrl = normalizeBase(creds.baseUrl);
+  const companyDB = creds.companyDB;
 
-  const response = await sapFetch(`${baseUrl}/b1s/v1/Login`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      UserName: creds.username,
-      Password: creds.password,
-      CompanyDB: creds.companyDB,
-    }),
-  });
+  const response = await sapFetch(
+    `${baseUrl}/b1s/v1/Login`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        UserName: creds.username,
+        Password: creds.password,
+        CompanyDB: companyDB,
+      }),
+    },
+    companyDB
+  );
 
   if (!response.ok) {
     const detail = await response.text().catch(() => '');
@@ -181,10 +213,13 @@ export async function sapLogin(creds: SapCredentials): Promise<SapSession> {
 
   // SessionTimeout viene en minutos; por defecto SAP usa 30.
   const timeoutMin = typeof data?.SessionTimeout === 'number' ? data.SessionTimeout : 30;
+  const expiresAt = Date.now() + timeoutMin * 60 * 1000;
+  noteSapLogin(sessionId, baseUrl, companyDB, expiresAt);
   return {
     sessionId,
     baseUrl,
-    expiresAt: Date.now() + timeoutMin * 60 * 1000,
+    expiresAt,
+    companyDB,
   };
 }
 
@@ -199,14 +234,18 @@ export async function sapGet<T = unknown>(
 ): Promise<T> {
   const url = `${session.baseUrl}/b1s/v1/${path.replace(/^\/+/, '')}`;
 
-  const response = await sapFetch(url, {
-    method: 'GET',
-    headers: {
-      'Content-Type': 'application/json',
-      Cookie: `B1SESSION=${session.sessionId}`,
-      ...extraHeaders,
+  const response = await sapFetch(
+    url,
+    {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+        Cookie: `B1SESSION=${session.sessionId}`,
+        ...extraHeaders,
+      },
     },
-  });
+    dbOf(session)
+  );
 
   if (response.status === 401) {
     throw new SapError('Sesion SAP expirada o invalida', 401);
@@ -222,7 +261,11 @@ export async function sapGet<T = unknown>(
 /** GET de un archivo (p. ej. `Attachments2(n)/$value?filename='x.pdf'`): devuelve el contenido crudo. */
 export async function sapGetBinary(session: SapSession, path: string): Promise<{ data: Buffer; contentType: string }> {
   const url = `${session.baseUrl}/b1s/v1/${path.replace(/^\/+/, '')}`;
-  const response = await sapFetch(url, { method: 'GET', headers: { Cookie: `B1SESSION=${session.sessionId}` } });
+  const response = await sapFetch(
+    url,
+    { method: 'GET', headers: { Cookie: `B1SESSION=${session.sessionId}` } },
+    dbOf(session)
+  );
   if (response.status === 401) throw new SapError('Sesion SAP expirada o invalida', 401);
   if (!response.ok) {
     const detail = await response.text().catch(() => '');
@@ -272,14 +315,18 @@ export async function sapPost<T = unknown>(
 ): Promise<T> {
   const url = `${session.baseUrl}/b1s/v1/${path.replace(/^\/+/, '')}`;
 
-  const response = await sapFetch(url, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Cookie: `B1SESSION=${session.sessionId}`,
+  const response = await sapFetch(
+    url,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Cookie: `B1SESSION=${session.sessionId}`,
+      },
+      body: JSON.stringify(body),
     },
-    body: JSON.stringify(body),
-  });
+    dbOf(session)
+  );
 
   if (response.status === 401) {
     throw new SapError('Sesion SAP expirada o invalida', 401);
@@ -300,11 +347,15 @@ export async function sapPost<T = unknown>(
  */
 export async function sapPostText(session: SapSession, path: string, body: unknown): Promise<string> {
   const url = `${session.baseUrl}/b1s/v1/${path.replace(/^\/+/, '')}`;
-  const response = await sapFetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Cookie: `B1SESSION=${session.sessionId}` },
-    body: JSON.stringify(body),
-  });
+  const response = await sapFetch(
+    url,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: `B1SESSION=${session.sessionId}` },
+      body: JSON.stringify(body),
+    },
+    dbOf(session)
+  );
   if (response.status === 401) throw new SapError('Sesion SAP expirada o invalida', 401);
   const text = await response.text().catch(() => '');
   if (!response.ok) {
@@ -339,11 +390,15 @@ export async function sapPatch(
   // (valor de `odata.etag`). Evita que dos decisiones pisen el mismo borrador.
   if (opts.ifMatch) headers['If-Match'] = opts.ifMatch;
 
-  const response = await sapFetch(url, {
-    method: 'PATCH',
-    headers,
-    body: JSON.stringify(body),
-  });
+  const response = await sapFetch(
+    url,
+    {
+      method: 'PATCH',
+      headers,
+      body: JSON.stringify(body),
+    },
+    dbOf(session)
+  );
 
   if (response.status === 401) {
     throw new SapError('Sesion SAP expirada o invalida', 401);
@@ -394,16 +449,20 @@ export async function sapUploadFiles<T = unknown>(
   const boundary = `----synerlink${Date.now().toString(16)}${Math.random().toString(16).slice(2)}`;
   const body = buildMultipartBody(files, boundary);
 
-  const response = await sapFetch(url, {
-    method,
-    headers: {
-      Accept: 'application/json',
-      'Content-Type': `multipart/form-data; boundary=${boundary}`,
-      'Content-Length': String(body.length),
-      Cookie: `B1SESSION=${session.sessionId}`,
+  const response = await sapFetch(
+    url,
+    {
+      method,
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': `multipart/form-data; boundary=${boundary}`,
+        'Content-Length': String(body.length),
+        Cookie: `B1SESSION=${session.sessionId}`,
+      },
+      body,
     },
-    body,
-  });
+    dbOf(session)
+  );
 
   if (response.status === 401) {
     throw new SapError('Sesion SAP expirada o invalida', 401);
@@ -421,10 +480,14 @@ export async function sapUploadFiles<T = unknown>(
 export async function sapDelete(session: SapSession, path: string): Promise<void> {
   const url = `${session.baseUrl}/b1s/v1/${path.replace(/^\/+/, '')}`;
 
-  const response = await sapFetch(url, {
-    method: 'DELETE',
-    headers: { Cookie: `B1SESSION=${session.sessionId}` },
-  });
+  const response = await sapFetch(
+    url,
+    {
+      method: 'DELETE',
+      headers: { Cookie: `B1SESSION=${session.sessionId}` },
+    },
+    dbOf(session)
+  );
 
   if (response.status === 401) {
     throw new SapError('Sesion SAP expirada o invalida', 401);
@@ -438,11 +501,17 @@ export async function sapDelete(session: SapSession, path: string): Promise<void
 /** Cierra la sesion del Service Layer. Best-effort: no lanza si falla. */
 export async function sapLogout(session: SapSession): Promise<void> {
   try {
-    await sapFetch(`${session.baseUrl}/b1s/v1/Logout`, {
-      method: 'POST',
-      headers: { Cookie: `B1SESSION=${session.sessionId}` },
-    });
+    await sapFetch(
+      `${session.baseUrl}/b1s/v1/Logout`,
+      {
+        method: 'POST',
+        headers: { Cookie: `B1SESSION=${session.sessionId}` },
+      },
+      dbOf(session)
+    );
   } catch {
     // El cierre de sesion no es critico para la respuesta al usuario.
+  } finally {
+    noteSapLogout(session.sessionId);
   }
 }

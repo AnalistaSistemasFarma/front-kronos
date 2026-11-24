@@ -35,6 +35,7 @@
  * sondea ids que el proyecto existe.
  */
 import { prisma } from '../prisma';
+import { isProjectMuted, mutedProjectIds } from '../proyectos/mute';
 import { getChatAccess } from './access';
 import { parseAgentTasks } from './status-tasks';
 import type { EstadoAgenteProyectoDto } from '../proyectos/estado-agente';
@@ -509,6 +510,7 @@ export async function listProjectsForUser(user: ProjectUser, opciones: { archiva
     orderBy: [{ updated_at: 'desc' }],
     take: 200,
   });
+  const muted = await mutedProjectIds(user.id);
 
   return {
     companies: empresas,
@@ -527,6 +529,7 @@ export async function listProjectsForUser(user: ProjectUser, opciones: { archiva
       fileCount: p._count.files,
       taskCount: p._count.tasks,
       updatedAt: p.updated_at.toISOString(),
+      muted: muted.has(p.id_project),
     })),
   };
 }
@@ -684,6 +687,8 @@ export async function getProjectDetail(user: ProjectUser, acceso: ProjectAccess,
     company: { idCompany: p.company.id_company, companyName: p.company.company.trim() },
     myRole: acceso.role,
     archived: p.archived,
+    // «Silenciar notificaciones» (2026-11-23): only for this person.
+    muted: await isProjectMuted(p.id_project, user.id),
     // Agregar y retirar asistentes (2026-11-10): también la administración de SynerLink.
     capabilities: p.archived ? { ...capabilitiesFor(null), archive: caps.archive } : { ...caps, manageAgents: caps.manageAgents || opciones.esAdmin === true },
     createdAt: p.created_at.toISOString(),

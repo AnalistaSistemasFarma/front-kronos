@@ -975,6 +975,11 @@ model ChatProject {
   policyRepos   ChatProjectAgentPolicyRepo[]
   mesas ChatProjectMesa[]
   matrices ChatProjectMatrix[]
+  /// People who muted this project's notifications (2026-11-23).
+  mutes    ChatProjectMute[]
+  /// Meetings assigned to the project and «whole series» rules (2026-11-24).
+  meetings     ChatProjectMeeting[]
+  meetingRules ChatProjectMeetingRule[]
 
   @@index([id_agent, archived])
   @@index([id_company])
@@ -1065,6 +1070,128 @@ model ChatProjectRead {
   @@unique([id_conversation, id_user], map: "chat_project_read_conversation_user")
   @@index([id_user], map: "chat_project_read_id_user_idx")
   @@map("chat_project_read")
+  @@schema("dbo")
+}
+
+/// «Silenciar notificaciones» of a project, PER PERSON (2026-11-23, Nicolás
+/// Rivera, msg 38059). A row = that person muted that project: no push for the
+/// project's replies, no sound and it does not count in the header «Proyectos»
+/// icon. No row = notifications on (the default). It never affects the other
+/// members. Separate NEW table (lib/proyectos/mute.ts): if the code ships
+/// before the DDL, reads fail open (everyone keeps getting notifications).
+model ChatProjectMute {
+  id_project_mute Int      @id @default(autoincrement())
+  id_project      Int
+  /// No foreign key on purpose (like chat_project_read.id_user): a deactivated
+  /// user must not block anything, and the row grants no access.
+  id_user         String   @db.NVarChar(1000)
+  created_at      DateTime @default(now())
+
+  project ChatProject @relation(fields: [id_project], references: [id_project], onDelete: Cascade)
+
+  @@unique([id_project, id_user], map: "chat_project_mute_project_user")
+  @@index([id_user], map: "chat_project_mute_id_user_idx")
+  @@map("chat_project_mute")
+  @@schema("dbo")
+}
+
+/// One Teams/calendar OCCURRENCE assigned to a project (2026-11-24, msg 38206). ical_uid is the same in
+/// every attendee's calendar and differs per occurrence; it is UNIQUE: a meeting belongs to ONE project.
+/// Only counts are stored (never the attendee list) and never the transcript. See lib/meetings/projects/.
+model ChatProjectMeeting {
+  id_project_meeting  Int      @id @default(autoincrement())
+  id_project          Int
+  ical_uid            String   @unique(map: "chat_project_meeting_ical_uid") @db.NVarChar(400)
+  /// seriesMasterId in the mailbox of whoever linked it (for the «whole series» rule).
+  series_key          String?  @db.NVarChar(512)
+  /// Event id in the mailbox of whoever linked it (to read it again).
+  event_id            String   @db.NVarChar(512)
+  mailbox             String   @db.NVarChar(254)
+  subject             String   @db.NVarChar(400)
+  start_at            DateTime
+  end_at              DateTime
+  scheduled_minutes   Int
+  actual_minutes      Int?
+  start_delay_minutes Int?
+  organizer_name      String?  @db.NVarChar(200)
+  organizer_email     String?  @db.NVarChar(254)
+  attendees_count     Int      @default(0)
+  attended_count      Int?
+  online              Boolean  @default(false)
+  has_transcript      Boolean?
+  /// Short summary the linker reviews; the only content shared with the project.
+  summary             String?  @db.NVarChar(500)
+  /// 'manual' | 'serie' | 'sugerencia' (CHECK in the database).
+  origin              String   @db.NVarChar(20)
+  id_rule             Int?
+  /// No foreign key on purpose (like chat_project_mute.id_user).
+  linked_by           String   @db.NVarChar(1000)
+  linked_at           DateTime @default(now())
+
+  project  ChatProject                  @relation(fields: [id_project], references: [id_project], onDelete: Cascade)
+  analyses ChatProjectMeetingAnalysis[]
+
+  @@index([id_project, start_at], map: "chat_project_meeting_project_start_idx")
+  @@map("chat_project_meeting")
+  @@schema("dbo")
+}
+
+/// «The whole series goes to this project» (2026-11-24): next occurrences are linked on their own.
+model ChatProjectMeetingRule {
+  id_rule          Int      @id @default(autoincrement())
+  id_project       Int
+  id_user          String   @db.NVarChar(1000)
+  mailbox          String   @db.NVarChar(254)
+  series_key       String   @db.NVarChar(512)
+  subject_snapshot String   @db.NVarChar(400)
+  created_at       DateTime @default(now())
+
+  project ChatProject @relation(fields: [id_project], references: [id_project], onDelete: Cascade)
+
+  @@unique([mailbox, series_key], map: "chat_project_meeting_rule_mailbox_series")
+  @@index([id_project], map: "chat_project_meeting_rule_id_project_idx")
+  @@map("chat_project_meeting_rule")
+  @@schema("dbo")
+}
+
+/// Analysis of a project meeting by the project's agent, on demand (2026-11-24). The transcript is NOT
+/// stored: it is read live from Teams for the agent's turn. 'analizando' | 'listo' | 'fallido'.
+model ChatProjectMeetingAnalysis {
+  id_analysis          Int       @id @default(autoincrement())
+  id_project_meeting   Int
+  id_agent             Int
+  /// Project conversation where the agent worked (archived once the analysis finishes).
+  id_conversation      Int?
+  id_message_request   Int?
+  requested_by         String    @db.NVarChar(1000)
+  /// Mailbox and event id of the attendee who asked for it (the transcript is read with them).
+  mailbox              String    @db.NVarChar(254)
+  event_id             String    @db.NVarChar(512)
+  status               String    @db.NVarChar(20)
+  score                Int?      @db.TinyInt
+  summary              String?   @db.NVarChar(2000)
+  decisions_json       String?   @db.NVarChar(Max)
+  commitments_json     String?   @db.NVarChar(Max)
+  topics_json          String?   @db.NVarChar(Max)
+  recommendations_json String?   @db.NVarChar(Max)
+  followup_json        String?   @db.NVarChar(Max)
+  /// Indicators without AI (punctuality, overrun, attendance, participation by speaker).
+  metrics_json         String?   @db.NVarChar(Max)
+  /// Ids of the task proposals created from the commitments.
+  proposals_json       String?   @db.NVarChar(Max)
+  could_be_email       Boolean?
+  error                String?   @db.NVarChar(500)
+  tokens_in            Int?
+  tokens_out           Int?
+  model                String?   @db.NVarChar(60)
+  created_at           DateTime  @default(now())
+  finished_at          DateTime?
+
+  meeting ChatProjectMeeting @relation(fields: [id_project_meeting], references: [id_project_meeting], onDelete: Cascade)
+
+  @@index([id_project_meeting, created_at], map: "chat_project_meeting_analysis_meeting_idx")
+  @@index([id_conversation], map: "chat_project_meeting_analysis_conversation_idx")
+  @@map("chat_project_meeting_analysis")
   @@schema("dbo")
 }
 
@@ -1412,7 +1539,7 @@ model ChatProjectTask {
 model ChatProjectEvent {
   id_event   Int      @id @default(autoincrement())
   id_project Int
-  /// 'tarea' | 'solicitud' | 'propuesta' | 'concesion'
+  /// 'tarea' | 'solicitud' | 'propuesta' | 'concesion' | 'reunion' (2026-11-24)
   entity     String   @db.NVarChar(20)
   id_entity  Int?
   /// p. ej. 'crear', 'editar', 'borrar', 'fecha_objetivo', 'proponer', 'confirmar', 'rechazar'
