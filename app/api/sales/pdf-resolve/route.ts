@@ -6,6 +6,7 @@ import { salesCompanyConfig } from '../../../../lib/sales/companyConfig';
 import { MAX_PDF_LINES, type ImportLine } from '../../../../lib/sales/linesImport';
 import { validateLines } from '../../../../lib/sales/linesValidate';
 import { bestCandidate, nitBase } from '../../../../lib/sales/pdfOrder';
+import { recentItems, RECENT_LINES, searchPath } from '../../../../lib/sales/search';
 import { sapGet, sapLogin, sapLogout, SapError } from '../../../../lib/sap/serviceLayer';
 
 /**
@@ -65,6 +66,11 @@ export async function POST(request: NextRequest) {
       // 2) Líneas. Empresas de servicios (descripción editable: Kelab, Meditrack): la OC trae descripciones libres
       // y SAP tiene pocos artículos genéricos; se empareja por cobertura y la línea conserva la descripción del PDF.
       const servicios = Boolean(conf?.descripcionEditable);
+      // Artículos que ya se le han facturado a este cliente: desempatan el emparejamiento por descripción.
+      const recientes = await sapGet<Record<string, unknown>>(sap, searchPath('recent_items', { cardCode: customer.CardCode }), { Prefer: `odata.maxpagesize=${RECENT_LINES}` })
+        .then((d) => recentItems(d, 60))
+        .catch(() => []);
+      const preferidos = new Map(recientes.map((r) => [r.ItemCode, r.Times]));
       const v = await validateLines(sap, {
         cardCode: customer.CardCode, input, matchByDescription: true, servicios,
         priceListDefault: conf?.priceListDefault ?? null, defaultWarehouse: conf?.defaultWarehouse ?? null,
@@ -73,7 +79,9 @@ export async function POST(request: NextRequest) {
       const lines: Record<string, unknown>[] = v.lines.map((l) => ({ ...l, aiNote: null as string | null }));
       const elegidos: (ImportLine & { aiNote: string })[] = [];
       for (const p of v.pending) {
-        const b = bestCandidate(p.input.ItemDescription, p.candidates, { servicios });
+        // Los artículos que ya se le venden al cliente entran como candidatos aunque la búsqueda no los trajera.
+        const extra = recientes.filter((r) => !p.candidates.some((c) => c.ItemCode === r.ItemCode)).map((r) => ({ ItemCode: r.ItemCode, ItemName: r.ItemName }));
+        const b = bestCandidate(p.input.ItemDescription, servicios ? [...p.candidates, ...extra] : p.candidates, { servicios, preferidos });
         if (!b) {
           avisos.push(`«${p.input.ItemDescription}» (${p.input.Quantity}): no se encontró en SAP; agréguelo a mano.`);
           continue;

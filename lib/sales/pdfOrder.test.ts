@@ -196,3 +196,15 @@ describe('empresas de servicios (Kelab, Meditrack)', () => {
     expect(b?.seguro).toBe(false);
   });
 });
+
+describe('Kelab: lo que ya se le vende al cliente desempata', () => {
+  it('con empate gravado/excluido, gana el que el cliente compra (AFE001S)', () => {
+    const c = [
+      { ItemCode: 'AFGV001', ItemName: 'SERVICIO DE ANALISIS GRAVADO' },
+      { ItemCode: 'AFE001S', ItemName: 'SERVICIO DE ANALISIS EXCLUIDO' },
+    ];
+    const b = bestCandidate('SERVICIO DE ANALISIS PRODUCTO TERMINADO VALORACIÓN, MEROPENEM 1G LOTE: 2151026', c, { servicios: true, preferidos: new Map([['AFE001S', 12]]) });
+    expect(b?.ItemCode).toBe('AFE001S');
+    expect(b?.seguro).toBe(true);
+  });
+});
