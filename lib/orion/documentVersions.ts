@@ -20,6 +20,29 @@ function versionIdForSigner(signer: OrionSignerState): string {
 }
 
 /**
+ * Firmante (slot) al que corresponde una versión parcial/final. Si la misma persona firma
+ * varias veces, buscar solo por correo devolvía siempre su PRIMER slot y «Firma 2 (final)»
+ * salía acumulada hasta la firma 1. Orden de búsqueda: id exacto de la versión, luego el
+ * slot de ese correo con la misma fecha de firma, y por último el primero del correo.
+ */
+export function findSignerForVersion(
+  signers: OrionSignerState[] | null | undefined,
+  version: Pick<OrionDocumentVersion, 'id' | 'signerEmail' | 'createdAt'>
+): OrionSignerState | null {
+  const list = signers ?? [];
+  const byId = list.find((s) => versionIdForSigner(s) === version.id);
+  if (byId) return byId;
+  const email = normalizeEmail(version.signerEmail);
+  if (!email) return null;
+  const mine = list.filter((s) => normalizeEmail(s.email) === email);
+  const at = Date.parse(String(version.createdAt || ''));
+  const sameTime = Number.isFinite(at)
+    ? mine.find((s) => Date.parse(String(s.signedAt || '')) === at)
+    : undefined;
+  return sameTime ?? mine[0] ?? null;
+}
+
+/**
  * Historial de versiones / descargas:
  * - Quien creó la solicitud (solicitante).
  * - Preparador documento del flujo (Administración → Preparadores documento).
