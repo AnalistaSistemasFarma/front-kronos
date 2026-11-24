@@ -4,6 +4,7 @@ import { authOptions } from '../../../auth/[...nextauth]/route';
 import { withMssqlPool } from '@/lib/mssqlPool';
 import { fetchOrionSignedFileContent } from '@/lib/orion/client';
 import {
+  coversAllSigners,
   findSignerForVersion,
   listOrionDocumentVersions,
   resolveOrionPdfUrl,
@@ -254,6 +255,13 @@ export async function GET(req: Request) {
             .filter((v) => v.kind === 'partial' || v.kind === 'final')
             .findIndex((v) => v.id === selectedVersion!.id);
           if (signedIdx >= 0) maxSignerOrder = signedIdx + 1;
+        }
+        // La versión final (o una que ya incluye a todos los firmantes) es el documento completo:
+        // se pide sin maxOrder. Con maxOrder Orion SOLO reconstruye y, si la reconstrucción
+        // falla, responde 404 «No se encontró el PDF firmado»; sin maxOrder tiene respaldo
+        // (último PDF firmado en OneDrive). Sin watermark igual que antes.
+        if (coversAllSigners(state, selectedVersion.kind, maxSignerOrder)) {
+          maxSignerOrder = null;
         }
       }
     } else if (versionId) {
