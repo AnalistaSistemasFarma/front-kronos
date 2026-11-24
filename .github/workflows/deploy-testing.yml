@@ -11,14 +11,24 @@ name: Deploy a PRUEBAS (.230)
 #     rp-kronos-test no cambian) y reenvia al color activo (A :3032 o B :3033),
 #     segun <estado>\active.json.
 #   - Job "build": construye la carpeta INACTIVA mientras la activa sigue
-#     atendiendo (sin mantenimiento, sin pm2 stop). Se CANCELA si llega un merge
-#     mas nuevo: solo se construye el ultimo.
+#     atendiendo (sin mantenimiento, sin pm2 stop).
 #   - Job "switch": arranca el color nuevo en su puerto, smoke test, cambia el
 #     proxy (< 0,5 s, cero peticiones perdidas), mueve kronos-mcp-test (delete +
 #     start, ~2-4 s, nunca 2 instancias) y retira el color viejo. NUNCA se cancela
 #     a mitad. Si el smoke test falla, no cambia nada (rollback automatico).
 #   - La pagina de mantenimiento del IIS queda solo como respaldo si, al final,
 #     :3030 no responde.
+#   - CONCURRENCY (queue, 2026-11-24): one deploy at a time per environment and
+#     a running deploy is NEVER cancelled (build + switch always finish). A merge
+#     that lands while a deploy runs gets QUEUED and starts when the current one
+#     ends. GitHub keeps at most ONE pending run per group: with several merges in
+#     a row, the newest pending run replaces the older pending one (shown as
+#     "cancelled" without ever starting). That is fine because deploys are
+#     cumulative: the last run builds the whole `testing` tip. A run that starts
+#     after `testing` already moved on skips itself.
+#     Before, build had cancel-in-progress: true (a merge killed the running
+#     deploy) and build/switch used separate groups, so a newer run's build could
+#     overwrite the folder another run was about to activate.
 # Reversa: scripts\bluegreen\revert-230.ps1 + revertir este archivo.
 
 on:
@@ -30,6 +40,12 @@ on:
         description: 'Carpeta de estado azul/verde (vacio = la real de PRUEBAS). Otra carpeta = ensayo aislado que construye la rama elegida.'
         required: false
         default: ''
+
+# Single group for the whole run: the running deploy always finishes and the
+# next one waits in the queue (see CONCURRENCY above).
+concurrency:
+  group: deploy-testing-230-${{ inputs.state_dir || 'pruebas' }}
+  cancel-in-progress: false
 
 env:
   # Sin esto, las apps que arranca pm2 heredan RUNNER_TRACKING_ID y el runner las
@@ -43,10 +59,8 @@ jobs:
   build:
     name: Build en la carpeta inactiva (la activa sigue atendiendo)
     runs-on: [self-hosted, kronos-230]
-    # Un merge nuevo cancela el build en curso: solo se construye el ultimo.
-    concurrency:
-      group: deploy-testing-230-build-${{ inputs.state_dir || 'pruebas' }}
-      cancel-in-progress: true
+    # Upper bound so a hung build cannot block the deploy queue (same as prod).
+    timeout-minutes: 75
     outputs:
       skip: ${{ steps.resolve.outputs.skip }}
       color: ${{ steps.resolve.outputs.color }}
@@ -122,10 +136,8 @@ jobs:
     needs: build
     if: needs.build.outputs.skip != 'true'
     runs-on: [self-hosted, kronos-230]
-    # Nunca se cancela a mitad del cambio; los cambios se hacen de a uno.
-    concurrency:
-      group: deploy-testing-230-switch-${{ inputs.state_dir || 'pruebas' }}
-      cancel-in-progress: false
+    # Never cancelled midway: workflow-level concurrency serializes runs.
+    timeout-minutes: 30
     steps:
       - name: Arrancar color nuevo, smoke test y cambiar el proxy
         shell: powershell
