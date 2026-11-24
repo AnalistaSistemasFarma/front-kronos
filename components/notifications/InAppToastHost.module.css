@@ -1,17 +1,18 @@
 /* In-app notification cards (lib/notifications/inAppToast.ts). Colors come from the app theme
    tokens (--app-*), so they follow light/dark mode and each person's palette. */
 
-/* Bottom-right corner (Nicolás, msg 38376). The newest card sits closest to the corner. */
+/* Top-right corner, below the header (Nicolás, msg 38429: bottom-right collided with the floating
+   chat panel). Newest on top. */
 .region {
   position: fixed;
-  bottom: calc(env(safe-area-inset-bottom, 0px) + 16px);
+  top: calc(var(--app-header-height, 4rem) + 10px);
   right: 16px;
   width: 380px;
   max-width: calc(100vw - 32px);
   max-height: calc(100dvh - var(--app-header-height, 4rem) - 32px);
   /* z-index comes from Z_INDEX.inAppToasts (lib/ui/zIndex.ts): above the chat panel, below modals. */
   display: flex;
-  flex-direction: column-reverse;
+  flex-direction: column;
   gap: 10px;
   pointer-events: none;
 }
@@ -283,7 +284,7 @@
 @keyframes toast-bounce-in {
   0% {
     opacity: 0;
-    transform: translateY(24px) scale(0.9);
+    transform: translateY(-24px) scale(0.9);
   }
   100% {
     opacity: 1;
@@ -294,7 +295,7 @@
 @keyframes toast-in {
   from {
     opacity: 0;
-    transform: translateY(8px) scale(0.98);
+    transform: translateY(-8px) scale(0.98);
   }
   to {
     opacity: 1;
@@ -327,10 +328,10 @@
   }
 }
 
-/* Phones: full width near the bottom, above the chat composer / bottom bars. */
+/* Phones: full width at the very top, like the OS banners. */
 @media (max-width: 640px) {
   .region {
-    bottom: calc(env(safe-area-inset-bottom, 0px) + 84px);
+    top: calc(env(safe-area-inset-top, 0px) + 8px);
     left: 8px;
     right: 8px;
     width: auto;
