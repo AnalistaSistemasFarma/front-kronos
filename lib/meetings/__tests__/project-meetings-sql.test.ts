@@ -46,6 +46,18 @@ describe('project meetings SQL', () => {
     expect(block).not.toMatch(/transcript\]\s+NVARCHAR/i);
   });
 
+  it('no nested comment openers (T-SQL nests /* … */: one inside a comment breaks the whole script)', () => {
+    for (const f of [
+      'prisma/migrations/20261124150000_chat_project_meetings/migration.sql',
+      'prisma/manual/2026-11-24-proyectos-reuniones-PRUEBAS.sql',
+      'prisma/manual/2026-11-24-proyectos-reuniones-PROD.sql',
+      'prisma/manual/2026-11-24-proyectos-reuniones-reversa.sql',
+    ]) {
+      const sql = read(f);
+      expect((sql.match(/\/\*/g) ?? []).length).toBe((sql.match(/\*\//g) ?? []).length);
+    }
+  });
+
   it('the reversal refuses to lose data without its flag and has a database guard', () => {
     const r = read('prisma/manual/2026-11-24-proyectos-reuniones-reversa.sql');
     expect(r).toMatch(/proyectos_reuniones_reversa_acepta_perdida/);

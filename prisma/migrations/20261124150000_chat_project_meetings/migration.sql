@@ -1,7 +1,7 @@
 /*
   Migration: meetings per PROJECT and on-demand analysis by the project's agent — 2026-11-24.
   Approved by Nicolás Rivera (SynerLink conv 1, msg 38206): «sí, todos los del proyecto, a demanda».
-  Design: traspasos/reuniones-proyectos-analisis-20261124/PROPUESTA.md (annex A). Code: lib/meetings/projects/*.
+  Design: traspasos/reuniones-proyectos-analisis-20261124/PROPUESTA.md (annex A). Code: the lib/meetings/projects folder.
 
   ADDITIVE and IDEMPOTENT, safe to apply hot (the previous code does not read any of this):
     - chat_project_meeting           one Teams/calendar OCCURRENCE assigned to a project. The ical_uid is the
