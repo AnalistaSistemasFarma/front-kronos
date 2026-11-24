@@ -56,7 +56,9 @@ export async function GET(req) {
         rg.sapsend_auth_error,
         rg.sapsend_auth_synced_at,
         rg.sapsend_files_synced_at,
-        rg.sapsend_files_error
+        rg.sapsend_files_error,
+        -- Consecutivo por reglas de opción (2026-11-24), p. ej. AU-0001.
+        rg.consecutive
       FROM requests_general rg
       INNER JOIN company c ON c.id_company = rg.id_company
       LEFT JOIN [user] urq ON urq.id = rg.id_requester
