@@ -127,7 +127,7 @@ export default function OtInforme({ company, idOrden }: { company: OtCompanyAcce
             <Campo label='Hora inicio' value={fmtFechaHoraSeg(o.abiertaEn)} />
             <Campo label='Hora final' value={o.cerradaEn ? fmtFechaHoraSeg(o.cerradaEn) : 'Pendiente (abierta)'} />
             <Campo label='Abrió' value={`${o.abiertaPor} — ${OT_ROL_APERTURA_CIERRE[o.abiertaComo]} — ${fmtFechaHoraSeg(o.abiertaEn)}`} />
-            <Campo label={OT_INSPECTOR_LABEL} value={o.inspector?.name ?? '—'} />
+            {o.inspector && <Campo label={OT_INSPECTOR_LABEL} value={o.inspector.name} />}
             <Campo label={OT_JEFE_PRODUCCION_LABEL} value={o.jefe?.name ?? '—'} />
             <Campo
               label='Cerró'
