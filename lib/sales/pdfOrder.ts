@@ -204,10 +204,15 @@ export function coverage(desc: string, name: string): number {
 export function bestCandidate(
   desc: string,
   candidates: { ItemCode: string; ItemName: string }[],
-  opts: { servicios?: boolean } = {}
+  opts: { servicios?: boolean; preferidos?: Map<string, number> } = {}
 ): { ItemCode: string; ItemName: string; score: number; seguro: boolean } | null {
-  const score = (name: string) => (opts.servicios ? Math.max(similarity(desc, name), coverage(desc, name)) : similarity(desc, name));
-  const scored = candidates.map((c) => ({ ...c, score: score(c.ItemName) })).sort((x, y) => y.score - x.score);
+  const base = (name: string) => (opts.servicios ? Math.max(similarity(desc, name), coverage(desc, name)) : similarity(desc, name));
+  // Lo que ya se le vende a ESE cliente desempata y suma (Kelab le factura a Farmalógica casi todo con AFE001S).
+  const score = (c: { ItemCode: string; ItemName: string }) => {
+    const b = base(c.ItemName);
+    return b > 0 && opts.preferidos?.has(c.ItemCode) ? b + 0.2 : b;
+  };
+  const scored = candidates.map((c) => ({ ...c, score: score(c) })).sort((x, y) => y.score - x.score);
   const top = scored[0];
   if (!top || top.score < 0.34) return null;
   const second = scored[1]?.score ?? 0;
