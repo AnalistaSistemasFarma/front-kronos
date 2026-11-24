@@ -545,8 +545,8 @@ export default function SeccionReuniones({
           </Text>
           <Stack gap={4}>
             {datos.rules.map((r) => (
-              <Group key={r.id} justify='space-between' wrap='nowrap'>
-                <Group gap={6} wrap='nowrap'>
+              <Group key={r.id} justify='space-between' wrap='wrap' gap={4}>
+                <Group gap={6} wrap='nowrap' style={{ minWidth: 0 }}>
                   <IconRepeat size={14} />
                   <Text size='sm'>
                     {r.subject}{' '}
