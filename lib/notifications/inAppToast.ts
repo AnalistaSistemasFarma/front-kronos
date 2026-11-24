@@ -14,6 +14,7 @@
  */
 import { notificationKind } from './notificationKind';
 import { inferNotificationPath } from './resolveNotificationTarget';
+import { notificationReplyTarget, replyPlaceholder } from './replyTarget';
 
 /** 'urgent' = signatures/validations and monitor alerts; 'nudge' = 📳 between people. */
 export type InAppToastTone = 'default' | 'urgent' | 'nudge';
@@ -35,8 +36,20 @@ export interface InAppToast {
   createdAt: string;
   /** Where «Abrir» goes. null = no button. */
   url: string | null;
-  /** Chat or project conversation that accepts a quick reply. */
-  replyConversationId: number | null;
+  /**
+   * Inline quick reply (2026-11-24, msg 38376): a chat/project conversation (message via the chat
+   * send API) or a bell notification (note on its request/ticket via /api/notifications/:id/reply).
+   * null = only «Abrir».
+   */
+  reply: InAppToastReply | null;
+}
+
+export type InAppToastReply =
+  | { kind: 'chat'; conversationId: number; placeholder: string }
+  | { kind: 'notification'; notificationId: number; placeholder: string };
+
+function chatReply(conversationId: number, placeholder = 'Responder…'): InAppToastReply {
+  return { kind: 'chat', conversationId, placeholder };
 }
 
 /** At most this many cards on screen; the oldest leaves first. */
@@ -115,7 +128,7 @@ export function toastFromInboxConversation(
       tone: 'default',
       createdAt: c.lastMessage.createdAt,
       url: `/process/chat/persona/${c.id}`,
-      replyConversationId: c.id,
+      reply: chatReply(c.id),
     };
   }
 
@@ -133,7 +146,7 @@ export function toastFromInboxConversation(
       tone: 'default',
       createdAt: c.lastMessage.createdAt,
       url: `/process/chat/grupo/${c.id}`,
-      replyConversationId: c.id,
+      reply: chatReply(c.id),
     };
   }
 
@@ -150,7 +163,7 @@ export function toastFromInboxConversation(
     tone: 'default',
     createdAt: c.lastMessage.createdAt,
     url: `/process/chat/${encodeURIComponent(c.agent.code)}`,
-    replyConversationId: c.id,
+    reply: chatReply(c.id),
   };
 }
 
@@ -190,7 +203,7 @@ export function toastFromProjectEvent(e: ProjectPulseInput): InAppToast | null {
     tone: 'default',
     createdAt: e.createdAt,
     url: e.url ?? '/process/proyectos',
-    replyConversationId: e.idConversation,
+    reply: chatReply(e.idConversation, 'Responder en el proyecto…'),
   };
 }
 
@@ -209,7 +222,7 @@ export function toastFromNudge(e: { idConversation: number; authorName: string; 
     tone: 'nudge',
     createdAt: e.createdAt,
     url: `/process/chat/persona/${e.idConversation}`,
-    replyConversationId: e.idConversation,
+    reply: chatReply(e.idConversation),
   };
 }
 
@@ -226,6 +239,12 @@ export interface BellNotificationInput {
 /** Monitor alerts (system and SAP) link to the metrics page. */
 export function isMonitorAlert(n: { url: string | null }): boolean {
   return (n.url ?? '').toLowerCase().includes('/process/system-metrics');
+}
+
+/** Requests, activities and tickets accept a note; anything else only «Abrir». */
+function bellReply(n: BellNotificationInput): InAppToastReply | null {
+  const target = notificationReplyTarget(n.url);
+  return target ? { kind: 'notification', notificationId: n.id, placeholder: replyPlaceholder(target) } : null;
 }
 
 export function toastFromBellNotification(n: BellNotificationInput): InAppToast {
@@ -258,7 +277,7 @@ export function toastFromBellNotification(n: BellNotificationInput): InAppToast 
     tone: urgent ? 'urgent' : 'default',
     createdAt: n.created_at,
     url: inferNotificationPath(n) ?? null,
-    replyConversationId: null,
+    reply: bellReply(n),
   };
 }
 
@@ -290,7 +309,7 @@ export function bellSummaryToast(count: number, newestAt: string, anyUrgent: boo
     tone: anyUrgent ? 'urgent' : 'default',
     createdAt: newestAt,
     url: null,
-    replyConversationId: null,
+    reply: null,
   };
 }
 
