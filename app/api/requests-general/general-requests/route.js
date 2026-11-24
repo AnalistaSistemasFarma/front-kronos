@@ -221,7 +221,7 @@ export async function GET(req) {
       try {
         const setRows = (
           await bind().query(`
-            SELECT rg.id, rg.status_req, rg.created_at, pc.sla_value, pc.sla_unit, pc.sla_warn_pct
+            SELECT rg.id, rg.status_req, rg.created_at, COALESCE(rg.sla_value, pc.sla_value) AS sla_value, CASE WHEN rg.sla_value IS NOT NULL THEN rg.sla_unit ELSE pc.sla_unit END AS sla_unit, pc.sla_warn_pct
             ${from}
             ${where}
             ORDER BY rg.id DESC

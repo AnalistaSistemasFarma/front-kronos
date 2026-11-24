@@ -119,7 +119,7 @@ export async function loadSlaScope(
             .request()
             .input('ids', sql.NVarChar(sql.MAX), JSON.stringify(ids))
             .query(`
-              SELECT rg.id, rg.created_at, rg.status_req, pc.sla_value, pc.sla_unit, pc.sla_warn_pct
+              SELECT rg.id, rg.created_at, rg.status_req, COALESCE(rg.sla_value, pc.sla_value) AS sla_value, CASE WHEN rg.sla_value IS NOT NULL THEN rg.sla_unit ELSE pc.sla_unit END AS sla_unit, pc.sla_warn_pct
               FROM requests_general rg
               LEFT JOIN process_category_request_general pcrg ON pcrg.id_request_general = rg.id
               LEFT JOIN process_category pc ON pc.id = pcrg.id_process_category
