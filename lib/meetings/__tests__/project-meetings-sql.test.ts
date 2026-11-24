@@ -31,8 +31,12 @@ describe('project meetings SQL', () => {
     const guards = block.match(/IF (OBJECT_ID|NOT EXISTS)/g) ?? [];
     expect(creates.length).toBe(9);
     expect(guards.length).toBeGreaterThanOrEqual(creates.length);
-    expect(block).not.toMatch(/^\s*(INSERT|UPDATE|DELETE|MERGE|DROP)\b/im);
-    expect(block).not.toMatch(/ALTER TABLE/i);
+    expect(block).not.toMatch(/^\s*(INSERT|UPDATE|DELETE|MERGE)\b/im);
+    expect(block).not.toMatch(/DROP TABLE/i);
+    // The only existing object touched: the audit CHECK, re-created with 'reunion' and only when missing.
+    expect(block.match(/ALTER TABLE/g)?.length).toBe(2);
+    expect(block).toMatch(/definition NOT LIKE N'%reunion%'/);
+    expect(block).toMatch(/N''concesion'', N''reunion''/);
   });
 
   it('names match Prisma (db push leaves no duplicated indexes)', () => {
@@ -58,8 +62,14 @@ describe('project meetings SQL', () => {
     }
   });
 
+  it('the audit entity matches the code', () => {
+    const code = read('lib/proyectos/cronograma.ts');
+    expect(code).toMatch(/entity: 'tarea' \| 'solicitud' \| 'propuesta' \| 'concesion' \| 'reunion'/);
+  });
+
   it('the reversal refuses to lose data without its flag and has a database guard', () => {
     const r = read('prisma/manual/2026-11-24-proyectos-reuniones-reversa.sql');
+    expect(r).toMatch(/WITH NOCHECK ADD CONSTRAINT \[chat_project_event_via_ck\]/);
     expect(r).toMatch(/proyectos_reuniones_reversa_acepta_perdida/);
     expect(r).toMatch(/THROW 52405/);
     expect(r).toMatch(/IF DB_NAME\(\) NOT IN \(N'KRONOSDB', N'KRONOSDB_PRUEBAS', N'kronos_ci'\)/);

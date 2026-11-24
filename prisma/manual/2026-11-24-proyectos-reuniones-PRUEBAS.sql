@@ -9,10 +9,13 @@
     - dbo.chat_project_meeting (reunión asignada a un proyecto; ical_uid ÚNICO = una reunión, un proyecto);
     - dbo.chat_project_meeting_rule (regla «toda la serie va a este proyecto»);
     - dbo.chat_project_meeting_analysis (resultado del análisis del agente; la transcripción NO se guarda).
-  No altera tablas existentes ni inserta filas. Aditivo e IDEMPOTENTE; informa antes y después.
+  Además amplía el CHECK chat_project_event_via_ck para aceptar entity = 'reunion' (auditoría del proyecto).
+  No inserta ni cambia filas. Aditivo e IDEMPOTENTE; informa antes y después.
 
   🔒 BLOQUEOS: crear tablas nuevas no bloquea tablas existentes (las FK a chat_project piden un bloqueo
-  breve de esquema sobre chat_project). No toca User, company_user ni subprocess_user_company: el login
+  breve de esquema sobre chat_project). Rehacer el CHECK de chat_project_event (tabla de auditoría de unos
+  cientos de filas) pide un bloqueo de esquema sobre ESA tabla por milisegundos: mientras dure, nadie escribe
+  en la auditoría de Proyectos. No toca User, company_user ni subprocess_user_company: el login
   no se ve afectado. LOCK_TIMEOUT 5000: si no consigue el bloqueo en 5 s hace ROLLBACK; vuelva a correrlo.
   CÓMO CORRERLO: script Node con `mssql` (memoria «correr-sql-servidores-front-kronos») o SSMS.
   REVERSA: prisma/manual/2026-11-24-proyectos-reuniones-reversa.sql
@@ -131,6 +134,16 @@ IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'chat_project_meeting_anal
   EXEC(N'CREATE NONCLUSTERED INDEX [chat_project_meeting_analysis_meeting_idx] ON [dbo].[chat_project_meeting_analysis]([id_project_meeting], [created_at]);');
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'chat_project_meeting_analysis_conversation_idx' AND object_id = OBJECT_ID(N'[dbo].[chat_project_meeting_analysis]'))
   EXEC(N'CREATE NONCLUSTERED INDEX [chat_project_meeting_analysis_conversation_idx] ON [dbo].[chat_project_meeting_analysis]([id_conversation]);');
+
+-- The project audit (chat_project_event) accepts entity 'reunion' (link, unlink, series rule, analysis).
+-- chat_project_event is a small audit table (hundreds of rows): re-checking it takes milliseconds.
+IF OBJECT_ID(N'[dbo].[chat_project_event]', N'U') IS NOT NULL
+   AND EXISTS (SELECT 1 FROM sys.check_constraints WHERE name = 'chat_project_event_via_ck' AND definition NOT LIKE N'%reunion%')
+BEGIN
+  ALTER TABLE [dbo].[chat_project_event] DROP CONSTRAINT [chat_project_event_via_ck];
+  EXEC(N'ALTER TABLE [dbo].[chat_project_event] WITH CHECK ADD CONSTRAINT [chat_project_event_via_ck]
+    CHECK ([via] IN (N''web'', N''puente'', N''mcp'') AND [entity] IN (N''tarea'', N''solicitud'', N''propuesta'', N''concesion'', N''reunion''));');
+END;
 
 COMMIT TRAN;
 

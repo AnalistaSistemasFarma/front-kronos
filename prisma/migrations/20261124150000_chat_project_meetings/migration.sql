@@ -11,7 +11,8 @@
     - chat_project_meeting_rule      «the whole series goes to this project» (per mailbox + seriesMasterId).
     - chat_project_meeting_analysis  result of the agent's analysis (several versions per meeting). The
                                      transcript is NOT stored: it is read live from Teams for the agent's turn.
-  No existing table is altered and no data is copied or changed.
+  The only existing object that changes is the CHECK chat_project_event_via_ck, which now also accepts
+  entity 'reunion' (audit of link / unlink / series rule / analysis). No data is copied or changed.
 
   BLOQUE-DDL-INICIO (the manual PRUEBAS and PROD scripts repeat this block verbatim;
   lib/meetings/__tests__/project-meetings-sql.test.ts checks they stay in sync).
@@ -122,6 +123,16 @@ IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'chat_project_meeting_anal
   EXEC(N'CREATE NONCLUSTERED INDEX [chat_project_meeting_analysis_meeting_idx] ON [dbo].[chat_project_meeting_analysis]([id_project_meeting], [created_at]);');
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'chat_project_meeting_analysis_conversation_idx' AND object_id = OBJECT_ID(N'[dbo].[chat_project_meeting_analysis]'))
   EXEC(N'CREATE NONCLUSTERED INDEX [chat_project_meeting_analysis_conversation_idx] ON [dbo].[chat_project_meeting_analysis]([id_conversation]);');
+
+-- The project audit (chat_project_event) accepts entity 'reunion' (link, unlink, series rule, analysis).
+-- chat_project_event is a small audit table (hundreds of rows): re-checking it takes milliseconds.
+IF OBJECT_ID(N'[dbo].[chat_project_event]', N'U') IS NOT NULL
+   AND EXISTS (SELECT 1 FROM sys.check_constraints WHERE name = 'chat_project_event_via_ck' AND definition NOT LIKE N'%reunion%')
+BEGIN
+  ALTER TABLE [dbo].[chat_project_event] DROP CONSTRAINT [chat_project_event_via_ck];
+  EXEC(N'ALTER TABLE [dbo].[chat_project_event] WITH CHECK ADD CONSTRAINT [chat_project_event_via_ck]
+    CHECK ([via] IN (N''web'', N''puente'', N''mcp'') AND [entity] IN (N''tarea'', N''solicitud'', N''propuesta'', N''concesion'', N''reunion''));');
+END;
 
 COMMIT TRAN;
 
