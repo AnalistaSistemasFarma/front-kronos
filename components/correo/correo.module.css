@@ -531,7 +531,8 @@
   position: fixed;
   right: 24px;
   bottom: 0;
-  z-index: 300;
+  /* Z_INDEX.pageFloating (lib/ui/zIndex.ts): below the floating chat panel and below any modal. */
+  z-index: 150;
   width: min(560px, calc(100vw - 48px));
   max-height: calc(100dvh - var(--app-header-height, 4rem) - 24px);
   display: flex;
@@ -583,6 +584,7 @@
   position: fixed;
   right: 16px;
   bottom: calc(16px + env(safe-area-inset-bottom, 0px));
-  z-index: 200;
+  /* Z_INDEX.pageFloating (lib/ui/zIndex.ts). */
+  z-index: 150;
   box-shadow: var(--mantine-shadow-lg);
 }

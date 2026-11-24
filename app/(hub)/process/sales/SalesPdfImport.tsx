@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { Alert, Badge, Button, Checkbox, Group, Menu, Modal, Progress, ScrollArea, Stack, Table, Text, Tooltip } from '@mantine/core';
 import { IconAlertCircle, IconCircleCheck, IconLoader2, IconRobot, IconSparkles } from '@tabler/icons-react';
 import toast from 'react-hot-toast';
-import { agentOrderInstruction, agentReplyJson, chunkOrderText, mergePdfOrders, PDF_ORDER_SCHEMA, PDF_ORDER_SYSTEM_PROMPT, parsePdfOrder, pdfOrderChunkPrompt, tableHeaderRow, type PdfOrderResult } from '../../../../lib/sales/pdfOrder';
+import { agentOrderInstruction, assembleAgentReply, chunkOrderText, isJsonAttachment, rawLineCount, mergePdfOrders, PDF_ORDER_SCHEMA, PDF_ORDER_SYSTEM_PROMPT, parsePdfOrder, pdfOrderChunkPrompt, tableHeaderRow, type PdfOrderResult } from '../../../../lib/sales/pdfOrder';
 
 /**
  * «Montar oferta desde PDF»: lee la orden de compra del cliente con la IA NATIVA del navegador (Prompt API,
@@ -18,8 +18,13 @@ type Line = Record<string, unknown>;
 type Support = 'checking' | 'unsupported' | 'ready';
 type Phase = 'idle' | 'leyendo' | 'descargando' | 'analizando' | 'agente' | 'montando' | 'simulacion' | 'error';
 type ChatAgent = { idAgent: number; code: string; displayName: string; companies: { idCompany: number }[] };
-/** Espera máxima de la respuesta del agente. */
-const AGENT_TIMEOUT_MS = 6 * 60 * 1000;
+/** Espera máxima de la respuesta del agente: si está ocupado en otra conversación hace fila, así que no se falla pronto. */
+const AGENT_TIMEOUT_MS = 30 * 60 * 1000;
+/** Desde aquí, si el agente no está trabajando en la OC, se avisa que parece ocupado y que se puede cerrar la ventana. */
+const AGENT_BUSY_HINT_MS = 2 * 60 * 1000;
+/** A long answer arrives split in several chat messages: wait this long for the missing parts before giving up. */
+const AGENT_PARTS_GRACE_MS = 45 * 1000;
+type ReplyMessage = { id: number; role: string; body: string; attachments?: { fileName: string; contentType: string | null; downloadUrl: string }[] };
 const money = (v: unknown) => (v == null || v === '' ? '—' : `$ ${Number(v).toLocaleString('es-CO')}`);
 
 export interface PdfOffer {
@@ -102,6 +107,8 @@ export default function SalesPdfImport({ companyId, companyName, cardCode, onLoa
   /** Estado en vivo del agente mientras lee la OC (el mismo indicador del chat: «Pensando…», «Leyendo el adjunto…»). */
   const [live, setLive] = useState<{ sentAt: number; delivered: boolean; state: string | null; label: string | null; tasks: { desc: string }[] } | null>(null);
   const [now, setNow] = useState(Date.now());
+  /** Ventana cerrada mientras el agente trabaja: la espera sigue y al responder se abre la simulación. */
+  const [minimized, setMinimized] = useState(false);
   useEffect(() => {
     if (!live) return;
     const t = setInterval(() => setNow(Date.now()), 1000);
@@ -262,10 +269,13 @@ export default function SalesPdfImport({ companyId, companyName, cardCode, onLoa
       const start = Date.now();
       setLive({ sentAt: start, delivered: false, state: null, label: null, tasks: [] });
       let reply: string | null = null;
+      let incompleteSince: number | null = null;
+      let seenParts = 0;
+      const triedFiles = new Set<string>();
       while (Date.now() - start < AGENT_TIMEOUT_MS) {
         await new Promise((res) => setTimeout(res, 3000));
         const [g, st] = await Promise.all([
-          fetch(`/api/chat/conversations/${convId}/messages?limit=10`, { cache: 'no-store' }),
+          fetch(`/api/chat/conversations/${convId}/messages?limit=30`, { cache: 'no-store' }),
           fetch(`/api/chat/conversations/${convId}/status`, { cache: 'no-store' }).catch(() => null),
         ]);
         const gd = await g.json().catch(() => ({}));
@@ -278,18 +288,47 @@ export default function SalesPdfImport({ companyId, companyName, cardCode, onLoa
           label: sd.status?.label ?? null,
           tasks: Array.isArray(sd.status?.tasks) ? sd.status.tasks : [],
         });
-        const found = ((gd.messages ?? []) as { id: number; role: string; body: string }[])
-          .filter((x) => x.id > sentId && x.role !== 'user' && /\{[\s\S]*\}/.test(x.body ?? ''))
-          .sort((x, y) => x.id - y.id)[0];
-        if (found) {
-          reply = found.body;
+        // Agent messages after the request, in order. A long answer comes split in several messages (the
+        // channel cuts at 40,000 characters), so they are joined until the JSON parses.
+        const after = ((gd.messages ?? []) as ReplyMessage[]).filter((x) => x.id > sentId && x.role === 'agent').sort((x, y) => x.id - y.id);
+        // The agent may also send the JSON as an attached .json file.
+        for (const f of after.flatMap((x) => x.attachments ?? []).filter(isJsonAttachment)) {
+          if (triedFiles.has(f.downloadUrl)) continue;
+          triedFiles.add(f.downloadUrl);
+          const fr = await fetch(f.downloadUrl, { cache: 'no-store' }).catch(() => null);
+          const text = fr && fr.ok ? await fr.text().catch(() => '') : '';
+          const fromFile = assembleAgentReply([text]);
+          if (fromFile.status === 'ok') {
+            reply = fromFile.json;
+            break;
+          }
+        }
+        if (reply) break;
+        const assembled = assembleAgentReply(after.map((x) => x.body ?? ''));
+        if (assembled.status === 'ok') {
+          reply = assembled.json;
           break;
+        }
+        if (assembled.status === 'incomplete') {
+          // Restart the grace period every time a new part arrives.
+          if (assembled.parts !== seenParts) {
+            seenParts = assembled.parts;
+            incompleteSince = Date.now();
+          }
+          const idle = !sd.status?.state || sd.status.state === 'idle';
+          if (incompleteSince && idle && Date.now() - incompleteSince > AGENT_PARTS_GRACE_MS) {
+            throw new Error(`${a.displayName} respondió en ${assembled.parts === 1 ? 'un mensaje' : `${assembled.parts} mensajes`}, pero el JSON llegó incompleto (no se pudo leer). Revise la respuesta en el chat e intente de nuevo o use el cargue desde Excel.`);
+          }
         }
       }
       if (!reply) throw new Error(`${a.displayName} no respondió en ${AGENT_TIMEOUT_MS / 60000} minutos. Cuando responda, verá su lectura en el chat; puede intentarlo de nuevo.`);
       setLive(null);
-      const r = parsePdfOrder(agentReplyJson(reply));
-      await resolveAndSimulate(r, []);
+      setMinimized(false);
+      const r = parsePdfOrder(reply);
+      const leidas = rawLineCount(reply);
+      const descartadas = leidas - r.lineas.length;
+      const avisos = descartadas > 0 ? [`${a.displayName} leyó ${leidas} líneas; ${descartadas} se descartaron por no tener cantidad válida o descripción/código.`] : [];
+      await resolveAndSimulate(r, avisos);
     } catch (e) {
       setLive(null);
       setError((e as Error).message);
@@ -322,6 +361,11 @@ export default function SalesPdfImport({ companyId, companyName, cardCode, onLoa
           Montar oferta desde PDF
         </Button>
       </Tooltip>
+      {phase === 'agente' && minimized && (
+        <Button variant="subtle" color="indigo" size="xs" leftSection={<IconLoader2 size={14} className="animate-spin" />} onClick={() => setMinimized(false)}>
+          {agent?.displayName} leyendo la OC…
+        </Button>
+      )}
       <input id={inputId} type="file" accept="application/pdf" hidden onChange={(e) => { analyze(e.currentTarget.files?.[0] ?? null); e.currentTarget.value = ''; }} />
       {agents.length > 0 && (
         <>
@@ -350,8 +394,8 @@ export default function SalesPdfImport({ companyId, companyName, cardCode, onLoa
         </>
       )}
 
-      <Modal opened={phase !== 'idle'} onClose={() => !working && setPhase('idle')} size={phase === 'simulacion' ? 'xl' : 'md'} title={<Group gap={6}><IconSparkles size={18} /><Text fw={700}>{agent && (phase === 'agente' || conversationId) ? `Oferta desde el PDF (con ${agent.displayName})` : 'Oferta desde el PDF (IA local)'}</Text></Group>}
-        closeOnClickOutside={!working} withCloseButton={!working} zIndex={1300}>
+      <Modal opened={phase !== 'idle' && !(phase === 'agente' && minimized)} onClose={() => (phase === 'agente' ? setMinimized(true) : !working && setPhase('idle'))} size={phase === 'simulacion' ? 'xl' : 'md'} title={<Group gap={6}><IconSparkles size={18} /><Text fw={700}>{agent && (phase === 'agente' || conversationId) ? `Oferta desde el PDF (con ${agent.displayName})` : 'Oferta desde el PDF (IA local)'}</Text></Group>}
+        closeOnClickOutside={!working || phase === 'agente'} withCloseButton={!working || phase === 'agente'} zIndex={1300}>
         {phase === 'agente' && live && (
           <Stack gap={6} mb="sm">
             {(() => {
@@ -374,7 +418,12 @@ export default function SalesPdfImport({ companyId, companyName, cardCode, onLoa
                       {live.tasks.slice(0, 4).map((tk, i) => <Text key={i} size="xs" c="dimmed">• {tk.desc}</Text>)}
                     </Stack>
                   )}
-                  <Text size="xs" c="dimmed">Tiempo: {t} · máximo {AGENT_TIMEOUT_MS / 60000} min</Text>
+                  <Text size="xs" c="dimmed">Tiempo: {t}</Text>
+                  {now - live.sentAt > AGENT_BUSY_HINT_MS && !(live.state === 'thinking' || live.state === 'tool') && (
+                    <Alert color="blue" variant="light" p="xs">
+                      {agent?.displayName ?? 'El agente'} parece ocupado en otra conversación: atiende la OC cuando termine. Puede cerrar esta ventana y seguir; cuando responda, se abre la simulación.
+                    </Alert>
+                  )}
                 </>
               );
             })()}

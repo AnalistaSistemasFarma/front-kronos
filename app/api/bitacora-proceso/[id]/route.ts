@@ -15,7 +15,8 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     if (access instanceof Response) return access;
     const orden = await getOrdenDetalle(prisma, id, access, ctx.actor.idUser);
     if (!orden) return jsonNoStore({ error: 'Bitácora no encontrada' }, 404);
-    return jsonNoStore({ orden });
+    // ahoraServidor: reloj vivo de planta (2026-11-24); el cliente calcula el desfase de su equipo.
+    return jsonNoStore({ orden, ahoraServidor: new Date().toISOString() });
   } catch (error) {
     return errorResponse(error, 'detail');
   }

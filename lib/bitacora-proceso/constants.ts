@@ -209,6 +209,13 @@ export const OT_AREAS_FARMALOGICA: ReadonlyArray<string> = ['Envase y agrafado']
 export const OT_VISTOS_BUENOS = ['OPERARIO', 'SUPERVISOR', 'INSPECTOR', 'JEFE_PROD'] as const;
 export type OtFirmaRol = (typeof OT_VISTOS_BUENOS)[number];
 
+/**
+ * 2026-11-24 (reunión de mejoras con Farmalógica): el INSPECTOR sale del flujo. Quedan
+ * operario → supervisor (cierra) → jefe de producción. INSPECTOR sigue en OT_VISTOS_BUENOS
+ * y en la base solo para LEER las bitácoras viejas que ya tienen ese visto bueno.
+ */
+export const OT_INSPECTOR_EN_FLUJO = false;
+
 export function isOtFirmaRol(v: unknown): v is OtFirmaRol {
   return typeof v === 'string' && (OT_VISTOS_BUENOS as readonly string[]).includes(v);
 }
@@ -291,6 +298,11 @@ export const OT_PIN_MAX_FALLOS = 5;
 export const OT_RESPONSABLE_ROLES = ['SUPERVISOR', 'INSPECTOR', 'JEFE_PROD'] as const;
 export type OtResponsableRol = (typeof OT_RESPONSABLE_ROLES)[number];
 
+/** Roles que se pueden ASIGNAR hoy (2026-11-24: el inspector ya no se asigna; las filas viejas se leen). */
+export const OT_RESPONSABLE_ROLES_ASIGNABLES: ReadonlyArray<OtResponsableRol> = OT_RESPONSABLE_ROLES.filter(
+  (r) => OT_INSPECTOR_EN_FLUJO || r !== 'INSPECTOR'
+);
+
 export function isOtResponsableRol(v: unknown): v is OtResponsableRol {
   return typeof v === 'string' && (OT_RESPONSABLE_ROLES as readonly string[]).includes(v);
 }
@@ -298,6 +310,6 @@ export function isOtResponsableRol(v: unknown): v is OtResponsableRol {
 /** Qué hace cada responsable (texto de ayuda del catálogo). */
 export const OT_RESPONSABLE_AYUDA: Record<OtResponsableRol, string> = {
   SUPERVISOR: 'Abre y cierra la bitácora («Cerró»). Debe tener el permiso «Bitácora de Proceso: Gestión».',
-  INSPECTOR: 'Da su visto bueno después del cierre (del supervisor o del jefe de producción). No abre ni cierra.',
-  JEFE_PROD: 'Puede abrir y cerrar la bitácora de la que es jefe; si la cierra otra persona, da el último visto bueno, después del inspector.',
+  INSPECTOR: 'Ya no forma parte del flujo (2026-11-24). Solo se conserva en las bitácoras anteriores.',
+  JEFE_PROD: 'Puede abrir y cerrar la bitácora de la que es jefe; si la cierra el supervisor, da el último visto bueno.',
 };

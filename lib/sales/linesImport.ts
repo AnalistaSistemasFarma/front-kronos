@@ -6,6 +6,11 @@
 
 export const LINE_HEADERS = ['Codigo articulo', 'Cantidad', 'Precio', 'Bodega', 'Descripcion'] as const;
 export const MAX_IMPORT_LINES = 200;
+/**
+ * Lines accepted from a purchase order read from a PDF (agent or browser AI). Higher than the Excel cap: a real
+ * order (FE-4390, 2026-11-24) had 358 lines. SAP lookups are batched by 25 codes, so this stays a few dozen calls.
+ */
+export const MAX_PDF_LINES = 500;
 
 export interface ImportLine {
   row: number;
