@@ -19,7 +19,10 @@ type Support = 'checking' | 'unsupported' | 'ready';
 type Phase = 'idle' | 'leyendo' | 'descargando' | 'analizando' | 'agente' | 'montando' | 'simulacion' | 'error';
 type ChatAgent = { idAgent: number; code: string; displayName: string; companies: { idCompany: number }[] };
 /** Espera máxima de la respuesta del agente. */
-const AGENT_TIMEOUT_MS = 6 * 60 * 1000;
+/** Espera máxima de la respuesta del agente (si está ocupado en otra cosa, hace fila: no se falla antes). */
+const AGENT_TIMEOUT_MS = 30 * 60 * 1000;
+/** Desde aquí se avisa que el agente parece ocupado y que se puede cerrar la ventana. */
+const AGENT_BUSY_HINT_MS = 2 * 60 * 1000;
 const money = (v: unknown) => (v == null || v === '' ? '—' : `$ ${Number(v).toLocaleString('es-CO')}`);
 
 export interface PdfOffer {
@@ -102,6 +105,8 @@ export default function SalesPdfImport({ companyId, companyName, cardCode, onLoa
   /** Estado en vivo del agente mientras lee la OC (el mismo indicador del chat: «Pensando…», «Leyendo el adjunto…»). */
   const [live, setLive] = useState<{ sentAt: number; delivered: boolean; state: string | null; label: string | null; tasks: { desc: string }[] } | null>(null);
   const [now, setNow] = useState(Date.now());
+  /** Ventana cerrada mientras el agente trabaja: la espera sigue y al responder se abre la simulación. */
+  const [minimized, setMinimized] = useState(false);
   useEffect(() => {
     if (!live) return;
     const t = setInterval(() => setNow(Date.now()), 1000);
@@ -278,16 +283,25 @@ export default function SalesPdfImport({ companyId, companyName, cardCode, onLoa
           label: sd.status?.label ?? null,
           tasks: Array.isArray(sd.status?.tasks) ? sd.status.tasks : [],
         });
-        const found = ((gd.messages ?? []) as { id: number; role: string; body: string }[])
-          .filter((x) => x.id > sentId && x.role !== 'user' && /\{[\s\S]*\}/.test(x.body ?? ''))
-          .sort((x, y) => x.id - y.id)[0];
-        if (found) {
-          reply = found.body;
-          break;
+        // El chat parte las respuestas largas en varios mensajes: se juntan todos los del agente posteriores a la OC
+        // y se toman cuando forman un JSON completo (si no, se espera el resto).
+        const delAgente = ((gd.messages ?? []) as { id: number; role: string; body: string }[])
+          .filter((x) => x.id > sentId && x.role !== 'user')
+          .sort((x, y) => x.id - y.id);
+        if (delAgente.length && delAgente.some((x) => x.body?.includes('{'))) {
+          const joined = delAgente.map((x) => x.body ?? '').join('\n');
+          try {
+            parsePdfOrder(agentReplyJson(joined));
+            reply = joined;
+            break;
+          } catch {
+            /* respuesta aún incompleta: sigue esperando */
+          }
         }
       }
-      if (!reply) throw new Error(`${a.displayName} no respondió en ${AGENT_TIMEOUT_MS / 60000} minutos. Cuando responda, verá su lectura en el chat; puede intentarlo de nuevo.`);
+      if (!reply) throw new Error(`${a.displayName} no entregó una lectura completa en ${AGENT_TIMEOUT_MS / 60000} minutos. Revise su respuesta en el chat o intente de nuevo.`);
       setLive(null);
+      setMinimized(false);
       const r = parsePdfOrder(agentReplyJson(reply));
       await resolveAndSimulate(r, []);
     } catch (e) {
@@ -322,6 +336,11 @@ export default function SalesPdfImport({ companyId, companyName, cardCode, onLoa
           Montar oferta desde PDF
         </Button>
       </Tooltip>
+      {phase === 'agente' && minimized && (
+        <Button variant="subtle" color="indigo" size="xs" leftSection={<IconLoader2 size={14} className="animate-spin" />} onClick={() => setMinimized(false)}>
+          {agent?.displayName} leyendo la OC…
+        </Button>
+      )}
       <input id={inputId} type="file" accept="application/pdf" hidden onChange={(e) => { analyze(e.currentTarget.files?.[0] ?? null); e.currentTarget.value = ''; }} />
       {agents.length > 0 && (
         <>
@@ -350,8 +369,8 @@ export default function SalesPdfImport({ companyId, companyName, cardCode, onLoa
         </>
       )}
 
-      <Modal opened={phase !== 'idle'} onClose={() => !working && setPhase('idle')} size={phase === 'simulacion' ? 'xl' : 'md'} title={<Group gap={6}><IconSparkles size={18} /><Text fw={700}>{agent && (phase === 'agente' || conversationId) ? `Oferta desde el PDF (con ${agent.displayName})` : 'Oferta desde el PDF (IA local)'}</Text></Group>}
-        closeOnClickOutside={!working} withCloseButton={!working} zIndex={1300}>
+      <Modal opened={phase !== 'idle' && !(phase === 'agente' && minimized)} onClose={() => (phase === 'agente' ? setMinimized(true) : !working && setPhase('idle'))} size={phase === 'simulacion' ? 'xl' : 'md'} title={<Group gap={6}><IconSparkles size={18} /><Text fw={700}>{agent && (phase === 'agente' || conversationId) ? `Oferta desde el PDF (con ${agent.displayName})` : 'Oferta desde el PDF (IA local)'}</Text></Group>}
+        closeOnClickOutside={!working || phase === 'agente'} withCloseButton={!working || phase === 'agente'} zIndex={1300}>
         {phase === 'agente' && live && (
           <Stack gap={6} mb="sm">
             {(() => {
@@ -374,7 +393,12 @@ export default function SalesPdfImport({ companyId, companyName, cardCode, onLoa
                       {live.tasks.slice(0, 4).map((tk, i) => <Text key={i} size="xs" c="dimmed">• {tk.desc}</Text>)}
                     </Stack>
                   )}
-                  <Text size="xs" c="dimmed">Tiempo: {t} · máximo {AGENT_TIMEOUT_MS / 60000} min</Text>
+                  <Text size="xs" c="dimmed">Tiempo: {t}</Text>
+                  {now - live.sentAt > AGENT_BUSY_HINT_MS && !(live.state === 'thinking' || live.state === 'tool') && (
+                    <Alert color="blue" variant="light" p="xs">
+                      {agent?.displayName ?? 'El agente'} parece ocupado en otra conversación: atiende la OC cuando termine. Puede cerrar esta ventana y seguir; cuando responda, se abre la simulación.
+                    </Alert>
+                  )}
                 </>
               );
             })()}

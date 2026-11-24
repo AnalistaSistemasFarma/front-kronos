@@ -96,3 +96,12 @@ describe('montar con agente', () => {
     expect(parsePdfOrder(agentReplyJson(body)).numeroOrdenCompra).toBe('OC-7');
   });
 });
+
+describe('respuesta del agente partida en varios mensajes', () => {
+  it('juntando los pedazos se lee completa', () => {
+    const p1 = '```json\n{"numeroOrdenCompra":"OC1","nitCliente":"900149596-3","fechaEntrega":"","lineas":[\n{"codigo":"10030","descripcion":"A","cantidad":300,"precioUnitario":1051.2},';
+    const p2 = '{"codigo":"13470","descripcion":"B","cantidad":2400,"precioUnitario":48.39}]}\n```';
+    expect(() => parsePdfOrder(agentReplyJson(p1))).toThrow();
+    expect(parsePdfOrder(agentReplyJson([p1, p2].join('\n'))).lineas).toHaveLength(2);
+  });
+});
