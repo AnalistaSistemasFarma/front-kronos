@@ -9,7 +9,7 @@
   width: 380px;
   max-width: calc(100vw - 32px);
   max-height: calc(100dvh - var(--app-header-height, 4rem) - 32px);
-  z-index: 1000;
+  /* z-index comes from Z_INDEX.inAppToasts (lib/ui/zIndex.ts): above the chat panel, below modals. */
   display: flex;
   flex-direction: column-reverse;
   gap: 10px;

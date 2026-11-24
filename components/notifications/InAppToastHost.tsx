@@ -32,6 +32,7 @@ import {
   getServerInAppToasts,
   subscribeInAppToasts,
 } from '../../lib/notifications/inAppToastStore';
+import { Z_INDEX } from '../../lib/ui/zIndex';
 import styles from './InAppToastHost.module.css';
 
 /**
@@ -57,7 +58,7 @@ export default function InAppToastHost() {
 
   if (!mounted) return null;
   return createPortal(
-    <section className={styles.region} aria-live='polite' aria-label='Notificaciones de SynerLink'>
+    <section className={styles.region} style={{ zIndex: Z_INDEX.inAppToasts }} aria-live='polite' aria-label='Notificaciones de SynerLink'>
       {toasts.map((t) => (
         <ToastCard key={t.key} toast={t} />
       ))}
