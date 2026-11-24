@@ -77,6 +77,27 @@ function requestResponsibleExists(userId: string): Prisma.Sql {
   )`;
 }
 
+/**
+ * Same as requestResponsibleExists, but identifies the responsible user by
+ * e-mail (trimmed, case-insensitive). The e-mail always travels as a parameter.
+ */
+function requestResponsibleEmailExists(email: string): Prisma.Sql {
+  return Prisma.sql`EXISTS (
+    SELECT 1
+    FROM process_category_request_general pcrg
+    INNER JOIN user_process_category_request_general upcrg
+      ON upcrg.id_process_category = pcrg.id_process_category
+    INNER JOIN [user] ru ON ru.id = upcrg.id_user
+    WHERE pcrg.id_request_general = rg.id
+      AND LOWER(LTRIM(RTRIM(ru.email))) = ${normalizeEmail(email)}
+  )`;
+}
+
+/** Normalizes an e-mail used as a filter value (trim + lower case). */
+function normalizeEmail(email: string): string {
+  return email.trim().toLowerCase();
+}
+
 /** Empaqueta un resultado como contenido MCP (texto JSON). */
 function jsonResult(data: unknown) {
   return {
@@ -569,7 +590,7 @@ export function registerTools(rawServer: McpServer, ctx: ToolContext): void {
   // ---------------------------------------------------------------------------
   server.tool(
     'kronos_list_requests',
-    'Lista solicitudes generales (workflows). Filtra SIEMPRE por las empresas del alcance. Permite filtrar por responsable (encargado del proceso) con responsibleUserId (user.id). Paginada.',
+    'Lista solicitudes generales (workflows). Filtra SIEMPRE por las empresas del alcance. Permite filtrar por responsable (encargado del proceso) con responsibleUserId (user.id) o responsibleEmail, y por solicitante (quien radicó la solicitud) con requesterId (user.id) o requesterEmail. Los filtros se combinan entre sí (Y). Paginada.',
     {
       companyId: z
         .number()
@@ -582,6 +603,28 @@ export function registerTools(rawServer: McpServer, ctx: ToolContext): void {
         .optional()
         .describe(
           'Filtra solicitudes donde este usuario (user.id) es ENCARGADO/responsable del proceso asignado a la solicitud.'
+        ),
+      responsibleEmail: z
+        .string()
+        .trim()
+        .email()
+        .max(255)
+        .optional()
+        .describe(
+          'Igual que responsibleUserId, pero identificando al responsable por su correo (sin distinguir mayúsculas).'
+        ),
+      requesterId: z
+        .string()
+        .optional()
+        .describe('Filtra solicitudes RADICADAS por este usuario (user.id del solicitante).'),
+      requesterEmail: z
+        .string()
+        .trim()
+        .email()
+        .max(255)
+        .optional()
+        .describe(
+          'Filtra solicitudes RADICADAS por la persona con este correo (sin distinguir mayúsculas).'
         ),
       limit: z.number().int().optional(),
       offset: z.number().int().optional(),
@@ -598,6 +641,19 @@ export function registerTools(rawServer: McpServer, ctx: ToolContext): void {
         }
         if (args.responsibleUserId !== undefined) {
           where.push(requestResponsibleExists(args.responsibleUserId));
+        }
+        if (args.responsibleEmail !== undefined) {
+          where.push(requestResponsibleEmailExists(args.responsibleEmail));
+        }
+        if (args.requesterId !== undefined) {
+          where.push(Prisma.sql`rg.id_requester = ${args.requesterId}`);
+        }
+        if (args.requesterEmail !== undefined) {
+          where.push(Prisma.sql`EXISTS (
+            SELECT 1 FROM [user] rq
+            WHERE rq.id = rg.id_requester
+              AND LOWER(LTRIM(RTRIM(rq.email))) = ${normalizeEmail(args.requesterEmail)}
+          )`);
         }
         const whereSql = Prisma.join(where, ' AND ');
 
@@ -1723,7 +1779,7 @@ export function registerTools(rawServer: McpServer, ctx: ToolContext): void {
   // ---------------------------------------------------------------------------
   server.tool(
     'kronos_list_tickets',
-    'Lista tickets/casos de mesa de ayuda. Filtra SIEMPRE por las empresas del alcance. Permite filtrar por técnico/responsable asignado con technicianId y expone las columnas "technician"/"technician_id". Paginada.',
+    'Lista tickets/casos de mesa de ayuda. Filtra SIEMPRE por las empresas del alcance. Permite filtrar por técnico/responsable asignado con technicianId y por solicitante con requesterId (user.id) o requesterEmail; expone las columnas "technician"/"technician_id". Paginada.',
     {
       companyId: z.number().int().optional(),
       status: z.number().int().optional().describe('id_status_case'),
@@ -1732,6 +1788,21 @@ export function registerTools(rawServer: McpServer, ctx: ToolContext): void {
         .string()
         .optional()
         .describe('Filtra casos donde este usuario (user.id) es el TÉCNICO/responsable asignado.'),
+      requesterId: z
+        .string()
+        .optional()
+        .describe(
+          'Filtra casos cuyo solicitante registrado es este usuario (user.id). Casos antiguos donde el solicitante solo aparece en el asunto pueden no coincidir; en ese caso use kronos_search.'
+        ),
+      requesterEmail: z
+        .string()
+        .trim()
+        .email()
+        .max(255)
+        .optional()
+        .describe(
+          'Filtra casos por correo del solicitante: el correo de contacto del caso o el del usuario solicitante registrado (sin distinguir mayúsculas).'
+        ),
       limit: z.number().int().optional(),
       offset: z.number().int().optional(),
     },
@@ -1745,6 +1816,29 @@ export function registerTools(rawServer: McpServer, ctx: ToolContext): void {
         if (args.status !== undefined) where.push(Prisma.sql`c.id_status_case = ${args.status}`);
         if (args.priority !== undefined) where.push(Prisma.sql`c.priority = ${args.priority}`);
         if (args.technicianId !== undefined) where.push(Prisma.sql`ut.id = ${args.technicianId}`);
+        // [case].requester stores the requester's id_company_user (legacy rows may hold a user.id).
+        if (args.requesterId !== undefined) {
+          where.push(Prisma.sql`EXISTS (
+            SELECT 1 FROM [user] rq
+            LEFT JOIN company_user rqcu ON rqcu.id_user = rq.id
+            WHERE rq.id = ${args.requesterId}
+              AND (CAST(c.requester AS NVARCHAR(255)) = rq.id
+                   OR TRY_CAST(c.requester AS INT) = rqcu.id_company_user)
+          )`);
+        }
+        if (args.requesterEmail !== undefined) {
+          const email = normalizeEmail(args.requesterEmail);
+          where.push(Prisma.sql`(
+            LOWER(LTRIM(RTRIM(c.email))) = ${email}
+            OR EXISTS (
+              SELECT 1 FROM [user] rq
+              LEFT JOIN company_user rqcu ON rqcu.id_user = rq.id
+              WHERE LOWER(LTRIM(RTRIM(rq.email))) = ${email}
+                AND (CAST(c.requester AS NVARCHAR(255)) = rq.id
+                     OR TRY_CAST(c.requester AS INT) = rqcu.id_company_user)
+            )
+          )`);
+        }
         const whereSql = Prisma.join(where, ' AND ');
 
         const rows = await queryReadOnly<unknown>(Prisma.sql`
