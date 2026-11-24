@@ -4,6 +4,8 @@ import { stampControlledCopy } from '../sgc/watermark';
 import type { BiomedAccess } from './access';
 import type { SealImageBytes } from '../orion/annotationStamp';
 import { sha256Hex } from '../sgc/storage';
+import { ACTIVIDAD_INSPECCION, hoyBogota } from './hojaVida';
+import { datosDe, type DatosEquipo } from './inventario';
 import { AnotacionInvalida, MAX_SELLOS, dibujarAnotaciones, leerDatos, normalizarAnotaciones, validarImagenSello, type BiomedAnotacion, type BiomedSello } from './anotaciones';
 
 /**
@@ -17,6 +19,9 @@ import { AnotacionInvalida, MAX_SELLOS, dibujarAnotaciones, leerDatos, normaliza
  *     ni se cierra; se diligencia de nuevo sobre la versión vigente. Lo ya
  *     cerrado queda como evidencia, con su versión.
  *   - El PDF diligenciado sale con la marca de copia controlada (quién y cuándo).
+ *   - Fase 3 (2026-11-23): el registro queda LIGADO a su equipo del inventario
+ *     (hoja de vida). En la «Inspección de equipos biomédicos nuevos» se escriben
+ *     los datos del equipo y, al CERRAR la inspección, el equipo se crea en bodega.
  *   - Todo queda en biomed_evento (solo inserción).
  */
 
@@ -146,6 +151,10 @@ export interface BiomedRegistroResumenDto {
   createdBy: string;
   createdAt: string;
   closedAt: string | null;
+  /** Equipo del inventario al que pertenece (fase 3). */
+  idEquipo: number | null;
+  /** Inspección de equipos nuevos: el equipo se crea en el inventario al cerrarla. */
+  esInspeccion: boolean;
   /** Borrador cuyo formato ya no está vigente: bloqueado. */
   bloqueado: boolean;
 }
@@ -178,23 +187,62 @@ export async function listRegistros(db: BiomedDb, access: BiomedAccess, filtros:
       createdBy: r.created_by,
       createdAt: r.created_at.toISOString(),
       closedAt: r.closed_at?.toISOString() ?? null,
+      idEquipo: r.id_biomed_equipo ?? null,
+      esInspeccion: r.formato.actividad === ACTIVIDAD_INSPECCION,
       bloqueado: r.estado === 'borrador' && !vigente,
     };
   });
 }
 
 /** Nuevo registro sobre la VERSIÓN VIGENTE del formato. */
-export async function createRegistro(db: BiomedDb, access: BiomedAccess, input: { idFormato?: unknown; equipo?: unknown; serial?: unknown }, actor: BiomedActor) {
+export async function createRegistro(
+  db: BiomedDb,
+  access: BiomedAccess,
+  input: { idFormato?: unknown; equipo?: unknown; serial?: unknown; idEquipo?: unknown; equipoDatos?: unknown },
+  actor: BiomedActor
+) {
   if (!access.canUse) throw new SgcError('Sin acceso al módulo de Ingeniería biomédica.', 403);
   const idFormato = Number(input.idFormato);
   const formato = Number.isInteger(idFormato) ? await db.biomedFormato.findFirst({ where: { id_biomed_formato: idFormato, id_company: access.idCompany, is_active: true } }) : null;
   if (!formato) throw new SgcError('El formato no está habilitado en el módulo.', 404);
   const doc = await db.sgcDocument.findUnique({ where: { id_document: formato.id_document }, select: { code: true, status: true, current_version_id: true } });
   if (!doc || doc.status !== 'vigente' || !doc.current_version_id) throw new SgcError('El formato no está vigente en el SGC: no se puede diligenciar.', 409);
-  const equipo = texto(input.equipo, 'El equipo', 200, 2);
-  const serial = typeof input.serial === 'string' && input.serial.trim() ? input.serial.trim().slice(0, 100) : null;
+  let equipo: string;
+  let serial: string | null;
+  let idEquipo: number | null = null;
+  let equipoJson: string | null = null;
+  if (formato.actividad === ACTIVIDAD_INSPECCION) {
+    // Fase 3: la inspección de un equipo NUEVO trae sus datos; el equipo se crea en bodega al cerrarla.
+    const d = datosDe((input.equipoDatos ?? {}) as Record<string, unknown>) as DatosEquipo;
+    if (!d.equipo) throw new SgcError('Escriba el equipo que se inspecciona.', 400);
+    if (!d.serie) throw new SgcError('Escriba la serie del equipo que se inspecciona.', 400);
+    if (await db.biomedEquipo.findFirst({ where: { id_company: access.idCompany, serie: d.serie }, select: { id_biomed_equipo: true } })) {
+      throw new SgcError(`La serie ${d.serie} ya está en el inventario: la inspección de ingreso es para equipos nuevos.`, 409);
+    }
+    equipoJson = JSON.stringify({ ...d, cliente: null, sede: null, zona: null, ciudad: null });
+    equipo = d.equipo;
+    serial = d.serie;
+  } else {
+    const id = input.idEquipo === undefined || input.idEquipo === null || input.idEquipo === '' ? null : Number(input.idEquipo);
+    const eq = id !== null && Number.isInteger(id) ? await db.biomedEquipo.findFirst({ where: { id_biomed_equipo: id, id_company: access.idCompany } }) : null;
+    if (id !== null && !eq) throw new SgcError('Equipo no encontrado.', 404);
+    equipo = eq ? eq.equipo : texto(input.equipo, 'El equipo', 200, 2);
+    serial = eq ? eq.serie : typeof input.serial === 'string' && input.serial.trim() ? input.serial.trim().slice(0, 100) : null;
+    // Si el serial es de un equipo del inventario, el formato queda en su hoja de vida.
+    idEquipo = eq?.id_biomed_equipo ?? (serial ? ((await db.biomedEquipo.findFirst({ where: { id_company: access.idCompany, serie: serial }, select: { id_biomed_equipo: true } }))?.id_biomed_equipo ?? null) : null);
+  }
   const row = await db.biomedRegistro.create({
-    data: { id_company: access.idCompany, id_biomed_formato: formato.id_biomed_formato, id_document: formato.id_document, id_document_version: doc.current_version_id, equipo, serial, created_by: lower(actor.email) },
+    data: {
+      id_company: access.idCompany,
+      id_biomed_formato: formato.id_biomed_formato,
+      id_document: formato.id_document,
+      id_document_version: doc.current_version_id,
+      equipo,
+      serial,
+      id_biomed_equipo: idEquipo,
+      equipo_json: equipoJson,
+      created_by: lower(actor.email),
+    },
   });
   await evento(db, access.idCompany, 'registro.creado', actor, `${doc.code} · ${equipo}${serial ? ` (serial ${serial})` : ''}`, row.id_biomed_registro);
   return { id: row.id_biomed_registro };
@@ -217,7 +265,7 @@ export async function getRegistro(db: BiomedDb, access: BiomedAccess, idRegistro
   const [resumen] = (await listRegistros(db, access)).filter((x) => x.id === r.id_biomed_registro);
   const vig = await vigenciaDe(db, r.id_document, r.id_document_version);
   const base: BiomedRegistroResumenDto =
-    resumen ?? { id: r.id_biomed_registro, idFormato: r.id_biomed_formato, code: '—', title: '—', actividad: r.formato.actividad, versionNumber: 0, equipo: r.equipo, serial: r.serial, estado: r.estado as BiomedRegistroResumenDto['estado'], createdBy: r.created_by, createdAt: r.created_at.toISOString(), closedAt: r.closed_at?.toISOString() ?? null, bloqueado: !vig.vigente };
+    resumen ?? { id: r.id_biomed_registro, idFormato: r.id_biomed_formato, code: '—', title: '—', actividad: r.formato.actividad, versionNumber: 0, equipo: r.equipo, serial: r.serial, estado: r.estado as BiomedRegistroResumenDto['estado'], createdBy: r.created_by, createdAt: r.created_at.toISOString(), closedAt: r.closed_at?.toISOString() ?? null, idEquipo: r.id_biomed_equipo ?? null, esInspeccion: r.formato.actividad === ACTIVIDAD_INSPECCION, bloqueado: !vig.vigente };
   const esAutor = lower(r.created_by) === lower(viewerEmail);
   return {
     ...base,
@@ -246,12 +294,43 @@ export async function saveAnotaciones(db: BiomedDb, access: BiomedAccess, idRegi
   return { saved: anotaciones.length };
 }
 
-/** Cierra el registro: queda como evidencia (no se modifica más). */
+/** Cierra el registro: queda como evidencia (no se modifica más). En la inspección de ingreso, crea el equipo en bodega. */
 export async function closeRegistro(db: BiomedDb, access: BiomedAccess, idRegistro: number, actor: BiomedActor) {
   const r = await editable(db, access, idRegistro, actor);
   if (leerDatos(r.data_json).anotaciones.length === 0) throw new SgcError('El formato está vacío: diligéncielo antes de cerrarlo.');
   const now = new Date();
-  await db.biomedRegistro.update({ where: { id_biomed_registro: r.id_biomed_registro }, data: { estado: 'cerrado', closed_by: lower(actor.email), closed_at: now, updated_by: lower(actor.email), updated_at: now } });
+  const email = lower(actor.email);
+  if (r.equipo_json && r.id_biomed_equipo === null) {
+    const d = JSON.parse(r.equipo_json) as DatosEquipo;
+    const code = (await db.sgcDocument.findUnique({ where: { id_document: r.id_document }, select: { code: true } }))?.code ?? 'inspección';
+    const creado = await db
+      .$transaction(async (tx) => {
+        const eq = await tx.biomedEquipo.create({
+          data: { id_company: access.idCompany, ...d, equipo: d.equipo!, serie: d.serie!, estado: 'bodega', fecha_ingreso: hoyBogota(now), created_by: email },
+          select: { id_biomed_equipo: true },
+        });
+        await tx.biomedEquipoEvento.create({
+          data: {
+            id_company: access.idCompany,
+            id_biomed_equipo: eq.id_biomed_equipo,
+            accion: 'alta',
+            despues: JSON.stringify({ ...d, estado: 'bodega', inspeccion: r.id_biomed_registro }),
+            justificacion: `Inspección de ingreso ${code} · registro #${r.id_biomed_registro}`,
+            actor_email: email,
+            ip: actor.ip ?? null,
+          },
+        });
+        await tx.biomedRegistro.update({ where: { id_biomed_registro: r.id_biomed_registro }, data: { estado: 'cerrado', id_biomed_equipo: eq.id_biomed_equipo, closed_by: email, closed_at: now, updated_by: email, updated_at: now } });
+        return eq.id_biomed_equipo;
+      })
+      .catch((e: unknown) => {
+        if ((e as { code?: string })?.code === 'P2002') throw new SgcError(`La serie ${d.serie} ya está en el inventario: no se puede cerrar la inspección de ingreso.`, 409);
+        throw e;
+      });
+    await evento(db, access.idCompany, 'registro.cerrado', actor, `${r.equipo} · equipo creado en el inventario (#${creado})`, r.id_biomed_registro);
+    return { closed: true, idEquipo: creado };
+  }
+  await db.biomedRegistro.update({ where: { id_biomed_registro: r.id_biomed_registro }, data: { estado: 'cerrado', closed_by: email, closed_at: now, updated_by: email, updated_at: now } });
   await evento(db, access.idCompany, 'registro.cerrado', actor, `${r.equipo}`, r.id_biomed_registro);
   return { closed: true };
 }

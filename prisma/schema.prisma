@@ -5907,10 +5907,15 @@ model BiomedRegistro {
   closed_by           String?   @db.NVarChar(255)
   closed_at           DateTime?
   annul_reason        String?   @db.NVarChar(1000)
+  /// Fase 3 (2026-11-23): equipo al que pertenece el formato diligenciado (hoja de vida).
+  id_biomed_equipo    Int?
+  /// Fase 3: en la inspección de equipos nuevos, los datos del equipo que se crea al cerrarla (JSON).
+  equipo_json         String?   @db.NVarChar(Max)
 
   formato BiomedFormato @relation(fields: [id_biomed_formato], references: [id_biomed_formato], onDelete: NoAction, onUpdate: NoAction)
 
   @@index([id_company, estado])
+  @@index([id_biomed_equipo])
   @@map("biomed_registro")
   @@schema("dbo")
 }
@@ -5953,6 +5958,10 @@ model BiomedEquipo {
   observacion          String?   @db.NVarChar(1000)
   valor_cobro          Decimal?  @db.Decimal(18, 2)
   novedad_at           DateTime?
+  /// Fase 3 (2026-11-23): hoja de vida.
+  fecha_ingreso           DateTime? @db.Date
+  vida_util_anios         Int?
+  periodicidad_mant_meses Int?
   created_by           String    @db.NVarChar(255)
   created_at           DateTime  @default(now())
   updated_by           String?   @db.NVarChar(255)
@@ -5976,6 +5985,35 @@ model BiomedValorUnitario {
 
   @@unique([id_company, codigo_interno])
   @@map("biomed_valor_unitario")
+  @@schema("dbo")
+}
+
+/// INGENIERÍA BIOMÉDICA · MANTENIMIENTOS (fase 3, 2026-11-23): preventivo, correctivo o metrológico, con su
+/// lista de chequeo. No se borra ni se cambia: solo se anula con motivo (disparador en la base).
+model BiomedMantenimiento {
+  id_biomed_mantenimiento Int       @id @default(autoincrement())
+  id_company              Int
+  id_biomed_equipo        Int
+  fecha                   DateTime  @db.Date
+  /// preventivo | correctivo | metrologico
+  tipo                    String    @db.NVarChar(20)
+  numero_reporte          String?   @db.NVarChar(50)
+  checklist_json          String    @default("[]") @db.NVarChar(Max)
+  observaciones           String?   @db.NVarChar(2000)
+  responsables            String    @db.NVarChar(500)
+  proximo                 DateTime? @db.Date
+  id_biomed_registro      Int?
+  /// vigente | anulado
+  estado                  String    @default("vigente") @db.NVarChar(20)
+  anulado_por             String?   @db.NVarChar(255)
+  anulado_at              DateTime?
+  motivo_anulacion        String?   @db.NVarChar(1000)
+  created_by              String    @db.NVarChar(255)
+  created_at              DateTime  @default(now())
+
+  @@index([id_biomed_equipo, fecha])
+  @@index([id_company, proximo])
+  @@map("biomed_mantenimiento")
   @@schema("dbo")
 }
 

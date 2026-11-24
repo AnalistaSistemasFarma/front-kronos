@@ -5,7 +5,10 @@ import { biomedContext } from '../_acceso';
 
 export const dynamic = 'force-dynamic';
 
-/** POST /api/biomedica/registros { company, idFormato, equipo, serial? } — nuevo formato diligenciado sobre la versión vigente. */
+/**
+ * POST /api/biomedica/registros { company, idFormato, equipo, serial?, idEquipo?, equipoDatos? } — nuevo formato diligenciado sobre
+ * la versión vigente. En la inspección de equipos nuevos, equipoDatos trae el equipo que se crea al cerrarla (fase 3).
+ */
 export async function POST(request: Request) {
   try {
     const body = await readJson(request);
