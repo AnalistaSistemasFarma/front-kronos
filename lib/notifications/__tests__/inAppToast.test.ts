@@ -251,3 +251,15 @@ describe('expressive content (msg 38382)', () => {
     expect(mediaFromMessage({ attachments: [{ fileName: 'a.pdf', contentType: 'application/pdf', downloadUrl: '/x' }] })).toBeNull();
   });
 });
+
+describe('previewNeedsMedia', () => {
+  it('empty, «Envió un archivo» and the sticker/GIF stand-ins read the message', async () => {
+    const { previewNeedsMedia } = await import('../inAppToast');
+    expect(previewNeedsMedia('')).toBe(true);
+    expect(previewNeedsMedia('Envió un archivo')).toBe(true);
+    expect(previewNeedsMedia('[Sticker: ¡De acuerdo!]')).toBe(true);
+    expect(previewNeedsMedia('[GIF: gato bailando]')).toBe(true);
+    expect(previewNeedsMedia('Mire el [GIF: x] que le mandé')).toBe(false);
+    expect(previewNeedsMedia('Hola')).toBe(false);
+  });
+});
