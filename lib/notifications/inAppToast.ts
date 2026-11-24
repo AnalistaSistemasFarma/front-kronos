@@ -157,6 +157,16 @@ export function mediaFromMessage(msg: MessageMediaInput | null | undefined): InA
   return image ? { src: image.downloadUrl, poster: null, alt: image.fileName || 'Imagen' } : null;
 }
 
+/**
+ * Does the text preview stand for a message without real text? Empty, «Envió un archivo», or the
+ * text stand-in the chat stores for stickers and GIFs («[Sticker: …]», «[GIF: …]»,
+ * lib/chat/media-rules.ts). Then the card reads the message to show the image instead.
+ */
+export function previewNeedsMedia(preview: string | null | undefined): boolean {
+  const t = (preview ?? '').trim();
+  return !t || t === 'Envió un archivo' || /^\[(?:GIF|Sticker): [^\]]*\]?…?$/.test(t);
+}
+
 /** Label for a media-only message. */
 export function mediaLabel(msg: MessageMediaInput): string {
   if (msg.media?.kind === 'gif') return 'Envió un GIF';
