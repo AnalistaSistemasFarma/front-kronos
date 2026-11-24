@@ -109,6 +109,37 @@ describe('Bitácora de Proceso · Excel del batch record (2026-11-24)', () => {
     expect(todo).toContain('Jefe de producción: pendiente — Natalia Velandia');
     expect(ws.pageSetup.printArea).toMatch(/^A1:K\d+$/);
     expect(wb.creator).toBe('SynerLink');
+    // Estilos propios agregados al final (no se reescriben los de la plantilla): borde y negrita.
+    expect(ws.getCell('A10').font?.bold).toBe(true);
+    expect(ws.getCell('A10').border?.top?.style).toBe('thin');
+  });
+
+  it('edita el XML de la plantilla sin reescribirla: logo, filas 1–9 y títulos de impresión intactos', async () => {
+    const JSZip = (await import('jszip')).default;
+    const { BATCH_RECORD_PLANTILLA_BASE64 } = await import('../batchRecordPlantilla');
+    const original = await JSZip.loadAsync(Buffer.from(BATCH_RECORD_PLANTILLA_BASE64, 'base64'));
+    const enc = { producto: 'A & B <x>', concentracion: '500 mg', lote: 'L1', op: '1', loteMp: 'M1' };
+    const salida = await JSZip.loadAsync(await buildBatchRecordXlsx(enc, [orden(1, '2026-11-03T11:00:00.000Z')]));
+    // Archivos que no se tocan: idénticos byte a byte.
+    for (const p of ['xl/media/image1.jpeg', 'xl/drawings/drawing1.xml', 'xl/theme/theme1.xml', 'xl/printerSettings/printerSettings1.bin']) {
+      expect(await salida.file(p)!.async('base64')).toBe(await original.file(p)!.async('base64'));
+    }
+    const sheet = await salida.file('xl/worksheets/sheet1.xml')!.async('string');
+    const sheetOrig = await original.file('xl/worksheets/sheet1.xml')!.async('string');
+    // Filas 1–3 (logo, título, información general) idénticas; el texto va escapado.
+    const filas13 = (x: string) => /<row r="1"[\s\S]*?<row r="4"/.exec(x)![0];
+    expect(filas13(sheet)).toBe(filas13(sheetOrig));
+    expect(sheet).toContain('A &amp; B &lt;x&gt;');
+    expect(sheet).not.toContain('<sheetProtection');
+    expect(sheet).not.toMatch(/<f>/);
+    const wbXml = await salida.file('xl/workbook.xml')!.async('string');
+    expect(wbXml).toContain("'P-16-1,'!$1:$8");
+    expect(wbXml).toMatch(/Print_Area[^>]*>'P-16-1,'!\$A\$1:\$K\$\d+</);
+    // Los estilos de la plantilla siguen en su sitio: solo se agregan al final.
+    const st = await salida.file('xl/styles.xml')!.async('string');
+    const stOrig = await original.file('xl/styles.xml')!.async('string');
+    const xfs = (x: string) => /<cellXfs count="(\d+)"/.exec(x)![1];
+    expect(Number(xfs(st))).toBe(Number(xfs(stOrig)) + 5);
   });
 
   it('muchas bitácoras y registros: sigue siendo una sola hoja con el encabezado repetido', async () => {

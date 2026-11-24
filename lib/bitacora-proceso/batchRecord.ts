@@ -1,4 +1,4 @@
-import ExcelJS from 'exceljs';
+import JSZip from 'jszip';
 import { OT_LIMITS, OT_METODO_LABEL, OT_ROL_LABEL, OT_SIGNIFICADO_CIERRE_JEFE, OT_TURNO_LABEL, type OtTurno } from './constants';
 import type { OrdenDetalle } from './db';
 import { OtError } from './rules';
@@ -107,15 +107,6 @@ export function nombreArchivoBatchRecord(lote: string, consecutivos: number[]): 
   return `BatchRecord_${lote.replace(/[^A-Za-z0-9_-]+/g, '') || 'lote'}_${rango}.xlsx`;
 }
 
-const BORDE: Partial<ExcelJS.Borders> = {
-  top: { style: 'thin' },
-  left: { style: 'thin' },
-  bottom: { style: 'thin' },
-  right: { style: 'thin' },
-};
-/** La plantilla imprime al 63 %: 12 pt en pantalla ≈ 7,5 pt en papel. */
-const FUENTE = { name: 'Calibri', size: 12 };
-
 /** Columnas de la cronología sobre las 10 columnas de la plantilla (A–J). */
 const COLS = { fecha: 1, hora: 2, actividadDe: 3, actividadA: 5, operarioDe: 6, operarioA: 9, observacion: 10 } as const;
 
@@ -127,98 +118,213 @@ function textoVisto(o: OrdenDetalle, v: OrdenDetalle['vistos'][number]): string 
   return `${rol}: pendiente${v.designado ? ` — ${v.designado}` : ''}${o.estado === 'ABIERTA' ? ' (bitácora abierta)' : ''}`;
 }
 
-/** Genera el .xlsx: plantilla del batch record + una sección por bitácora (en orden de apertura). */
-export async function buildBatchRecordXlsx(enc: BatchRecordEncabezado, ordenes: OrdenDetalle[], generado: Date = new Date()): Promise<Buffer> {
-  if (ordenes.length === 0) throw new OtError('No hay bitácoras para el archivo.', 400);
-  const lista = [...ordenes].sort((a, b) => a.abiertaEn.localeCompare(b.abiertaEn) || a.consecutivo - b.consecutivo);
-  const wb = new ExcelJS.Workbook();
-  await wb.xlsx.load(Buffer.from(BATCH_RECORD_PLANTILLA_BASE64, 'base64') as unknown as ArrayBuffer);
-  wb.creator = 'SynerLink';
-  wb.lastModifiedBy = 'SynerLink';
-  wb.created = generado;
-  wb.modified = generado;
-  const ws = wb.worksheets[0];
+// ---------------------------------------------------------------------------
+// Generación por XML (2026-11-24, Nicolás: «aprende del SGC para que no se dañe el formato»).
+// Como el SGC (lib/sgc/pdf/officePdf.ts, prepareXlsxForMicrosoft), la plantilla NO pasa por una
+// librería que la lea y la reescriba: se abre el .xlsx con JSZip y solo se tocan, en su XML, las
+// celdas del encabezado, las filas nuevas desde la 10, sus estilos (se AGREGAN al final de
+// styles.xml), las celdas combinadas y el área de impresión. Logo, estilos, filas 1–9, títulos
+// que se repiten en cada página y configuración de página quedan byte a byte como en Excel.
+// ---------------------------------------------------------------------------
 
-  // Encabezado del lote (filas 1–8, se repiten en cada página: print titles 1:8 de la plantilla).
-  ws.getCell('B4').value = enc.producto;
-  ws.getCell('F4').value = enc.concentracion;
-  ws.getCell('J4').value = enc.lote;
-  ws.getCell('F6').value = enc.op;
-  ws.getCell('C7').value = enc.loteMp;
-  const areas = [...new Set(lista.map((o) => (o.area ?? '').trim()).filter(Boolean))];
-  ws.getCell('C9').value = `BITACORA DE AREA ${(areas.join(' / ') || 'ENVASE Y GRAFADO').toUpperCase()}`;
+const SHEET = 'xl/worksheets/sheet1.xml';
+const STYLES = 'xl/styles.xml';
+const WORKBOOK = 'xl/workbook.xml';
 
-  let r = 10;
-  const fila = (alto?: number) => {
-    const row = ws.getRow(r);
-    if (alto) row.height = alto;
-    return row;
-  };
-  const textoAncho = (texto: string, opts: { bold?: boolean; fill?: string; size?: number } = {}) => {
-    ws.mergeCells(r, 1, r, 10);
-    const c = ws.getCell(r, 1);
-    c.value = texto;
-    c.font = { ...FUENTE, bold: Boolean(opts.bold), size: opts.size ?? FUENTE.size };
-    c.alignment = { vertical: 'middle', horizontal: 'left', wrapText: true };
-    c.border = BORDE;
-    if (opts.fill) c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: opts.fill } };
-    // Alto según el largo (≈ 125 caracteres por línea en el ancho A–J).
-    fila(Math.max(18, Math.ceil(texto.length / 125) * 16));
-    r++;
-  };
-  const celda = (col: number, hasta: number, valor: string, bold = false, fill?: string) => {
-    if (hasta > col) ws.mergeCells(r, col, r, hasta);
-    const c = ws.getCell(r, col);
-    c.value = valor;
-    c.font = { ...FUENTE, bold };
-    c.alignment = { vertical: 'top', horizontal: 'left', wrapText: true };
-    if (fill) c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: fill } };
-    for (let k = col; k <= hasta; k++) ws.getCell(r, k).border = BORDE;
-  };
+/** Escapa texto para XML y quita caracteres de control que Excel no acepta. */
+export function xmlTexto(s: string): string {
+  return s
+    .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
 
-  for (const o of lista) {
-    const turno = OT_TURNO_LABEL[o.turno as OtTurno] ?? o.turno;
-    textoAncho(
-      `Bitácora ${codigo(o.consecutivo)} · Turno ${turno} · Inicio ${fmtFechaHora(o.abiertaEn)} · Final ${o.cerradaEn ? fmtFechaHora(o.cerradaEn) : 'abierta'}${o.area ? ` · Área ${o.area}` : ''}`,
-      { bold: true, fill: 'FFD9D9D9', size: 13 }
+function colLetra(n: number): string {
+  return String.fromCharCode(64 + n); // A–K: basta una letra
+}
+
+/** Agrega un elemento al final de una colección de styles.xml (<fonts count="n">…) y devuelve su índice. */
+function agregarEstilo(styles: string, coleccion: 'fonts' | 'fills' | 'borders' | 'cellXfs', xml: string): { styles: string; indice: number } {
+  // eslint-disable-next-line security/detect-non-literal-regexp -- `coleccion` es una de cuatro constantes del código
+  const re = new RegExp(`<${coleccion} count="(\\d+)"([^>]*)>([\\s\\S]*?)</${coleccion}>`);
+  const m = re.exec(styles);
+  if (!m) throw new Error(`La plantilla no tiene <${coleccion}> en styles.xml`);
+  const indice = Number(m[1]);
+  return { styles: styles.replace(re, `<${coleccion} count="${indice + 1}"${m[2]}>${m[3]}${xml}</${coleccion}>`), indice };
+}
+
+interface EstilosBitacora {
+  seccion: number;
+  linea: number;
+  encabezadoTabla: number;
+  celda: number;
+  pie: number;
+}
+
+/** Estilos propios de la bitácora (Calibri, borde fino, ajuste de texto), agregados sin tocar los de la plantilla. */
+function agregarEstilosBitacora(styles: string): { styles: string; estilos: EstilosBitacora } {
+  let s = styles;
+  const fuente = (sz: number, bold: boolean) => {
+    const r = agregarEstilo(s, 'fonts', `<font>${bold ? '<b/>' : ''}<sz val="${sz}"/><name val="Calibri"/><family val="2"/></font>`);
+    s = r.styles;
+    return r.indice;
+  };
+  const relleno = (argb: string) => {
+    const r = agregarEstilo(s, 'fills', `<fill><patternFill patternType="solid"><fgColor rgb="${argb}"/><bgColor indexed="64"/></patternFill></fill>`);
+    s = r.styles;
+    return r.indice;
+  };
+  const fNormal = fuente(12, false);
+  const fNegrita = fuente(12, true);
+  const fSeccion = fuente(13, true);
+  const fPie = fuente(10, false);
+  const gris = relleno('FFD9D9D9');
+  const grisClaro = relleno('FFF2F2F2');
+  const b = agregarEstilo(s, 'borders', '<border><left style="thin"><color indexed="64"/></left><right style="thin"><color indexed="64"/></right><top style="thin"><color indexed="64"/></top><bottom style="thin"><color indexed="64"/></bottom><diagonal/></border>');
+  s = b.styles;
+  const xf = (font: number, fill: number, vertical: 'center' | 'top') => {
+    const r = agregarEstilo(
+      s,
+      'cellXfs',
+      `<xf numFmtId="49" fontId="${font}" fillId="${fill}" borderId="${b.indice}" xfId="0" applyNumberFormat="1" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="left" vertical="${vertical}" wrapText="1"/></xf>`
     );
+    s = r.styles;
+    return r.indice;
+  };
+  // Primero se agregan los formatos y DESPUÉS se devuelve el styles.xml que ya los tiene.
+  const estilos: EstilosBitacora = {
+    seccion: xf(fSeccion, gris, 'center'),
+    linea: xf(fNormal, 0, 'center'),
+    encabezadoTabla: xf(fNegrita, grisClaro, 'center'),
+    celda: xf(fNormal, 0, 'top'),
+    pie: xf(fPie, 0, 'center'),
+  };
+  return { styles: s, estilos };
+}
+
+/** Pone un texto en una celda que YA existe en la plantilla (conserva su estilo `s`). */
+export function ponerTextoCelda(sheet: string, ref: string, texto: string): string {
+  // La celda puede venir vacía (<c r="B4" s="113"/>) o con valor (<c r="C9" s="102" t="s"><v>0</v></c>).
+  // eslint-disable-next-line security/detect-non-literal-regexp -- `ref` es una celda fija del código (B4, F4, J4, F6, C7, C9)
+  const re = new RegExp(`<c r="${ref}"([^>]*?)(?:/>|>[\\s\\S]*?</c>)`);
+  const m = re.exec(sheet);
+  if (!m) throw new Error(`La plantilla no tiene la celda ${ref}`);
+  const estilo = / s="\d+"/.exec(m[1])?.[0] ?? '';
+  return sheet.replace(re, `<c r="${ref}"${estilo} t="inlineStr"><is><t xml:space="preserve">${xmlTexto(texto)}</t></is></c>`);
+}
+
+interface FilaNueva {
+  alto: number;
+  celdas: Array<{ desde: number; hasta: number; texto: string; estilo: number }>;
+}
+
+/** XML de una fila: cada celda del rango combinado lleva el estilo (para que el borde salga completo). */
+function filaXml(n: number, f: FilaNueva): { xml: string; merges: string[] } {
+  const celdas: string[] = [];
+  const merges: string[] = [];
+  for (const c of f.celdas) {
+    for (let k = c.desde; k <= c.hasta; k++) {
+      const ref = `${colLetra(k)}${n}`;
+      celdas.push(k === c.desde && c.texto ? `<c r="${ref}" s="${c.estilo}" t="inlineStr"><is><t xml:space="preserve">${xmlTexto(c.texto)}</t></is></c>` : `<c r="${ref}" s="${c.estilo}"/>`);
+    }
+    if (c.hasta > c.desde) merges.push(`${colLetra(c.desde)}${n}:${colLetra(c.hasta)}${n}`);
+  }
+  return { xml: `<row r="${n}" spans="1:10" ht="${f.alto}" customHeight="1">${celdas.join('')}</row>`, merges };
+}
+
+/** Filas de la bitácora (desde la 10): una sección por bitácora, en orden de apertura. */
+export function filasBitacora(ordenes: OrdenDetalle[], e: EstilosBitacora, generado: Date): FilaNueva[] {
+  const filas: FilaNueva[] = [];
+  const ancho = (texto: string, estilo: number, porLinea = 125, minimo = 18) =>
+    filas.push({ alto: Math.max(minimo, Math.ceil(texto.length / porLinea) * 16), celdas: [{ desde: 1, hasta: 10, texto, estilo }] });
+  for (const o of ordenes) {
+    const turno = OT_TURNO_LABEL[o.turno as OtTurno] ?? o.turno;
+    ancho(`Bitácora ${codigo(o.consecutivo)} · Turno ${turno} · Inicio ${fmtFechaHora(o.abiertaEn)} · Final ${o.cerradaEn ? fmtFechaHora(o.cerradaEn) : 'abierta'}${o.area ? ` · Área ${o.area}` : ''}`, e.seccion, 110, 20);
     const cerro = o.cierre ? `${o.cierre.nombre}${o.cierre.como === 'JEFE_PROD' ? ' (jefe de producción)' : ''}` : 'pendiente';
     // La cuenta que registró (casi siempre la de la tablet) va una vez aquí, no en cada fila.
     const cuentas = [...new Set(o.registros.map((x) => x.usuario))];
-    textoAncho(`Abrió: ${o.abiertaPor} · Cerró: ${cerro} · Jefe de producción: ${o.jefe?.name ?? '—'}${cuentas.length ? ` · Registró en SynerLink: ${cuentas.join(', ')}` : ''}`);
-    if (o.operadores.length) textoAncho(`Operarios: ${o.operadores.map((x) => x.nombre).join(', ')}`);
-    if (o.observacionCierre) textoAncho(`Observación de cierre: ${o.observacionCierre}`);
-
-    celda(COLS.fecha, COLS.fecha, 'Fecha', true, 'FFF2F2F2');
-    celda(COLS.hora, COLS.hora, 'Hora (servidor)', true, 'FFF2F2F2');
-    celda(COLS.actividadDe, COLS.actividadA, 'Actividad', true, 'FFF2F2F2');
-    celda(COLS.operarioDe, COLS.operarioA, 'Operario', true, 'FFF2F2F2');
-    celda(COLS.observacion, COLS.observacion, 'Observación / texto libre', true, 'FFF2F2F2');
-    fila(18);
-    r++;
-    if (o.registros.length === 0) {
-      textoAncho('Sin registros.');
-    }
+    ancho(`Abrió: ${o.abiertaPor} · Cerró: ${cerro} · Jefe de producción: ${o.jefe?.name ?? '—'}${cuentas.length ? ` · Registró en SynerLink: ${cuentas.join(', ')}` : ''}`, e.linea);
+    if (o.operadores.length) ancho(`Operarios: ${o.operadores.map((x) => x.nombre).join(', ')}`, e.linea);
+    if (o.observacionCierre) ancho(`Observación de cierre: ${o.observacionCierre}`, e.linea);
+    filas.push({
+      alto: 18,
+      celdas: [
+        { desde: COLS.fecha, hasta: COLS.fecha, texto: 'Fecha', estilo: e.encabezadoTabla },
+        { desde: COLS.hora, hasta: COLS.hora, texto: 'Hora (servidor)', estilo: e.encabezadoTabla },
+        { desde: COLS.actividadDe, hasta: COLS.actividadA, texto: 'Actividad', estilo: e.encabezadoTabla },
+        { desde: COLS.operarioDe, hasta: COLS.operarioA, texto: 'Operario', estilo: e.encabezadoTabla },
+        { desde: COLS.observacion, hasta: COLS.observacion, texto: 'Observación / texto libre', estilo: e.encabezadoTabla },
+      ],
+    });
+    if (o.registros.length === 0) ancho('Sin registros.', e.linea);
     for (const reg of o.registros) {
-      const quien = reg.operador ? reg.operador : reg.usuario;
+      const quien = reg.operador ?? reg.usuario;
       const obs = reg.observacion ? (reg.textoLibre ? `Texto libre: ${reg.observacion}` : reg.observacion) : '';
-      celda(COLS.fecha, COLS.fecha, fmtFecha(reg.registradoEn));
-      celda(COLS.hora, COLS.hora, fmtHora(reg.registradoEn));
-      celda(COLS.actividadDe, COLS.actividadA, reg.actividad);
-      celda(COLS.operarioDe, COLS.operarioA, quien);
-      celda(COLS.observacion, COLS.observacion, obs);
       // Alto según el texto más largo (observación ≈ 30 caracteres por línea; actividad ≈ 48; operario ≈ 34).
       const lineas = Math.max(1, Math.ceil(obs.length / 30), Math.ceil(reg.actividad.length / 48), Math.ceil(quien.length / 34));
-      fila(Math.max(17, lineas * 16));
-      r++;
+      filas.push({
+        alto: Math.max(17, lineas * 16),
+        celdas: [
+          { desde: COLS.fecha, hasta: COLS.fecha, texto: fmtFecha(reg.registradoEn), estilo: e.celda },
+          { desde: COLS.hora, hasta: COLS.hora, texto: fmtHora(reg.registradoEn), estilo: e.celda },
+          { desde: COLS.actividadDe, hasta: COLS.actividadA, texto: reg.actividad, estilo: e.celda },
+          { desde: COLS.operarioDe, hasta: COLS.operarioA, texto: quien, estilo: e.celda },
+          { desde: COLS.observacion, hasta: COLS.observacion, texto: obs, estilo: e.celda },
+        ],
+      });
     }
-    textoAncho(`Vistos buenos — ${o.vistos.map((v) => textoVisto(o, v)).join(' · ')}`);
-    r++; // separación entre bitácoras
+    ancho(`Vistos buenos — ${o.vistos.map((v) => textoVisto(o, v)).join(' · ')}`, e.linea);
+    filas.push({ alto: 9, celdas: [] }); // separación entre bitácoras
   }
-  textoAncho(`Generado por SynerLink (Bitácora de Proceso) el ${fmtFechaHora(generado.toISOString())}. Fechas y horas del servidor, hora de Colombia. Los registros no se editan ni se borran.`, { size: 10 });
+  ancho(`Generado por SynerLink (Bitácora de Proceso) el ${fmtFechaHora(generado.toISOString())}. Fechas y horas del servidor, hora de Colombia. Los registros no se editan ni se borran.`, e.pie, 150);
+  return filas;
+}
 
-  ws.pageSetup.printArea = `A1:K${r - 1}`;
-  ws.pageSetup.printTitlesRow = '1:8';
-  const out = await wb.xlsx.writeBuffer();
-  return Buffer.from(out as ArrayBuffer);
+/** Genera el .xlsx sobre la plantilla del batch record (edición del XML; ver arriba). */
+export async function buildBatchRecordXlsx(enc: BatchRecordEncabezado, ordenes: OrdenDetalle[], generado: Date = new Date()): Promise<Buffer> {
+  if (ordenes.length === 0) throw new OtError('No hay bitácoras para el archivo.', 400);
+  const lista = [...ordenes].sort((a, b) => a.abiertaEn.localeCompare(b.abiertaEn) || a.consecutivo - b.consecutivo);
+  const zip = await JSZip.loadAsync(Buffer.from(BATCH_RECORD_PLANTILLA_BASE64, 'base64'));
+  const leer = async (p: string) => {
+    const f = zip.file(p);
+    if (!f) throw new Error(`La plantilla no tiene ${p}`);
+    return f.async('string');
+  };
+  const { styles, estilos } = agregarEstilosBitacora(await leer(STYLES));
+  let sheet = await leer(SHEET);
+
+  // Encabezado del lote (filas 1–8: Excel las repite en cada página por los títulos de impresión de la plantilla).
+  sheet = ponerTextoCelda(sheet, 'B4', enc.producto);
+  sheet = ponerTextoCelda(sheet, 'F4', enc.concentracion);
+  sheet = ponerTextoCelda(sheet, 'J4', enc.lote);
+  sheet = ponerTextoCelda(sheet, 'F6', enc.op);
+  sheet = ponerTextoCelda(sheet, 'C7', enc.loteMp);
+  const areas = [...new Set(lista.map((o) => (o.area ?? '').trim()).filter(Boolean))];
+  sheet = ponerTextoCelda(sheet, 'C9', `BITACORA DE AREA ${(areas.join(' / ') || 'ENVASE Y GRAFADO').toUpperCase()}`);
+
+  // Filas nuevas desde la 10, con sus celdas combinadas.
+  const filas = filasBitacora(lista, estilos, generado);
+  const xmlFilas: string[] = [];
+  const merges: string[] = [];
+  filas.forEach((f, i) => {
+    const r = filaXml(10 + i, f);
+    xmlFilas.push(r.xml);
+    merges.push(...r.merges);
+  });
+  const ultima = 9 + filas.length;
+  sheet = sheet.replace('</sheetData>', `${xmlFilas.join('')}</sheetData>`);
+  sheet = sheet.replace(/<mergeCells count="(\d+)">([\s\S]*?)<\/mergeCells>/, (_m, n: string, body: string) => {
+    return `<mergeCells count="${Number(n) + merges.length}">${body}${merges.map((ref) => `<mergeCell ref="${ref}"/>`).join('')}</mergeCells>`;
+  });
+  sheet = sheet.replace(/<dimension ref="[^"]*"\/>/, `<dimension ref="A1:K${ultima}"/>`);
+
+  // Área de impresión hasta la última fila; los títulos que se repiten (1:8) quedan como en la plantilla.
+  const workbook = (await leer(WORKBOOK)).replace(/(<definedName name="_xlnm\.Print_Area"[^>]*>[^<]*?\$A\$1:\$K\$)\d+(<\/definedName>)/, `$1${ultima}$2`);
+
+  zip.file(SHEET, sheet);
+  zip.file(STYLES, styles);
+  zip.file(WORKBOOK, workbook);
+  return zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE', compressionOptions: { level: 6 } });
 }

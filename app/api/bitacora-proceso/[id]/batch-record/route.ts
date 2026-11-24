@@ -1,16 +1,9 @@
 import { prisma } from '../../../../../lib/prisma';
 import { getOrdenDetalle, listOrdenesDelLote } from '../../../../../lib/bitacora-proceso/db';
 import { leerOpBatchRecord } from '../../../../../lib/bitacora-proceso/sap';
-import {
-  assertMismoLote,
-  buildBatchRecordXlsx,
-  nombreArchivoBatchRecord,
-  parseBatchRecordInput,
-  sugerirConcentracion,
-  sugerirLoteMp,
-} from '../../../../../lib/bitacora-proceso/batchRecord';
-import { OtError } from '../../../../../lib/bitacora-proceso/rules';
-import { errorResponse, getOtRequestContext, jsonNoStore, NO_STORE, parseCompanyParam, parseId, readJson, requireCompany } from '../../_lib/context';
+import { sugerirConcentracion, sugerirLoteMp } from '../../../../../lib/bitacora-proceso/batchRecord';
+import { armarBatchRecord } from '../../_lib/batchRecord';
+import { errorResponse, getOtRequestContext, jsonNoStore, NO_STORE, parseCompanyParam, parseId, requireCompany } from '../../_lib/context';
 
 export const dynamic = 'force-dynamic';
 
@@ -46,31 +39,17 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   }
 }
 
-/** POST /api/bitacora-proceso/[id]/batch-record?company=1 — descarga el .xlsx con el encabezado confirmado. */
+/** POST /api/bitacora-proceso/[id]/batch-record?company=1 — descarga el .xlsx (después de la vista previa). */
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
-    const ctx = await getOtRequestContext(request);
-    if (ctx instanceof Response) return ctx;
-    const id = parseId((await params).id);
-    if (!id) return jsonNoStore({ error: 'Bitácora no válida' }, 400);
-    const access = requireCompany(ctx, parseCompanyParam(request.url));
-    if (access instanceof Response) return access;
-    const input = parseBatchRecordInput(await readJson(request), id);
-    const ordenes = [];
-    for (const idOrden of input.ids) {
-      const o = await getOrdenDetalle(prisma, idOrden, access, ctx.actor.idUser);
-      if (!o) throw new OtError(`La bitácora ${idOrden} no existe en esta empresa.`, 404);
-      ordenes.push(o);
-    }
-    assertMismoLote(ordenes);
-    const xlsx = await buildBatchRecordXlsx(input, ordenes);
-    const nombre = nombreArchivoBatchRecord(ordenes[0].lote, ordenes.map((o) => o.consecutivo));
-    return new Response(new Uint8Array(xlsx), {
+    const r = await armarBatchRecord(request, params);
+    if (r instanceof Response) return r;
+    return new Response(new Uint8Array(r.xlsx), {
       status: 200,
       headers: {
         ...NO_STORE,
         'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-        'Content-Disposition': `attachment; filename="${nombre}"`,
+        'Content-Disposition': `attachment; filename="${r.nombre}"`,
       },
     });
   } catch (error) {
