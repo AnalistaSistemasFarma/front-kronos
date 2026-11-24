@@ -75,7 +75,7 @@ function mailboxPath(mailbox: string): string {
 }
 
 const EVENT_FIELDS =
-  'id,subject,start,end,isAllDay,isCancelled,isOnlineMeeting,isOrganizer,sensitivity,showAs,type,seriesMasterId,webLink,onlineMeeting,organizer,attendees,responseStatus';
+  'id,iCalUId,subject,start,end,isAllDay,isCancelled,isOnlineMeeting,isOrganizer,sensitivity,showAs,type,seriesMasterId,webLink,onlineMeeting,organizer,attendees,responseStatus';
 
 /** calendarView of the mailbox between two instants (UTC), with paging. */
 export async function calendarView(

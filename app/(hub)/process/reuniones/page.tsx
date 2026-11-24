@@ -30,10 +30,16 @@ import {
   IconArrowUpRight,
   IconClockHour4,
   IconCrown,
+  IconCircleCheck,
   IconFileText,
+  IconFolder,
   IconRefresh,
   IconSearch,
 } from '@tabler/icons-react';
+import toast from 'react-hot-toast';
+import AssignMeetingModal from '../../../../components/meetings/AssignMeetingModal';
+import { SUGGESTION_REASON_LABELS } from '../../../../lib/meetings/projects/rules';
+import type { MeetingProjectItemDto, MeetingsProjectsDto } from '../../../../lib/meetings/projects/types';
 import { deltaPct, formatDay, formatMinutes, formatTime } from '../../../../lib/meetings/format';
 import type { Meeting, PeriodSummary, TranscriptLine, WeekBucket, ActualsSummary } from '../../../../lib/meetings/metrics';
 import { ON_TIME_TOLERANCE_MIN, OVERRUN_TOLERANCE_MIN } from '../../../../lib/meetings/metrics';
@@ -276,6 +282,73 @@ function TranscriptModal({ id, onClose }: { id: string | null; onClose: () => vo
   );
 }
 
+/** «Proyecto» column (2026-11-24): assigned project, simple suggestion (no AI) or «Asignar». */
+function ProjectCell({
+  meeting,
+  item,
+  onAssign,
+}: {
+  meeting: Meeting;
+  item: MeetingProjectItemDto | undefined;
+  onAssign: (m: Meeting, defaultProjectId: number | null, origin: 'manual' | 'sugerencia') => void;
+}) {
+  if (meeting.private) {
+    return (
+      <Text size='xs' c='dimmed'>
+        Privada
+      </Text>
+    );
+  }
+  if (!item) return null;
+  if (item.link) {
+    return item.link.idProject ? (
+      <Anchor component={Link} href={`/process/proyectos/${item.link.idProject}?seccion=reuniones`} size='sm'>
+        <Group gap={4} wrap='nowrap'>
+          <IconFolder size={14} />
+          <Text size='sm' lineClamp={1}>
+            {item.link.projectName}
+          </Text>
+        </Group>
+        {item.link.origin === 'serie' && (
+          <Text size='xs' c='dimmed'>
+            por la serie
+          </Text>
+        )}
+      </Anchor>
+    ) : (
+      <Text size='xs' c='dimmed'>
+        En otro proyecto
+      </Text>
+    );
+  }
+  if (!item.canAssign) return null;
+  if (item.suggestion) {
+    const s = item.suggestion;
+    return (
+      <Stack gap={2}>
+        <Tooltip label={`Sugerencia: ${SUGGESTION_REASON_LABELS[s.reason]}`} withArrow multiline w={240}>
+          <Text size='xs' c='dimmed' lineClamp={1}>
+            ¿{s.projectName}?
+          </Text>
+        </Tooltip>
+        <Group gap={4} wrap='nowrap'>
+          <Button size='compact-xs' variant='light' onClick={() => onAssign(meeting, s.idProject, 'sugerencia')} data-testid='reunion-sugerencia-si'>
+            Sí
+          </Button>
+          <Button size='compact-xs' variant='subtle' color='gray' onClick={() => onAssign(meeting, null, 'manual')}>
+            Otro
+          </Button>
+        </Group>
+      </Stack>
+    );
+  }
+  return (
+    <Button size='compact-xs' variant='subtle' leftSection={<IconFolder size={14} />} onClick={() => onAssign(meeting, null, 'manual')} data-testid='reunion-asignar'>
+      Asignar
+    </Button>
+  );
+}
+
 function MeetingsPage() {
   const { data: session } = useSession();
   const router = useRouter();
@@ -288,6 +361,19 @@ function MeetingsPage() {
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const transcriptId = params.get('reunion');
+  // Meetings per project (2026-11-24).
+  const [links, setLinks] = useState<MeetingsProjectsDto | null>(null);
+  const [assign, setAssign] = useState<{ meeting: Meeting; defaultProjectId: number | null; origin: 'manual' | 'sugerencia' } | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+
+  const loadLinks = useCallback(async (range: string) => {
+    try {
+      const res = await fetch(`/api/meetings/projects?days=${range}`, { cache: 'no-store' });
+      if (res.ok) setLinks((await res.json()) as MeetingsProjectsDto);
+    } catch {
+      /* the column simply stays empty */
+    }
+  }, []);
 
   const load = useCallback(async (range: string) => {
     setLoading(true);
@@ -299,6 +385,7 @@ function MeetingsPage() {
       if (!res.ok) throw new Error(body.error ?? 'No se pudieron cargar sus reuniones.');
       setOverview(body);
       if (!body.enabled) return;
+      void loadLinks(range);
       setAnalyzing(true);
       const a = await fetch(`/api/meetings/analysis?days=${range}`, { cache: 'no-store' });
       if (a.ok) setAnalysis((await a.json()) as Analysis);
@@ -308,7 +395,7 @@ function MeetingsPage() {
       setLoading(false);
       setAnalyzing(false);
     }
-  }, []);
+  }, [loadLinks]);
 
   useEffect(() => {
     void load(days);
@@ -358,6 +445,12 @@ function MeetingsPage() {
       {error && (
         <Alert color='red' icon={<IconAlertTriangle size={18} />} mb='md'>
           {error}
+        </Alert>
+      )}
+
+      {notice && (
+        <Alert color='green' icon={<IconCircleCheck size={18} />} mb='md' withCloseButton onClose={() => setNotice(null)} role='status' data-testid='reuniones-aviso'>
+          {notice}
         </Alert>
       )}
 
@@ -444,7 +537,7 @@ function MeetingsPage() {
                 No hay reuniones en este periodo.
               </Text>
             ) : (
-              <Table.ScrollContainer minWidth={760}>
+              <Table.ScrollContainer minWidth={900}>
                 <Table highlightOnHover verticalSpacing='xs'>
                   <Table.Thead>
                     <Table.Tr>
@@ -454,6 +547,7 @@ function MeetingsPage() {
                       <Table.Th>Programada</Table.Th>
                       <Table.Th>Real</Table.Th>
                       <Table.Th>Inicio</Table.Th>
+                      {links?.available && <Table.Th>Proyecto</Table.Th>}
                       <Table.Th />
                     </Table.Tr>
                   </Table.Thead>
@@ -503,6 +597,15 @@ function MeetingsPage() {
                               </Text>
                             )}
                           </Table.Td>
+                          {links?.available && (
+                            <Table.Td style={{ maxWidth: 200 }}>
+                              <ProjectCell
+                                meeting={m}
+                                item={links.items[m.id]}
+                                onAssign={(meeting, defaultProjectId, origin) => setAssign({ meeting, defaultProjectId, origin })}
+                              />
+                            </Table.Td>
+                          )}
                           <Table.Td>
                             {m.online && (
                               <Button
@@ -528,6 +631,25 @@ function MeetingsPage() {
       )}
 
       <TranscriptModal id={transcriptId} onClose={closeTranscript} />
+      <AssignMeetingModal
+        opened={assign !== null}
+        onClose={() => setAssign(null)}
+        meeting={assign?.meeting ?? null}
+        projects={links?.projects ?? []}
+        defaultProjectId={assign?.defaultProjectId ?? null}
+        origin={assign?.origin ?? 'manual'}
+        onDone={(r) => {
+          const name = links?.projects.find((p) => p.idProject === r.idProject)?.name ?? 'el proyecto';
+          const text = r.seriesRule
+            ? `Reunión asignada a «${name}» con toda su serie: las próximas quedarán asignadas solas.`
+            : `Reunión asignada a «${name}». El equipo del proyecto ya la ve en su sección «Reuniones».`;
+          setNotice(text);
+          toast.success(text);
+          setAssign(null);
+          window.scrollTo({ top: 0, behavior: 'smooth' });
+          void loadLinks(days);
+        }}
+      />
     </div>
   );
 }

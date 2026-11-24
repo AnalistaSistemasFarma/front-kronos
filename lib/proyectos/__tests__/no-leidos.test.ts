@@ -27,6 +27,7 @@ const m = vi.hoisted(() => ({
   sessionUser: vi.fn(),
   guard: vi.fn(),
   estadoFindMany: vi.fn(),
+  muteFindMany: vi.fn(),
 }));
 
 vi.mock('../../prisma', () => ({
@@ -37,6 +38,7 @@ vi.mock('../../prisma', () => ({
     subprocessUserCompany: { findFirst: m.supFindFirst },
     chatParticipant: { findMany: m.participantes },
     chatAgentStatus: { findMany: m.estadoFindMany },
+    chatProjectMute: { findMany: m.muteFindMany },
   },
 }));
 vi.mock('../../chat/projects', () => ({ projectModuleCompanies: m.empresas }));
@@ -82,6 +84,7 @@ beforeEach(() => {
   m.visiblesPersonas.mockResolvedValue([]);
   m.participantes.mockResolvedValue([]);
   m.estadoFindMany.mockResolvedValue([]);
+  m.muteFindMany.mockResolvedValue([]);
 });
 
 describe('la puerta del contador', () => {
@@ -114,6 +117,23 @@ describe('la puerta del contador', () => {
     const where = m.convFindMany.mock.calls[0][0].where;
     expect(where).toMatchObject(whereConversacionesVisibles('u-ana', [3]));
     expect(m.empresas).toHaveBeenCalledWith('u-ana');
+    // Nothing muted: the query does not filter by project.
+    expect(where.id_project).toBeUndefined();
+  });
+
+  it('muted projects (2026-11-23) do not count in the header icon', async () => {
+    m.muteFindMany.mockResolvedValue([{ id_project: 4 }, { id_project: 9 }]);
+    await resumenNoLeidos(ANA, { detalle: false });
+    expect(m.muteFindMany).toHaveBeenCalledWith({ where: { id_user: 'u-ana' }, select: { id_project: true } });
+    expect(m.convFindMany.mock.calls[0][0].where.id_project).toEqual({ notIn: [4, 9] });
+  });
+
+  it('if the mutes cannot be read, it counts everything (fail open)', async () => {
+    m.muteFindMany.mockRejectedValue(new Error('Invalid object name chat_project_mute'));
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    await resumenNoLeidos(ANA, { detalle: false });
+    expect(m.convFindMany.mock.calls[0][0].where.id_project).toBeUndefined();
+    err.mockRestore();
   });
 });
 
@@ -297,6 +317,24 @@ describe('pulso del chat con proyectos', () => {
     expect(JSON.stringify(body)).not.toMatch(/body|fragmento/);
     // Sin hilos entre personas no se consulta su regla.
     expect(m.visiblesPersonas).not.toHaveBeenCalled();
+  });
+
+  it('a muted project (2026-11-23) still sends the event, flagged muted (no sound)', async () => {
+    m.sessionUser.mockResolvedValue(ANA);
+    m.supFindFirst.mockResolvedValue(null);
+    m.msgFindFirst.mockResolvedValue({ id: 120 });
+    m.muteFindMany.mockResolvedValue([{ id_project: 4 }]);
+    const fila = (id: number, idConversation: number, idProject: number) => ({
+      id, id_conversation: idConversation, event_type: null, created_at: new Date('2026-11-23T15:00:00Z'), role: 'agent',
+      conversation: { kind: 'project', id_project: idProject }, userAuthor: null, agentAuthor: { display_name: 'Play' },
+    });
+    m.msgFindMany.mockResolvedValue([fila(115, 28, 4), fila(116, 29, 5)]);
+    const body = await (await pulso(pulseReq(100))).json();
+    expect(body.events).toMatchObject([
+      { type: 'project', idConversation: 28, muted: true },
+      { type: 'project', idConversation: 29, muted: false },
+    ]);
+    expect(m.msgFindMany.mock.calls[0][0].select.conversation).toEqual({ select: { kind: true, id_project: true } });
   });
 
   it('con Chat y sin Proyectos: la rama de proyectos no existe', async () => {
