@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
   aggregateHelpdeskDashboard,
+  buildCaseDetail,
   buildMonthSeries,
+  matchesBucket,
+  parseCaseBucket,
+  resolutionDays,
   cleanLabel,
   computeKpis,
   filterCases,
@@ -110,6 +114,63 @@ describe('buildMonthSeries', () => {
       { key: '2026-02', label: 'feb 2026', total: 0 },
     ]);
     expect(buildMonthSeries([], {}, NOW)).toEqual([]);
+  });
+});
+
+describe('KPI drill-down', () => {
+  it('parses only the known buckets', () => {
+    expect(parseCaseBucket('pending')).toBe('pending');
+    expect(parseCaseBucket('measured')).toBe('measured');
+    expect(parseCaseBucket('x')).toBeNull();
+    expect(parseCaseBucket(null)).toBeNull();
+  });
+
+  it('each bucket matches the same cases its KPI counts', () => {
+    const kpis = computeKpis(rows);
+    const count = (b: Parameters<typeof matchesBucket>[1]) => rows.filter((r) => matchesBucket(r, b)).length;
+    expect(count('all')).toBe(kpis.total);
+    expect(count('resolved')).toBe(kpis.resolved);
+    expect(count('pending')).toBe(kpis.pending);
+    expect(count('measured')).toBe(kpis.resolvedWithEndDate);
+  });
+
+  it('resolution days only for resolved cases with a valid end_date', () => {
+    expect(resolutionDays(rows[0])).toBe(2);
+    expect(resolutionDays(rows[1])).toBeNull();
+    expect(resolutionDays(row({ statusId: 1, endDate: '2026-02-01T00:00:00.000Z' }))).toBeNull();
+  });
+
+  it('returns the filtered cases newest first, cleaned and cut at the limit', () => {
+    const all = buildCaseDetail(rows, {}, 'all', 3);
+    expect(all.total).toBe(5);
+    expect(all.truncated).toBe(true);
+    expect(all.cases.map((c) => c.id)).toEqual([5, 4, 3]);
+
+    const pending = buildCaseDetail(rows, { year: 2026 }, 'pending');
+    expect(pending.truncated).toBe(false);
+    expect(pending.cases).toEqual([
+      {
+        id: 4,
+        subject: 'Sin asunto',
+        status: 'Abierto',
+        caseType: 'Incidente',
+        company: 'FARMALOGICA S.A.',
+        department: 'GERENCIA',
+        technician: 'Sin técnico asignado',
+        category: 'Sin categoría',
+        subcategory: 'Portátil',
+        activity: 'Revisión',
+        createdAt: '2026-03-01',
+        endDate: null,
+        resolutionDays: null,
+      },
+    ]);
+
+    const measured = buildCaseDetail(rows, {}, 'measured');
+    expect(measured.cases.map((c) => [c.id, c.resolutionDays])).toEqual([
+      [5, 1],
+      [1, 2],
+    ]);
   });
 });
 

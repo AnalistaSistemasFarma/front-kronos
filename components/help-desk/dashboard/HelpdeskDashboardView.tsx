@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useSession } from 'next-auth/react';
 import {
   Alert,
@@ -13,6 +13,8 @@ import {
   Skeleton,
   Table,
   Text,
+  Tooltip,
+  UnstyledButton,
 } from '@mantine/core';
 import {
   IconAlertCircle,
@@ -32,9 +34,11 @@ import {
   buildVerticalBarChart,
 } from '../../../lib/charts/builders';
 import type {
+  CaseBucket,
   HelpdeskDashboardData,
   NamedCount,
 } from '../../../lib/help-desk/dashboard/aggregate';
+import HelpdeskCasesModal from './HelpdeskCasesModal';
 import { ActividadesSection, ChartCard, KpiStatCard } from '../../dashboard/actividades/ActividadesUi';
 import { ChartContainer } from '../../dashboard/ChartContainer';
 import DashboardPageShell from '../../dashboard/DashboardPageShell';
@@ -124,6 +128,36 @@ function CountTable({
   );
 }
 
+/** Makes a KPI card clickable: opens the detail of its cases. */
+function ClickableKpi({
+  onOpen,
+  disabled,
+  children,
+}: {
+  onOpen: () => void;
+  disabled: boolean;
+  children: ReactNode;
+}) {
+  return (
+    <Tooltip label='Ver el detalle de los casos' disabled={disabled} withArrow>
+      <UnstyledButton
+        onClick={onOpen}
+        disabled={disabled}
+        aria-label='Ver el detalle de los casos'
+        style={{
+          display: 'block',
+          width: '100%',
+          height: '100%',
+          borderRadius: 'var(--mantine-radius-md)',
+          cursor: disabled ? 'default' : 'pointer',
+        }}
+      >
+        {children}
+      </UnstyledButton>
+    </Tooltip>
+  );
+}
+
 export default function HelpdeskDashboardView() {
   const { status: sessionStatus } = useSession();
   const projectColors = useProjectColors();
@@ -137,18 +171,23 @@ export default function HelpdeskDashboardView() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [forbidden, setForbidden] = useState(false);
+  const [detailBucket, setDetailBucket] = useState<CaseBucket | null>(null);
+
+  const filterQuery = useMemo(() => {
+    const params = new URLSearchParams();
+    if (company !== ALL) params.set('company', company);
+    if (year !== ALL) {
+      params.set('year', year);
+      if (month !== ALL) params.set('month', month);
+    }
+    return params.toString();
+  }, [company, year, month]);
 
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const params = new URLSearchParams();
-      if (company !== ALL) params.set('company', company);
-      if (year !== ALL) {
-        params.set('year', year);
-        if (month !== ALL) params.set('month', month);
-      }
-      const res = await fetch(`/api/help-desk/dashboard?${params.toString()}`, { cache: 'no-store' });
+      const res = await fetch(`/api/help-desk/dashboard?${filterQuery}`, { cache: 'no-store' });
       const json = await res.json().catch(() => ({}));
       if (res.status === 403) {
         setForbidden(true);
@@ -161,7 +200,7 @@ export default function HelpdeskDashboardView() {
     } finally {
       setLoading(false);
     }
-  }, [company, year, month]);
+  }, [filterQuery]);
 
   useEffect(() => {
     if (sessionStatus === 'authenticated') void load();
@@ -266,6 +305,12 @@ export default function HelpdeskDashboardView() {
         ? `Año ${year}`
         : `${MONTH_OPTIONS[Number(month) - 1].label} de ${year}`;
 
+  const companyLabel =
+    company === ALL
+      ? 'Todas las empresas'
+      : (data?.filterOptions.companies.find((c) => String(c.id) === company)?.name ?? 'Empresa seleccionada');
+  const kpiDisabled = loading || !kpis;
+
   return (
     <DashboardPageShell
       title='Dashboard Helpdesk'
@@ -334,8 +379,13 @@ export default function HelpdeskDashboardView() {
         </SimpleGrid>
       </Paper>
 
-      <ActividadesSection priority={1} title='Resumen' description='Casos del periodo y empresa seleccionados.'>
+      <ActividadesSection
+        priority={1}
+        title='Resumen'
+        description='Casos del periodo y empresa seleccionados. Haga clic en un indicador para ver el detalle de sus casos.'
+      >
         <SimpleGrid cols={{ base: 1, xs: 2, lg: 4 }} spacing={{ base: 'sm', sm: 'md' }}>
+          <ClickableKpi onOpen={() => setDetailBucket('all')} disabled={kpiDisabled}>
           <KpiStatCard
             label='Casos en el periodo'
             value={kpis ? formatNumber(kpis.total) : '—'}
@@ -344,6 +394,8 @@ export default function HelpdeskDashboardView() {
             icon={IconTicket}
             loading={loading && !data}
           />
+          </ClickableKpi>
+          <ClickableKpi onOpen={() => setDetailBucket('resolved')} disabled={kpiDisabled}>
           <KpiStatCard
             label='Resueltos'
             value={kpis ? formatNumber(kpis.resolved) : '—'}
@@ -353,6 +405,8 @@ export default function HelpdeskDashboardView() {
             icon={IconCheck}
             loading={loading && !data}
           />
+          </ClickableKpi>
+          <ClickableKpi onOpen={() => setDetailBucket('pending')} disabled={kpiDisabled}>
           <KpiStatCard
             label='Pendientes'
             value={kpis ? formatNumber(kpis.pending) : '—'}
@@ -362,6 +416,8 @@ export default function HelpdeskDashboardView() {
             icon={IconHourglass}
             loading={loading && !data}
           />
+          </ClickableKpi>
+          <ClickableKpi onOpen={() => setDetailBucket('measured')} disabled={kpiDisabled}>
           <KpiStatCard
             label='Tiempo medio de resolución'
             value={kpis ? formatDays(kpis.avgResolutionDays) : '—'}
@@ -374,8 +430,16 @@ export default function HelpdeskDashboardView() {
             icon={IconClockHour4}
             loading={loading && !data}
           />
+          </ClickableKpi>
         </SimpleGrid>
       </ActividadesSection>
+
+      <HelpdeskCasesModal
+        bucket={detailBucket}
+        query={filterQuery}
+        periodLabel={`${companyLabel} · ${periodLabel}.`}
+        onClose={() => setDetailBucket(null)}
+      />
 
       <ActividadesSection priority={5} title='Evolución y demanda' description='Casos por mes y por departamento.'>
         <SimpleGrid cols={{ base: 1, lg: 3 }} spacing='lg'>
