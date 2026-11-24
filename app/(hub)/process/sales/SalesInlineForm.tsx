@@ -2,7 +2,7 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import type ExcelJS from 'exceljs';
-import { ActionIcon, Alert, Button, Group, Loader, NumberInput, ScrollArea, SegmentedControl, Select, Stack, Table, Text, TextInput, Textarea } from '@mantine/core';
+import { ActionIcon, Alert, Button, Group, Loader, NumberInput, Pagination, ScrollArea, SegmentedControl, Select, Stack, Table, Text, TextInput, Textarea } from '@mantine/core';
 import { IconDownload, IconFileSpreadsheet, IconPlus, IconSend, IconTrash } from '@tabler/icons-react';
 import { LINE_HEADERS, MAX_IMPORT_LINES, rowsToLines } from '../../../../lib/sales/linesImport';
 import toast from 'react-hot-toast';
@@ -77,6 +77,8 @@ export default function SalesInlineForm({ companyId, onDone, editDocEntry, initi
   const [pickRemark, setPickRemark] = useState('');
   const [opts, setOpts] = useState<CompanyOptions>({ pedidoDirecto: false, descripcionEditable: false, exigeOc: true });
   const [importing, setImporting] = useState(false);
+  /** Página de líneas visible: con cientos de líneas (OC grandes) dibujar todas cuelga el navegador. */
+  const [linePage, setLinePage] = useState(1);
   /** Bodega elegida para asignar masivamente. */
   const [bulkWh, setBulkWh] = useState('');
   const [companyName, setCompanyName] = useState('');
@@ -254,6 +256,10 @@ export default function SalesInlineForm({ companyId, onDone, editDocEntry, initi
 
   const lineTotal = (l: Line) => Number(l.Quantity || 0) * Number(l.UnitPrice || 0);
   const total = lines.reduce((a, l) => a + lineTotal(l), 0);
+  const LINES_PER_PAGE = 50;
+  const linePages = Math.max(1, Math.ceil(lines.length / LINES_PER_PAGE));
+  const curPage = Math.min(linePage, linePages);
+  const pageStart = (curPage - 1) * LINES_PER_PAGE;
   const money = (v: number) => `$ ${Math.round(v * 100) / 100 === Math.round(v) ? Math.round(v).toLocaleString('es-CO') : v.toLocaleString('es-CO', { maximumFractionDigits: 2 })}`;
   /** Líneas con artículo y sin bodega (llegan así del PDF o del Excel cuando el artículo no tiene bodega por defecto). */
   const sinBodega = lines.filter((l) => !empty(l.ItemCode) && empty(l.WarehouseCode)).length;
@@ -352,6 +358,7 @@ export default function SalesInlineForm({ companyId, onDone, editDocEntry, initi
     }
     // Se suman a las filas que ya tenga la oferta (las vacías se descartan).
     setLines((prev) => [...prev.filter((l) => !empty(l.ItemCode)), ...(r.lines as Line[])]);
+    setLinePage(1);
     if (r.numeroOrdenCompra) setNumAtCard(r.numeroOrdenCompra);
     if (r.fechaEntrega && r.fechaEntrega >= today()) setDueDate(r.fechaEntrega);
     const revisar = (r.lines as Line[]).filter((l) => String(l.aiNote ?? '').startsWith('Revisar')).length;
@@ -495,7 +502,9 @@ export default function SalesInlineForm({ companyId, onDone, editDocEntry, initi
               </Table.Tr>
             </Table.Thead>
             <Table.Tbody>
-              {lines.map((l, i) => (
+              {lines.slice(pageStart, pageStart + LINES_PER_PAGE).map((l, j) => {
+                const i = pageStart + j;
+                return (
                 <Table.Tr key={i}>
                   <Table.Td>
                     <Text size="xs" fw={600}>{i + 1}</Text>
@@ -569,13 +578,20 @@ export default function SalesInlineForm({ companyId, onDone, editDocEntry, initi
                     </ActionIcon>
                   </Table.Td>
                 </Table.Tr>
-              ))}
+                );
+              })}
             </Table.Tbody>
           </Table>
         </ScrollArea>
+        {linePages > 1 && (
+          <Group justify="center" mt="xs" gap="xs">
+            <Pagination size="sm" total={linePages} value={curPage} onChange={setLinePage} />
+            <Text size="xs" c="dimmed">Líneas {pageStart + 1}–{Math.min(pageStart + LINES_PER_PAGE, lines.length)} de {lines.length}</Text>
+          </Group>
+        )}
         <Group justify="space-between" mt="sm">
           <Group gap="xs">
-            <Button variant="light" leftSection={<IconPlus size={16} />} onClick={() => setLines((p) => [...p, {}])}>
+            <Button variant="light" leftSection={<IconPlus size={16} />} onClick={() => { setLines((p) => [...p, {}]); setLinePage(Math.ceil((lines.length + 1) / LINES_PER_PAGE)); }}>
               Agregar artículo
             </Button>
             <Button variant="subtle" leftSection={<IconFileSpreadsheet size={16} />} loading={importing} onClick={() => (cardCode ? fileRef.current?.click() : toast.error('Elija primero el cliente.'))}>

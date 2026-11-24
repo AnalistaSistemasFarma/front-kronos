@@ -191,8 +191,23 @@ export function similarity(desc: string, name: string): number {
  * Elige el artículo de SAP más parecido. Se toma solo si es claro: puntaje ≥ 0,5 y sin empate con el segundo
  * (si hay empate, se deja el mejor pero marcado «a revisar»). PURA.
  */
-export function bestCandidate(desc: string, candidates: { ItemCode: string; ItemName: string }[]): { ItemCode: string; ItemName: string; score: number; seguro: boolean } | null {
-  const scored = candidates.map((c) => ({ ...c, score: similarity(desc, c.ItemName) })).sort((x, y) => y.score - x.score);
+/** Qué tanto del NOMBRE del artículo de SAP aparece en la descripción (0 a 1). Para SERVICIOS: la OC trae una
+ *  descripción larga y libre («SERVICIO DE ANALISIS PRODUCTO TERMINADO … MEROPENEM») y el artículo de SAP es
+ *  genérico («SERVICIO DE ANALISIS GRAVADO»). PURA. */
+export function coverage(desc: string, name: string): number {
+  const a = new Set(tokens(desc));
+  const b = tokens(name).filter((t) => t.length >= 4);
+  if (!b.length) return 0;
+  return b.filter((t) => a.has(t)).length / b.length;
+}
+
+export function bestCandidate(
+  desc: string,
+  candidates: { ItemCode: string; ItemName: string }[],
+  opts: { servicios?: boolean } = {}
+): { ItemCode: string; ItemName: string; score: number; seguro: boolean } | null {
+  const score = (name: string) => (opts.servicios ? Math.max(similarity(desc, name), coverage(desc, name)) : similarity(desc, name));
+  const scored = candidates.map((c) => ({ ...c, score: score(c.ItemName) })).sort((x, y) => y.score - x.score);
   const top = scored[0];
   if (!top || top.score < 0.34) return null;
   const second = scored[1]?.score ?? 0;
