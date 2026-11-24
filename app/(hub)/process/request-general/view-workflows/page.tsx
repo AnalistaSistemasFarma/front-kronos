@@ -72,6 +72,7 @@ import WorkflowValidatorsModal from '../../../../../components/request-general/W
 import BotonMejoraContinua from '../../../../../components/request-general/BotonMejoraContinua';
 import { ProcessSlaCard } from '../../../../../components/request-general/sla/ProcessSlaCard';
 import { ProcessAccessCard } from '../../../../../components/request-general/flow-access/ProcessAccessCard';
+import { OptionRulesCard } from '../../../../../components/request-general/flow-access/OptionRulesCard';
 import { FlowConnector } from '../../../../../components/ui/flow/FlowConnector';
 import { SapTaskActionPicker, SapTaskCardInfo } from '../../../../../components/workflow-sap/SapTaskObject';
 import {
@@ -1811,6 +1812,8 @@ if (session?.user?.id) return session.user.id as unknown as number;
                   <ProcessSlaCard processId={workflow.id} />
 
                   <ProcessAccessCard processId={workflow.id} />
+
+                  <OptionRulesCard processId={workflow.id} />
 
                   {/* Formulario externo: expone este flujo en una página pública SIN login. */}
                   <Card withBorder radius='md' p='md'>
