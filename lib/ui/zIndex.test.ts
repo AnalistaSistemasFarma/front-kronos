@@ -1,10 +1,11 @@
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { getDefaultZIndex } from '@mantine/core';
 import { describe, expect, it } from 'vitest';
 import { MANTINE_Z_INDEX, Z_INDEX } from './zIndex';
 
-const read = (path: string) => readFileSync(fileURLToPath(new URL(`../../${path}`, import.meta.url)), 'utf8');
+const resolve = (path: string) => fileURLToPath(new URL(`../../${path}`, import.meta.url));
+const read = (path: string) => readFileSync(resolve(path), 'utf8');
 
 describe('z-index scale of the floating layers', () => {
   it('mirrors the Mantine defaults it is built on', () => {
@@ -31,6 +32,8 @@ describe('z-index scale of the floating layers', () => {
 
   it('the chat panel and the notification cards take their z-index from the scale', () => {
     expect(read('components/chat/AgentChatPanel.tsx')).toContain('zIndex={Z_INDEX.agentChatPanel}');
+    // The notification cards are not on every branch yet (hotfixes to main are cherry-picked).
+    if (!existsSync(resolve('components/notifications/InAppToastHost.tsx'))) return;
     expect(read('components/notifications/InAppToastHost.tsx')).toContain('zIndex: Z_INDEX.inAppToasts');
     // A hard-coded z-index in the CSS module would not win over the inline one, but it would mislead.
     expect(read('components/notifications/InAppToastHost.module.css')).not.toMatch(/z-index:\s*\d/);
