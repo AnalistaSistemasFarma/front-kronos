@@ -143,6 +143,15 @@ export function soltarHiloAbierto(idConversation: number): void {
   if (hiloAbierto === idConversation) hiloAbierto = null;
 }
 
+/**
+ * Is that thread open and on screen (tab visible), focused or not? The in-app notification card
+ * skips it: the message is already in front of the person.
+ */
+export function threadOnScreen(idConversation: number): boolean {
+  if (typeof document === 'undefined') return false;
+  return hiloAbierto === idConversation && document.visibilityState === 'visible';
+}
+
 /** ¿La persona tiene ESE hilo delante, con la pestaña visible y con foco? */
 function loEstaViendo(idConversation: number): boolean {
   if (typeof document === 'undefined') return false;
@@ -179,6 +188,15 @@ export function mensajeFresco(createdAt: string | null | undefined, ahora = Date
 export function avisarMensajeEntrante(idConversation: number): void {
   if (typeof window === 'undefined') return;
   if (loEstaViendo(idConversation)) return;
+  playMessageTone();
+}
+
+/**
+ * Plays the tone chosen on this device, with the same debounce as chat messages. Also used by the
+ * in-app notification cards of the bell (requests, signatures, alerts) so there is one sound setting.
+ */
+export function playMessageTone(): void {
+  if (typeof window === 'undefined') return;
   const tono = tonoMensaje();
   if (tono === 'silencio') return;
   const ahora = Date.now();
@@ -212,30 +230,30 @@ export function avisarMensajeEntrante(idConversation: number): void {
  */
 let base: { email: string; noLeidos: Map<number, number> } | null = null;
 
-export function revisarNoLeidos(
-  email: string | null | undefined,
-  conversaciones: {
-    id: number;
-    unreadCount: number;
-    lastMessage?: { createdAt: string } | null;
-  }[]
-): void {
-  if (!email) return;
+export function revisarNoLeidos<
+  T extends { id: number; unreadCount: number; lastMessage?: { createdAt: string } | null },
+>(email: string | null | undefined, conversaciones: T[]): T[] {
+  if (!email) return [];
   const actual = new Map<number, number>();
   for (const c of conversaciones) actual.set(c.id, c.unreadCount);
   if (!base || base.email !== email) {
     base = { email, noLeidos: actual };
-    return;
+    return [];
   }
   const previo = base.noLeidos;
   base.noLeidos = actual;
+  // Conversations whose unread count went up with a fresh message: the in-app
+  // notification cards are built from these (useChatOverview).
+  const subieron: T[] = [];
   for (const c of conversaciones) {
     const antes = previo.get(c.id) ?? 0;
     if (c.unreadCount > antes && mensajeFresco(c.lastMessage?.createdAt)) {
       // El antirrebote deja sonar solo al primero que no se esté viendo.
       avisarMensajeEntrante(c.id);
+      subieron.push(c);
     }
   }
+  return subieron;
 }
 
 /** Al cerrar la sesión: la siguiente persona arranca con base nueva. */

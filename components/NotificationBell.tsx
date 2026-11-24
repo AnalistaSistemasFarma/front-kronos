@@ -37,6 +37,14 @@ import {
   isExternalNotificationPath,
 } from '../lib/notifications/resolveNotificationTarget';
 import { notificationKind, type NotificationKind } from '../lib/notifications/notificationKind';
+import {
+  BELL_BURST_LIMIT,
+  bellSummaryToast,
+  newBellNotifications,
+  toastFromBellNotification,
+} from '../lib/notifications/inAppToast';
+import { showInAppToast } from '../lib/notifications/inAppToastStore';
+import { playMessageTone } from '../lib/chat/message-sound';
 
 interface Notification {
   id: number;
@@ -109,6 +117,9 @@ export default function NotificationBell() {
   const [mounted, setMounted] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
   const fetchInFlightRef = useRef(false);
+  // In-app notification cards (2026-11-24): highest unread id already seen, per user. null = the
+  // first answer only sets the baseline, so the history does not pop up.
+  const lastSeenRef = useRef<{ email: string | null | undefined; id: number | null }>({ email: null, id: null });
 
   // Vista activa en el dropdown y lista de leídas (se carga solo bajo demanda).
   const [view, setView] = useState<'unread' | 'read'>('unread');
@@ -120,6 +131,28 @@ export default function NotificationBell() {
   useEffect(() => {
     setMounted(true);
   }, []);
+
+  // New unread notifications since the last poll become SynerLink cards (lib/notifications/inAppToast.ts).
+  const announceNewNotifications = useCallback(
+    (unread: Notification[]) => {
+      if (lastSeenRef.current.email !== userEmail) lastSeenRef.current = { email: userEmail, id: null };
+      const { fresh, lastSeenId } = newBellNotifications(lastSeenRef.current.id, unread);
+      lastSeenRef.current.id = lastSeenId;
+      if (fresh.length === 0) return;
+      const cards = fresh.map(toastFromBellNotification);
+      let shown = false;
+      if (fresh.length > BELL_BURST_LIMIT) {
+        shown = showInAppToast(
+          bellSummaryToast(fresh.length, fresh[0].created_at, cards.some((c) => c.tone === 'urgent'))
+        );
+      } else {
+        // Oldest first, so the newest ends on top.
+        for (const card of [...cards].reverse()) shown = showInAppToast(card) || shown;
+      }
+      if (shown) playMessageTone();
+    },
+    [userEmail]
+  );
 
   const fetchNotifications = useCallback(async () => {
     if (!isAuthenticated || typeof document === 'undefined') return;
@@ -142,6 +175,7 @@ export default function NotificationBell() {
 
       setNotifications(data.notifications || []);
       setUnreadCount(data.unreadCount || 0);
+      announceNewNotifications(data.notifications || []);
     } catch (err) {
       if (isAbortError(err) || controller.signal.aborted) return;
     } finally {
@@ -150,7 +184,7 @@ export default function NotificationBell() {
         setFetching(false);
       }
     }
-  }, [isAuthenticated]);
+  }, [isAuthenticated, announceNewNotifications]);
 
   // Carga las leídas solo cuando el usuario lo pide (no entra en el polling).
   const fetchRead = useCallback(async () => {
