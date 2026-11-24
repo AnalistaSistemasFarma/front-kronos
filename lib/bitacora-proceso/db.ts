@@ -638,6 +638,28 @@ export async function getOrdenDetalle(db: OtDb, idOrden: number, access: OtCompa
 }
 
 /**
+ * Bitácoras del MISMO lote en la empresa (batch record, 2026-11-24): un lote tiene una por turno
+ * y el Excel del batch record las junta. Orden de apertura; máximo 60.
+ */
+export async function listOrdenesDelLote(db: OtDb, idCompany: number, lote: string) {
+  const filas = await db.otOrdenTrabajo.findMany({
+    where: { id_company: idCompany, lote },
+    orderBy: [{ abierta_en: 'asc' }, { consecutivo: 'asc' }],
+    take: 60,
+    select: { id_orden_trabajo: true, consecutivo: true, turno: true, estado: true, abierta_en: true, cerrada_en: true, area: true },
+  });
+  return filas.map((f) => ({
+    id: f.id_orden_trabajo,
+    consecutivo: f.consecutivo,
+    turno: f.turno,
+    estado: f.estado,
+    abiertaEn: f.abierta_en.toISOString(),
+    cerradaEn: f.cerrada_en ? f.cerrada_en.toISOString() : null,
+    area: f.area,
+  }));
+}
+
+/**
  * Crea un registro (R4, R5, R6, R8; A1). Bloquea la fila de la orden
  * (UPDLOCK) para que un cierre simultáneo no deje pasar un registro tardío.
  * La hora la pone la base: el cliente nunca la envía. Guarda el OPERARIO
