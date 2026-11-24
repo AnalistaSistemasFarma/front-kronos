@@ -43,6 +43,31 @@ export function findSignerForVersion(
 }
 
 /**
+ * ¿La versión pedida ya es el documento completo? Sí si es la final de un documento firmado
+ * por todos, o si su orden alcanza al último firmante. En ese caso no hace falta pedirle a
+ * Orion una reconstrucción histórica (maxOrder), que no tiene respaldo si falla.
+ */
+export function coversAllSigners(
+  state: Pick<OrionSignatureState, 'signers' | 'status'>,
+  versionKind: string,
+  maxSignerOrder: number | null
+): boolean {
+  const signers = state.signers ?? [];
+  if (signers.length === 0) return false;
+  const fullySigned =
+    String(state.status || '').toUpperCase() === 'FIRMADO' || allSignersCompleted(signers);
+  if (!fullySigned) return false;
+  if (versionKind === 'final') return true;
+  const lastOrder = Math.max(
+    ...signers.map((s, i) => {
+      const order = Number(s.order);
+      return Number.isFinite(order) && order > 0 ? order : i + 1;
+    })
+  );
+  return maxSignerOrder != null && maxSignerOrder >= lastOrder;
+}
+
+/**
  * Historial de versiones / descargas:
  * - Quien creó la solicitud (solicitante).
  * - Preparador documento del flujo (Administración → Preparadores documento).
