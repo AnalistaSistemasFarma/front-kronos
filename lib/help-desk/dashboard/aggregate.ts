@@ -22,6 +22,8 @@ export interface HelpdeskCaseRow {
   category: string | null;
   subcategory: string | null;
   activity: string | null;
+  /** Only loaded for the case detail (KPI drill-down). */
+  subject?: string | null;
 }
 
 export interface HelpdeskDashboardFilters {
@@ -242,6 +244,114 @@ export function buildMonthSeries(
     }
   }
   return series;
+}
+
+/**
+ * KPI drill-down buckets, aligned with computeKpis:
+ * - all: every case in the period;
+ * - resolved: status Resuelto;
+ * - pending: neither Resuelto nor Cancelado;
+ * - measured: Resuelto with a valid end_date (the cases behind the average resolution time).
+ */
+export const CASE_BUCKETS = ['all', 'resolved', 'pending', 'measured'] as const;
+export type CaseBucket = (typeof CASE_BUCKETS)[number];
+
+export function parseCaseBucket(raw: string | null | undefined): CaseBucket | null {
+  return (CASE_BUCKETS as readonly string[]).includes(String(raw)) ? (raw as CaseBucket) : null;
+}
+
+/** Days from creation to end_date for a resolved case, or null when it cannot be measured. */
+export function resolutionDays(row: HelpdeskCaseRow): number | null {
+  if (row.statusId !== CASE_STATUS_RESOLVED) return null;
+  const created = toDate(row.createdAt);
+  const ended = toDate(row.endDate);
+  if (!created || !ended || ended.getTime() < created.getTime()) return null;
+  return Math.round(((ended.getTime() - created.getTime()) / MS_PER_DAY) * 10) / 10;
+}
+
+export function matchesBucket(row: HelpdeskCaseRow, bucket: CaseBucket): boolean {
+  switch (bucket) {
+    case 'all':
+      return true;
+    case 'resolved':
+      return row.statusId === CASE_STATUS_RESOLVED;
+    case 'pending':
+      return row.statusId !== CASE_STATUS_RESOLVED && row.statusId !== CASE_STATUS_CANCELLED;
+    case 'measured':
+      return resolutionDays(row) != null;
+    default:
+      return false;
+  }
+}
+
+export interface HelpdeskCaseDetail {
+  id: number;
+  subject: string;
+  status: string;
+  caseType: string;
+  company: string;
+  department: string;
+  technician: string;
+  category: string;
+  subcategory: string;
+  activity: string;
+  /** YYYY-MM-DD */
+  createdAt: string | null;
+  /** YYYY-MM-DD */
+  endDate: string | null;
+  resolutionDays: number | null;
+}
+
+export interface HelpdeskCaseDetailResult {
+  bucket: CaseBucket;
+  filters: HelpdeskDashboardFilters;
+  total: number;
+  /** True when `cases` was cut at `limit`. */
+  truncated: boolean;
+  cases: HelpdeskCaseDetail[];
+}
+
+export function toCaseDetail(row: HelpdeskCaseRow): HelpdeskCaseDetail {
+  const created = toDate(row.createdAt);
+  const ended = toDate(row.endDate);
+  return {
+    id: row.id,
+    subject: cleanLabel(row.subject, 'Sin asunto'),
+    status: cleanLabel(row.status, 'Sin estado'),
+    caseType: cleanLabel(row.caseType, 'Sin tipo'),
+    company: cleanLabel(row.company, 'Sin empresa'),
+    department: cleanLabel(row.department, 'Sin departamento'),
+    technician: cleanLabel(row.technician, 'Sin técnico asignado'),
+    category: cleanLabel(row.category, 'Sin categoría'),
+    subcategory: cleanLabel(row.subcategory, 'Sin subcategoría'),
+    activity: cleanLabel(row.activity, 'Sin actividad'),
+    createdAt: created ? isoDay(created) : null,
+    endDate: ended ? isoDay(ended) : null,
+    resolutionDays: resolutionDays(row),
+  };
+}
+
+/** Cases of one KPI bucket, newest first, cut at `limit`. */
+export function buildCaseDetail(
+  allRows: HelpdeskCaseRow[],
+  filters: HelpdeskDashboardFilters,
+  bucket: CaseBucket,
+  limit = 1000
+): HelpdeskCaseDetailResult {
+  const rows = filterCases(allRows, filters)
+    .filter((row) => matchesBucket(row, bucket))
+    .sort((a, b) => {
+      const da = toDate(a.createdAt)?.getTime() ?? 0;
+      const db = toDate(b.createdAt)?.getTime() ?? 0;
+      return db - da || b.id - a.id;
+    });
+  return {
+    bucket,
+    filters,
+    total: rows.length,
+    truncated: rows.length > limit,
+    cases: rows.slice(0, limit).map(toCaseDetail),
+  };
 }
 
 export function aggregateHelpdeskDashboard(
