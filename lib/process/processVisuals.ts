@@ -83,6 +83,8 @@ const SUB_RULES: Array<{ test: RegExp; icon: TablerIcon }> = [
   { test: /^proyectos?$|gesti[oó]n\s+de\s+proyectos/, icon: IconFolders },
   // Módulo «Formación» (2026-10-26): cursos y capacitaciones.
   { test: /^formaci[oó]n$|capacitaci/, icon: IconSchool },
+  // «Dashboard Helpdesk» (2026-11-18): must not fall into the generic /help/ ticket rule.
+  { test: /dashboard\s*help\s*desk/, icon: IconLayoutDashboard },
   { test: /mis\s*ticket/, icon: IconInbox },
   { test: /^tickets?$|panel.*caso/, icon: IconTicket },
   { test: /ticket|help|soporte/, icon: IconTicket },

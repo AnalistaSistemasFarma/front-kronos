@@ -40,6 +40,8 @@ export default defineConfig({
       'app/api/biomedica/**/*.test.ts',
       // `app/api/integrations/orion/**`: búsqueda de socios de firma (solo empresas del usuario, 403).
       'app/api/integrations/orion/**/*.test.ts',
+      // `app/api/help-desk/dashboard/**`: Dashboard Helpdesk (subprocess access, aggregates only).
+      'app/api/help-desk/dashboard/**/*.test.ts',
       'components/sgc/**/*.test.ts',
       // Medidor del consumo de Anthropic en Proyectos (render del marcado, 2026-10-22).
       'components/proyectos/**/*.test.ts',
