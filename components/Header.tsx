@@ -23,6 +23,7 @@ import NotificationBell from './NotificationBell';
 import CorreoHeaderIcon from './correo/CorreoHeaderIcon';
 import ProyectosHeaderIcon from './proyectos/ProyectosHeaderIcon';
 import FormacionHeaderIcon from './formacion/FormacionHeaderIcon';
+import MeetingsHeaderIcon from './meetings/MeetingsHeaderIcon';
 import ChatRail from './chat/ChatRail';
 import ChatPulse from './chat/ChatPulse';
 import dynamic from 'next/dynamic';
@@ -394,6 +395,8 @@ export default function Header() {
               {/* Proyectos (2026-10-19): solo con el permiso del módulo; contador de
                   conversaciones con mensajes nuevos y panel con lo último. */}
               <ProyectosHeaderIcon />
+              {/* Reuniones recientes (2026-11-23): Teams meetings of the signed-in account; only if enabled. */}
+              <MeetingsHeaderIcon />
               {/* Formación (2026-10-26): cursos o videos divulgados pendientes por ver; solo si hay. */}
               <FormacionHeaderIcon />
               {/* Acceso directo al Correo (2026-10-15): solo con el permiso del módulo. */}
