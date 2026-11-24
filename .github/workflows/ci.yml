@@ -637,6 +637,17 @@ jobs:
           echo "IF OBJECT_ID(N'dbo.chat_project_mute', N'U') IS NULL OR NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'chat_project_mute_project_user' AND is_unique = 1) OR NOT EXISTS (SELECT 1 FROM sys.foreign_keys WHERE name = N'chat_project_mute_id_project_fkey') THROW 50000, N'Project mute did not leave chat_project_mute, its unique index or its FK.', 1;" > /tmp/project-mute-ok.sql
           npx prisma db execute --schema prisma/schema.prisma --file /tmp/project-mute-ok.sql
           if npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-11-23-proyectos-silenciar-PROD.sql; then echo "The PROD project mute script should have refused on kronos_ci"; exit 1; fi
+          # Project meetings (msg 38206, 2026-11-24): migration and PRUEBAS twice, reversal twice, PRUEBAS again (idempotent round trip), tables + unique iCalUId + FK, and PROD refusing.
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261124150000_chat_project_meetings/migration.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261124150000_chat_project_meetings/migration.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-11-24-proyectos-reuniones-PRUEBAS.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-11-24-proyectos-reuniones-PRUEBAS.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-11-24-proyectos-reuniones-reversa.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-11-24-proyectos-reuniones-reversa.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-11-24-proyectos-reuniones-PRUEBAS.sql
+          echo "IF OBJECT_ID(N'dbo.chat_project_meeting', N'U') IS NULL OR OBJECT_ID(N'dbo.chat_project_meeting_rule', N'U') IS NULL OR OBJECT_ID(N'dbo.chat_project_meeting_analysis', N'U') IS NULL OR NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'chat_project_meeting_ical_uid' AND is_unique = 1) OR NOT EXISTS (SELECT 1 FROM sys.foreign_keys WHERE name = N'chat_project_meeting_analysis_id_project_meeting_fkey') THROW 50000, N'Project meetings did not leave its tables, the unique iCalUId or the analysis FK.', 1;" > /tmp/project-meetings-ok.sql
+          npx prisma db execute --schema prisma/schema.prisma --file /tmp/project-meetings-ok.sql
+          if npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-11-24-proyectos-reuniones-PROD.sql; then echo "The PROD project meetings script should have refused on kronos_ci"; exit 1; fi
           # Errores de IA (Auditoría de agentes, 2026-11-03): PRUEBAS dos veces, reversa y otra vez PRUEBAS (idempotencia ida y vuelta) y PROD que se niega. La lógica se prueba en tests/integration/auditoria.
           npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-11-03-errores-ia-PRUEBAS.sql
           npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-11-03-errores-ia-PRUEBAS.sql
@@ -674,7 +685,7 @@ jobs:
         run: |
           set -e
           # Banderas de sesión con las que cada reversa acepta sus pérdidas (datos de prueba).
-          FLAGS="sgc_reversa_pendientes_archivo sgc_reversa_padres sgc_reversa_propuestas sgc_reversa_recapacitaciones sgc_reversa_flujo_s10 sgc_reversa_copias sgc_reversa_sustitutos sgc_reversa_firma_propia sgc_reversa_modelo_roles sgc_reversa_lideres_departamento sgc_reversa_encabezados sgc_reversa_evaluaciones sgc_reversa_generador sgc_reversa_generador_guia sgc_reversa_padres_hijos chat_proyectos_reversa_acepta_perdida proyectos_modulo_reversa_acepta_perdida proyectos_cronograma_reversa_acepta_perdida proyectos_equipo_reversa_acepta_perdida proyectos_no_leidos_reversa_acepta_perdida chat_reacciones_reversa_acepta_perdida proyectos_permisos_agentes_reversa_acepta_perdida proyectos_config_agentes_reversa_acepta_perdida chat_stickers_personales_reversa_acepta_perdida vitrina_reversa_acepta_perdida proyectos_archivos_agente_reversa_acepta_perdida vitrina_lineas_reversa_acepta_perdida vitrina_modelo3d_reversa_acepta_perdida proyectos_mesas_reversa_acepta_perdida proyectos_matrices_reversa_acepta_perdida proyectos_carpetas_reversa_acepta_perdida biomedica_reversa_acepta_perdida biomedica_inventario_reversa_acepta_perdida proyectos_silenciar_reversa_acepta_perdida"
+          FLAGS="sgc_reversa_pendientes_archivo sgc_reversa_padres sgc_reversa_propuestas sgc_reversa_recapacitaciones sgc_reversa_flujo_s10 sgc_reversa_copias sgc_reversa_sustitutos sgc_reversa_firma_propia sgc_reversa_modelo_roles sgc_reversa_lideres_departamento sgc_reversa_encabezados sgc_reversa_evaluaciones sgc_reversa_generador sgc_reversa_generador_guia sgc_reversa_padres_hijos chat_proyectos_reversa_acepta_perdida proyectos_modulo_reversa_acepta_perdida proyectos_cronograma_reversa_acepta_perdida proyectos_equipo_reversa_acepta_perdida proyectos_no_leidos_reversa_acepta_perdida chat_reacciones_reversa_acepta_perdida proyectos_permisos_agentes_reversa_acepta_perdida proyectos_config_agentes_reversa_acepta_perdida chat_stickers_personales_reversa_acepta_perdida vitrina_reversa_acepta_perdida proyectos_archivos_agente_reversa_acepta_perdida vitrina_lineas_reversa_acepta_perdida vitrina_modelo3d_reversa_acepta_perdida proyectos_mesas_reversa_acepta_perdida proyectos_matrices_reversa_acepta_perdida proyectos_carpetas_reversa_acepta_perdida biomedica_reversa_acepta_perdida biomedica_inventario_reversa_acepta_perdida proyectos_silenciar_reversa_acepta_perdida proyectos_reuniones_reversa_acepta_perdida"
           reversa() {
             { for f in $FLAGS; do printf "EXEC sp_set_session_context N'%s', 1;\n" "$f"; done; cat "$1"; } > /tmp/reversa.sql
             npx prisma db execute --schema prisma/schema.prisma --file /tmp/reversa.sql
@@ -714,6 +725,17 @@ jobs:
           echo "IF OBJECT_ID(N'dbo.biomed_registro', N'U') IS NOT NULL OR EXISTS (SELECT 1 FROM dbo.subprocess WHERE subprocess_url = N'/process/sgc-documental/biomedica') THROW 50000, N'La reversa de Ingeniería biomédica no quitó sus tablas o su permiso.', 1;" > /tmp/biomedica-quitado.sql
           npx prisma db execute --schema prisma/schema.prisma --file /tmp/biomedica-quitado.sql
           migra 20261106150000_biomedica
+          # Project meetings (2026-11-24): its tables point to chat_project, so their reversal goes FIRST; with a test row,
+          # without the flag it must refuse. It is migrated again at the end, with the F1.
+          echo "INSERT INTO dbo.chat_project_meeting (id_project, ical_uid, event_id, mailbox, subject, start_at, end_at, scheduled_minutes, origin, linked_by) SELECT TOP (1) id_project, N'ci-ical', N'ci-event', N'ci@x.com', N'ci', SYSUTCDATETIME(), SYSUTCDATETIME(), 30, N'manual', N'ci' FROM dbo.chat_project;" > /tmp/meetings-dato.sql
+          npx prisma db execute --schema prisma/schema.prisma --file /tmp/meetings-dato.sql
+          if npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-11-24-proyectos-reuniones-reversa.sql; then
+            echo "IF EXISTS (SELECT 1 FROM dbo.chat_project) THROW 50000, N'The project meetings reversal should have refused without its flag.', 1;" > /tmp/meetings-nego.sql
+            npx prisma db execute --schema prisma/schema.prisma --file /tmp/meetings-nego.sql
+          fi
+          reversa prisma/manual/2026-11-24-proyectos-reuniones-reversa.sql
+          echo "IF OBJECT_ID(N'dbo.chat_project_meeting', N'U') IS NOT NULL OR OBJECT_ID(N'dbo.chat_project_meeting_analysis', N'U') IS NOT NULL THROW 50000, N'The project meetings reversal did not drop its tables.', 1;" > /tmp/meetings-quitado.sql
+          npx prisma db execute --schema prisma/schema.prisma --file /tmp/meetings-quitado.sql
           # Project mute (2026-11-23): chat_project_mute points to chat_project, so its reversal goes FIRST; with a test row,
           # without the flag it must refuse. It is migrated again at the end, with the F1.
           echo "INSERT INTO dbo.chat_project_mute (id_project, id_user) SELECT TOP (1) id_project, N'ci-mute' FROM dbo.chat_project;" > /tmp/mute-dato.sql
@@ -847,6 +869,7 @@ jobs:
           migra 20261105150000_chat_project_matrices
           migra 20261106120000_chat_project_folders
           migra 20261123200000_chat_project_mute
+          migra 20261124150000_chat_project_meetings
           # Padres e hijos (2026-10-19): con tipos padre marcados y relaciones creadas solas (integración), sin la bandera debe negarse.
           if npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-10-19-sgc-padres-hijos-reversa.sql; then echo "La reversa de padres e hijos debió negarse sin su bandera"; exit 1; fi
           reversa prisma/manual/2026-10-19-sgc-padres-hijos-reversa.sql
