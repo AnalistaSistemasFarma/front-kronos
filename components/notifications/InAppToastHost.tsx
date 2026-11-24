@@ -37,8 +37,9 @@ import styles from './InAppToastHost.module.css';
 
 /**
  * Host of the in-app notification cards (lib/notifications/inAppToast.ts). Mounted once in the
- * header of the whole app, next to ChatPulse and the bell, and drawn in a portal on top of
- * everything: top-right below the header on a computer, full width at the top on a phone (msg 38429:
+ * header of the whole app, next to ChatPulse and the bell, and drawn in a portal above the page and
+ * the floating chat panel but below any modal (lib/ui/zIndex.ts, so a card never covers the toolbar
+ * of an open preview): top-right below the header on a computer, full width at the top on a phone (msg 38429:
  * the bottom-right corner collided with the floating chat panel). Max 3 cards, newest on top, ~8 s each (paused while the pointer, the
  * focus or a draft is on the card). Each card has an always-visible reply input when it has a
  * reply target (2026-11-24, msg 38376): Enter sends, Esc closes.
