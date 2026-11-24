@@ -79,7 +79,11 @@ describe('withInitiatedContext (inbox)', () => {
       { id_message: 100, id_conversation: 9, reason: 'viejo' },
       { id_message: 115, id_conversation: 9, reason: 'Avisar acceso SAP' },
     ]);
-    db.messageFindFirst.mockResolvedValue({ id: 110 });
+    // Person messages of conversation 9: 110 (delivered), 120 and 121 (pending).
+    db.messageFindFirst.mockImplementation(async ({ where }: { where: { id: { lt: number } } }) => {
+      const prev = [110, 120, 121].filter((id) => id < where.id.lt).pop();
+      return prev ? { id: prev } : null;
+    });
     db.messageFindMany.mockResolvedValue([{ id: 115, body: 'Ya tiene SAP.', created_at: new Date('2026-11-24T20:40:00Z') }]);
     const out = await withInitiatedContext(pending);
     expect(out[0].body).toMatch(/^\[Contexto de SynerLink/);
@@ -91,6 +95,19 @@ describe('withInitiatedContext (inbox)', () => {
     // Only direct conversations are looked up.
     expect(db.initiatedFindMany.mock.calls[0][0].where.id_conversation).toEqual({ in: [9, 10] });
     expect(db.messageFindMany).toHaveBeenCalledWith(expect.objectContaining({ where: { id: { in: [115] } } }));
+  });
+
+  it('an older undelivered backlog does not swallow the context: it goes with the first reply after it', async () => {
+    const backlog = [
+      { id: 50, id_conversation: 9, body: 'viejo sin entregar', conversation: { kind: 'direct' } },
+      { id: 120, id_conversation: 9, body: 'Gracias, ya entré', conversation: { kind: 'direct' } },
+    ];
+    db.initiatedFindMany.mockResolvedValue([{ id_message: 115, id_conversation: 9, reason: 'Avisar acceso SAP' }]);
+    db.messageFindFirst.mockResolvedValue({ id: 50 });
+    db.messageFindMany.mockResolvedValue([{ id: 115, body: 'Ya tiene SAP.', created_at: new Date('2026-11-24T20:40:00Z') }]);
+    const out = await withInitiatedContext(backlog);
+    expect(out[0].body).toBe('viejo sin entregar');
+    expect(out[1].body).toMatch(/^\[Contexto de SynerLink[\s\S]*Gracias, ya entré$/);
   });
 
   it('usual case: no agent-initiated messages → one query, bodies unchanged', async () => {
