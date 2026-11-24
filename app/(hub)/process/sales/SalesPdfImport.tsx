@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { Alert, Badge, Button, Checkbox, Group, Menu, Modal, Progress, ScrollArea, Stack, Table, Text, Tooltip } from '@mantine/core';
-import { IconAlertCircle, IconRobot, IconSparkles } from '@tabler/icons-react';
+import { IconAlertCircle, IconCircleCheck, IconLoader2, IconRobot, IconSparkles } from '@tabler/icons-react';
 import toast from 'react-hot-toast';
 import { agentOrderInstruction, agentReplyJson, chunkOrderText, mergePdfOrders, PDF_ORDER_SCHEMA, PDF_ORDER_SYSTEM_PROMPT, parsePdfOrder, pdfOrderChunkPrompt, tableHeaderRow, type PdfOrderResult } from '../../../../lib/sales/pdfOrder';
 
@@ -99,6 +99,14 @@ export default function SalesPdfImport({ companyId, companyName, cardCode, onLoa
   const [agents, setAgents] = useState<ChatAgent[]>([]);
   const [agent, setAgent] = useState<ChatAgent | null>(null);
   const [conversationId, setConversationId] = useState<number | null>(null);
+  /** Estado en vivo del agente mientras lee la OC (el mismo indicador del chat: «Pensando…», «Leyendo el adjunto…»). */
+  const [live, setLive] = useState<{ sentAt: number; delivered: boolean; state: string | null; label: string | null; tasks: { desc: string }[] } | null>(null);
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    if (!live) return;
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [live]);
 
   useEffect(() => {
     let cancelled = false;
@@ -249,13 +257,27 @@ export default function SalesPdfImport({ companyId, companyName, cardCode, onLoa
       const md = await m.json().catch(() => ({}));
       if (!m.ok || !md.message?.id) throw new Error(md.error || `No se pudo enviar la OC a ${a.displayName}.`);
       const sentId = Number(md.message.id);
-      // Espera la respuesta del agente (mensaje posterior al nuestro que no sea del usuario).
+      // Espera la respuesta del agente (mensaje posterior al nuestro que no sea del usuario) y, mientras tanto,
+      // muestra su estado en vivo (recibido, qué está haciendo, subtareas).
       const start = Date.now();
+      setLive({ sentAt: start, delivered: false, state: null, label: null, tasks: [] });
       let reply: string | null = null;
       while (Date.now() - start < AGENT_TIMEOUT_MS) {
-        await new Promise((res) => setTimeout(res, 5000));
-        const g = await fetch(`/api/chat/conversations/${convId}/messages?limit=10`, { cache: 'no-store' });
+        await new Promise((res) => setTimeout(res, 3000));
+        const [g, st] = await Promise.all([
+          fetch(`/api/chat/conversations/${convId}/messages?limit=10`, { cache: 'no-store' }),
+          fetch(`/api/chat/conversations/${convId}/status`, { cache: 'no-store' }).catch(() => null),
+        ]);
         const gd = await g.json().catch(() => ({}));
+        const sd = st && st.ok ? await st.json().catch(() => ({})) : {};
+        const mine = ((gd.messages ?? []) as { id: number; deliveredAt?: string | null }[]).find((x) => x.id === sentId);
+        setLive((prev) => prev && {
+          ...prev,
+          delivered: prev.delivered || Boolean(mine?.deliveredAt) || (sd.status?.state && sd.status.state !== 'idle'),
+          state: sd.status?.state ?? prev.state,
+          label: sd.status?.label ?? null,
+          tasks: Array.isArray(sd.status?.tasks) ? sd.status.tasks : [],
+        });
         const found = ((gd.messages ?? []) as { id: number; role: string; body: string }[])
           .filter((x) => x.id > sentId && x.role !== 'user' && /\{[\s\S]*\}/.test(x.body ?? ''))
           .sort((x, y) => x.id - y.id)[0];
@@ -265,9 +287,11 @@ export default function SalesPdfImport({ companyId, companyName, cardCode, onLoa
         }
       }
       if (!reply) throw new Error(`${a.displayName} no respondió en ${AGENT_TIMEOUT_MS / 60000} minutos. Cuando responda, verá su lectura en el chat; puede intentarlo de nuevo.`);
+      setLive(null);
       const r = parsePdfOrder(agentReplyJson(reply));
       await resolveAndSimulate(r, []);
     } catch (e) {
+      setLive(null);
       setError((e as Error).message);
       setPhase('error');
     }
@@ -328,6 +352,34 @@ export default function SalesPdfImport({ companyId, companyName, cardCode, onLoa
 
       <Modal opened={phase !== 'idle'} onClose={() => !working && setPhase('idle')} size={phase === 'simulacion' ? 'xl' : 'md'} title={<Group gap={6}><IconSparkles size={18} /><Text fw={700}>{agent && (phase === 'agente' || conversationId) ? `Oferta desde el PDF (con ${agent.displayName})` : 'Oferta desde el PDF (IA local)'}</Text></Group>}
         closeOnClickOutside={!working} withCloseButton={!working} zIndex={1300}>
+        {phase === 'agente' && live && (
+          <Stack gap={6} mb="sm">
+            {(() => {
+              const seg = Math.floor((now - live.sentAt) / 1000);
+              const t = `${Math.floor(seg / 60)}:${String(seg % 60).padStart(2, '0')}`;
+              const paso = (ok: boolean, activo: boolean, texto: string) => (
+                <Group gap={6} wrap="nowrap">
+                  {ok ? <IconCircleCheck size={16} color="var(--mantine-color-teal-6)" /> : activo ? <IconLoader2 size={16} className="animate-spin" /> : <IconLoader2 size={16} opacity={0.3} />}
+                  <Text size="sm" c={ok || activo ? undefined : 'dimmed'}>{texto}</Text>
+                </Group>
+              );
+              const trabajando = live.state === 'thinking' || live.state === 'tool';
+              return (
+                <>
+                  {paso(true, false, `Orden de compra enviada a ${agent?.displayName ?? 'el agente'}`)}
+                  {paso(live.delivered, !live.delivered, live.delivered ? `${agent?.displayName ?? 'El agente'} la recibió` : 'Esperando a que el agente la reciba…')}
+                  {paso(false, live.delivered, trabajando ? `${live.label || (live.state === 'tool' ? 'Usando una herramienta…' : 'Pensando…')}` : live.delivered ? 'Leyendo la orden de compra…' : 'Leer la orden de compra')}
+                  {live.tasks.length > 0 && (
+                    <Stack gap={2} pl={24}>
+                      {live.tasks.slice(0, 4).map((tk, i) => <Text key={i} size="xs" c="dimmed">• {tk.desc}</Text>)}
+                    </Stack>
+                  )}
+                  <Text size="xs" c="dimmed">Tiempo: {t} · máximo {AGENT_TIMEOUT_MS / 60000} min</Text>
+                </>
+              );
+            })()}
+          </Stack>
+        )}
         {working && (
           <Stack gap="xs">
             <Text size="sm" c="dimmed">
