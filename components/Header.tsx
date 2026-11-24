@@ -26,6 +26,7 @@ import FormacionHeaderIcon from './formacion/FormacionHeaderIcon';
 import MeetingsHeaderIcon from './meetings/MeetingsHeaderIcon';
 import ChatRail from './chat/ChatRail';
 import ChatPulse from './chat/ChatPulse';
+import InAppToastHost from './notifications/InAppToastHost';
 import dynamic from 'next/dynamic';
 import { isValentineWallSeason } from '../lib/valentine/constants';
 
@@ -391,6 +392,8 @@ export default function Header() {
               {/* Pulso del chat entre personas (mensajes directos y zumbidos
                   📳 en cualquier pantalla). No pinta nada. */}
               <ChatPulse />
+              {/* In-app notification cards (2026-11-24): drawn in a portal, top-right / top on phones. */}
+              <InAppToastHost />
               {isValentineWallSeason() && <ValentineWallRoot />}
               {/* Proyectos (2026-10-19): solo con el permiso del módulo; contador de
                   conversaciones con mensajes nuevos y panel con lo último. */}

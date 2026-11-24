@@ -297,24 +297,43 @@ describe('pulso del chat con proyectos', () => {
     expect((await pulso(pulseReq(0))).status).toBe(403);
   });
 
-  it('solo Proyectos: busca solo la rama de proyectos, con la puerta, y avisa sin el texto', async () => {
+  it('solo Proyectos: busca solo la rama de proyectos, con la puerta; la tarjeta trae proyecto, empresa y fragmento', async () => {
     m.sessionUser.mockResolvedValue(ANA);
     m.supFindFirst.mockResolvedValue(null);
     m.msgFindFirst.mockResolvedValue({ id: 120 });
-    m.msgFindMany.mockResolvedValue([
-      { id: 115, id_conversation: 28, event_type: null, created_at: new Date('2026-10-19T15:00:00Z'), role: 'agent', conversation: { kind: 'project' }, userAuthor: null, agentAuthor: { display_name: 'Play' } },
-    ]);
+    m.msgFindMany
+      .mockResolvedValueOnce([
+        { id: 115, id_conversation: 28, event_type: null, created_at: new Date('2026-10-19T15:00:00Z'), role: 'agent', conversation: { kind: 'project', id_project: 4 }, userAuthor: null, agentAuthor: { code: 'play', display_name: 'Play', avatar_url: '/agents/play.png', avatar_updated_at: null } },
+      ])
+      // In-app card details (2026-11-24): read only for the rows that passed the gate.
+      .mockResolvedValueOnce([
+        { id: 115, body: '**Listo**, el PR quedó   abierto', conversation: { project: { id_project: 4, name: 'Infraestructura', company: { company: 'GSS' } } } },
+      ]);
     const res = await pulso(pulseReq(100));
     const body = await res.json();
     expect(body.cursor).toBe(120);
     expect(body.events).toEqual([
-      { type: 'project', idConversation: 28, idMessage: 115, authorName: 'Play', createdAt: '2026-10-19T15:00:00.000Z', muted: false },
+      {
+        type: 'project',
+        idConversation: 28,
+        idMessage: 115,
+        authorName: 'Play',
+        createdAt: '2026-10-19T15:00:00.000Z',
+        muted: false,
+        preview: 'Listo, el PR quedó abierto',
+        projectName: 'Infraestructura',
+        companyName: 'GSS',
+        authorAvatarUrl: '/agents/play.png',
+        authorAgentCode: 'play',
+        url: '/process/proyectos/4?conversacion=28',
+      },
     ]);
     const ramas = m.msgFindMany.mock.calls[0][0].where.OR;
     expect(ramas).toHaveLength(1);
     expect(ramas[0].conversation).toEqual(whereConversacionesVisibles('u-ana', [3]));
     expect(ramas[0].role).toEqual({ in: ['user', 'agent'] });
-    expect(JSON.stringify(body)).not.toMatch(/body|fragmento/);
+    // The detail query only asks for the ids that passed the gate.
+    expect(m.msgFindMany.mock.calls[1][0].where).toEqual({ id: { in: [115] } });
     // Sin hilos entre personas no se consulta su regla.
     expect(m.visiblesPersonas).not.toHaveBeenCalled();
   });
@@ -351,5 +370,39 @@ describe('pulso del chat con proyectos', () => {
     expect(ramas).toHaveLength(1);
     expect(ramas[0].conversation.kind).toBe('people');
     expect(body.events).toMatchObject([{ type: 'message', idConversation: 30, authorName: 'Diana' }]);
+  });
+
+  it('ag=1 (in-app cards, 2026-11-24): also agent replies in MY direct threads and others in MY groups, without text', async () => {
+    m.sessionUser.mockResolvedValue(ANA);
+    m.supFindFirst.mockResolvedValue({ id_subprocess_user_company: 1 });
+    m.empresas.mockResolvedValue([]);
+    m.msgFindFirst.mockResolvedValue({ id: 120 });
+    m.msgFindMany.mockResolvedValue([
+      { id: 117, id_conversation: 31, event_type: null, created_at: new Date('2026-11-24T15:00:00Z'), role: 'agent', conversation: { kind: 'direct', id_project: null }, userAuthor: null, agentAuthor: { code: 'orus', display_name: 'Orus' } },
+      { id: 118, id_conversation: 32, event_type: null, created_at: new Date('2026-11-24T15:00:01Z'), role: 'user', conversation: { kind: 'group', id_project: null }, userAuthor: { name: 'Diana', email: 'd@x' }, agentAuthor: null },
+    ]);
+    const body = await (await pulso(new NextRequest('http://x/api/chat/pulse?since=100&ag=1'))).json();
+    const ramas = m.msgFindMany.mock.calls[0][0].where.OR;
+    expect(ramas).toHaveLength(3);
+    expect(ramas[1]).toEqual({ role: 'agent', conversation: { kind: 'direct', id_user: 'u-ana', archived: false } });
+    expect(ramas[2].conversation).toEqual({ kind: 'group', archived: false, participants: { some: { id_user: 'u-ana' } } });
+    expect(ramas[2].OR).toEqual([{ id_user_author: null }, { id_user_author: { not: 'u-ana' } }]);
+    expect(body.events).toEqual([
+      { type: 'agent', idConversation: 31, idMessage: 117, authorName: 'Orus', createdAt: '2026-11-24T15:00:00.000Z', muted: false },
+      { type: 'agent', idConversation: 32, idMessage: 118, authorName: 'Diana', createdAt: '2026-11-24T15:00:01.000Z', muted: false },
+    ]);
+  });
+
+  it('without ag the branches are the same as before', async () => {
+    m.sessionUser.mockResolvedValue(ANA);
+    m.supFindFirst.mockResolvedValue({ id_subprocess_user_company: 1 });
+    m.empresas.mockResolvedValue([]);
+    m.msgFindFirst.mockResolvedValue({ id: 120 });
+    m.msgFindMany.mockResolvedValue([
+      { id: 116, id_conversation: 30, event_type: null, created_at: new Date(), role: 'user', conversation: { kind: 'people' }, userAuthor: { name: 'Diana', email: 'd@x' }, agentAuthor: null },
+    ]);
+    m.visiblesPersonas.mockResolvedValue([30]);
+    await pulso(new NextRequest('http://x/api/chat/pulse?since=100'));
+    expect(m.msgFindMany.mock.calls[0][0].where.OR).toHaveLength(1);
   });
 });

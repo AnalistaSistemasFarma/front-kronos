@@ -229,8 +229,13 @@ export const NUDGE_FRESH_MS = 2 * 60_000;
  * ('project', 2026-10-19: icono «Proyectos» de la cabecera).
  */
 export interface ChatPulseEvent {
-  /** 'reaction' (2026-10-20): alguien reaccionó; solo pide sondear el hilo. */
-  type: 'message' | 'nudge' | 'project' | 'reaction';
+  /**
+   * 'reaction' (2026-10-20): alguien reaccionó; solo pide sondear el hilo.
+   * 'agent' (2026-11-24, in-app notifications): a new message from an agent in one of MY direct
+   * threads, or from someone else in a group I belong to. Only sent when the client asks with
+   * `ag=1`; it just makes the inbox refresh now instead of on its 30 s poll.
+   */
+  type: 'message' | 'nudge' | 'project' | 'reaction' | 'agent';
   idConversation: number;
   idMessage: number;
   /** Quién lo escribió o zumbó. */
@@ -241,4 +246,18 @@ export interface ChatPulseEvent {
    * notificaciones de ese proyecto (sin sonido).
    */
   muted: boolean;
+  /**
+   * 'project' only (2026-11-24): what the in-app notification card shows. Same gate as the event
+   * (member + module), so it reveals nothing the project page would not. Optional: an older server
+   * does not send them and the card falls back to the author name.
+   */
+  preview?: string;
+  projectName?: string;
+  companyName?: string | null;
+  /** Avatar of the author: agent picture or person photo. null = initials. */
+  authorAvatarUrl?: string | null;
+  /** Agent code when an agent wrote it (stable avatar color). */
+  authorAgentCode?: string | null;
+  /** Deep link to the conversation. */
+  url?: string;
 }
