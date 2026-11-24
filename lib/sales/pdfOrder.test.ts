@@ -177,3 +177,22 @@ describe('respuesta del agente partida en varios mensajes (OC grande)', () => {
     expect(isJsonAttachment({ fileName: 'FE-4390.pdf', contentType: 'application/pdf' })).toBe(false);
   });
 });
+
+import { coverage } from './pdfOrder';
+describe('empresas de servicios (Kelab, Meditrack)', () => {
+  const kelab = [
+    { ItemCode: 'AFGV001', ItemName: 'SERVICIO DE ANALISIS GRAVADO' },
+    { ItemCode: 'AFE001S', ItemName: 'SERVICIO DE ANALISIS EXCLUIDO' },
+    { ItemCode: 'SDES001', ItemName: 'SERVICIO DESARROLLO' },
+  ];
+  const desc = 'SERVICIO DE ANALISIS PRODUCTO TERMINADO VALORACIÓN, MEROPENEM 1G LOTE: 2151026';
+  it('sin modo servicios la descripción larga no empareja', () => {
+    expect(bestCandidate(desc, kelab)).toBeNull();
+  });
+  it('con modo servicios empareja por cobertura del nombre y queda «a revisar» si hay empate', () => {
+    expect(coverage(desc, kelab[0].ItemName)).toBeCloseTo(2 / 3);
+    const b = bestCandidate(desc, kelab, { servicios: true });
+    expect(['AFGV001', 'AFE001S']).toContain(b?.ItemCode);
+    expect(b?.seguro).toBe(false);
+  });
+});

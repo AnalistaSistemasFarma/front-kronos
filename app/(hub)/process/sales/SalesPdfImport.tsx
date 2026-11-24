@@ -97,6 +97,8 @@ export default function SalesPdfImport({ companyId, companyName, cardCode, onLoa
   const [error, setError] = useState('');
   /** Simulación: lo que se montaría, antes de agregarlo a la oferta (Nicolás Rivera, 2026-11-09). */
   const [sim, setSim] = useState<(Omit<PdfOffer, 'lines'> & { lines: (Line & { include: boolean })[] }) | null>(null);
+  /** Filas visibles de la simulación: se dibujan de a 100 (una OC de 360 líneas colgaba el navegador). */
+  const [simShown, setSimShown] = useState(100);
   /** Avance de la lectura por fragmentos (OC de varias hojas). */
   const [step, setStep] = useState<{ k: number; n: number } | null>(null);
   /** Agentes del chat asignados al usuario, de CUALQUIER empresa («Montar con agente»; Nicolás Rivera, 2026-11-24:
@@ -234,6 +236,7 @@ export default function SalesPdfImport({ companyId, companyName, cardCode, onLoa
       if (!res.ok) throw new Error(d.error || 'No se pudo montar la oferta con los datos del PDF');
       if (!d.customer) throw new Error((d.avisos ?? []).join(' ') || 'No se identificó el cliente del PDF.');
       if (!(d.lines ?? []).length) throw new Error(`Se identificó el cliente ${d.customer.CardName}, pero ninguna línea del PDF se encontró en SAP. ${(d.avisos ?? []).join(' ')}`);
+      setSimShown(100);
       setSim({
         customer: d.customer, lines: (d.lines as Line[]).map((l) => ({ ...l, include: true })), numeroOrdenCompra: r.numeroOrdenCompra,
         fechaEntrega: r.fechaEntrega, avisos: [...avisosPrevios, ...(d.avisos ?? [])], leidas: r.lineas.length,
@@ -463,7 +466,7 @@ export default function SalesPdfImport({ companyId, companyName, cardCode, onLoa
                   </Table.Tr>
                 </Table.Thead>
                 <Table.Tbody>
-                  {sim.lines.map((l, i) => (
+                  {sim.lines.slice(0, simShown).map((l, i) => (
                     <Table.Tr key={i}>
                       <Table.Td><Checkbox checked={l.include} onChange={(e) => { const c = e.currentTarget.checked; setSim({ ...sim, lines: sim.lines.map((x, j) => (j === i ? { ...x, include: c } : x)) }); }} /></Table.Td>
                       <Table.Td><Text size="xs" c="dimmed">{String(l.row ?? i + 1)}</Text></Table.Td>
@@ -479,6 +482,13 @@ export default function SalesPdfImport({ companyId, companyName, cardCode, onLoa
                   ))}
                 </Table.Tbody>
               </Table>
+              {sim.lines.length > simShown && (
+                <Group justify="center" my="xs">
+                  <Button size="xs" variant="light" onClick={() => setSimShown((n) => n + 100)}>
+                    Mostrar 100 más (se ven {simShown} de {sim.lines.length})
+                  </Button>
+                </Group>
+              )}
             </ScrollArea.Autosize>
             <Group justify="flex-end">
               <Text fw={700}>
