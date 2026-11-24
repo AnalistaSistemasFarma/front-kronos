@@ -1,5 +1,6 @@
 import { expect, test, type BrowserContext, type Page } from '@playwright/test';
 import { encode } from 'next-auth/jwt';
+import { abrirExpresiones } from './chat-simulado';
 
 /**
  * Chat · reacciones, stickers y GIF (2026-10-20).
@@ -292,12 +293,12 @@ test.describe('Chat · reacciones, stickers y GIF · escritorio', () => {
     await capturar(page, 'escritorio-4-reaccion-en-vivo');
   });
 
-  test('envía un sticker y un GIF desde el botón de al lado del clip; el GIF llega por el proxy', async ({ page }) => {
+  test('envía un sticker y un GIF desde el menú «+» del compositor; el GIF llega por el proxy', async ({ page }) => {
     const estado = await simularChat(page);
     await page.goto('/process/chat?agent=horus');
     await expect(burbuja(page, 'quedó en SharePoint')).toBeVisible();
 
-    await page.getByRole('button', { name: 'Emojis, stickers y GIF' }).click();
+    await abrirExpresiones(page);
     const selector = page.getByTestId('chat-expresiones');
     await expect(selector.getByRole('button', { name: 'Enviar sticker gracias' })).toBeVisible();
     await capturar(page, 'escritorio-5-selector-stickers');
@@ -305,7 +306,7 @@ test.describe('Chat · reacciones, stickers y GIF · escritorio', () => {
     await expect(hilo(page).getByRole('img', { name: 'Sticker: ¡Gracias!' })).toBeVisible();
     expect(estado.mediaEnviada.at(-1)).toEqual({ kind: 'sticker', code: 'gracias' });
 
-    await page.getByRole('button', { name: 'Emojis, stickers y GIF' }).click();
+    await abrirExpresiones(page);
     await page.getByRole('tab', { name: 'GIF' }).click();
     await expect(selector.getByRole('button', { name: 'Enviar GIF GIF 1' })).toBeVisible();
     await expect(selector.getByText(/Con tecnología de GIPHY/)).toBeVisible();
@@ -363,7 +364,7 @@ test.describe('Chat · reacciones, stickers y GIF · celular', () => {
     await capturar(page, 'celular-3-reaccion-puesta');
 
     // Selector de stickers como hoja inferior (en el lugar del teclado).
-    await page.getByRole('button', { name: 'Emojis, stickers y GIF' }).click();
+    await abrirExpresiones(page);
     const selector = page.getByTestId('chat-expresiones');
     await expect(selector).toBeVisible();
     const cajaSel = (await page.locator('.chat-expresiones-hoja').boundingBox())!;

@@ -1,10 +1,15 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { expect, test } from '@playwright/test';
-import { CAPTURAS, REMOTO, SECRET, caja, capturar, guardarVideo, hilo, sesion, simularChat } from './chat-simulado';
+import { CAPTURAS, REMOTO, SECRET, abrirExpresiones, caja, capturar, guardarVideo, hilo, sesion, simularChat } from './chat-simulado';
 
 /**
- * Chat · compositor estilo Teams y «Mis stickers» (2026-10-21).
+ * Chat · compositor y «Mis stickers» (2026-10-21).
+ *
+ * Since 2026-11-24 the composer is a Gemini-style floating pill (Nicolás, msg
+ * 39009): «+» on the left with every secondary action, the box in the middle
+ * and the round send button on the right, on desktop and on the phone.
+ * Below, the original Teams-style request kept for history:
  *
  * Referencia de Nicolás (2026-10-20, 13:46): el compositor de Microsoft Teams,
  * «no debe ser igual, pero al menos, con la nueva funcionalidad de los
@@ -25,7 +30,7 @@ test.use({ video: CAPTURAS ? 'on' : 'off' });
 for (const oscuro of [false, true]) {
   const modo = oscuro ? 'oscuro' : 'claro';
 
-  test.describe(`Chat · compositor estilo Teams · escritorio · ${modo}`, () => {
+  test.describe(`Chat · compositor en cápsula · escritorio · ${modo}`, () => {
     test.skip(!SECRET || REMOTO, 'Requiere NEXTAUTH_SECRET del servidor local (CI) para firmar la sesión de prueba.');
     test.use({ viewport: { width: 1440, height: 900 } });
 
@@ -33,65 +38,71 @@ for (const oscuro of [false, true]) {
       await sesion(context, baseURL!);
     });
 
-    test('fila de íconos abajo a la derecha, barra de formato arriba y línea de acento con el foco', async ({ page }) => {
+    test('cápsula: «+» a la izquierda, caja al centro, enviar redondo a la derecha; formato arriba', async ({ page }) => {
       await simularChat(page, { gif: true, oscuro, misStickers: true });
       await page.goto('/process/chat?agent=horus');
       await expect(hilo(page).getByText('quedó en SharePoint')).toBeVisible();
 
-      const compositor = page.locator('.chat-composer--marco');
-      await expect(compositor).toBeVisible();
+      const pill = page.getByTestId('chat-composer-pill');
+      await expect(pill).toBeVisible();
       await capturar(page, `escritorio-${modo}-1-compositor`);
 
-      // Orden de la fila, de izquierda a derecha, y enviar al final, separado.
-      const nombres = ['Formato', 'Emojis, stickers y GIF', 'Adjuntar archivos', 'Más opciones', 'Enviar mensaje'];
-      const cajas = [];
-      for (const n of nombres) cajas.push((await compositor.getByRole('button', { name: n, exact: true }).boundingBox())!);
-      for (let i = 1; i < cajas.length; i++) {
-        expect(cajas[i].x).toBeGreaterThan(cajas[i - 1].x);
-        expect(Math.abs(cajas[i].y - cajas[0].y)).toBeLessThan(4);
-      }
-      const marco = (await compositor.boundingBox())!;
+      // Left to right on one row: «+», box, send. Nothing else on the pill.
+      const mas = (await pill.getByRole('button', { name: 'Más opciones' }).boundingBox())!;
       const textarea = (await caja(page).boundingBox())!;
-      // Íconos DEBAJO de la caja y pegados a la derecha del marco.
-      expect(cajas[0].y).toBeGreaterThan(textarea.y + textarea.height - 4);
-      expect(marco.x + marco.width - (cajas[4].x + cajas[4].width)).toBeLessThan(16);
-      expect(cajas[4].x - (cajas[3].x + cajas[3].width)).toBeGreaterThan(8);
+      const enviar = pill.getByRole('button', { name: 'Enviar mensaje' });
+      const env = (await enviar.boundingBox())!;
+      const cap = (await pill.boundingBox())!;
+      expect(mas.x).toBeLessThan(textarea.x);
+      expect(textarea.x + textarea.width).toBeLessThanOrEqual(env.x + 1);
+      expect(cap.x + cap.width - (env.x + env.width)).toBeLessThan(10);
+      expect(Math.abs(env.width - env.height)).toBeLessThan(1);
+      await expect(pill.getByRole('button', { name: 'Formato', exact: true })).toHaveCount(0);
+      await expect(pill.getByRole('button', { name: 'Adjuntar archivos' })).toHaveCount(0);
+      // Single line by default and fully rounded.
+      expect(cap.height).toBeLessThan(60);
+      expect(parseFloat(await pill.evaluate((el) => getComputedStyle(el).borderTopLeftRadius))).toBeGreaterThanOrEqual(24);
+      // Disabled look while empty.
+      await expect(enviar).toBeDisabled();
 
-      // Línea de acento abajo SOLO con el foco.
-      const acento = () => compositor.evaluate((el) => getComputedStyle(el, '::after').backgroundColor);
-      const sinFoco = await acento();
-      await caja(page).click();
-      await expect.poll(acento).not.toBe(sinFoco);
-      await capturar(page, `escritorio-${modo}-2-foco-acento`);
+      // Grows with the text up to 6 lines, then scrolls.
+      await caja(page).fill(Array.from({ length: 12 }, (_, i) => `renglón ${i + 1}`).join('\n'));
+      const alta = (await caja(page).boundingBox())!.height;
+      expect(alta).toBeGreaterThan(120);
+      expect(alta).toBeLessThan(24 * 6 + 30);
+      await expect(enviar).toBeEnabled();
+      await caja(page).fill('');
 
-      // La «A» despliega la barra de formato ARRIBA de la caja.
+      // «+» holds attach, emoji/stickers/GIF, format and the old extras.
+      await pill.getByRole('button', { name: 'Más opciones' }).click();
+      for (const n of ['Adjuntar archivos', 'Emojis, stickers y GIF', 'Formato', 'Código', 'Vista previa']) {
+        await expect(page.getByRole('menuitem', { name: n, exact: true })).toBeVisible();
+      }
+      await capturar(page, `escritorio-${modo}-2-mas-opciones`);
+      await page.keyboard.press('Escape');
+
+      // «Formato» unfolds the format bar ABOVE the pill.
       await caja(page).fill('informe listo');
       await caja(page).selectText();
-      await compositor.getByRole('button', { name: 'Formato', exact: true }).click();
-      const barra = compositor.getByRole('toolbar', { name: 'Formato del mensaje' });
+      await pill.getByRole('button', { name: 'Más opciones' }).click();
+      await page.getByRole('menuitem', { name: 'Formato', exact: true }).click();
+      const barra = page.getByRole('toolbar', { name: 'Formato del mensaje' });
       await expect(barra).toBeVisible();
-      expect((await barra.boundingBox())!.y).toBeLessThan((await caja(page).boundingBox())!.y);
+      expect((await barra.boundingBox())!.y).toBeLessThan((await pill.boundingBox())!.y);
       for (const n of ['Negrita', 'Cursiva', 'Tachado', 'Lista con viñetas', 'Lista numerada', 'Cita', 'Código', 'Enlace']) {
         await expect(barra.getByRole('button', { name: n, exact: true })).toBeVisible();
       }
+      await caja(page).selectText();
       await barra.getByRole('button', { name: 'Negrita', exact: true }).click();
       await expect(caja(page)).toHaveValue('**informe listo**');
-      await barra.getByRole('button', { name: 'Tachado', exact: true }).click();
-      await expect(caja(page)).toHaveValue('**~~informe listo~~**');
       await capturar(page, `escritorio-${modo}-3-barra-formato`);
 
-      // «+»: más acciones.
-      await compositor.getByRole('button', { name: 'Más opciones' }).click();
-      await expect(page.getByRole('menuitem', { name: 'Vista previa' })).toBeVisible();
-      await capturar(page, `escritorio-${modo}-4-mas-opciones`);
-      await page.keyboard.press('Escape');
-
-      // Panel de stickers desde su botón, con «Mis stickers» primero.
-      await compositor.getByRole('button', { name: 'Emojis, stickers y GIF' }).click();
+      // Emoji | Stickers | GIF from the «+» menu, «Mis stickers» first.
+      await abrirExpresiones(page);
       const panel = page.getByTestId('chat-expresiones');
       await expect(panel.getByRole('button', { name: 'Paquete Mis stickers' })).toBeVisible();
       await expect(panel.getByRole('button', { name: 'Agregar un sticker propio' })).toBeVisible();
-      await capturar(page, `escritorio-${modo}-5-panel-mis-stickers`);
+      await capturar(page, `escritorio-${modo}-4-panel-mis-stickers`);
     });
   });
 }
@@ -109,7 +120,7 @@ test.describe('Chat · «Mis stickers» · escritorio', () => {
     await page.goto('/process/chat?agent=horus');
     await expect(hilo(page).getByText('quedó en SharePoint')).toBeVisible();
 
-    await page.getByRole('button', { name: 'Emojis, stickers y GIF' }).click();
+    await abrirExpresiones(page);
     await page.getByTestId('chat-expresiones').getByRole('button', { name: 'Agregar un sticker propio' }).click();
     const ventana = page.getByTestId('chat-mis-stickers');
     await expect(ventana).toBeVisible();
@@ -143,7 +154,7 @@ test.describe('Chat · «Mis stickers» · escritorio', () => {
     await page.keyboard.press('Escape');
 
     // Enviarlo desde «Mis stickers».
-    await page.getByRole('button', { name: 'Emojis, stickers y GIF' }).click();
+    await abrirExpresiones(page);
     await page.getByTestId('chat-expresiones').getByRole('button', { name: 'Enviar sticker ¡Bravo, equipo!' }).click();
     expect(estado.mediaEnviada.at(-1)).toEqual({ kind: 'sticker', idSticker: 501 });
     await page.waitForTimeout(800);
@@ -154,7 +165,7 @@ test.describe('Chat · «Mis stickers» · escritorio', () => {
 
 for (const oscuro of [false, true]) {
   const modo = oscuro ? 'oscuro' : 'claro';
-  test.describe(`Chat · compositor estilo Teams · celular · ${modo}`, () => {
+  test.describe(`Chat · compositor en cápsula · celular · ${modo}`, () => {
     test.skip(!SECRET || REMOTO, 'Requiere NEXTAUTH_SECRET del servidor local (CI) para firmar la sesión de prueba.');
     test.use({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
 
@@ -162,20 +173,22 @@ for (const oscuro of [false, true]) {
       await sesion(context, baseURL!);
     });
 
-    test('íconos agrupados dentro de la caja: emoji y «+» con adjuntar y formato', async ({ page }) => {
+    test('la misma cápsula: «+» con adjuntar, emoji y formato; enviar redondo a la derecha', async ({ page }) => {
       await simularChat(page, { gif: true, oscuro, misStickers: true });
       await page.goto('/process/chat?agent=horus');
       await expect(hilo(page).getByText('quedó en SharePoint')).toBeVisible();
 
-      // Sin marco ni fila de escritorio: la cápsula de una fila.
-      await expect(page.locator('.chat-composer--marco')).toHaveCount(0);
-      await expect(page.getByRole('button', { name: 'Formato', exact: true })).toHaveCount(0);
-      await expect(page.getByRole('button', { name: 'Adjuntar archivos' })).toHaveCount(0);
-      await expect(page.getByRole('button', { name: 'Emojis, stickers y GIF' })).toBeVisible();
+      const pill = page.getByTestId('chat-composer-pill');
+      await expect(pill).toBeVisible();
+      const cap = (await pill.boundingBox())!;
+      // No horizontal overflow at 390 px.
+      expect(cap.x).toBeGreaterThanOrEqual(0);
+      expect(cap.x + cap.width).toBeLessThanOrEqual(390);
       await capturar(page, `celular-${modo}-1-compositor`);
 
-      await page.getByRole('button', { name: 'Más opciones' }).tap();
+      await pill.getByRole('button', { name: 'Más opciones' }).tap();
       await expect(page.getByRole('menuitem', { name: 'Adjuntar archivos' })).toBeVisible();
+      await expect(page.getByRole('menuitem', { name: 'Emojis, stickers y GIF' })).toBeVisible();
       await expect(page.getByRole('menuitem', { name: 'Formato' })).toBeVisible();
       await capturar(page, `celular-${modo}-2-mas-opciones`);
       await page.getByRole('menuitem', { name: 'Formato' }).tap();
@@ -186,9 +199,11 @@ for (const oscuro of [false, true]) {
       await expect(caja(page)).toHaveValue('_hola_');
       await capturar(page, `celular-${modo}-3-formato`);
 
-      await page.getByRole('button', { name: 'Emojis, stickers y GIF' }).tap();
+      await abrirExpresiones(page, { tocar: true });
       await expect(page.locator('.chat-expresiones-hoja')).toBeVisible();
       await expect(page.getByRole('button', { name: 'Paquete Mis stickers' })).toBeVisible();
+      // The «+» turns into «Volver al teclado» while the sheet is open.
+      await expect(pill.getByRole('button', { name: 'Volver al teclado' })).toBeVisible();
       await capturar(page, `celular-${modo}-4-hoja-mis-stickers`);
     });
   });
