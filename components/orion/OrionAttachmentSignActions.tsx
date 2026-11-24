@@ -17,6 +17,7 @@ import {
   getCurrentPendingSigner,
   isSignerCompleted,
   orderedSigners,
+  signerSlotProgress,
 } from '../../lib/orion/signerStatus';
 import type { OrionSignatureIntent, OrionSignatureState } from '../../lib/orion/types';
 import { useOrionSignatureApi } from './OrionSignatureContext';
@@ -134,6 +135,8 @@ export function useOrionAttachmentDerived(props: OrionAttachmentSignActionsProps
 
   const me = normalizeEmail(currentUserEmail);
   const currentUserCompleted = me ? allSlotsCompletedForEmail(state.signers, me) : false;
+  // Varias firmas de la misma persona en este PDF («firma 2 de 2»).
+  const mySlots = signerSlotProgress(state.signers, me);
   const pendingSigner = getCurrentPendingSigner(state.signers);
   const isMyTurn = Boolean(
     me && pendingSigner && normalizeEmail(pendingSigner.email) === me
@@ -310,6 +313,7 @@ export function useOrionAttachmentDerived(props: OrionAttachmentSignActionsProps
     turnName,
     displayStatus,
     currentUserCompleted,
+    mySlots,
     isTerminal,
     canManageAttachment,
     canEditDocument,
@@ -472,6 +476,16 @@ export default function OrionAttachmentSignActions(props: OrionAttachmentSignAct
         >
           Ver firmado
         </UnstyledButton>
+      ) : null}
+
+      {d.forSigning && d.mySlots.total > 1 ? (
+        <Text size='xs' c={d.currentUserCompleted ? 'teal' : 'orange'} fw={600} maw={220}>
+          {d.currentUserCompleted
+            ? `Usted firmó sus ${d.mySlots.total} firmas`
+            : d.canSignNow
+              ? `Firma ${d.mySlots.position || d.mySlots.done + 1} de ${d.mySlots.total} suyas en este documento`
+              : `Este documento tiene ${d.mySlots.total} firmas suyas (${d.mySlots.done} ${d.mySlots.done === 1 ? 'hecha' : 'hechas'})`}
+        </Text>
       ) : null}
     </Stack>
   );
