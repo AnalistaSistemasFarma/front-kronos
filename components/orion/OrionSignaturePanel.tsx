@@ -1211,7 +1211,10 @@ export default function OrionSignaturePanel({
               ...file,
               pdfUrl: liveOdUrl || file.pdfUrl,
             },
-            pdfBase64
+            // Documento nuevo: el servidor lee el PDF del adjunto por fileId (Graph). Antes se
+            // reenviaba el base64 que el navegador acababa de bajar (~12 MB con un PDF de 9 MB)
+            // y por el túnel de Cloudflare la subida se cortaba con 502.
+            fileState.orionDocumentId ? pdfBase64 : undefined
           ),
         ]);
         if (!hasRubric && filePerms.canDrawSignature) {
