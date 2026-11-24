@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { Alert, Badge, Button, Checkbox, Group, Menu, Modal, Progress, ScrollArea, Stack, Table, Text, Tooltip } from '@mantine/core';
 import { IconAlertCircle, IconCircleCheck, IconLoader2, IconRobot, IconSparkles } from '@tabler/icons-react';
 import toast from 'react-hot-toast';
-import { agentOrderInstruction, agentReplyJson, chunkOrderText, mergePdfOrders, PDF_ORDER_SCHEMA, PDF_ORDER_SYSTEM_PROMPT, parsePdfOrder, pdfOrderChunkPrompt, tableHeaderRow, type PdfOrderResult } from '../../../../lib/sales/pdfOrder';
+import { agentOrderInstruction, assembleAgentReply, chunkOrderText, isJsonAttachment, rawLineCount, mergePdfOrders, PDF_ORDER_SCHEMA, PDF_ORDER_SYSTEM_PROMPT, parsePdfOrder, pdfOrderChunkPrompt, tableHeaderRow, type PdfOrderResult } from '../../../../lib/sales/pdfOrder';
 
 /**
  * «Montar oferta desde PDF»: lee la orden de compra del cliente con la IA NATIVA del navegador (Prompt API,
@@ -20,6 +20,9 @@ type Phase = 'idle' | 'leyendo' | 'descargando' | 'analizando' | 'agente' | 'mon
 type ChatAgent = { idAgent: number; code: string; displayName: string; companies: { idCompany: number }[] };
 /** Espera máxima de la respuesta del agente. */
 const AGENT_TIMEOUT_MS = 6 * 60 * 1000;
+/** A long answer arrives split in several chat messages: wait this long for the missing parts before giving up. */
+const AGENT_PARTS_GRACE_MS = 45 * 1000;
+type ReplyMessage = { id: number; role: string; body: string; attachments?: { fileName: string; contentType: string | null; downloadUrl: string }[] };
 const money = (v: unknown) => (v == null || v === '' ? '—' : `$ ${Number(v).toLocaleString('es-CO')}`);
 
 export interface PdfOffer {
@@ -262,10 +265,13 @@ export default function SalesPdfImport({ companyId, companyName, cardCode, onLoa
       const start = Date.now();
       setLive({ sentAt: start, delivered: false, state: null, label: null, tasks: [] });
       let reply: string | null = null;
+      let incompleteSince: number | null = null;
+      let seenParts = 0;
+      const triedFiles = new Set<string>();
       while (Date.now() - start < AGENT_TIMEOUT_MS) {
         await new Promise((res) => setTimeout(res, 3000));
         const [g, st] = await Promise.all([
-          fetch(`/api/chat/conversations/${convId}/messages?limit=10`, { cache: 'no-store' }),
+          fetch(`/api/chat/conversations/${convId}/messages?limit=30`, { cache: 'no-store' }),
           fetch(`/api/chat/conversations/${convId}/status`, { cache: 'no-store' }).catch(() => null),
         ]);
         const gd = await g.json().catch(() => ({}));
@@ -278,18 +284,46 @@ export default function SalesPdfImport({ companyId, companyName, cardCode, onLoa
           label: sd.status?.label ?? null,
           tasks: Array.isArray(sd.status?.tasks) ? sd.status.tasks : [],
         });
-        const found = ((gd.messages ?? []) as { id: number; role: string; body: string }[])
-          .filter((x) => x.id > sentId && x.role !== 'user' && /\{[\s\S]*\}/.test(x.body ?? ''))
-          .sort((x, y) => x.id - y.id)[0];
-        if (found) {
-          reply = found.body;
+        // Agent messages after the request, in order. A long answer comes split in several messages (the
+        // channel cuts at 40,000 characters), so they are joined until the JSON parses.
+        const after = ((gd.messages ?? []) as ReplyMessage[]).filter((x) => x.id > sentId && x.role === 'agent').sort((x, y) => x.id - y.id);
+        // The agent may also send the JSON as an attached .json file.
+        for (const f of after.flatMap((x) => x.attachments ?? []).filter(isJsonAttachment)) {
+          if (triedFiles.has(f.downloadUrl)) continue;
+          triedFiles.add(f.downloadUrl);
+          const fr = await fetch(f.downloadUrl, { cache: 'no-store' }).catch(() => null);
+          const text = fr && fr.ok ? await fr.text().catch(() => '') : '';
+          const fromFile = assembleAgentReply([text]);
+          if (fromFile.status === 'ok') {
+            reply = fromFile.json;
+            break;
+          }
+        }
+        if (reply) break;
+        const assembled = assembleAgentReply(after.map((x) => x.body ?? ''));
+        if (assembled.status === 'ok') {
+          reply = assembled.json;
           break;
+        }
+        if (assembled.status === 'incomplete') {
+          // Restart the grace period every time a new part arrives.
+          if (assembled.parts !== seenParts) {
+            seenParts = assembled.parts;
+            incompleteSince = Date.now();
+          }
+          const idle = !sd.status?.state || sd.status.state === 'idle';
+          if (incompleteSince && idle && Date.now() - incompleteSince > AGENT_PARTS_GRACE_MS) {
+            throw new Error(`${a.displayName} respondió en ${assembled.parts === 1 ? 'un mensaje' : `${assembled.parts} mensajes`}, pero el JSON llegó incompleto (no se pudo leer). Revise la respuesta en el chat e intente de nuevo o use el cargue desde Excel.`);
+          }
         }
       }
       if (!reply) throw new Error(`${a.displayName} no respondió en ${AGENT_TIMEOUT_MS / 60000} minutos. Cuando responda, verá su lectura en el chat; puede intentarlo de nuevo.`);
       setLive(null);
-      const r = parsePdfOrder(agentReplyJson(reply));
-      await resolveAndSimulate(r, []);
+      const r = parsePdfOrder(reply);
+      const leidas = rawLineCount(reply);
+      const descartadas = leidas - r.lineas.length;
+      const avisos = descartadas > 0 ? [`${a.displayName} leyó ${leidas} líneas; ${descartadas} se descartaron por no tener cantidad válida o descripción/código.`] : [];
+      await resolveAndSimulate(r, avisos);
     } catch (e) {
       setLive(null);
       setError((e as Error).message);

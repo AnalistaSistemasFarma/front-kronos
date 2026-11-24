@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { authOptions } from '../../auth/[...nextauth]/route';
 import { salesEndpointForUser } from '../../../../lib/sales/access';
 import { salesCompanyConfig } from '../../../../lib/sales/companyConfig';
-import { MAX_IMPORT_LINES, type ImportLine } from '../../../../lib/sales/linesImport';
+import { MAX_PDF_LINES, type ImportLine } from '../../../../lib/sales/linesImport';
 import { validateLines } from '../../../../lib/sales/linesValidate';
 import { bestCandidate, nitBase } from '../../../../lib/sales/pdfOrder';
 import { sapGet, sapLogin, sapLogout, SapError } from '../../../../lib/sap/serviceLayer';
@@ -24,7 +24,10 @@ export async function POST(request: NextRequest) {
     if (!session?.user?.email) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     const body = await request.json().catch(() => ({}));
     const companyId = Number(body.companyId);
-    const input = (Array.isArray(body.lines) ? body.lines : []).slice(0, MAX_IMPORT_LINES) as ImportLine[];
+    const received = Array.isArray(body.lines) ? body.lines.length : 0;
+    const input = (Array.isArray(body.lines) ? body.lines : []).slice(0, MAX_PDF_LINES) as ImportLine[];
+    // Never drop lines silently: the user is told how many were left out.
+    const avisoTope = received > MAX_PDF_LINES ? [`La orden trae ${received} líneas; se montan las primeras ${MAX_PDF_LINES}. Agregue las demás a mano o en otra oferta.`] : [];
     if (!companyId || !input.length) return NextResponse.json({ error: 'Faltan datos de la orden de compra.' }, { status: 400 });
     const access = await salesEndpointForUser(session.user.email, companyId, 'write');
     if (!access?.endpoint) return NextResponse.json({ error: 'Sin permiso para crear ofertas en esta empresa.' }, { status: 403 });
@@ -64,7 +67,7 @@ export async function POST(request: NextRequest) {
         cardCode: customer.CardCode, input, matchByDescription: true,
         priceListDefault: conf?.priceListDefault ?? null, defaultWarehouse: conf?.defaultWarehouse ?? null,
       });
-      const avisos: string[] = v.errors.map((e) => e.error);
+      const avisos: string[] = [...avisoTope, ...v.errors.map((e) => e.error)];
       const lines: Record<string, unknown>[] = v.lines.map((l) => ({ ...l, aiNote: null as string | null }));
       const elegidos: (ImportLine & { aiNote: string })[] = [];
       for (const p of v.pending) {
