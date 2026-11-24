@@ -71,6 +71,8 @@ export interface ChatMessagePayload {
   reactions?: ChatReactionDto[];
   /** GIF o sticker (2026-10-20). Solo viaja en esos mensajes. */
   media?: ChatMediaDto;
+  /** The agent sent it on its own (chat_agent_initiated_message, 2026-11-24). Only travels when true. */
+  agentInitiated?: boolean;
 }
 
 /**

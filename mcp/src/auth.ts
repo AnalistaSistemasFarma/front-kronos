@@ -100,8 +100,19 @@ function safeEqualHash(a: string, b: string): boolean {
  * la base sin código se descartan aunque estén marcadas (SynerLink ya lo valida al guardar).
  */
 export function toolRequiresAgentCode(name: string): boolean {
-  return name === 'kronos_request_ia_access' || /^correo_/.test(name) || /^proyectos?_/.test(name);
+  return (
+    name === 'kronos_request_ia_access' ||
+    name === 'chat_enviar_mensaje_usuario' ||
+    /^correo_/.test(name) ||
+    /^proyectos?_/.test(name)
+  );
 }
+
+/**
+ * Tools that only a key from the FILE (MCP_API_KEYS) can enable, never a database key (2026-11-24:
+ * the agent-initiated chat message is not in the api_permission catalog yet).
+ */
+export const FILE_KEY_ONLY_TOOLS: ReadonlySet<string> = new Set(['chat_enviar_mensaje_usuario']);
 
 /** Alcance de una llave de la base (Permisos API). */
 export function scopeFromDbEntry(entry: DbApiKeyEntry): AuthScope {
@@ -111,9 +122,10 @@ export function scopeFromDbEntry(entry: DbApiKeyEntry): AuthScope {
     allCompanies: entry.allCompanies,
     companyIds: entry.allCompanies ? [] : [...entry.companyIds],
     // SIEMPRE lista blanca (aunque esté vacía): una llave de la base nunca es «sin restricción».
-    allowedTools: entry.agentCode
+    allowedTools: (entry.agentCode
       ? [...entry.allowedTools]
-      : entry.allowedTools.filter((t) => !toolRequiresAgentCode(t)),
+      : entry.allowedTools.filter((t) => !toolRequiresAgentCode(t))
+    ).filter((t) => !FILE_KEY_ONLY_TOOLS.has(t)),
     ...(entry.agentCode ? { agentCode: entry.agentCode } : {}),
   };
 }

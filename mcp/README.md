@@ -375,3 +375,24 @@ sin lista blanca (horus, nancy) **no** las ven.
   igual que `POST /api/users`), devuelta una sola vez y nunca auditada.
 - **Orden de despliegue:** primero el código y después la llave. Un servidor anterior no conoce estas
   herramientas y, con ellas en `allowedTools`, **no arranca**.
+
+## Agent-initiated message: `chat_enviar_mensaje_usuario` (2026-11-24)
+
+Approved by Nicolás Rivera (SynerLink conv 1, msgs 38807–38809). Lets an agent post a message **as itself**
+in a person's direct chat with that agent (e.g. Paco telling Mauricio Duque he now has SAP).
+
+- **Off by default.** Registered only for a FILE key (`MCP_API_KEYS`) that lists it in `allowedTools` and has
+  `agentCode`. Keys without `allowedTools` never get it; database keys (Permisos API) never get it for now.
+- Params: `destinatario` (email or user id), `texto` (Markdown, max 4000), `motivo` (5–300, audit).
+- Checks: active recipient with the agent's permission subprocess in a company of `agent_company` inside the
+  key scope, plus the chat module (`/process/chat`); limits per agent (`MCP_AGENT_MESSAGE_DAILY_LIMIT`, default 20)
+  and per agent+recipient (`MCP_AGENT_MESSAGE_RECIPIENT_DAILY_LIMIT`, default 5), rolling 24 h, serialized
+  with `sp_getapplock`.
+- Writes (one transaction): reuses the open direct conversation or creates it like the app; the `agent` message
+  (unread); `chat_agent_initiated_message` (audit: key, recipient, reason, message id).
+- Push: `POST <CHAT_MCP_APP_URL>/api/chat/agent/initiated-notify` with header `x-chat-mcp-secret:
+  <CHAT_MCP_NOTIFY_SECRET>` (≥ 32 chars; `serve.mjs` also reads `CHAT_MCP_*` from the front `.env`). The app
+  reuses `notifyAgentReply()`. Without config the message is still delivered (`notificacion_push: sin_configurar`).
+- Context: when the person replies, the agent inbox prepends the agent-initiated message(s) to the reply body
+  (`lib/chat/agent-initiated.ts`), so no bridge needs changes.
+- DDL: `prisma/manual/2026-11-24-chat-mensaje-iniciado-agente-{PRUEBAS,PROD,reversa}.sql`.

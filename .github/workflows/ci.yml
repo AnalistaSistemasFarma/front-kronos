@@ -667,6 +667,26 @@ jobs:
           echo "IF OBJECT_ID(N'dbo.chat_project_meeting', N'U') IS NULL OR OBJECT_ID(N'dbo.chat_project_meeting_rule', N'U') IS NULL OR OBJECT_ID(N'dbo.chat_project_meeting_analysis', N'U') IS NULL OR NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'chat_project_meeting_ical_uid' AND is_unique = 1) OR NOT EXISTS (SELECT 1 FROM sys.foreign_keys WHERE name = N'chat_project_meeting_analysis_id_project_meeting_fkey') OR NOT EXISTS (SELECT 1 FROM sys.check_constraints WHERE name = N'chat_project_event_via_ck' AND definition LIKE N'%reunion%') THROW 50000, N'Project meetings did not leave its tables, the unique iCalUId, the analysis FK or the audit entity reunion.', 1;" > /tmp/project-meetings-ok.sql
           npx prisma db execute --schema prisma/schema.prisma --file /tmp/project-meetings-ok.sql
           if npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-11-24-proyectos-reuniones-PROD.sql; then echo "The PROD project meetings script should have refused on kronos_ci"; exit 1; fi
+          # Agent-initiated chat messages (msgs 38807-38809, 2026-11-24): migration and PRUEBAS twice, reversal twice, PRUEBAS again (idempotent round trip), a row makes the reversal refuse without its flag, table + FK + indexes, and PROD refusing.
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261124180000_chat_agent_initiated_message/migration.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261124180000_chat_agent_initiated_message/migration.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-11-24-chat-mensaje-iniciado-agente-PRUEBAS.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-11-24-chat-mensaje-iniciado-agente-PRUEBAS.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-11-24-chat-mensaje-iniciado-agente-reversa.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-11-24-chat-mensaje-iniciado-agente-reversa.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-11-24-chat-mensaje-iniciado-agente-PRUEBAS.sql
+          echo "IF OBJECT_ID(N'dbo.chat_agent_initiated_message', N'U') IS NULL OR NOT EXISTS (SELECT 1 FROM sys.foreign_keys WHERE name = N'chat_agent_initiated_message_id_message_fkey') OR (SELECT COUNT(*) FROM sys.indexes WHERE name IN (N'chat_agent_initiated_message_agent_idx', N'chat_agent_initiated_message_user_idx', N'chat_agent_initiated_message_conversation_idx')) <> 3 THROW 50000, N'Agent-initiated messages did not leave its table, FK or indexes.', 1;" > /tmp/agent-initiated-ok.sql
+          npx prisma db execute --schema prisma/schema.prisma --file /tmp/agent-initiated-ok.sql
+          if npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-11-24-chat-mensaje-iniciado-agente-PROD.sql; then echo "The PROD agent-initiated message script should have refused on kronos_ci"; exit 1; fi
+          echo "IF EXISTS (SELECT 1 FROM dbo.chat_message) INSERT INTO dbo.chat_agent_initiated_message (id_message, id_conversation, id_agent, id_user, reason, requested_by) SELECT TOP (1) id, id_conversation, 0, N'ci', N'ci', N'key:ci' FROM dbo.chat_message WHERE id NOT IN (SELECT id_message FROM dbo.chat_agent_initiated_message);" > /tmp/agent-initiated-dato.sql
+          npx prisma db execute --schema prisma/schema.prisma --file /tmp/agent-initiated-dato.sql
+          if npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-11-24-chat-mensaje-iniciado-agente-reversa.sql; then
+            echo "IF EXISTS (SELECT 1 FROM dbo.chat_message) THROW 50000, N'The agent-initiated message reversal should have refused without its flag.', 1;" > /tmp/agent-initiated-nego.sql
+            npx prisma db execute --schema prisma/schema.prisma --file /tmp/agent-initiated-nego.sql
+            npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-11-24-chat-mensaje-iniciado-agente-PRUEBAS.sql
+          fi
+          echo "DELETE FROM dbo.chat_agent_initiated_message WHERE requested_by = N'key:ci';" > /tmp/agent-initiated-limpia.sql
+          npx prisma db execute --schema prisma/schema.prisma --file /tmp/agent-initiated-limpia.sql
           # Errores de IA (Auditoría de agentes, 2026-11-03): PRUEBAS dos veces, reversa y otra vez PRUEBAS (idempotencia ida y vuelta) y PROD que se niega. La lógica se prueba en tests/integration/auditoria.
           npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-11-03-errores-ia-PRUEBAS.sql
           npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-11-03-errores-ia-PRUEBAS.sql

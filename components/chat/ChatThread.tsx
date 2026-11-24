@@ -72,6 +72,7 @@ import { ReenviarModal } from './CompartirAdjunto';
 import { avisoMensajeReenviado } from '../../lib/chat/reenviar-mensaje-rules';
 import type { MediaParaEnviar } from './useChatConversation';
 import StickerAnimado from './StickerAnimado';
+import { AGENT_INITIATED_BADGE } from '../../lib/chat/agent-initiated-rules';
 
 /**
  * GIF o STICKER de un mensaje (2026-10-20). La imagen sale SIEMPRE de la
@@ -455,6 +456,13 @@ const MessageBubble = memo(function MessageBubble({
         {!isUser && (
           <Text size='xs' fw={600} className='chat-bubble__author'>
             {nombreAutor}
+          </Text>
+        )}
+
+        {/* The agent wrote this on its own, not as a reply (2026-11-24). */}
+        {!isUser && message.agentInitiated && (
+          <Text size='xs' className='chat-bubble__iniciado'>
+            {AGENT_INITIATED_BADGE}
           </Text>
         )}
 
