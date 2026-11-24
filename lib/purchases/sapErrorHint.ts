@@ -20,6 +20,12 @@ export function sapErrorHint(message: string): string | null {
   if (noRate) {
     return 'No hay TRM (tipo de cambio) cargada en SAP para esta fecha. Pida a Contabilidad que la cargue y vuelva a intentarlo.';
   }
+  if (m.includes('not a vendor')) {
+    return 'El socio de negocio de alguna línea no es proveedor en SAP. Cambie la línea por un proveedor.';
+  }
+  if (m.includes('item number is missing')) {
+    return 'Algún código de artículo no existe en SAP de esta compañía. Revise los artículos de las líneas.';
+  }
   return null;
 }
 

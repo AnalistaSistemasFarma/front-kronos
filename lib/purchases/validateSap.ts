@@ -14,26 +14,35 @@ import { odataString, type DraftLine, type ValidationError } from './drafts';
  *  - Consulta cada codigo distinto una sola vez, no una vez por linea.
  *  - Un error de SAP distinto de "no existe" se propaga (SAPSEND lo tomaba como
  *    "no existe" y mostraba un mensaje enganoso).
+ *  - Tambien valida el articulo (ItemCode) y que el socio de la linea
+ *    (LineVendor) sea proveedor. SAP solo lo rechaza al guardar ("Item number
+ *    is missing") o al publicar en firme ("The selected BP is not a vendor"),
+ *    con mensajes que no dicen que linea ni que codigo fallo.
  *  - Norma de reparto: DistributionRulesService_GetDistributionRuleList IGNORA
  *    $filter y $top (verificado en Farmalogica el 2026-10-21: con un FactorCode
  *    inexistente devuelve la lista completa). En SAPSEND esa validacion nunca
  *    fallaba. Aqui se trae la lista una vez y se verifica la pertenencia.
  */
 
-type Kind = 'AccountCode' | 'CostingCode' | 'TaxCode';
+type Kind = 'ItemCode' | 'LineVendor' | 'AccountCode' | 'CostingCode' | 'TaxCode';
 type QueryKind = Exclude<Kind, 'CostingCode'>;
 
 const QUERIES: Record<QueryKind, (code: string) => string> = {
+  ItemCode: (c) => `Items?$top=1&$select=ItemCode&$filter=ItemCode eq ${odataString(c)}`,
+  LineVendor: (c) =>
+    `BusinessPartners?$top=1&$select=CardCode&$filter=CardCode eq ${odataString(c)} and CardType eq 'cSupplier'`,
   AccountCode: (c) => `ChartOfAccounts?$top=1&$select=Code&$filter=Code eq ${odataString(c)}`,
   TaxCode: (c) => `SalesTaxCodes?$top=1&$select=Code&$filter=Code eq ${odataString(c)}`,
 };
 
 const DISTRIBUTION_RULES_PATH = 'DistributionRulesService_GetDistributionRuleList';
 
-const MESSAGES: Record<Kind, string> = {
-  AccountCode: 'La cuenta no existe en SAP. Seleccione un valor valido de la lista.',
-  CostingCode: 'La norma de reparto no existe en SAP. Seleccione un valor valido de la lista.',
-  TaxCode: 'El indicador de IVA no existe en SAP. Seleccione un valor valido de la lista.',
+const MESSAGES: Record<Kind, (code: string) => string> = {
+  ItemCode: (c) => `El artículo ${c} no existe en SAP de esta compañía. Verifique el código.`,
+  LineVendor: (c) => `El socio de negocio ${c} no existe en SAP o no es proveedor. Elija un proveedor.`,
+  AccountCode: () => 'La cuenta no existe en SAP. Seleccione un valor valido de la lista.',
+  CostingCode: () => 'La norma de reparto no existe en SAP. Seleccione un valor valido de la lista.',
+  TaxCode: () => 'El indicador de IVA no existe en SAP. Seleccione un valor valido de la lista.',
 };
 
 /** Accesos a SAP que usa la validacion. Inyectables para tests. */
@@ -69,7 +78,7 @@ export function sapLookups(sap: SapSession): SapLookups {
  */
 export async function validateLinesInSap(lines: DraftLine[], sap: SapLookups): Promise<ValidationError[]> {
   const queryKinds = Object.keys(QUERIES) as QueryKind[];
-  const kinds: Kind[] = ['AccountCode', 'CostingCode', 'TaxCode'];
+  const kinds: Kind[] = ['ItemCode', 'LineVendor', 'AccountCode', 'CostingCode', 'TaxCode'];
   const key = (kind: Kind, code: string) => `${kind}|${code}`;
   const codeOf = (line: DraftLine, kind: Kind) => String(line[kind] ?? '').trim();
 
@@ -103,7 +112,7 @@ export async function validateLinesInSap(lines: DraftLine[], sap: SapLookups): P
     for (const kind of kinds) {
       const code = codeOf(line, kind);
       if (code && results.get(key(kind, code)) === false) {
-        errors.push({ field: `DocumentLines[${i}].${kind}`, error: MESSAGES[kind] });
+        errors.push({ field: `DocumentLines[${i}].${kind}`, error: MESSAGES[kind](code) });
       }
     }
   });
