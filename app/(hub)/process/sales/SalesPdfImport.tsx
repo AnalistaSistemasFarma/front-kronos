@@ -18,8 +18,10 @@ type Line = Record<string, unknown>;
 type Support = 'checking' | 'unsupported' | 'ready';
 type Phase = 'idle' | 'leyendo' | 'descargando' | 'analizando' | 'agente' | 'montando' | 'simulacion' | 'error';
 type ChatAgent = { idAgent: number; code: string; displayName: string; companies: { idCompany: number }[] };
-/** Espera máxima de la respuesta del agente. */
-const AGENT_TIMEOUT_MS = 6 * 60 * 1000;
+/** Espera máxima de la respuesta del agente: si está ocupado en otra conversación hace fila, así que no se falla pronto. */
+const AGENT_TIMEOUT_MS = 30 * 60 * 1000;
+/** Desde aquí, si el agente no está trabajando en la OC, se avisa que parece ocupado y que se puede cerrar la ventana. */
+const AGENT_BUSY_HINT_MS = 2 * 60 * 1000;
 /** A long answer arrives split in several chat messages: wait this long for the missing parts before giving up. */
 const AGENT_PARTS_GRACE_MS = 45 * 1000;
 type ReplyMessage = { id: number; role: string; body: string; attachments?: { fileName: string; contentType: string | null; downloadUrl: string }[] };
@@ -105,6 +107,8 @@ export default function SalesPdfImport({ companyId, companyName, cardCode, onLoa
   /** Estado en vivo del agente mientras lee la OC (el mismo indicador del chat: «Pensando…», «Leyendo el adjunto…»). */
   const [live, setLive] = useState<{ sentAt: number; delivered: boolean; state: string | null; label: string | null; tasks: { desc: string }[] } | null>(null);
   const [now, setNow] = useState(Date.now());
+  /** Ventana cerrada mientras el agente trabaja: la espera sigue y al responder se abre la simulación. */
+  const [minimized, setMinimized] = useState(false);
   useEffect(() => {
     if (!live) return;
     const t = setInterval(() => setNow(Date.now()), 1000);
@@ -319,6 +323,7 @@ export default function SalesPdfImport({ companyId, companyName, cardCode, onLoa
       }
       if (!reply) throw new Error(`${a.displayName} no respondió en ${AGENT_TIMEOUT_MS / 60000} minutos. Cuando responda, verá su lectura en el chat; puede intentarlo de nuevo.`);
       setLive(null);
+      setMinimized(false);
       const r = parsePdfOrder(reply);
       const leidas = rawLineCount(reply);
       const descartadas = leidas - r.lineas.length;
@@ -356,6 +361,11 @@ export default function SalesPdfImport({ companyId, companyName, cardCode, onLoa
           Montar oferta desde PDF
         </Button>
       </Tooltip>
+      {phase === 'agente' && minimized && (
+        <Button variant="subtle" color="indigo" size="xs" leftSection={<IconLoader2 size={14} className="animate-spin" />} onClick={() => setMinimized(false)}>
+          {agent?.displayName} leyendo la OC…
+        </Button>
+      )}
       <input id={inputId} type="file" accept="application/pdf" hidden onChange={(e) => { analyze(e.currentTarget.files?.[0] ?? null); e.currentTarget.value = ''; }} />
       {agents.length > 0 && (
         <>
@@ -384,8 +394,8 @@ export default function SalesPdfImport({ companyId, companyName, cardCode, onLoa
         </>
       )}
 
-      <Modal opened={phase !== 'idle'} onClose={() => !working && setPhase('idle')} size={phase === 'simulacion' ? 'xl' : 'md'} title={<Group gap={6}><IconSparkles size={18} /><Text fw={700}>{agent && (phase === 'agente' || conversationId) ? `Oferta desde el PDF (con ${agent.displayName})` : 'Oferta desde el PDF (IA local)'}</Text></Group>}
-        closeOnClickOutside={!working} withCloseButton={!working} zIndex={1300}>
+      <Modal opened={phase !== 'idle' && !(phase === 'agente' && minimized)} onClose={() => (phase === 'agente' ? setMinimized(true) : !working && setPhase('idle'))} size={phase === 'simulacion' ? 'xl' : 'md'} title={<Group gap={6}><IconSparkles size={18} /><Text fw={700}>{agent && (phase === 'agente' || conversationId) ? `Oferta desde el PDF (con ${agent.displayName})` : 'Oferta desde el PDF (IA local)'}</Text></Group>}
+        closeOnClickOutside={!working || phase === 'agente'} withCloseButton={!working || phase === 'agente'} zIndex={1300}>
         {phase === 'agente' && live && (
           <Stack gap={6} mb="sm">
             {(() => {
@@ -408,7 +418,12 @@ export default function SalesPdfImport({ companyId, companyName, cardCode, onLoa
                       {live.tasks.slice(0, 4).map((tk, i) => <Text key={i} size="xs" c="dimmed">• {tk.desc}</Text>)}
                     </Stack>
                   )}
-                  <Text size="xs" c="dimmed">Tiempo: {t} · máximo {AGENT_TIMEOUT_MS / 60000} min</Text>
+                  <Text size="xs" c="dimmed">Tiempo: {t}</Text>
+                  {now - live.sentAt > AGENT_BUSY_HINT_MS && !(live.state === 'thinking' || live.state === 'tool') && (
+                    <Alert color="blue" variant="light" p="xs">
+                      {agent?.displayName ?? 'El agente'} parece ocupado en otra conversación: atiende la OC cuando termine. Puede cerrar esta ventana y seguir; cuando responda, se abre la simulación.
+                    </Alert>
+                  )}
                 </>
               );
             })()}
