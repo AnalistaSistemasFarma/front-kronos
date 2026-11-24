@@ -188,10 +188,13 @@ async function searchSapOptions(companyId: number, q: string): Promise<PartnerOp
   }
 }
 
-/** El usuario de la sesión (activo) pertenece a la empresa (`company_user`). */
+/**
+ * El usuario de la sesión (activo, no proveedor) pertenece a la empresa (`company_user`).
+ * Los usuarios del portal de proveedores no asignan firmantes ni deben listar socios SAP.
+ */
 async function userBelongsToCompany(email: string, companyId: number): Promise<boolean> {
   const count = await prisma.companyUser.count({
-    where: { id_company: companyId, user: { email, isActive: true } },
+    where: { id_company: companyId, user: { email, isActive: true, NOT: { role: 'supplier' } } },
   });
   return count > 0;
 }

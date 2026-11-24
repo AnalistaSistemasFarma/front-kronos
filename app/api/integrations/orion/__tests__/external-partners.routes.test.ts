@@ -72,7 +72,7 @@ describe('GET /api/integrations/orion/external-partners', () => {
     const res = await get('companyId=99&q=acme');
     expect(res.status).toBe(403);
     expect(companyUserCount).toHaveBeenCalledWith({
-      where: { id_company: 99, user: { email: EMAIL, isActive: true } },
+      where: { id_company: 99, user: { email: EMAIL, isActive: true, NOT: { role: 'supplier' } } },
     });
     expect(sapEndpointsFindMany).not.toHaveBeenCalled();
     expect(sapLogin).not.toHaveBeenCalled();
@@ -84,10 +84,20 @@ describe('GET /api/integrations/orion/external-partners', () => {
     const res = await get('companyId=7&q=acme');
     expect(res.status).toBe(200);
     expect(companyUserCount).toHaveBeenCalledWith({
-      where: { id_company: 7, user: { email: EMAIL, isActive: true } },
+      where: { id_company: 7, user: { email: EMAIL, isActive: true, NOT: { role: 'supplier' } } },
     });
     expect(sapEndpointsFindMany).toHaveBeenCalledWith({ where: { id_company: 7 } });
     const body = await res.json();
     expect(body.options).toEqual([]);
+  });
+
+  it('usuario proveedor (rol supplier) de la empresa recibe 403: el conteo lo excluye', async () => {
+    // Prisma aplica NOT role 'supplier' en el where; simulamos que no queda ninguna fila.
+    companyUserCount.mockResolvedValue(0);
+    const res = await get('companyId=7&q=acme');
+    expect(res.status).toBe(403);
+    const where = companyUserCount.mock.calls[0]![0].where;
+    expect(where.user.NOT).toEqual({ role: 'supplier' });
+    expect(sapLogin).not.toHaveBeenCalled();
   });
 });
