@@ -15,6 +15,7 @@ vi.mock('../../chat/agent-auth', () => ({
 vi.mock('../../chat/projects', () => ({ mencionablesParaAgente: vi.fn().mockResolvedValue([]) }));
 vi.mock('../../chat/notifyAgentReply', () => ({ notifyAgentReply: notify }));
 vi.mock('../mesas', () => ({ alPublicarAgenteEnMesa: vi.fn().mockResolvedValue({ esMesa: false, esSintesis: false }) }));
+vi.mock('../../meetings/projects/analysis', () => ({ onAgentPublishedAnalysis: vi.fn().mockResolvedValue({ handled: false }) }));
 vi.mock('../../chat/conversations', () => ({ messageInclude: {}, serializeMessage: (x: unknown) => x }));
 vi.mock('../../prisma', () => {
   const tx = {

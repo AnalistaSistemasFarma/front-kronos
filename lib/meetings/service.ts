@@ -1,5 +1,6 @@
 import 'server-only';
 import { meetingsCredentialsFor, type MeetingsCredentials } from './config';
+import { fixtureAttendance, fixtureEvent, fixtureEvents, fixtureTranscript, meetingsFixtureEnabledFor } from './fixture';
 import {
   MeetingsGraphError,
   attendanceReports,
@@ -72,12 +73,8 @@ interface Window {
 
 /** Real meetings that already started in [from, to), newest first. */
 async function loadWindow(email: string, fromMs: number, toMs: number): Promise<Window> {
-  const events: GraphMeetingEvent[] = await calendarView(
-    credentials(email),
-    email,
-    new Date(fromMs).toISOString(),
-    new Date(toMs).toISOString()
-  );
+  const events: GraphMeetingEvent[] = await readCalendar(email, fromMs, toMs);
+  rememberEvents(email, events);
   const joinUrls = new Map<string, string>();
   const meetings: Meeting[] = [];
   const now = Date.now();
@@ -152,6 +149,95 @@ async function joinUrlFor(email: string, cred: MeetingsCredentials, eventId: str
   return { joinUrl: event.onlineMeeting?.joinUrl ?? null, meeting: normalizeMeeting(event, email) };
 }
 
+/* ─────────────── Raw events (server only) and the QA fixture (2026-11-24) ─────────────── */
+
+/** calendarView of the mailbox, or the QA fixture for the e-mails in REUNIONES_FIXTURE_USUARIOS. */
+async function readCalendar(email: string, fromMs: number, toMs: number): Promise<GraphMeetingEvent[]> {
+  if (meetingsFixtureEnabledFor(email)) return fixtureEvents(email, fromMs, toMs);
+  return calendarView(credentials(email), email, new Date(fromMs).toISOString(), new Date(toMs).toISOString());
+}
+
+/** One event of the mailbox (404 when it is not there). Always the mailbox passed in, never the browser's. */
+export async function readEvent(email: string, eventId: string): Promise<GraphMeetingEvent> {
+  if (meetingsFixtureEnabledFor(email)) {
+    const e = fixtureEvent(email, eventId);
+    if (!e) throw new MeetingsGraphError('No se pudo leer la reunión: Microsoft 365 respondió 404.', 404);
+    return e;
+  }
+  return getEvent(credentials(email), email, eventId);
+}
+
+/**
+ * Raw Graph events by id, per person, as last read (attendee e-mails, series id, sensitivity…).
+ * SERVER ONLY: used to link meetings to projects and to suggest a project; never sent to the browser.
+ */
+const rawEventCache = new Map<string, { map: Map<string, GraphMeetingEvent>; expires: number }>();
+
+function rememberEvents(email: string, events: GraphMeetingEvent[]): void {
+  const key = email.toLowerCase();
+  const prev = rawEventCache.get(key);
+  const map = prev && prev.expires > Date.now() ? prev.map : new Map<string, GraphMeetingEvent>();
+  for (const e of events) map.set(e.id, e);
+  if (rawEventCache.size > 500) rawEventCache.clear();
+  rawEventCache.set(key, { map, expires: Date.now() + ACTUALS_TTL_MS });
+}
+
+/** Meetings of the period with their raw event (server side). */
+export async function meetingsWithEvents(
+  email: string,
+  days: number
+): Promise<{ meeting: Meeting; event: GraphMeetingEvent | null }[]> {
+  const overview = await meetingsOverview(email, days);
+  const raw = rawEventCache.get(email.toLowerCase())?.map;
+  return overview.meetings.map((meeting) => ({ meeting, event: raw?.get(meeting.id) ?? null }));
+}
+
+/**
+ * The occurrence with this iCalUId in the calendar of `email` (± 3 h around the slot), or null when the
+ * person was not invited. This is how SynerLink knows someone ATTENDED a project meeting: the meeting is
+ * in their own calendar.
+ */
+export async function findOwnOccurrence(
+  email: string,
+  icalUid: string,
+  startIso: string,
+  endIso: string
+): Promise<GraphMeetingEvent | null> {
+  const key = `own:${email.toLowerCase()}:${icalUid}`;
+  return cached(key, LIST_TTL_MS, async () => {
+    const margin = 3 * 60 * 60 * 1000;
+    const events = await readCalendar(email, Date.parse(startIso) - margin, Date.parse(endIso) + margin);
+    return events.find((e) => (e.iCalUId ?? '').trim() === icalUid && !e.isCancelled) ?? null;
+  });
+}
+
+/** Real start/duration and transcript availability of ONE occurrence of the mailbox (best effort). */
+export async function occurrenceActuals(email: string, event: GraphMeetingEvent): Promise<MeetingAnalysisRow> {
+  const m = normalizeMeeting(event, email);
+  const empty = actualsFromReports([], m);
+  if (meetingsFixtureEnabledFor(email)) {
+    return { id: m.id, ...actualsFromReports(fixtureAttendance(event.id), m), hasTranscript: fixtureTranscript(event.id) !== null, available: true };
+  }
+  const joinUrl = event.onlineMeeting?.joinUrl;
+  if (!joinUrl) return { id: m.id, ...empty, hasTranscript: false, available: false };
+  try {
+    const cred = credentials(email);
+    const userId = await userObjectId(cred, email);
+    const meetingId = await onlineMeetingId(cred, userId, joinUrl);
+    if (!meetingId) return { id: m.id, ...empty, hasTranscript: false, available: false };
+    const [reports, transcripts] = await Promise.all([attendanceReports(cred, userId, meetingId), listTranscripts(cred, userId, meetingId)]);
+    return {
+      id: m.id,
+      ...actualsFromReports(reports, m),
+      hasTranscript: transcripts.some((t) => belongsToOccurrence(t.createdDateTime ?? t.endDateTime, m)),
+      available: true,
+    };
+  } catch (err) {
+    console.error('[meetings] occurrence actuals:', err instanceof Error ? err.message : err);
+    return { id: m.id, ...empty, hasTranscript: false, available: false };
+  }
+}
+
 async function mapLimited<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
   const out: R[] = new Array(items.length);
   let next = 0;
@@ -187,6 +273,15 @@ export async function meetingsAnalysis(email: string, days: number): Promise<Mee
     const urls = joinUrlCache.get(email.toLowerCase())?.map ?? new Map<string, string>();
     const online = overview.meetings.filter((m) => m.online && urls.has(m.id));
     const target = online.slice(0, MAX_ANALYZED);
+    if (meetingsFixtureEnabledFor(email)) {
+      const rows = target.map((m): MeetingAnalysisRow => ({
+        id: m.id,
+        ...actualsFromReports(fixtureAttendance(m.id), m),
+        hasTranscript: fixtureTranscript(m.id) !== null,
+        available: true,
+      }));
+      return { days, rows, summary: summarizeActuals(rows), truncated: online.length > target.length };
+    }
     const cred = credentials(email);
     const userId = await userObjectId(cred, email);
     const rows = await mapLimited(target, CONCURRENCY, async (m): Promise<MeetingAnalysisRow> => {
@@ -228,6 +323,12 @@ export interface MeetingTranscript {
 
 /** Transcript of one meeting of the SESSION user (occurrence-aware for recurring meetings). */
 export async function meetingTranscript(email: string, eventId: string): Promise<MeetingTranscript> {
+  if (meetingsFixtureEnabledFor(email)) {
+    const meeting = normalizeMeeting(await readEvent(email, eventId), email);
+    const vtt = fixtureTranscript(eventId);
+    if (!vtt) return { meeting, available: false, reason: 'La reunión no se transcribió.', lines: [] };
+    return { meeting, available: true, createdAt: meeting.end, lines: parseTranscript(vtt) };
+  }
   const cred = credentials(email);
   const { joinUrl, meeting } = await joinUrlFor(email, cred, eventId);
   if (!joinUrl) return { meeting, available: false, reason: 'La reunión no es de Teams.', lines: [] };

@@ -31,4 +31,31 @@ Módulo del proyecto «Mejoras Reuniones - Teams» (2026-11-23). Muestra a la pe
 
 Para leer las reuniones en línea, las transcripciones y la asistencia de una persona, la política de acceso de aplicación de Teams (`Grant-CsApplicationAccessPolicy`) debe incluirla. Está confirmada para Nicolás Rivera. Si a otra persona no la cubre, el calendario sí se ve, pero la puntualidad y las transcripciones quedan «—» hasta que Tecnología se la asigne.
 
+| `REUNIONES_FIXTURE_USUARIOS` | **Solo pruebas.** Correos (p. ej. `qa.sgc@gsslatam.com`) que ven un calendario FICTICIO generado en `lib/meetings/fixture.ts` (serie semanal «Seguimiento semanal SGC», reuniones sueltas, una privada, asistencia y transcripciones) en vez de Microsoft Graph. Sirve para probar de punta a punta con usuarios QA, que no tienen buzón real. **Nunca en producción.** |
+
 Solo lectura: el módulo no crea, cambia ni borra nada en Microsoft 365.
+
+## Reuniones por proyecto y análisis con el agente (2026-11-24)
+
+Aprobado por Nicolás Rivera (SynerLink conv. 1, msg 38206). Propuesta: `traspasos/reuniones-proyectos-analisis-20261124/PROPUESTA.md`. Código: `lib/meetings/projects/`.
+
+**Asignar a un proyecto (Fase 1, sin IA)**
+
+- En «Mis reuniones», columna **Proyecto**: «Asignar», la sugerencia «¿Proyecto? Sí / Otro» o el proyecto ya asignado. Solo aparecen los proyectos donde la persona es dueña o editora.
+- En el proyecto, sección **Reuniones** → «Asignar reunión» (escoge una de SUS reuniones de los últimos 30 días).
+- El evento se vuelve a leer del buzón de la sesión (`POST /api/proyectos/[id]/vinculos/reuniones`). Las reuniones **privadas o confidenciales** no se pueden asignar. **Una reunión, un proyecto** (`ical_uid` único).
+- **Toda la serie:** con «Aplicar a toda la serie» queda una regla (`chat_project_meeting_rule`, por buzón y `seriesMasterId`). Las ocurrencias que ya empezaron se asignan solas al abrir «Mis reuniones» o la sección del proyecto. La regla se quita desde la sección.
+- **Sugerencia sin IA** (`lib/meetings/projects/rules.ts`): (1) otra ocurrencia de la serie ya está en un proyecto; (2) el asunto trae una palabra del nombre del proyecto que ningún otro proyecto comparte; (3) más de la mitad de los otros invitados son miembros del proyecto. Un empate no sugiere nada.
+- **Qué ven los miembros:** asunto, fecha, duración programada y real, cuántos invitados y cuántos se conectaron, el resumen de quien la asignó y el análisis. Nunca la lista de asistentes ni la transcripción.
+
+**Análisis a demanda (Fase 2)**
+
+- Botón «Analizar» en la sección. Lo puede pedir quien **asistió** (la reunión está en su propio calendario), es dueño o editor y puede escribirle al asistente del proyecto. Máximo 10 análisis por proyecto y día.
+- SynerLink **no llama a ningún modelo**. Abre una conversación del proyecto «Análisis de reunión · …» con el asistente del proyecto (el que lo creó, o el primero disponible) y deja un mensaje de **sistema** con su fila de entrega, como los turnos de las mesas. La bandeja del puente (`/api/chat/agent/inbox`, alcance `projects`) le entrega al asistente el aviso + las instrucciones (la «skill» `analisis-efectividad-reunion`, en `analysis-rules.ts`) + la transcripción, leída en vivo de Teams con el buzón de quien lo pidió. **En la base solo queda el aviso corto.**
+- El asistente responde con un bloque ` ```analisis-reunion ` (JSON). Al publicarlo (`/api/chat/agent/messages`), SynerLink lo valida y lo guarda en `chat_project_meeting_analysis`, convierte los compromisos en **propuestas de tarea** (`tarea_crear`, el flujo de siempre: una persona las confirma en el Cronograma) y cambia el mensaje del hilo por un texto legible. Diez minutos después la conversación se archiva (borrado lógico), para que nadie siga preguntándole al asistente por la transcripción.
+- Indicadores sin IA (participación por palabras de cada hablante, puntualidad, sobretiempo, asistencia, quiénes no intervinieron) en `metrics_json`. **La participación por persona y la transcripción solo las ven quienes asistieron.** El índice de efectividad es de la reunión: no hay ranking de personas.
+- Si el asistente no responde en 75 minutos, el análisis queda «fallido» y se puede volver a pedir.
+
+**Tablas:** `chat_project_meeting`, `chat_project_meeting_rule`, `chat_project_meeting_analysis` (migración `20261124150000_chat_project_meetings`; scripts manuales `prisma/manual/2026-11-24-proyectos-reuniones-*.sql`). Si el código sale antes que las tablas, la columna y la sección dicen «no disponible» y «Mis reuniones» sigue funcionando.
+
+**Pendiente (Fase 3):** seguimiento de compromisos entre reuniones con el estado real de las tareas, vista agregada mensual, análisis automático con tope y la herramienta MCP `proyecto_reuniones`.

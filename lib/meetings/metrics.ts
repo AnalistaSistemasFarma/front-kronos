@@ -15,6 +15,8 @@ const BOGOTA_OFFSET_MS = -5 * 60 * 60 * 1000;
 /** Calendar event as returned by Graph (fields we use). */
 export interface GraphMeetingEvent {
   id: string;
+  /** Same in every attendee's calendar, different per occurrence (2026-11-24: project meetings). */
+  iCalUId?: string | null;
   subject?: string | null;
   start: { dateTime: string; timeZone?: string };
   end: { dateTime: string; timeZone?: string };
@@ -47,6 +49,8 @@ export interface Meeting {
   recurring: boolean;
   private: boolean;
   webLink: string | null;
+  /** iCalUId of the occurrence (shared by every attendee); null when Graph did not send it. */
+  icalUid: string | null;
 }
 
 /** Graph `dateTime` (UTC, without offset) → epoch ms. */
@@ -92,6 +96,7 @@ export function normalizeMeeting(e: GraphMeetingEvent, sessionEmail: string): Me
     recurring: e.type === 'occurrence' || e.type === 'exception' || !!e.seriesMasterId,
     private: isPrivate,
     webLink: e.webLink ?? null,
+    icalUid: e.iCalUId?.trim() || null,
   };
 }
 
@@ -287,4 +292,33 @@ export function parseTranscript(vtt: string, maxLines = 5000): TranscriptLine[] 
     out.push({ at, speaker: speaker || 'Participante', text });
   }
   return out;
+}
+
+export interface SpeakerShare {
+  speaker: string;
+  words: number;
+  /** Share of the words spoken in the meeting, 0-100 (rounded). */
+  pct: number;
+  interventions: number;
+}
+
+/**
+ * Participation balance by speaker from the transcript (no AI): share of the
+ * words each person spoke, biggest first. Visible only to attendees.
+ */
+export function participationFromLines(lines: TranscriptLine[]): SpeakerShare[] {
+  const by = new Map<string, { words: number; interventions: number }>();
+  let total = 0;
+  for (const l of lines) {
+    const words = l.text.split(/\s+/).filter(Boolean).length;
+    if (words === 0) continue;
+    const cur = by.get(l.speaker) ?? { words: 0, interventions: 0 };
+    cur.words += words;
+    cur.interventions += 1;
+    by.set(l.speaker, cur);
+    total += words;
+  }
+  return [...by.entries()]
+    .map(([speaker, v]) => ({ speaker, words: v.words, interventions: v.interventions, pct: total ? Math.round((v.words / total) * 100) : 0 }))
+    .sort((a, b) => b.words - a.words);
 }

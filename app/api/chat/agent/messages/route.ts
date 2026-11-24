@@ -31,6 +31,7 @@ import {
 } from '../../../../../lib/chat/attachmentStorage';
 import { notifyAgentReply } from '../../../../../lib/chat/notifyAgentReply';
 import { alPublicarAgenteEnMesa } from '../../../../../lib/proyectos/mesas';
+import { onAgentPublishedAnalysis } from '../../../../../lib/meetings/projects/analysis';
 import { projectMutedUserIds, projectPushRecipients } from '../../../../../lib/proyectos/mute';
 import { mencionablesParaAgente } from '../../../../../lib/chat/projects';
 import type { AgenteMencionable } from '../../../../../lib/chat/groups';
@@ -364,6 +365,15 @@ export async function POST(request: NextRequest) {
         mesaSinPush = r.esMesa && !r.esSintesis;
       } catch (error) {
         console.error('[mesas] al publicar', error);
+      }
+      // Meeting analysis (2026-11-24): the final answer of a pending analysis is validated and stored,
+      // and the thread keeps a readable text. Never breaks the publication.
+      try {
+        const analysis = await onAgentPublishedAnalysis({ idConversation: conversation.id, idAgent: agent.idAgent, idMessage: message.id, body, state });
+        // The push carries the readable text, not the raw JSON block.
+        if (analysis.visibleBody) body = analysis.visibleBody;
+      } catch (error) {
+        console.error('[meetings] analysis answer', error);
       }
     }
 

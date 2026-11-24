@@ -23,6 +23,7 @@ import {
   IconTrash,
   IconUsers,
   IconUsersGroup,
+  IconVideo,
 } from '@tabler/icons-react';
 import toast from 'react-hot-toast';
 import AgentAvatar from '../chat/AgentAvatar';
@@ -46,6 +47,7 @@ import SeccionEquipo from './equipo/SeccionEquipo';
 import SeccionPermisos from './permisos/SeccionPermisos';
 import SeccionMesas from './mesas/SeccionMesas';
 import SeccionMatrices from './matrices/SeccionMatrices';
+import SeccionReuniones from './reuniones/SeccionReuniones';
 import { AgentesApilados, AvisoArriba, BadgeRol, CONSULTA_ESCRITORIO, Encabezado, EsqueletoFilas, type Aviso } from './ui';
 import css from './proyectos.module.css';
 import { useEstadosAgentes } from './useEstadosAgentes';
@@ -72,8 +74,9 @@ import type { EstadoAgenteProyectoDto } from '../../lib/proyectos/estado-agente'
 
 // «Equipo» (F2, 2026-10-18): los subagentes del proyecto, junto al cronograma.
 // «Permisos» (2026-10-20): qué pueden hacer los agentes con el código del proyecto.
-type Seccion = 'conversaciones' | 'mesas' | 'matrices' | 'cronograma' | 'equipo' | 'vinculados' | 'archivos' | 'miembros' | 'permisos' | 'detalles';
-const SECCIONES: Seccion[] = ['conversaciones', 'mesas', 'matrices', 'cronograma', 'equipo', 'vinculados', 'archivos', 'miembros', 'permisos', 'detalles'];
+// «Reuniones» (2026-11-24): meetings assigned to the project and the agent's analysis.
+type Seccion = 'conversaciones' | 'mesas' | 'matrices' | 'cronograma' | 'reuniones' | 'equipo' | 'vinculados' | 'archivos' | 'miembros' | 'permisos' | 'detalles';
+const SECCIONES: Seccion[] = ['conversaciones', 'mesas', 'matrices', 'cronograma', 'reuniones', 'equipo', 'vinculados', 'archivos', 'miembros', 'permisos', 'detalles'];
 
 function esSeccion(v: string | null): v is Seccion {
   return v !== null && (SECCIONES as string[]).includes(v);
@@ -301,6 +304,7 @@ export default function ProyectoPage({ idProject }: { idProject: number }) {
     mesas: null,
     matrices: null,
     cronograma: proyecto ? proyecto.taskCount + proyecto.links.requests.length : null,
+    reuniones: null,
     equipo: proyecto?.teamCount ?? null,
     vinculados: proyecto ? proyecto.links.emails.length + proyecto.links.requests.length : null,
     archivos: proyecto?.files.length ?? null,
@@ -313,6 +317,7 @@ export default function ProyectoPage({ idProject }: { idProject: number }) {
     mesas: 'Mesas',
     matrices: 'Matrices',
     cronograma: 'Cronograma',
+    reuniones: 'Reuniones',
     equipo: 'Equipo',
     vinculados: 'Vinculados',
     archivos: 'Archivos',
@@ -325,6 +330,7 @@ export default function ProyectoPage({ idProject }: { idProject: number }) {
     mesas: <IconMessageChatbot size={18} />,
     matrices: <IconTable size={18} />,
     cronograma: <IconTimeline size={18} />,
+    reuniones: <IconVideo size={18} />,
     equipo: <IconUsersGroup size={18} />,
     vinculados: <IconLink size={18} />,
     archivos: <IconFile size={18} />,
@@ -366,6 +372,8 @@ export default function ProyectoPage({ idProject }: { idProject: number }) {
         return <SeccionMatrices proyecto={proyecto} version={version} avisar={avisar} />;
       case 'cronograma':
         return <SeccionCronograma proyecto={proyecto} version={version} avisar={avisar} onVincularSolicitud={() => setModal('solicitud')} />;
+      case 'reuniones':
+        return <SeccionReuniones proyecto={proyecto} version={version} avisar={avisar} onIrACronograma={() => setSeccion('cronograma')} />;
       case 'equipo':
         return <SeccionEquipo proyecto={proyecto} version={version} avisar={avisar} />;
       case 'permisos':
