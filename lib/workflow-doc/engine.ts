@@ -1,4 +1,5 @@
 import sql from 'mssql';
+import { logFlowChange } from '../workflow/flowChangeLog';
 import sqlConfig from '../../dbconfig.js';
 import { prisma } from '../prisma';
 import { useGetMicrosoftToken as getMicrosoftToken } from '../../components/microsoft-365/useGetMicrosoftToken';
@@ -160,6 +161,41 @@ export async function checkSgcSource(cfg: Pick<DocTemplateConfig, 'source' | 'id
   return `${doc.code} v${v?.version_number ?? '?'} (SGC)`;
 }
 
+/**
+ * 2026-11-24 (Calidad OLP: «si el documento se actualiza en el SGC, se actualiza en los módulos»): a Word template taken
+ * from the SGC FOLLOWS the current version on its own. If the SGC document is no longer current, the task stays blocked.
+ * Returns the configuration to use now and, if it moved to a newer version, that version to save after a clean fill.
+ */
+export async function followCurrentSgcVersion(cfg: DocTemplateConfig): Promise<{ cfg: DocTemplateConfig; followedTo: { versionNumber: number; code: string } | null }> {
+  if (cfg.source !== 'sgc' || cfg.engine !== 'word' || !cfg.id_sgc_document) return { cfg, followedTo: null };
+  const doc = await prisma.sgcDocument.findUnique({ where: { id_document: cfg.id_sgc_document }, select: { code: true, status: true, current_version_id: true } });
+  if (!doc || doc.status !== 'vigente' || !doc.current_version_id || doc.current_version_id === cfg.id_sgc_version) return { cfg, followedTo: null };
+  const v = await prisma.sgcDocumentVersion.findUnique({
+    where: { id_document_version: doc.current_version_id },
+    select: { id_document_version: true, version_number: true, source_item_id: true, source_file_name: true },
+  });
+  // Without its Word original the current version cannot be filled: stays blocked as before.
+  if (!v?.source_item_id || !/\.docx$/i.test(v.source_file_name ?? '')) return { cfg, followedTo: null };
+  return {
+    cfg: { ...cfg, id_sgc_version: v.id_document_version, source_item_id: v.source_item_id, source_file_name: v.source_file_name },
+    followedTo: { versionNumber: v.version_number, code: doc.code },
+  };
+}
+
+async function saveFollowedVersion(cfg: DocTemplateConfig, followedTo: { versionNumber: number; code: string }) {
+  const p = await pool();
+  await p
+    .request()
+    .input('id', sql.Int, cfg.id)
+    .input('v', sql.Int, cfg.id_sgc_version)
+    .input('item', sql.NVarChar(200), cfg.source_item_id)
+    .input('name', sql.NVarChar(260), cfg.source_file_name)
+    .query(`UPDATE dbo.task_doc_template SET id_sgc_version = @v, source_item_id = @item, source_file_name = @name, updated_by = N'sistema (versión vigente del SGC)', updated_at = GETDATE() WHERE id = @id;`);
+  const t = await p.request().input('t', sql.Int, cfg.id_task).query<{ id_process_category: number; task: string }>('SELECT id_process_category, task FROM task_process_category WHERE id = @t;');
+  const row = t.recordset[0];
+  if (row) await logFlowChange(row.id_process_category, 'sistema@synerlink', 'plantilla', `Tarea «${row.task}»: pasó sola a ${followedTo.code} v${followedTo.versionNumber} (versión vigente del SGC).`);
+}
+
 async function graphToken(): Promise<string> {
   const t = await getMicrosoftToken();
   if (!t) throw new DocTemplateError('No se pudo obtener el token de OneDrive.', 502);
@@ -191,6 +227,8 @@ export interface RenderedDocument {
 export async function renderDocument(cfg: DocTemplateConfig, idRequest: number, idTaskRequest: number | null, editedHtml?: string | null): Promise<RenderedDocument> {
   const info = await loadRequestInfo(idRequest);
   if (!info) throw new DocTemplateError('Solicitud no encontrada.', 404);
+  const followed = await followCurrentSgcVersion(cfg);
+  cfg = followed.cfg;
   const sourceLabel = await checkSgcSource(cfg);
   const fields = await loadFormValues(idRequest);
   const catalog = buildMarkerCatalog(fields);
@@ -214,6 +252,16 @@ export async function renderDocument(cfg: DocTemplateConfig, idRequest: number, 
   if (!cfg.source_item_id) throw new DocTemplateError('La plantilla no tiene el Word de origen.');
   const bytes = await downloadSgcFile(cfg.source_item_id);
   const r = fillDocx(bytes, catalog, values);
+  if (followed.followedTo) {
+    // The new version is used only if every mark still has its field; otherwise the flow editors adjust the template.
+    if (r.unknown.length) {
+      throw new DocTemplateError(
+        `La versión vigente v${followed.followedTo.versionNumber} de ${followed.followedTo.code} trae marcas que el flujo no tiene (${r.unknown.slice(0, 5).join(', ')}): los editores del flujo deben ajustar la plantilla.`,
+        409
+      );
+    }
+    await saveFollowedVersion(cfg, followed.followedTo);
+  }
   return { fileBase, html: null, docx: r.bytes, unknown: r.unknown, sourceLabel };
 }
 
