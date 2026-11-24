@@ -94,7 +94,8 @@ export default function SalesPdfImport({ companyId, companyName, cardCode, onLoa
   const [sim, setSim] = useState<(Omit<PdfOffer, 'lines'> & { lines: (Line & { include: boolean })[] }) | null>(null);
   /** Avance de la lectura por fragmentos (OC de varias hojas). */
   const [step, setStep] = useState<{ k: number; n: number } | null>(null);
-  /** Agentes del chat asignados al usuario en esta empresa («Montar con agente»). */
+  /** Agentes del chat asignados al usuario, de CUALQUIER empresa («Montar con agente»; Nicolás Rivera, 2026-11-24:
+   *  el agente solo lee el PDF, así que no tiene que ser de la empresa de la oferta). El chat valida el permiso. */
   const [agents, setAgents] = useState<ChatAgent[]>([]);
   const [agent, setAgent] = useState<ChatAgent | null>(null);
   const [conversationId, setConversationId] = useState<number | null>(null);
@@ -105,7 +106,9 @@ export default function SalesPdfImport({ companyId, companyName, cardCode, onLoa
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => {
         if (cancelled || !d?.canUseChat) return;
-        setAgents(((d.agents ?? []) as ChatAgent[]).filter((a) => a.companies?.some((c) => String(c.idCompany) === String(companyId))));
+        // Primero los de la empresa de la oferta; después los demás.
+        const delaEmpresa = (a: ChatAgent) => a.companies?.some((c) => String(c.idCompany) === String(companyId));
+        setAgents([...((d.agents ?? []) as ChatAgent[])].sort((x, y) => Number(delaEmpresa(y)) - Number(delaEmpresa(x))));
       })
       .catch(() => undefined);
     return () => {
