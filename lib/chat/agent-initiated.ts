@@ -63,33 +63,32 @@ interface PendingDirect {
 }
 
 /**
- * Prepends, to the FIRST pending person message of each direct conversation, the agent-initiated
- * messages posted after that person's previous message. Never throws: on any error the messages go
- * out unchanged (the context is a convenience; the delivery is what matters).
+ * Prepends, to each pending person message of a direct conversation, the agent-initiated messages
+ * posted between the person's previous message and that one. Older undelivered messages of the same
+ * conversation (a backlog) therefore do not swallow the context: it goes with the first reply AFTER
+ * the agent-initiated message. Never throws: on any error the messages go out unchanged (the context
+ * is a convenience; the delivery is what matters).
  */
 export async function withInitiatedContext<T extends PendingDirect>(pending: T[]): Promise<T[]> {
   const direct = pending.filter((m) => m.conversation.kind === 'direct');
   if (direct.length === 0) return pending;
   try {
-    const firstByConversation = new Map<number, T>();
-    for (const m of [...direct].sort((a, b) => a.id - b.id)) {
-      if (!firstByConversation.has(m.id_conversation)) firstByConversation.set(m.id_conversation, m);
-    }
+    const conversationIds = [...new Set(direct.map((m) => m.id_conversation))];
     const since = new Date(Date.now() - CONTEXT_WINDOW_DAYS * 24 * 60 * 60 * 1000);
     // One indexed query; in the usual case (no agent-initiated messages) it ends here.
     const candidates = await prisma.chatAgentInitiatedMessage.findMany({
-      where: { id_conversation: { in: [...firstByConversation.keys()] }, created_at: { gte: since } },
+      where: { id_conversation: { in: conversationIds }, created_at: { gte: since } },
       select: { id_message: true, id_conversation: true, reason: true },
       orderBy: { id_message: 'asc' },
     });
     if (candidates.length === 0) return pending;
 
     const prefixById = new Map<number, string>();
-    for (const [idConversation, first] of firstByConversation) {
-      const own = candidates.filter((c) => c.id_conversation === idConversation && c.id_message < first.id);
+    for (const m of [...direct].sort((a, b) => a.id - b.id)) {
+      const own = candidates.filter((c) => c.id_conversation === m.id_conversation && c.id_message < m.id);
       if (own.length === 0) continue;
       const previousUser = await prisma.chatMessage.findFirst({
-        where: { id_conversation: idConversation, role: 'user', id: { lt: first.id } },
+        where: { id_conversation: m.id_conversation, role: 'user', id: { lt: m.id } },
         orderBy: { id: 'desc' },
         select: { id: true },
       });
@@ -106,7 +105,7 @@ export async function withInitiatedContext<T extends PendingDirect>(pending: T[]
         reason: fresh.find((c) => c.id_message === msg.id)?.reason ?? null,
       }));
       const prefix = buildInitiatedContextPrefix(items);
-      if (prefix) prefixById.set(first.id, prefix);
+      if (prefix) prefixById.set(m.id, prefix);
     }
     if (prefixById.size === 0) return pending;
     return pending.map((m) => (prefixById.has(m.id) ? { ...m, body: `${prefixById.get(m.id)}${m.body}` } : m));
