@@ -3,7 +3,12 @@ import { prisma } from '../../../../lib/prisma';
 import { CHAT_MODULE_URL } from '../../../../lib/chat/access';
 import { visiblePeopleConversationIds } from '../../../../lib/chat/people';
 import { projectModuleCompanies } from '../../../../lib/chat/projects';
-import { whereConversacionesVisibles, whereMensajesQueCuentan } from '../../../../lib/proyectos/no-leidos';
+import {
+  fragmentoMensaje,
+  whereConversacionesVisibles,
+  whereMensajesQueCuentan,
+} from '../../../../lib/proyectos/no-leidos';
+import { agentAvatarSrc } from '../../../../lib/chat/client';
 import { mutedProjectIds } from '../../../../lib/proyectos/mute';
 import { MAX_ESTADOS, cursorDeEstado, type EstadoAgenteProyectoDto } from '../../../../lib/proyectos/estado-agente';
 import { estadosCambiadosVisibles, marcaGlobalEstados } from '../../../../lib/proyectos/estado-agente-servidor';
@@ -86,6 +91,15 @@ export const dynamic = 'force-dynamic';
  * cliente manda `rsince`. El evento solo lleva el id de la conversación y del
  * mensaje; las reacciones en sí las trae el sondeo del hilo, que vuelve a
  * validar el acceso. Lo que reacciona uno mismo no se avisa.
+ *
+ * IN-APP NOTIFICATIONS (2026-11-24, Nicolás Rivera, «opción 1»: notification cards drawn by
+ * SynerLink itself, like Teams):
+ *   - With `ag=1` the same pulse also reports, as `type: 'agent'`, new messages from an agent in
+ *     one of MY direct threads and from anyone else in a group I belong to. The event carries no
+ *     text: the client just refreshes the inbox (which re-checks access and brings the preview), so
+ *     the card shows up in ~1 s instead of on the 30 s inbox poll. Without `ag` nothing changes.
+ *   - 'project' events now carry what the card needs (plain-text preview, project, company and
+ *     author avatar). Same gate as before (member + module of the project's company).
  */
 export async function GET(request: NextRequest) {
   try {
@@ -142,6 +156,9 @@ export async function GET(request: NextRequest) {
     };
     if (rcursor === 0) rcursor = await maxReaccion();
 
+    // Agent replies in my direct threads and new messages in my groups (in-app notifications).
+    const conAgentes = Boolean(conChat) && request.nextUrl.searchParams.get('ag') === '1';
+
     if (since === 0) {
       return jsonNoStore({ cursor: await maxActual(), events: [], ...extra(), ...(rcursor !== null ? { rcursor } : {}) });
     }
@@ -162,6 +179,16 @@ export async function GET(request: NextRequest) {
       ...(empresasProyectos.length > 0
         ? [{ ...whereMensajesQueCuentan(user.id), conversation: whereConversacionesVisibles(user.id, empresasProyectos) }]
         : []),
+      ...(conAgentes
+        ? [
+            { role: 'agent', conversation: { kind: 'direct', id_user: user.id, archived: false } },
+            {
+              role: { in: ['agent', 'user'] },
+              OR: [{ id_user_author: null }, { id_user_author: { not: user.id } }],
+              conversation: { kind: 'group', archived: false, participants: { some: { id_user: user.id } } },
+            },
+          ]
+        : []),
     ];
 
     const buscar = (desde: number, hasta: number) =>
@@ -176,8 +203,8 @@ export async function GET(request: NextRequest) {
           created_at: true,
           role: true,
           conversation: { select: { kind: true, id_project: true } },
-          userAuthor: { select: { name: true, email: true } },
-          agentAuthor: { select: { display_name: true } },
+          userAuthor: { select: { name: true, email: true, image: true } },
+          agentAuthor: { select: { code: true, display_name: true, avatar_url: true, avatar_updated_at: true } },
         },
       });
 
@@ -256,6 +283,7 @@ export async function GET(request: NextRequest) {
     // Proyecto: la puerta ya va en la consulta (miembro + módulo de hoy).
     const deProyecto = filas.filter((f) => f.conversation.kind === 'project');
     const dePersonas = filas.filter((f) => f.conversation.kind === 'people');
+    const deAgentes = filas.filter((f) => f.conversation.kind === 'direct' || f.conversation.kind === 'group');
 
     // La regla de acceso de HOY, y la preferencia de silencio de cada hilo.
     const visibles = new Set(dePersonas.length ? await visiblePeopleConversationIds(user.id) : []);
@@ -271,8 +299,53 @@ export async function GET(request: NextRequest) {
     // «Silenciar notificaciones» (2026-11-23): the event still arrives (the icon and the open thread
     // refresh) but flagged `muted`, so the browser does not play the sound.
     const proyectosSilenciados = deProyecto.length > 0 ? await mutedProjectIds(user.id) : new Set<number>();
-    const eventosProyecto: ChatPulseEvent[] = deProyecto.map((f) => ({
-      type: 'project' as const,
+    // What the in-app card shows: message text (plain, short) and the project with its company.
+    // Read only for rows that already passed the gate.
+    const detalleProyecto = deProyecto.length
+      ? await prisma.chatMessage.findMany({
+          where: { id: { in: deProyecto.map((f) => f.id) } },
+          select: {
+            id: true,
+            body: true,
+            conversation: {
+              select: { project: { select: { id_project: true, name: true, company: { select: { company: true } } } } },
+            },
+          },
+        })
+      : [];
+    const detallePorId = new Map(detalleProyecto.map((d) => [d.id, d]));
+    const eventosProyecto: ChatPulseEvent[] = deProyecto.map((f) => {
+      const detalle = detallePorId.get(f.id);
+      const proyecto = detalle?.conversation.project ?? null;
+      const agente = f.role === 'agent' ? f.agentAuthor : null;
+      return {
+        type: 'project' as const,
+        idConversation: f.id_conversation,
+        idMessage: f.id,
+        authorName:
+          f.role === 'agent'
+            ? f.agentAuthor?.display_name?.trim() || 'El asistente'
+            : f.userAuthor?.name?.trim() || f.userAuthor?.email || 'Alguien',
+        createdAt: f.created_at.toISOString(),
+        muted: f.conversation.id_project !== null && proyectosSilenciados.has(f.conversation.id_project),
+        preview: detalle ? fragmentoMensaje(detalle.body) : undefined,
+        projectName: proyecto?.name,
+        companyName: proyecto?.company?.company ?? null,
+        authorAvatarUrl: agente
+          ? agentAvatarSrc({
+              code: agente.code,
+              avatarUrl: agente.avatar_url,
+              avatarVersion: agente.avatar_updated_at ? agente.avatar_updated_at.getTime() : null,
+            })
+          : f.userAuthor?.image ?? null,
+        authorAgentCode: agente?.code ?? null,
+        url: proyecto ? `/process/proyectos/${proyecto.id_project}?conversacion=${f.id_conversation}` : undefined,
+      };
+    });
+
+    // Agent replies / group messages: only a hint (no text). The inbox refresh re-checks access.
+    const eventosAgente: ChatPulseEvent[] = deAgentes.map((f) => ({
+      type: 'agent' as const,
       idConversation: f.id_conversation,
       idMessage: f.id,
       authorName:
@@ -280,7 +353,7 @@ export async function GET(request: NextRequest) {
           ? f.agentAuthor?.display_name?.trim() || 'El asistente'
           : f.userAuthor?.name?.trim() || f.userAuthor?.email || 'Alguien',
       createdAt: f.created_at.toISOString(),
-      muted: f.conversation.id_project !== null && proyectosSilenciados.has(f.conversation.id_project),
+      muted: false,
     }));
 
     const events: ChatPulseEvent[] = dePersonas
@@ -296,7 +369,7 @@ export async function GET(request: NextRequest) {
           muted: esZumbido && Boolean(silenciado.get(f.id_conversation)),
         };
       });
-    events.push(...eventosProyecto);
+    events.push(...eventosProyecto, ...eventosAgente);
     events.sort((a, b) => a.idMessage - b.idMessage);
     // Las reacciones van al final: solo le piden al hilo que pregunte.
     events.push(...eventosReaccion);

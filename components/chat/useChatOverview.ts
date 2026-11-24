@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSession } from 'next-auth/react';
 import {
+  agentAvatarSrc,
   CHAT_ACTIVITY_EVENT,
   CHAT_REFRESH_EVENT,
   chatGetJson,
@@ -13,7 +14,9 @@ import {
   type ChatConversationDto,
   type ChatStatusDto,
 } from '../../lib/chat/client';
-import { olvidarNoLeidos, revisarNoLeidos } from '../../lib/chat/message-sound';
+import { olvidarNoLeidos, revisarNoLeidos, threadOnScreen } from '../../lib/chat/message-sound';
+import { toastFromInboxConversation } from '../../lib/notifications/inAppToast';
+import { showInAppToast } from '../../lib/notifications/inAppToastStore';
 import { bumpConversationActivity } from '../../lib/chat/rail';
 
 /**
@@ -66,6 +69,28 @@ type CacheChat = {
 };
 
 let cache: CacheChat | null = null;
+
+/** Session user id, for the «other person» of a people thread in the in-app cards. */
+let currentUserId: string | null = null;
+
+/**
+ * In-app notification cards (2026-11-24): one per conversation whose unread count just went up,
+ * except the one the person has on screen. The sound is already played by revisarNoLeidos.
+ */
+function announceNewMessages(email: string, rose: ChatConversationDto[]): void {
+  if (rose.length === 0) return;
+  const catalog = leerCache(email)?.access?.agents ?? [];
+  const avatar = (agent: { idAgent: number; code: string; avatarUrl: string | null }) =>
+    agentAvatarSrc({
+      code: agent.code,
+      avatarUrl: agent.avatarUrl,
+      avatarVersion: catalog.find((a) => a.idAgent === agent.idAgent)?.avatarVersion ?? null,
+    });
+  for (const c of rose) {
+    if (threadOnScreen(c.id)) continue;
+    showInAppToast(toastFromInboxConversation(c, currentUserId, avatar));
+  }
+}
 
 function leerCache(email: string | null | undefined): CacheChat | null {
   if (!email || !cache || cache.email !== email) return null;
@@ -169,7 +194,8 @@ function pedirBandejaCompartida(email: string, opciones: { recienteMs?: number }
         resultado = { ok: true, lista: data.conversations ?? [] };
         // Sonido de mensaje nuevo: un no leído que sube (ver message-sound.ts).
         // Una vez por respuesta, no una por instancia.
-        revisarNoLeidos(email, resultado.lista);
+        // In-app notification cards for the same conversations (2026-11-24).
+        announceNewMessages(email, revisarNoLeidos(email, resultado.lista));
       }
     } catch {
       /* silencioso: es una barra secundaria, ver fetchAccess */
@@ -253,6 +279,7 @@ export function useChatOverview(opciones?: {
   const isAuthenticated = status === 'authenticated' && Boolean(session?.user?.email);
 
   const email = session?.user?.email ?? null;
+  currentUserId = session?.user?.id ?? null;
   // El primer render sale de la caché, no de un vacío. Si no hay nada guardado
   // para este usuario, se cae al estado de siempre y se ve el esqueleto.
   const inicial = leerCache(email);
