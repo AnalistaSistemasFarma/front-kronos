@@ -1,10 +1,12 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import type { CSSProperties } from 'react';
 import { createPortal } from 'react-dom';
 import { useRouter } from 'next/navigation';
 import { useSession } from 'next-auth/react';
 import { ActionIcon, Avatar, Button, Textarea } from '@mantine/core';
+import { useReducedMotion } from '@mantine/hooks';
 import {
   IconActivity,
   IconAlertTriangle,
@@ -172,12 +174,14 @@ function ToastCard({ toast }: { toast: InAppToast }) {
     styles.card,
     toast.tone === 'urgent' ? styles.urgent : '',
     toast.tone === 'nudge' ? styles.nudge : '',
+    toast.emojiOnly ? styles.emojiCard : '',
     paused ? styles.paused : '',
   ]
     .filter(Boolean)
     .join(' ');
 
   const Icon = toast.icon ? ICONS[toast.icon] : IconActivity;
+  const reducedMotion = useReducedMotion();
 
   return (
     <article
@@ -229,7 +233,25 @@ function ToastCard({ toast }: { toast: InAppToast }) {
         </button>
       </div>
 
-      {toast.preview && <p className={styles.preview}>{toast.preview}</p>}
+      {toast.media ? (
+        <div className={styles.mediaBox}>
+          {/* eslint-disable-next-line @next/next/no-img-element -- same-origin chat media, sized by CSS */}
+          <img
+            className={styles.media}
+            src={reducedMotion && toast.media.poster ? toast.media.poster : toast.media.src}
+            alt={toast.media.alt}
+            loading='lazy'
+          />
+        </div>
+      ) : toast.emojiOnly ? (
+        <p key={revision} className={styles.emojiBig} aria-label={toast.preview ?? undefined}>
+          {toast.emojiOnly}
+        </p>
+      ) : (
+        toast.preview && <p className={styles.preview}>{toast.preview}</p>
+      )}
+
+      {toast.celebrate && !reducedMotion && <Confetti key={`confetti-${revision}`} />}
 
       {sent && (
         <span className={styles.replyOk} role='status'>
@@ -291,5 +313,41 @@ function ToastCard({ toast }: { toast: InAppToast }) {
         aria-hidden
       />
     </article>
+  );
+}
+
+/* Short confetti burst (~1 s) for celebration messages. CSS only, decorative, not focusable. */
+const CONFETTI_COLORS = ['#f59f00', '#e64980', '#4c6ef5', '#12b886', '#fab005', '#7950f2'];
+const CONFETTI_PIECES = Array.from({ length: 18 }, (_, i) => {
+  const angle = (i / 18) * Math.PI * 2;
+  const distance = 60 + (i % 3) * 22;
+  return {
+    color: CONFETTI_COLORS[i % CONFETTI_COLORS.length],
+    dx: Math.round(Math.cos(angle) * distance),
+    dy: Math.round(Math.sin(angle) * distance * 0.6),
+    rotate: (i * 47) % 360,
+    delay: (i % 4) * 40,
+  };
+});
+
+function Confetti() {
+  return (
+    <span className={styles.confetti} aria-hidden>
+      {CONFETTI_PIECES.map((p, i) => (
+        <span
+          key={i}
+          className={styles.confettiPiece}
+          style={
+            {
+              background: p.color,
+              '--dx': `${p.dx}px`,
+              '--dy': `${p.dy}px`,
+              '--rot': `${p.rotate}deg`,
+              animationDelay: `${p.delay}ms`,
+            } as CSSProperties
+          }
+        />
+      ))}
+    </span>
   );
 }
