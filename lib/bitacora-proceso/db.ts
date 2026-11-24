@@ -411,7 +411,7 @@ export async function crearOrden(
   }
   // Inspector y jefe: SOLO personas asignadas a ese rol en la empresa (2026-10-16).
   const [insp, jefe, ops, areas] = await Promise.all([
-    motivoSinRolPersona(db, input.idCompany, input.inspector, 'INSPECTOR'),
+    input.inspector ? motivoSinRolPersona(db, input.idCompany, input.inspector, 'INSPECTOR') : Promise.resolve(null),
     motivoSinRolPersona(db, input.idCompany, input.jefeProduccion, 'JEFE_PROD'),
     operadoresActivos(db, input.idCompany, input.operadores),
     db.otArea.findMany({ where: { id_company: input.idCompany, activo: true }, select: { id_area: true, nombre: true } }),
@@ -419,7 +419,7 @@ export async function crearOrden(
   if (ops.length !== input.operadores.length) {
     throw new OtError('Algún operario seleccionado no existe o está inactivo en el maestro de la empresa.', 400);
   }
-  assertActoresDistintos({ abre: actor.idUser, inspector: input.inspector, jefe: input.jefeProduccion });
+  if (input.inspector) assertActoresDistintos({ abre: actor.idUser, inspector: input.inspector, jefe: input.jefeProduccion });
   if (insp) throw new OtError(insp, 400);
   if (jefe) throw new OtError(jefe, 400);
   const area = resolverArea(areas, input.idArea);
@@ -569,7 +569,8 @@ export async function getOrdenDetalle(db: OtDb, idOrden: number, access: OtCompa
   const requeridos = vistosRequeridos(actores, o.firmas);
   const siguiente = siguienteVistoBueno(actores, o.firmas);
   const cerroElJefe = esCierreDelJefe(dados.SUPERVISOR);
-  const vistos: VistoBuenoVista[] = OT_VISTOS_BUENOS.map((rol) => {
+  // 2026-11-24: el inspector salió del flujo; su casilla solo se muestra si ya lo había dado (bitácoras viejas).
+  const vistos: VistoBuenoVista[] = OT_VISTOS_BUENOS.filter((rol) => rol !== 'INSPECTOR' || Boolean(dados.INSPECTOR)).map((rol) => {
     const f = dados[rol];
     const designado = rol === 'INSPECTOR' ? nombre(o.id_inspector) : rol === 'JEFE_PROD' ? nombre(o.id_jefe_produccion) : null;
     if (f) return { rol, estado: 'dado', designado, firma: firmaVista(f), nota: null };
@@ -634,6 +635,28 @@ export async function getOrdenDetalle(db: OtDb, idOrden: number, access: OtCompa
     puedeVerificar: o.estado === 'CERRADA' && siguiente !== null,
     puedeVistoOperario: o.estado === 'ABIERTA' && actores.operadores.length > 0 && !dados.OPERARIO,
   };
+}
+
+/**
+ * Bitácoras del MISMO lote en la empresa (batch record, 2026-11-24): un lote tiene una por turno
+ * y el Excel del batch record las junta. Orden de apertura; máximo 60.
+ */
+export async function listOrdenesDelLote(db: OtDb, idCompany: number, lote: string) {
+  const filas = await db.otOrdenTrabajo.findMany({
+    where: { id_company: idCompany, lote },
+    orderBy: [{ abierta_en: 'asc' }, { consecutivo: 'asc' }],
+    take: 60,
+    select: { id_orden_trabajo: true, consecutivo: true, turno: true, estado: true, abierta_en: true, cerrada_en: true, area: true },
+  });
+  return filas.map((f) => ({
+    id: f.id_orden_trabajo,
+    consecutivo: f.consecutivo,
+    turno: f.turno,
+    estado: f.estado,
+    abiertaEn: f.abierta_en.toISOString(),
+    cerradaEn: f.cerrada_en ? f.cerrada_en.toISOString() : null,
+    area: f.area,
+  }));
 }
 
 /**

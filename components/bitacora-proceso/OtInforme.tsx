@@ -10,6 +10,7 @@ import type { OrdenDetalle } from '../../lib/bitacora-proceso/db';
 import type { OtCompanyAccess } from '../../lib/bitacora-proceso/rules';
 import { buildInformePrintCss, mmACm, parseMargenSuperiorCm } from '../../lib/bitacora-proceso/impresion';
 import { OtMargenBatchCampo, useOtMargenBatch } from './OtMargenBatch';
+import OtBatchRecordExcel from './OtBatchRecordExcel';
 import { codigoOt, fmtFecha, fmtFechaHora, fmtFechaHoraSeg, nombreArchivoInforme, otHref, turnoLabel, useOtFetch } from './otClient';
 
 /**
@@ -24,6 +25,8 @@ import { codigoOt, fmtFecha, fmtFechaHora, fmtFechaHoraSeg, nombreArchivoInforme
  *   - #8316 (2026-11-23): cada página deja arriba, en blanco, el espacio del encabezado del lote
  *     batch (margen configurable por empresa, 4 cm por defecto; se puede ajustar para una
  *     impresión). Las páginas se numeran en el pie. CSS en lib/bitacora-proceso/impresion.ts.
+ *   - 2026-11-24: «Excel batch record» descarga la bitácora (o todas las del lote) sobre la
+ *     plantilla del batch record de Farmalógica, con el encabezado del lote (OtBatchRecordExcel).
  * En el celular la cronología va en tarjetas (sin desplazamiento lateral).
  */
 
@@ -127,7 +130,7 @@ export default function OtInforme({ company, idOrden }: { company: OtCompanyAcce
             <Campo label='Hora inicio' value={fmtFechaHoraSeg(o.abiertaEn)} />
             <Campo label='Hora final' value={o.cerradaEn ? fmtFechaHoraSeg(o.cerradaEn) : 'Pendiente (abierta)'} />
             <Campo label='Abrió' value={`${o.abiertaPor} — ${OT_ROL_APERTURA_CIERRE[o.abiertaComo]} — ${fmtFechaHoraSeg(o.abiertaEn)}`} />
-            <Campo label={OT_INSPECTOR_LABEL} value={o.inspector?.name ?? '—'} />
+            {o.inspector && <Campo label={OT_INSPECTOR_LABEL} value={o.inspector.name} />}
             <Campo label={OT_JEFE_PRODUCCION_LABEL} value={o.jefe?.name ?? '—'} />
             <Campo
               label='Cerró'
@@ -268,6 +271,7 @@ export default function OtInforme({ company, idOrden }: { company: OtCompanyAcce
           <Button variant='default' size={desktop ? 'lg' : 'md'} h={desktop ? undefined : 52} leftSection={<IconArrowLeft size={18} />} component={Link} href={otHref(`${OT_BASE_URL}/${o.id}`, company.idCompany)}>
             Volver
           </Button>
+          <OtBatchRecordExcel company={company} idOrden={o.id} />
           <Button size={desktop ? 'lg' : 'md'} h={desktop ? undefined : 52} leftSection={<IconPrinter size={18} />} onClick={() => {
               if (titulo) document.title = titulo;
               window.print();

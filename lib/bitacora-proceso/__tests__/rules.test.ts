@@ -132,17 +132,17 @@ describe('Bitácora de Proceso · validación', () => {
     const input = parseNuevaOrden(base);
     expect(input).toMatchObject({ idCompany: FARMA, producto: 'Cefazolina 1 g', lote: '1565426', turno: 'MANANA', sapOp: null, idArea: 3, itemCode: null });
     expect(input.operadores).toEqual([7, 8]);
-    expect(input.inspector).toBe('u9');
+    // 2026-11-24: el inspector salió del flujo; si un cliente viejo lo manda, se ignora.
+    expect(input.inspector).toBeNull();
     expect(input.jefeProduccion).toBe('u8');
     expect(parseNuevaOrden({ ...base, idArea: undefined }).idArea).toBeNull();
     // El área ya no es texto libre: un texto en `area` se ignora.
     expect(parseNuevaOrden({ ...base, area: 'Texto libre' })).not.toHaveProperty('area');
   });
 
-  it('B1: inspector y jefe de producción son campos distintos y obligatorios', () => {
-    expect(errorOf(() => parseNuevaOrden({ ...base, inspector: '' })).message).toMatch(/inspector/);
-    expect(errorOf(() => parseNuevaOrden({ ...base, inspector: undefined })).message).toMatch(/inspector/);
-    expect(errorOf(() => parseNuevaOrden({ ...base, inspector: 'x'.repeat(51) })).message).toMatch(/Inspector no válido/);
+  it('el jefe de producción es obligatorio; el inspector ya no se pide (2026-11-24)', () => {
+    expect(parseNuevaOrden({ ...base, inspector: '' }).inspector).toBeNull();
+    expect(parseNuevaOrden({ ...base, inspector: undefined }).inspector).toBeNull();
     expect(errorOf(() => parseNuevaOrden({ ...base, jefeProduccion: '' })).message).toMatch(/jefe de producción/);
     expect(errorOf(() => parseNuevaOrden({ ...base, jefeProduccion: 'x'.repeat(51) })).message).toMatch(/Jefe de producción no válido/);
     // El jefe ya no se toma del campo del inspector (el #617 los fusionaba).
