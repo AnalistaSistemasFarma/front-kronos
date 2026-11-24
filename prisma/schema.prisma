@@ -2334,6 +2334,8 @@ model ChatMessage {
   reactions    ChatMessageReaction[]
   /// GIF o sticker (2026-10-20). Tabla APARTE: el mensaje no cambia.
   media        ChatMessageMedia?
+  /// Agent-initiated message (2026-11-24): audit + marker row. Separate table: the message itself does not change.
+  initiatedByAgent ChatAgentInitiatedMessage?
 
   @@index([id_conversation, id(sort: Desc)])
   @@index([id_conversation, created_at])
@@ -2447,6 +2449,42 @@ model ChatMessageReaction {
 /// `media_url` es la URL del PROVEEDOR (GIPHY) y nunca viaja al navegador: la
 /// imagen se sirve por /api/chat/gifs/proxy con URL firmada, para no exponer la
 /// IP ni la sesión de nadie ante el proveedor.
+/// AGENT-INITIATED MESSAGE (2026-11-24, approved by Nicolás Rivera, conv 1 msgs 38807–38809).
+/// One row per message that an agent posted ON ITS OWN in a person's direct conversation through the
+/// kronos-mcp tool chat_enviar_mensaje_usuario (mcp/src/tools/agentMessage.ts). It is at once:
+///  - the AUDIT (who asked: the MCP key; recipient; reason; when; message id),
+///  - the source of the daily limits (per agent and per recipient, rolling 24 h),
+///  - the MARKER the interface uses for the «Mensaje iniciado por el asistente» badge and that the
+///    agent inbox uses to hand the message to the agent session as context when the person replies
+///    (lib/chat/agent-initiated.ts),
+///  - the once-only guard of the push (push_sent_at, app/api/chat/agent/initiated-notify).
+/// Separate table (like chat_message_media): chat_message and its event_type CHECK do not change.
+/// DDL: prisma/migrations/20261124180000_chat_agent_initiated_message.
+model ChatAgentInitiatedMessage {
+  id_message           Int       @id
+  id_conversation      Int
+  id_agent             Int
+  /// Recipient (chat_conversation.id_user). No FK: the row is an audit record.
+  id_user              String    @db.NVarChar(1000)
+  /// Short reason given by the agent (audit).
+  reason               String    @db.NVarChar(300)
+  /// Who asked: "key:<name of the MCP key>". Never the key itself.
+  requested_by         String    @db.NVarChar(120)
+  /// The conversation did not exist and was created for this message.
+  conversation_created Boolean   @default(false)
+  /// Push sent (set once by the app endpoint; NULL = not sent yet).
+  push_sent_at         DateTime?
+  created_at           DateTime  @default(now())
+
+  message ChatMessage @relation(fields: [id_message], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([id_agent, created_at], map: "chat_agent_initiated_message_agent_idx")
+  @@index([id_user, created_at], map: "chat_agent_initiated_message_user_idx")
+  @@index([id_conversation, id_message], map: "chat_agent_initiated_message_conversation_idx")
+  @@map("chat_agent_initiated_message")
+  @@schema("dbo")
+}
+
 model ChatMessageMedia {
   id_message  Int      @id
   /// 'gif' | 'sticker'. CHECK en la base.

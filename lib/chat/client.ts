@@ -204,6 +204,8 @@ export interface ChatMessageDto {
   reactions?: ChatReactionDto[];
   /** GIF o sticker (2026-10-20). Sin el campo = mensaje normal. */
   media?: ChatMediaDto;
+  /** The agent sent it on its own, not as a reply (2026-11-24). */
+  agentInitiated?: boolean;
   /** Marca local: mensaje aún no confirmado por el servidor (envío optimista). */
   pending?: boolean;
   /** Marca local: el envío falló y el usuario puede reintentar. */

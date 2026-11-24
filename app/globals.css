@@ -1892,6 +1892,17 @@ body.chat-inmersivo.con-chat-rail .chat-escritorio {
   margin-bottom: 2px;
 }
 
+/* Agent-initiated message badge (2026-11-24). */
+.chat-bubble__iniciado {
+  display: inline-block;
+  margin-bottom: 4px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  background: color-mix(in srgb, var(--app-accent, #2563eb) 12%, transparent);
+  color: var(--app-accent, #2563eb);
+}
+
 .chat-bubble__meta {
   margin-top: 4px;
   opacity: 0.75;

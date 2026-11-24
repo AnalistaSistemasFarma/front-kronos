@@ -4,6 +4,7 @@ import type { ChatMessagePayload } from './conversations';
 import { gifConfig, rutaProxyFirmada, urlDeGiphyValida } from './gif';
 import { resumirReacciones, type ChatMediaDto, type ChatReactionDto } from './media-rules';
 import { stickerPropio } from './stickers-paquetes';
+import { agentInitiatedIds } from './agent-initiated';
 
 /**
  * REACCIONES y GIF/STICKERS de los mensajes (2026-10-20) — la parte que toca
@@ -144,17 +145,24 @@ export async function conExtras(mensajes: ChatMessagePayload[], yo: string): Pro
   if (ids.length === 0) return mensajes;
   let reacciones = new Map<number, ChatReactionDto[]>();
   let media = new Map<number, ChatMediaDto>();
+  // Agent-initiated badge (2026-11-24): its own tolerant read, so a missing table never hides reactions.
+  const agentIds = ids.filter((id) => mensajes.some((m) => m.id === id && m.role === 'agent'));
+  const iniciadosPromesa = agentInitiatedIds(agentIds).catch((error) => {
+    console.error('[chat] agent-initiated badge', error);
+    return new Set<number>();
+  });
   try {
     [reacciones, media] = await Promise.all([reaccionesDe(ids, yo), mediaDe(ids)]);
   } catch (error) {
     if (!tablaAusente(error)) throw error;
-    return mensajes;
   }
+  const iniciados = await iniciadosPromesa;
   return mensajes.map((m) => {
     const r = reacciones.get(m.id);
     const md = media.get(m.id);
-    if (!r && !md) return m;
-    return { ...m, ...(r ? { reactions: r } : {}), ...(md ? { media: md } : {}) };
+    const ini = iniciados.has(m.id);
+    if (!r && !md && !ini) return m;
+    return { ...m, ...(r ? { reactions: r } : {}), ...(md ? { media: md } : {}), ...(ini ? { agentInitiated: true } : {}) };
   });
 }
 

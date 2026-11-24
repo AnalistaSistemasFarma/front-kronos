@@ -17,6 +17,7 @@ import { whereProyectoDelAgente } from '../../../../../lib/chat/projects';
 import { mensajesConEntregaPendiente } from '../../../../../lib/chat/entregas-pendientes';
 import { EVENT_TYPE_TURNO, tickMesas, turnoParaAgente } from '../../../../../lib/proyectos/mesas';
 import { ANALYSIS_AUTHOR_NAME, analysisTurnForAgent } from '../../../../../lib/meetings/projects/analysis';
+import { withInitiatedContext } from '../../../../../lib/chat/agent-initiated';
 
 // El long-poll obliga a que la ruta sea dinámica: nada de esto se cachea.
 export const dynamic = 'force-dynamic';
@@ -187,11 +188,15 @@ export async function GET(request: NextRequest) {
       ]);
     }
 
+    // Agent-initiated messages (2026-11-24): the person's reply carries what the agent had written on
+    // its own in that direct conversation, because the session serving it may not have written it.
+    const delivered = pending.length > 0 ? await withInitiatedContext(pending) : pending;
+
     return jsonNoStore({
       agent: { idAgent: agent.idAgent, code: agent.code, displayName: agent.displayName },
       acknowledged: ack,
       waitedMs: Date.now() - startedAt,
-      messages: pending.map((m) => ({
+      messages: delivered.map((m) => ({
         id: m.id,
         idConversation: m.id_conversation,
         role: m.role,

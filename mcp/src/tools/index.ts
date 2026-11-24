@@ -27,6 +27,7 @@ import {
 } from '../workflow.js';
 import { registerIaAccessTool } from './iaAccess.js';
 import { USUARIOS_TOOLS, registerUsuariosTools } from './usuarios.js';
+import { AGENT_MESSAGE_TOOLS, registerAgentMessageTool } from './agentMessage.js';
 import { BITACORA_TOOLS, registerBitacoraTools } from './bitacoraProceso.js';
 import { CORREO_AGENTE_TOOLS, correoAgenteHabilitado, registerCorreoAgenteTools } from './correoAgente.js';
 import { PROYECTOS_TOOLS_LECTURA, PROYECTOS_TOOLS_PROPUESTA, registerProyectosTools } from './proyectos.js';
@@ -439,6 +440,11 @@ export const TOOL_CAPABILITIES = {
    * llaves con el bloque `usuarios` en MCP_API_KEYS. No cuentan en totalTools.
    */
   usuarios: [...USUARIOS_TOOLS],
+  /**
+   * Agent-initiated chat message (2026-11-24, msgs 38807–38809): registered ONLY for keys that list
+   * it in allowedTools and carry agentCode (default off). Not counted in totalTools.
+   */
+  agentMessage: [...AGENT_MESSAGE_TOOLS],
   writeNote:
     'El servidor tiene rutas de escritura acotadas: categorización (caso: category_case; solicitud: process_category_request_general), creación de solicitudes (kronos_create_request: inserta requests_general + workflow + notificaciones), notas de bitácora (kronos_add_note) y resolución de actividades del workflow (kronos_resolve_task: cierra task_request_general con id_status=2 + date_resolution/end_date + id_executor_final, respetando el gate secuencial y avanzando el flujo), subida de adjuntos a OneDrive (kronos_upload_attachment: carpeta SAPSEND/TEC/SG/Request-<id> o SAPSEND/TEC/MA/Ticket-<id>, sin sobrescribir archivos existentes), eliminación de adjuntos (kronos_delete_attachment: solo key admin + usuario con doble llave de la app, justificación obligatoria, rechaza documentos con flujo de firma Orion y deja nota en la bitácora) y diligenciamiento del formulario dinámico (kronos_set_request_fields: UPSERT en request_form_value, sin campos de firma Orion ni solicitudes cerradas) y radicación de solicitudes de conectores IA a nombre de una persona (kronos_request_ia_access: la empresa se deduce del permiso de la persona sobre el agente de la key, nunca GSS; tope diario y sin duplicados), y PROPUESTAS sobre Proyectos (proyecto_proponer_*: solo insertan chat_project_proposal pendiente + aviso en el chat + auditoría; nada se ejecuta sin la confirmación de la persona en SynerLink). Todas parametrizadas, validadas por alcance de empresa y auditadas. El candado assertReadOnlySql sigue intacto para las tools de lectura.',
 } as const;
@@ -475,6 +481,9 @@ export function registerTools(rawServer: McpServer, ctx: ToolContext): void {
 
   // Administración de usuarios: SOLO llaves con el bloque `usuarios` (src/tools/usuarios.ts).
   registerUsuariosTools(server, { scope: ctx.scope, audit: ctx.audit });
+
+  // Agent-initiated message to a person (src/tools/agentMessage.ts): only keys that list it explicitly.
+  registerAgentMessageTool(server, { scope: ctx.scope, audit: ctx.audit });
 
   // «Consultar a un agente» desde el Correo: 2 lecturas del hilo compartido + 3 PROPUESTAS que la
   // persona confirma en el chat (src/tools/correoAgente.ts).
