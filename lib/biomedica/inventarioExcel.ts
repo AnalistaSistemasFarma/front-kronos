@@ -107,7 +107,8 @@ export async function leerInventarioXlsx(bytes: Uint8Array): Promise<{ filas: Fi
       if (filas.length + errores.length >= MAX_FILAS_CARGUE) throw new SgcError(`El archivo supera ${MAX_FILAS_CARGUE} filas.`, 400);
       const largos = (Object.keys(datos) as CampoEquipo[]).filter((c) => (datos[c]?.length ?? 0) > LARGO_CAMPO[c]);
       if (!datos.serie) errores.push({ fila: r, serie: null, motivo: 'Sin serie.' });
-      else if (!datos.equipo) errores.push({ fila: r, serie: datos.serie, motivo: 'Sin equipo.' });
+      // Sin equipo pero con modelo: lo completa la simulación con los datos de ese modelo en el inventario.
+      else if (!datos.equipo && !datos.modelo) errores.push({ fila: r, serie: datos.serie, motivo: 'Sin equipo ni modelo.' });
       else if (largos.length > 0) errores.push({ fila: r, serie: datos.serie, motivo: largos.map((c) => `${ETIQUETA_CAMPO[c]}: máximo ${LARGO_CAMPO[c]} caracteres`).join('; ') });
       else if (vistas.has(datos.serie.toLowerCase())) errores.push({ fila: r, serie: datos.serie, motivo: `Serie repetida (también en la fila ${vistas.get(datos.serie.toLowerCase())}).` });
       else {

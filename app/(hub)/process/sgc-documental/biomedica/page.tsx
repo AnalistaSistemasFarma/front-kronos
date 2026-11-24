@@ -148,7 +148,7 @@ function Biomedica({ company }: { company: SgcCompanyAccess }) {
         </Tabs.Panel>
 
         <Tabs.Panel value='inventario' pt='md'>
-          <BiomedInventario idCompany={company.idCompany} />
+          <BiomedInventario idCompany={company.idCompany} empresa={company.companyName} />
         </Tabs.Panel>
 
         <Tabs.Panel value='registros' pt='md'>
