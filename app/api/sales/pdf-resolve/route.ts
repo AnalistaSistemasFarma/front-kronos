@@ -62,25 +62,33 @@ export async function POST(request: NextRequest) {
         });
       }
 
-      // 2) Líneas.
+      // 2) Líneas. Empresas de servicios (descripción editable: Kelab, Meditrack): la OC trae descripciones libres
+      // y SAP tiene pocos artículos genéricos; se empareja por cobertura y la línea conserva la descripción del PDF.
+      const servicios = Boolean(conf?.descripcionEditable);
       const v = await validateLines(sap, {
-        cardCode: customer.CardCode, input, matchByDescription: true,
+        cardCode: customer.CardCode, input, matchByDescription: true, servicios,
         priceListDefault: conf?.priceListDefault ?? null, defaultWarehouse: conf?.defaultWarehouse ?? null,
       });
       const avisos: string[] = [...avisoTope, ...v.errors.map((e) => e.error)];
       const lines: Record<string, unknown>[] = v.lines.map((l) => ({ ...l, aiNote: null as string | null }));
       const elegidos: (ImportLine & { aiNote: string })[] = [];
       for (const p of v.pending) {
-        const b = bestCandidate(p.input.ItemDescription, p.candidates);
+        const b = bestCandidate(p.input.ItemDescription, p.candidates, { servicios });
         if (!b) {
           avisos.push(`«${p.input.ItemDescription}» (${p.input.Quantity}): no se encontró en SAP; agréguelo a mano.`);
           continue;
         }
-        elegidos.push({ ...p.input, ItemCode: b.ItemCode, aiNote: b.seguro ? `Emparejado por descripción con «${b.ItemName}»` : `Revisar: «${p.input.ItemDescription}» se emparejó con «${b.ItemName}» (hay otros parecidos)` });
+        const otros = p.candidates.filter((c) => c.ItemCode !== b.ItemCode).slice(0, 3).map((c) => c.ItemCode).join(', ');
+        elegidos.push({
+          ...p.input, ItemCode: b.ItemCode,
+          aiNote: b.seguro
+            ? `Emparejado por descripción con «${b.ItemName}»`
+            : `Revisar: se emparejó con «${b.ItemCode} ${b.ItemName}»${otros ? ` (otros posibles: ${otros})` : ''}`,
+        });
       }
       if (elegidos.length) {
         const v2 = await validateLines(sap, {
-          cardCode: customer.CardCode, input: elegidos, matchByDescription: false,
+          cardCode: customer.CardCode, input: elegidos, matchByDescription: false, descripcionEditable: servicios,
           priceListDefault: conf?.priceListDefault ?? null, defaultWarehouse: conf?.defaultWarehouse ?? null,
         });
         v2.lines.forEach((l) => lines.push({ ...l, aiNote: elegidos.find((e) => e.row === l.row)?.aiNote ?? null }));
