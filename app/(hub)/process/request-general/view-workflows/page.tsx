@@ -71,6 +71,7 @@ import TableColumnsEditor from '../_components/TableColumnsEditor';
 import WorkflowValidatorsModal from '../../../../../components/request-general/WorkflowValidatorsModal';
 import BotonMejoraContinua from '../../../../../components/request-general/BotonMejoraContinua';
 import { ProcessSlaCard } from '../../../../../components/request-general/sla/ProcessSlaCard';
+import { ProcessAccessCard } from '../../../../../components/request-general/flow-access/ProcessAccessCard';
 import { FlowConnector } from '../../../../../components/ui/flow/FlowConnector';
 import { SapTaskActionPicker, SapTaskCardInfo } from '../../../../../components/workflow-sap/SapTaskObject';
 import {
@@ -1808,6 +1809,8 @@ if (session?.user?.id) return session.user.id as unknown as number;
 
                   {/* SLA (ANS) of the subprocess: own load/save, independent of the edit mode. */}
                   <ProcessSlaCard processId={workflow.id} />
+
+                  <ProcessAccessCard processId={workflow.id} />
 
                   {/* Formulario externo: expone este flujo en una página pública SIN login. */}
                   <Card withBorder radius='md' p='md'>
