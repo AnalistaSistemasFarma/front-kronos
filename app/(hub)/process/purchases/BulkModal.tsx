@@ -24,6 +24,14 @@ interface GroupResult {
   errors?: { field: string; error: string }[];
 }
 
+/** «DocumentLines[1].ItemCode» -> «Fila 7: » (fila del Excel); otros campos sin prefijo. */
+function rowLabel(field: string, rows: number[]): string {
+  const m = /^DocumentLines\[(\d+)\]/.exec(field);
+  if (!m) return '';
+  const row = rows[Number(m[1])];
+  return row ? `Fila ${row}: ` : `Línea ${Number(m[1]) + 1}: `;
+}
+
 interface BulkReport {
   created: number;
   failed: number;
@@ -230,7 +238,7 @@ export default function BulkModal({ opened, onClose, onDone, companies }: Props)
                         <List size="xs">
                           {r.errors.map((e) => (
                             <List.Item key={`${e.field}-${e.error}`}>
-                              {e.field}: {e.error}
+                              {rowLabel(e.field, r.rows)}{e.error}
                             </List.Item>
                           ))}
                         </List>

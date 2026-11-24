@@ -42,6 +42,22 @@ describe('validateLinesInSap', () => {
     expect(sap.exists).toHaveBeenCalledWith(expect.stringContaining("Code eq '51''35'"));
   });
 
+  it('marca el articulo inexistente con su codigo', async () => {
+    const sap = lookups({ exists: vi.fn(async (path: string) => !path.startsWith('Items')) });
+    expect(await validateLinesInSap([{ ...line('5135', 'ADM', 'IVA19'), ItemCode: 'SERVOTROS01' }], sap)).toEqual([
+      { field: 'DocumentLines[0].ItemCode', error: expect.stringContaining('SERVOTROS01 no existe') },
+    ]);
+  });
+
+  it('marca el socio que no es proveedor y filtra por cSupplier', async () => {
+    const exists = vi.fn(async (path: string) => !path.startsWith('BusinessPartners'));
+    const sap = lookups({ exists });
+    expect(await validateLinesInSap([{ ...line('5135', 'ADM', 'IVA19'), LineVendor: '900281394' }], sap)).toEqual([
+      { field: 'DocumentLines[0].LineVendor', error: expect.stringContaining('no es proveedor') },
+    ]);
+    expect(exists).toHaveBeenCalledWith(expect.stringContaining("CardType eq 'cSupplier'"));
+  });
+
   it('propaga errores de SAP distintos de no existe', async () => {
     const sap = lookups({ exists: vi.fn().mockRejectedValue(new Error('SAP caido')) });
     await expect(validateLinesInSap([line('5135', 'ADM', 'IVA19')], sap)).rejects.toThrow('SAP caido');

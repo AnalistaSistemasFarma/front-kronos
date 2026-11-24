@@ -6,6 +6,8 @@ import { createAndSendNotifications } from '../notifications.js';
 import { createGeneralRequest } from '../requests-general/createGeneralRequest';
 import { sapGet, sapLogin, sapLogout, sapPatch, SapError, type SapSession } from '../sap/serviceLayer';
 import { publishApprovedDraft, publishSap } from './publish';
+import { sapLookups, validateLinesInSap } from './validateSap';
+import type { DraftLine } from './drafts';
 import { startStep, finishStep, withStep, type TriggeredBy } from '../workflow-sap/executionLog';
 import { isAuthorizationEffectEnabled } from '../workflow-sap/config';
 import { instantiateOutcomeTasks } from '../workflow-sap/outcomeTasks';
@@ -108,6 +110,12 @@ export async function refreshRequestTexts(sap: SapSession, companyId: number, do
     .query(`UPDATE requests_general SET subject_request = @s, description = @d WHERE id = @id;`);
 }
 
+/** «DocumentLines[2].ItemCode» -> «Línea 3: ». */
+function lineLabel(field: string): string {
+  const m = /^DocumentLines\[(\d+)\]/.exec(field);
+  return m ? `Línea ${Number(m[1]) + 1}: ` : '';
+}
+
 /** Envia un borrador a autorizar. `sap` es la sesion abierta con el permiso del usuario. */
 export async function sendToAuthorize(params: {
   sap: SapSession;
@@ -147,6 +155,17 @@ export async function sendToAuthorize(params: {
   }
   const user = await prisma.user.findUnique({ where: { email: userEmail }, select: { id: true } });
   if (!user) return { ok: false, status: 401, error: 'Usuario no encontrado.' };
+
+  // Antes de abrir el flujo: un articulo inexistente o un socio que no es proveedor
+  // solo fallaria al publicar en firme, con la solicitud ya autorizada.
+  if (!params.asDraft) {
+    const full = await sapGet<{ DocumentLines?: DraftLine[] }>(sap, `Drafts(${docEntry})?$select=DocumentLines`);
+    const errors = await validateLinesInSap(full.DocumentLines ?? [], sapLookups(sap));
+    if (errors.length > 0) {
+      const detail = errors.map((e) => `${lineLabel(e.field)}${e.error}`).join(' ');
+      return { ok: false, status: 422, error: `No se envió a autorizar. ${detail}` };
+    }
+  }
 
   const texts = await requestTextsFromSap(sap, docEntry);
   const subject = texts.subject;
