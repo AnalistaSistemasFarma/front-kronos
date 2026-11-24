@@ -4,6 +4,8 @@ import { authOptions } from '../../../auth/[...nextauth]/route';
 import { withMssqlPool } from '@/lib/mssqlPool';
 import { fetchOrionSignedFileContent } from '@/lib/orion/client';
 import {
+  coversAllSigners,
+  findSignerForVersion,
   listOrionDocumentVersions,
   resolveOrionPdfUrl,
   canViewOrionDocumentVersions,
@@ -242,8 +244,9 @@ export async function GET(req: Request) {
         maxSignerOrder = null;
       } else if (selectedVersion.kind === 'partial' || selectedVersion.kind === 'final') {
         // Igual que firma interna: acumulado hasta ese firmante, SIN watermark.
-        const email = normalizeEmail(selectedVersion.signerEmail);
-        const signer = (state.signers ?? []).find((s) => normalizeEmail(s.email) === email);
+        // El slot exacto de esta versión (no el primero del correo): con dos firmas de la
+        // misma persona, «Firma 2 (final)» debe llegar hasta su orden 2.
+        const signer = findSignerForVersion(state.signers, selectedVersion);
         const order = Number(signer?.order);
         if (Number.isFinite(order) && order > 0) {
           maxSignerOrder = order;
@@ -252,6 +255,13 @@ export async function GET(req: Request) {
             .filter((v) => v.kind === 'partial' || v.kind === 'final')
             .findIndex((v) => v.id === selectedVersion!.id);
           if (signedIdx >= 0) maxSignerOrder = signedIdx + 1;
+        }
+        // La versión final (o una que ya incluye a todos los firmantes) es el documento completo:
+        // se pide sin maxOrder. Con maxOrder Orion SOLO reconstruye y, si la reconstrucción
+        // falla, responde 404 «No se encontró el PDF firmado»; sin maxOrder tiene respaldo
+        // (último PDF firmado en OneDrive). Sin watermark igual que antes.
+        if (coversAllSigners(state, selectedVersion.kind, maxSignerOrder)) {
+          maxSignerOrder = null;
         }
       }
     } else if (versionId) {

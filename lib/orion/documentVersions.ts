@@ -20,6 +20,54 @@ function versionIdForSigner(signer: OrionSignerState): string {
 }
 
 /**
+ * Firmante (slot) al que corresponde una versión parcial/final. Si la misma persona firma
+ * varias veces, buscar solo por correo devolvía siempre su PRIMER slot y «Firma 2 (final)»
+ * salía acumulada hasta la firma 1. Orden de búsqueda: id exacto de la versión, luego el
+ * slot de ese correo con la misma fecha de firma, y por último el primero del correo.
+ */
+export function findSignerForVersion(
+  signers: OrionSignerState[] | null | undefined,
+  version: Pick<OrionDocumentVersion, 'id' | 'signerEmail' | 'createdAt'>
+): OrionSignerState | null {
+  const list = signers ?? [];
+  const byId = list.find((s) => versionIdForSigner(s) === version.id);
+  if (byId) return byId;
+  const email = normalizeEmail(version.signerEmail);
+  if (!email) return null;
+  const mine = list.filter((s) => normalizeEmail(s.email) === email);
+  const at = Date.parse(String(version.createdAt || ''));
+  const sameTime = Number.isFinite(at)
+    ? mine.find((s) => Date.parse(String(s.signedAt || '')) === at)
+    : undefined;
+  return sameTime ?? mine[0] ?? null;
+}
+
+/**
+ * ¿La versión pedida ya es el documento completo? Sí si es la final de un documento firmado
+ * por todos, o si su orden alcanza al último firmante. En ese caso no hace falta pedirle a
+ * Orion una reconstrucción histórica (maxOrder), que no tiene respaldo si falla.
+ */
+export function coversAllSigners(
+  state: Pick<OrionSignatureState, 'signers' | 'status'>,
+  versionKind: string,
+  maxSignerOrder: number | null
+): boolean {
+  const signers = state.signers ?? [];
+  if (signers.length === 0) return false;
+  const fullySigned =
+    String(state.status || '').toUpperCase() === 'FIRMADO' || allSignersCompleted(signers);
+  if (!fullySigned) return false;
+  if (versionKind === 'final') return true;
+  const lastOrder = Math.max(
+    ...signers.map((s, i) => {
+      const order = Number(s.order);
+      return Number.isFinite(order) && order > 0 ? order : i + 1;
+    })
+  );
+  return maxSignerOrder != null && maxSignerOrder >= lastOrder;
+}
+
+/**
  * Historial de versiones / descargas:
  * - Quien creó la solicitud (solicitante).
  * - Preparador documento del flujo (Administración → Preparadores documento).
