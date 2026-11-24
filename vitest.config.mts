@@ -38,6 +38,8 @@ export default defineConfig({
       'app/api/chat/compartir/**/*.test.ts',
       // `app/api/biomedica/**`: Ingeniería biomédica (permiso del módulo, PDF en línea, control de vigencia).
       'app/api/biomedica/**/*.test.ts',
+      // `app/api/integrations/orion/**`: búsqueda de socios de firma (solo empresas del usuario, 403).
+      'app/api/integrations/orion/**/*.test.ts',
       'components/sgc/**/*.test.ts',
       // Medidor del consumo de Anthropic en Proyectos (render del marcado, 2026-10-22).
       'components/proyectos/**/*.test.ts',
