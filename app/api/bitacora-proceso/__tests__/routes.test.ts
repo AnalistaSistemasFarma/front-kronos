@@ -138,7 +138,7 @@ describe('Bitácora de Proceso · rutas', () => {
       pinRestablecer.POST(send('POST', { company: FARMA, idUser: 'u9' })),
       responsables.GET(get('?company=1')),
       responsables.GET(get('?company=1&rol=INSPECTOR')),
-      responsables.POST(send('POST', { company: FARMA, id_user: 'u9', rol: 'INSPECTOR' })),
+      responsables.POST(send('POST', { company: FARMA, id_user: 'u9', rol: 'JEFE_PROD' })),
       responsables.PATCH(send('PATCH', { company: FARMA, id_responsable: 1, activo: false })),
     ]);
     expect(all.map((r) => r.status)).toEqual(all.map(() => 403));
@@ -301,8 +301,7 @@ describe('Bitácora de Proceso · rutas', () => {
     const res = await lista.POST(send('POST', nueva));
     expect(res.status).toBe(201);
     expect(await res.json()).toEqual({ orden: { id: 9, consecutivo: 1 } });
-    expect(m.crearOrden.mock.calls[0][1]).toMatchObject({ sapOp: null, turno: 'TARDE', inspector: 'u2', jefeProduccion: 'u3', operadores: [7], idArea: 3 });
-    expect((await lista.POST(send('POST', { ...nueva, inspector: '' }))).status).toBe(400);
+    expect(m.crearOrden.mock.calls[0][1]).toMatchObject({ sapOp: null, turno: 'TARDE', inspector: null, jefeProduccion: 'u3', operadores: [7], idArea: 3 });
     expect((await lista.POST(send('POST', { ...nueva, jefeProduccion: '' }))).status).toBe(400);
     expect(m.crearOrden.mock.calls[0][2]).toEqual({ idUser: 'u1', email: 'op@farmalogica.com', ip: '10.0.0.9' });
     expect(m.crearOrden.mock.calls[0][3]).toBe('GESTION');
@@ -333,7 +332,11 @@ describe('Bitácora de Proceso · rutas', () => {
     m.getOrdenDetalle.mockResolvedValue(null);
     expect((await detalle.GET(get('?company=1'), params('7'))).status).toBe(404);
     m.getOrdenDetalle.mockResolvedValue({ id: 7 });
-    expect((await detalle.GET(get('?company=1'), params('7'))).status).toBe(200);
+    const ok = await detalle.GET(get('?company=1'), params('7'));
+    expect(ok.status).toBe(200);
+    // Reloj vivo de planta (2026-11-24): el detalle trae la hora del servidor.
+    const { ahoraServidor } = (await ok.json()) as { ahoraServidor: string };
+    expect(Math.abs(Date.parse(ahoraServidor) - Date.now())).toBeLessThan(5_000);
     expect((await detalle.GET(get('?company=1'), params('0'))).status).toBe(400);
   });
 
@@ -439,7 +442,7 @@ describe('Bitácora de Proceso · rutas', () => {
       operadores.GET(get('?company=1&todas=1')),
       areas.GET(get('?company=1&todas=1')),
       operadores.POST(send('POST', { company: FARMA, nombre: 'Pepito' })),
-      responsables.POST(send('POST', { company: FARMA, id_user: 'u9', rol: 'INSPECTOR' })),
+      responsables.POST(send('POST', { company: FARMA, id_user: 'u9', rol: 'JEFE_PROD' })),
       operadoresOrden.POST(send('POST', { operadores: [7] }, '?company=1'), params('1')),
     ]);
     expect(catalogo.map((r) => r.status)).toEqual(catalogo.map(() => 403));
