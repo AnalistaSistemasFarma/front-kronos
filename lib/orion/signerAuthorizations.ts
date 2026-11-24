@@ -4,7 +4,7 @@ import { buildAppUrl, resolveEmailByUserId } from '../notificationEvents.js';
 import { createAndSendNotifications } from '../notifications.js';
 import type { OrionSignerState } from './types';
 import { findUserIdByEmail } from './signerTasks';
-import { getCurrentPendingSigner } from './signerStatus';
+import { getCurrentPendingSigner, signerSlotProgress } from './signerStatus';
 import {
   buildOrionAuthResolution,
   buildOrionFileTaskMarker,
@@ -154,6 +154,8 @@ export async function createOrionSignerAuthorizations(
     subject?: string | null;
     /** Solo el firmante pendiente actual (secuencial). Default true. */
     onlyCurrentTurn?: boolean;
+    /** Todos los firmantes del documento (para contar las firmas de una misma persona). */
+    documentSigners?: OrionSignerState[] | null;
   }
 ): Promise<CreateOrionSignerAuthorizationsResult> {
   const fileId = String(params.fileId || '').trim();
@@ -188,6 +190,9 @@ export async function createOrionSignerAuthorizations(
   let created = 0;
   let skipped = 0;
   const errors: string[] = [];
+  const documentSigners = Array.isArray(params.documentSigners) ? params.documentSigners : allSigners;
+  const docLabel = String(params.fileName || '').trim();
+  const subjectLabel = String(params.subject || '').trim();
 
   for (const signer of signers) {
     const email = String(signer.email || '').trim();
@@ -198,6 +203,13 @@ export async function createOrionSignerAuthorizations(
       errors.push(`Firmante sin usuario SynerLink: ${email}`);
       continue;
     }
+
+    // La misma persona puede firmar varias veces el documento (varios slots).
+    const progress = signerSlotProgress(documentSigners, email, signer);
+    const multiLine =
+      progress.total > 1
+        ? `Este documento tiene ${progress.total} firmas suyas: le corresponde la ${progress.position || progress.done + 1} de ${progress.total}.`
+        : null;
 
     const existing = await findExistingSignerAuth(
       pool,
@@ -216,6 +228,34 @@ export async function createOrionSignerAuthorizations(
         fileId,
         keepId: existing,
       });
+      // Su siguiente firma del mismo PDF no crea otra autorización (ya existe la de la
+      // primera, y recrearla causaba el bucle Autorizaciones ↔ Firmar), pero sin aviso la
+      // persona no se enteraba de que le faltaba firmar otra vez.
+      if (progress.total > 1 && progress.done > 0) {
+        try {
+          const emailAddr = await resolveEmailByUserId(user.id);
+          if (emailAddr) {
+            await createAndSendNotifications([emailAddr], {
+              title: docLabel
+                ? `Le falta firmar: ${docLabel} (firma ${progress.position || progress.done + 1} de ${progress.total})`
+                : `Le falta una firma (${progress.position || progress.done + 1} de ${progress.total})`,
+              body: [
+                `Solicitud #${params.requestId}`,
+                multiLine,
+                `Ya firmó ${progress.done}. Abra la solicitud y toque «Tu turno» para firmar de nuevo.`,
+              ]
+                .filter(Boolean)
+                .join(' · '),
+              url: buildAppUrl(
+                `/process/request-general/view-request?id=${encodeURIComponent(String(params.requestId))}`
+              ),
+              tag: `orion-auth-${existing}-slot-${Number(signer.order) || progress.position}`,
+            });
+          }
+        } catch (err) {
+          console.warn('[orion/signerAuthorizations] Aviso de firma adicional falló:', err);
+        }
+      }
       continue;
     }
 
@@ -249,16 +289,15 @@ export async function createOrionSignerAuthorizations(
     try {
       const emailAddr = await resolveEmailByUserId(user.id);
       if (emailAddr) {
-        const docLabel = String(params.fileName || '').trim();
-        const subjectLabel = String(params.subject || '').trim();
         await createAndSendNotifications([emailAddr], {
           title: docLabel
-            ? `Firmar: ${docLabel}`
+            ? `Firmar${progress.total > 1 ? ` (${progress.total} firmas)` : ''}: ${docLabel}`
             : 'Autorizar firma · SynerLink',
           body: [
             `Solicitud #${params.requestId}`,
             docLabel ? `Documento: ${docLabel}` : null,
             subjectLabel ? subjectLabel : null,
+            multiLine,
             'Autorice en Autorizaciones para ver y firmar este PDF.',
           ]
             .filter(Boolean)
@@ -302,6 +341,7 @@ export async function openNextOrionSignerAuthorization(
     ...params,
     signers: [current],
     onlyCurrentTurn: false,
+    documentSigners: params.signers,
   });
 
   if (result.errors.length > 0) {
