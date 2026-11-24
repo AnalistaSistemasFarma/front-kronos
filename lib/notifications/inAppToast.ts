@@ -14,6 +14,7 @@
  */
 import { notificationKind } from './notificationKind';
 import { inferNotificationPath } from './resolveNotificationTarget';
+import { notificationReplyTarget, replyPlaceholder } from './replyTarget';
 
 /** 'urgent' = signatures/validations and monitor alerts; 'nudge' = 📳 between people. */
 export type InAppToastTone = 'default' | 'urgent' | 'nudge';
@@ -35,8 +36,33 @@ export interface InAppToast {
   createdAt: string;
   /** Where «Abrir» goes. null = no button. */
   url: string | null;
-  /** Chat or project conversation that accepts a quick reply. */
-  replyConversationId: number | null;
+  /**
+   * Inline quick reply (2026-11-24, msg 38376): a chat/project conversation (message via the chat
+   * send API) or a bell notification (note on its request/ticket via /api/notifications/:id/reply).
+   * null = only «Abrir».
+   */
+  reply: InAppToastReply | null;
+  /** Message that is only emoji (≤ 6): shown big with its own entry animation (msg 38382). */
+  emojiOnly?: string | null;
+  /** Celebration content (🎉, «felicitaciones»…): short confetti burst, never with reduced motion. */
+  celebrate?: boolean;
+  /** Sticker, GIF or image of the message: shown instead of the text preview. */
+  media?: InAppToastMedia | null;
+}
+
+export interface InAppToastMedia {
+  src: string;
+  /** Still frame of an animated sticker (used with prefers-reduced-motion). */
+  poster: string | null;
+  alt: string;
+}
+
+export type InAppToastReply =
+  | { kind: 'chat'; conversationId: number; placeholder: string }
+  | { kind: 'notification'; notificationId: number; placeholder: string };
+
+function chatReply(conversationId: number, placeholder = 'Responder…'): InAppToastReply {
+  return { kind: 'chat', conversationId, placeholder };
 }
 
 /** At most this many cards on screen; the oldest leaves first. */
@@ -70,6 +96,72 @@ function clip(text: string | null | undefined, max = 160): string | null {
   const flat = (text ?? '').replace(/\s+/g, ' ').trim();
   if (!flat) return null;
   return flat.length <= max ? flat : `${flat.slice(0, max - 1).trimEnd()}…`;
+}
+
+/* ───────────────────────────── Expressive content (msg 38382) ───────────────────────────── */
+
+const PICTOGRAPHIC = /\p{Extended_Pictographic}/u;
+const EMOJI_ONLY = /^(?:\p{Extended_Pictographic}|\p{Emoji_Modifier}|\p{Regional_Indicator}|\u200d|\ufe0f|\u20e3|\s)+$/u;
+const MAX_BIG_EMOJI = 6;
+
+/** The text if it is ONLY emoji (at most 6), else null. «👍», «🎉🎉», «👏🏽» → big emoji. */
+export function emojiOnlyText(text: string | null | undefined): string | null {
+  const t = (text ?? '').trim();
+  if (!t || !EMOJI_ONLY.test(t) || !PICTOGRAPHIC.test(t)) return null;
+  const count = (t.match(/\p{Extended_Pictographic}/gu) ?? []).length;
+  return count <= MAX_BIG_EMOJI ? t.replace(/\s+/g, '') : null;
+}
+
+const CELEBRATION_EMOJI = ['🎉', '🎊', '👏', '🥳', '🏆', '🙌', '🥇', '🍾', '💯'];
+const CELEBRATION_WORDS = [
+  'felicitaciones',
+  'felicidades',
+  'felicito',
+  'congrats',
+  'congratulations',
+  'bien hecho',
+  'buen trabajo',
+  'excelente trabajo',
+  'lo logramos',
+  'lo lograste',
+];
+
+/** Celebration content: confetti emoji or words like «felicitaciones», «bien hecho». */
+export function isCelebration(text: string | null | undefined): boolean {
+  const t = (text ?? '').toLowerCase();
+  if (!t) return false;
+  return CELEBRATION_EMOJI.some((e) => t.includes(e)) || CELEBRATION_WORDS.some((w) => t.includes(w));
+}
+
+/** Adds big-emoji / celebration flags from the preview text. */
+export function withExpressiveContent(toast: InAppToast): InAppToast {
+  const emoji = emojiOnlyText(toast.preview);
+  return { ...toast, emojiOnly: emoji, celebrate: isCelebration(toast.preview) };
+}
+
+/** The slice of ChatMessageDto (lib/chat/client.ts) that can carry a sticker/GIF/image. */
+export interface MessageMediaInput {
+  media?: { kind: string; title: string; src: string; poster?: string | null } | null;
+  attachments?: { fileName: string; contentType: string | null; downloadUrl: string }[];
+}
+
+const INLINE_IMAGE = /^image\/(png|jpe?g|gif|webp)$/i;
+
+/** Sticker/GIF of the message, or its first image attachment, as the card preview. */
+export function mediaFromMessage(msg: MessageMediaInput | null | undefined): InAppToastMedia | null {
+  if (!msg) return null;
+  if (msg.media?.src) {
+    return { src: msg.media.src, poster: msg.media.poster ?? null, alt: msg.media.title || (msg.media.kind === 'gif' ? 'GIF' : 'Sticker') };
+  }
+  const image = (msg.attachments ?? []).find((a) => INLINE_IMAGE.test(a.contentType ?? '') && a.downloadUrl);
+  return image ? { src: image.downloadUrl, poster: null, alt: image.fileName || 'Imagen' } : null;
+}
+
+/** Label for a media-only message. */
+export function mediaLabel(msg: MessageMediaInput): string {
+  if (msg.media?.kind === 'gif') return 'Envió un GIF';
+  if (msg.media) return 'Envió un sticker';
+  return 'Envió una imagen';
 }
 
 /* ───────────────────────── Chat inbox (agents, groups, people) ───────────────────────── */
@@ -115,7 +207,7 @@ export function toastFromInboxConversation(
       tone: 'default',
       createdAt: c.lastMessage.createdAt,
       url: `/process/chat/persona/${c.id}`,
-      replyConversationId: c.id,
+      reply: chatReply(c.id),
     };
   }
 
@@ -133,7 +225,7 @@ export function toastFromInboxConversation(
       tone: 'default',
       createdAt: c.lastMessage.createdAt,
       url: `/process/chat/grupo/${c.id}`,
-      replyConversationId: c.id,
+      reply: chatReply(c.id),
     };
   }
 
@@ -150,7 +242,7 @@ export function toastFromInboxConversation(
     tone: 'default',
     createdAt: c.lastMessage.createdAt,
     url: `/process/chat/${encodeURIComponent(c.agent.code)}`,
-    replyConversationId: c.id,
+    reply: chatReply(c.id),
   };
 }
 
@@ -190,7 +282,7 @@ export function toastFromProjectEvent(e: ProjectPulseInput): InAppToast | null {
     tone: 'default',
     createdAt: e.createdAt,
     url: e.url ?? '/process/proyectos',
-    replyConversationId: e.idConversation,
+    reply: chatReply(e.idConversation, 'Responder en el proyecto…'),
   };
 }
 
@@ -209,7 +301,7 @@ export function toastFromNudge(e: { idConversation: number; authorName: string; 
     tone: 'nudge',
     createdAt: e.createdAt,
     url: `/process/chat/persona/${e.idConversation}`,
-    replyConversationId: e.idConversation,
+    reply: chatReply(e.idConversation),
   };
 }
 
@@ -226,6 +318,12 @@ export interface BellNotificationInput {
 /** Monitor alerts (system and SAP) link to the metrics page. */
 export function isMonitorAlert(n: { url: string | null }): boolean {
   return (n.url ?? '').toLowerCase().includes('/process/system-metrics');
+}
+
+/** Requests, activities and tickets accept a note; anything else only «Abrir». */
+function bellReply(n: BellNotificationInput): InAppToastReply | null {
+  const target = notificationReplyTarget(n.url);
+  return target ? { kind: 'notification', notificationId: n.id, placeholder: replyPlaceholder(target) } : null;
 }
 
 export function toastFromBellNotification(n: BellNotificationInput): InAppToast {
@@ -258,7 +356,7 @@ export function toastFromBellNotification(n: BellNotificationInput): InAppToast 
     tone: urgent ? 'urgent' : 'default',
     createdAt: n.created_at,
     url: inferNotificationPath(n) ?? null,
-    replyConversationId: null,
+    reply: bellReply(n),
   };
 }
 
@@ -290,7 +388,7 @@ export function bellSummaryToast(count: number, newestAt: string, anyUrgent: boo
     tone: anyUrgent ? 'urgent' : 'default',
     createdAt: newestAt,
     url: null,
-    replyConversationId: null,
+    reply: null,
   };
 }
 

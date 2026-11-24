@@ -69,7 +69,7 @@ describe('inbox conversation → card', () => {
       context: 'Ventas noviembre',
       preview: 'Listo, ya quedó el reporte de ventas',
       url: '/process/chat/orus',
-      replyConversationId: 12,
+      reply: { kind: 'chat', conversationId: 12, placeholder: 'Responder…' },
       tone: 'default',
     });
     expect(t.avatar).toEqual({ src: 'avatar:orus', name: 'Orus', colorKey: 'orus' });
@@ -114,7 +114,7 @@ describe('inbox conversation → card', () => {
       'u1',
       avatar
     )!;
-    expect(t).toMatchObject({ title: 'Laura Gómez', label: 'Mensaje', url: '/process/chat/persona/31', replyConversationId: 31 });
+    expect(t).toMatchObject({ title: 'Laura Gómez', label: 'Mensaje', url: '/process/chat/persona/31', reply: { kind: 'chat', conversationId: 31, placeholder: 'Responder…' } });
     expect(t.avatar?.src).toBe('https://x/laura.png');
   });
 
@@ -150,7 +150,7 @@ describe('project pulse event → card', () => {
       context: 'Infraestructura SynerLink',
       company: 'GSS',
       url: '/process/proyectos/19?conversacion=40',
-      replyConversationId: 40,
+      reply: { kind: 'chat', conversationId: 40, placeholder: 'Responder en el proyecto…' },
     });
   });
 
@@ -176,12 +176,17 @@ describe('bell notification → card', () => {
 
   it('monitor alerts are urgent', () => {
     expect(toastFromBellNotification(n('Alerta: CPU alta · SynerLink', '/process/system-metrics#alertas')))
-      .toMatchObject({ tone: 'urgent', label: 'Alerta', icon: 'alert', url: '/process/system-metrics#alertas' });
+      .toMatchObject({ tone: 'urgent', label: 'Alerta', icon: 'alert', url: '/process/system-metrics#alertas', reply: null });
   });
 
   it('tickets and activities are normal', () => {
     expect(toastFromBellNotification(n('Nuevo ticket asignado', '/process/help-desk/view-ticket?id=5')))
-      .toMatchObject({ tone: 'default', label: 'Mesa de ayuda', icon: 'ticket', replyConversationId: null });
+      .toMatchObject({
+        tone: 'default',
+        label: 'Mesa de ayuda',
+        icon: 'ticket',
+        reply: { kind: 'notification', notificationId: 1, placeholder: 'Agregar una nota al ticket #5…' },
+      });
     expect(toastFromBellNotification(n('Actividad asignada', null)).tone).toBe('default');
   });
 
@@ -210,5 +215,39 @@ describe('samePage', () => {
     expect(samePage('/process/chat/orus', 'https://synerlink.test/process/chat/orus/')).toBe(true);
     expect(samePage('/process/proyectos/19?conversacion=40', '/process/proyectos/19?conversacion=41')).toBe(false);
     expect(samePage(null, '/x')).toBe(false);
+  });
+});
+
+describe('expressive content (msg 38382)', () => {
+  it('emoji-only messages become a big emoji', async () => {
+    const { emojiOnlyText } = await import('../inAppToast');
+    expect(emojiOnlyText('👍')).toBe('👍');
+    expect(emojiOnlyText(' 🎉 🎉 ')).toBe('🎉🎉');
+    expect(emojiOnlyText('👏🏽')).toBe('👏🏽');
+    expect(emojiOnlyText('👨‍👩‍👧')).toBe('👨‍👩‍👧');
+    expect(emojiOnlyText('ok 👍')).toBeNull();
+    expect(emojiOnlyText('123')).toBeNull();
+    expect(emojiOnlyText('😀😀😀😀😀😀😀')).toBeNull();
+    expect(emojiOnlyText('')).toBeNull();
+  });
+
+  it('celebration by emoji or words', async () => {
+    const { isCelebration } = await import('../inAppToast');
+    expect(isCelebration('🎉')).toBe(true);
+    expect(isCelebration('¡Felicitaciones al equipo!')).toBe(true);
+    expect(isCelebration('Bien hecho, gracias')).toBe(true);
+    expect(isCelebration('Congrats!')).toBe(true);
+    expect(isCelebration('Revise la solicitud #10')).toBe(false);
+  });
+
+  it('sticker / GIF / image as preview', async () => {
+    const { mediaFromMessage, mediaLabel } = await import('../inAppToast');
+    const sticker = { media: { kind: 'sticker', title: 'Pulgar', src: '/stickers/a.webp', poster: '/stickers/a.png' }, attachments: [] };
+    expect(mediaFromMessage(sticker)).toEqual({ src: '/stickers/a.webp', poster: '/stickers/a.png', alt: 'Pulgar' });
+    expect(mediaLabel(sticker)).toBe('Envió un sticker');
+    const image = { attachments: [{ fileName: 'foto.jpg', contentType: 'image/jpeg', downloadUrl: '/api/chat/attachments/4' }] };
+    expect(mediaFromMessage(image)).toEqual({ src: '/api/chat/attachments/4', poster: null, alt: 'foto.jpg' });
+    expect(mediaLabel(image)).toBe('Envió una imagen');
+    expect(mediaFromMessage({ attachments: [{ fileName: 'a.pdf', contentType: 'application/pdf', downloadUrl: '/x' }] })).toBeNull();
   });
 });
