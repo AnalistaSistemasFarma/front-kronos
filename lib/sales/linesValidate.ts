@@ -47,7 +47,11 @@ export async function validateLines(
   /** Candidatos por palabras de búsqueda: en una OC grande muchas líneas comparten las mismas (una consulta a SAP por grupo). */
   const candidatesCache = new Map<string, { ItemCode: string; ItemName: string }[]>();
   for (const l of input) {
-    const it = l.ItemCode ? items.get(String(l.ItemCode)) : undefined;
+    const found = l.ItemCode ? items.get(String(l.ItemCode)) : undefined;
+    // Del PDF, un código que existe pero no es de venta (p. ej. el código de COMPRA del cliente, como SERV0000 de
+    // Farmalógica en Kelab) se trata como si no viniera: se busca el artículo por la descripción.
+    const noVendible = found && (found.Frozen === 'tYES' || found.SalesItem !== 'tYES');
+    const it = matchByDescription && noVendible && l.ItemDescription ? undefined : found;
     if (!it && matchByDescription && l.ItemDescription) {
       // Candidatos por descripción (todas las palabras útiles), solo artículos de venta activos.
       const terms = searchTerms(l.ItemDescription);
