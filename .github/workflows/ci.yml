@@ -645,7 +645,7 @@ jobs:
           npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-11-24-proyectos-reuniones-reversa.sql
           npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-11-24-proyectos-reuniones-reversa.sql
           npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-11-24-proyectos-reuniones-PRUEBAS.sql
-          echo "IF OBJECT_ID(N'dbo.chat_project_meeting', N'U') IS NULL OR OBJECT_ID(N'dbo.chat_project_meeting_rule', N'U') IS NULL OR OBJECT_ID(N'dbo.chat_project_meeting_analysis', N'U') IS NULL OR NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'chat_project_meeting_ical_uid' AND is_unique = 1) OR NOT EXISTS (SELECT 1 FROM sys.foreign_keys WHERE name = N'chat_project_meeting_analysis_id_project_meeting_fkey') THROW 50000, N'Project meetings did not leave its tables, the unique iCalUId or the analysis FK.', 1;" > /tmp/project-meetings-ok.sql
+          echo "IF OBJECT_ID(N'dbo.chat_project_meeting', N'U') IS NULL OR OBJECT_ID(N'dbo.chat_project_meeting_rule', N'U') IS NULL OR OBJECT_ID(N'dbo.chat_project_meeting_analysis', N'U') IS NULL OR NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'chat_project_meeting_ical_uid' AND is_unique = 1) OR NOT EXISTS (SELECT 1 FROM sys.foreign_keys WHERE name = N'chat_project_meeting_analysis_id_project_meeting_fkey') OR NOT EXISTS (SELECT 1 FROM sys.check_constraints WHERE name = N'chat_project_event_via_ck' AND definition LIKE N'%reunion%') THROW 50000, N'Project meetings did not leave its tables, the unique iCalUId, the analysis FK or the audit entity reunion.', 1;" > /tmp/project-meetings-ok.sql
           npx prisma db execute --schema prisma/schema.prisma --file /tmp/project-meetings-ok.sql
           if npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-11-24-proyectos-reuniones-PROD.sql; then echo "The PROD project meetings script should have refused on kronos_ci"; exit 1; fi
           # Errores de IA (Auditoría de agentes, 2026-11-03): PRUEBAS dos veces, reversa y otra vez PRUEBAS (idempotencia ida y vuelta) y PROD que se niega. La lógica se prueba en tests/integration/auditoria.
@@ -734,7 +734,7 @@ jobs:
             npx prisma db execute --schema prisma/schema.prisma --file /tmp/meetings-nego.sql
           fi
           reversa prisma/manual/2026-11-24-proyectos-reuniones-reversa.sql
-          echo "IF OBJECT_ID(N'dbo.chat_project_meeting', N'U') IS NOT NULL OR OBJECT_ID(N'dbo.chat_project_meeting_analysis', N'U') IS NOT NULL THROW 50000, N'The project meetings reversal did not drop its tables.', 1;" > /tmp/meetings-quitado.sql
+          echo "IF OBJECT_ID(N'dbo.chat_project_meeting', N'U') IS NOT NULL OR OBJECT_ID(N'dbo.chat_project_meeting_analysis', N'U') IS NOT NULL OR EXISTS (SELECT 1 FROM sys.check_constraints WHERE name = N'chat_project_event_via_ck' AND definition LIKE N'%reunion%') THROW 50000, N'The project meetings reversal did not drop its tables or restore the audit CHECK.', 1;" > /tmp/meetings-quitado.sql
           npx prisma db execute --schema prisma/schema.prisma --file /tmp/meetings-quitado.sql
           # Project mute (2026-11-23): chat_project_mute points to chat_project, so its reversal goes FIRST; with a test row,
           # without the flag it must refuse. It is migrated again at the end, with the F1.

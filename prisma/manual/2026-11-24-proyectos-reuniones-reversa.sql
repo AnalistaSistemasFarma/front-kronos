@@ -4,7 +4,9 @@
   Borra dbo.chat_project_meeting_analysis, dbo.chat_project_meeting_rule y dbo.chat_project_meeting (en ese
   orden). Sin las tablas, el código de esta versión NO pasa verificar-esquema: se corre solo si se devuelve
   también el código (pase anterior). Se pierden las reuniones asignadas, las reglas de serie y los análisis
-  (las propuestas de tarea que ya se crearon en el cronograma NO se tocan). Si hay filas, se niega salvo
+  (las propuestas de tarea que ya se crearon en el cronograma NO se tocan). El CHECK de chat_project_event
+  vuelve a sus valores anteriores (si ya hay auditoría 'reunion', se conserva y el CHECK queda WITH NOCHECK).
+  Si hay filas, se niega salvo
   con la bandera de sesión:
     EXEC sp_set_session_context N'proyectos_reuniones_reversa_acepta_perdida', 1;
   GUARDA: solo KRONOSDB, KRONOSDB_PRUEBAS o kronos_ci. Idempotente.
@@ -41,6 +43,18 @@ BEGIN TRY
     DROP TABLE [dbo].[chat_project_meeting_rule];
   IF OBJECT_ID(N'dbo.chat_project_meeting', N'U') IS NOT NULL
     DROP TABLE [dbo].[chat_project_meeting];
+  -- The audit CHECK goes back to its previous values. The 'reunion' audit rows are KEPT: in that case the
+  -- constraint is re-created WITH NOCHECK (it applies to new rows only).
+  IF EXISTS (SELECT 1 FROM sys.check_constraints WHERE name = 'chat_project_event_via_ck' AND definition LIKE N'%reunion%')
+  BEGIN
+    ALTER TABLE [dbo].[chat_project_event] DROP CONSTRAINT [chat_project_event_via_ck];
+    IF EXISTS (SELECT 1 FROM [dbo].[chat_project_event] WHERE [entity] = N'reunion')
+      EXEC(N'ALTER TABLE [dbo].[chat_project_event] WITH NOCHECK ADD CONSTRAINT [chat_project_event_via_ck]
+        CHECK ([via] IN (N''web'', N''puente'', N''mcp'') AND [entity] IN (N''tarea'', N''solicitud'', N''propuesta'', N''concesion''));');
+    ELSE
+      EXEC(N'ALTER TABLE [dbo].[chat_project_event] WITH CHECK ADD CONSTRAINT [chat_project_event_via_ck]
+        CHECK ([via] IN (N''web'', N''puente'', N''mcp'') AND [entity] IN (N''tarea'', N''solicitud'', N''propuesta'', N''concesion''));');
+  END;
   COMMIT;
 END TRY
 BEGIN CATCH
