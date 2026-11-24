@@ -170,6 +170,22 @@ describe('Correo · eliminar (buzón simulado)', () => {
     expect(estadoConexion(deps(), yo).eliminarHabilitado).toBe(true);
   });
 
+  it('per tenant: CORREO_GSS_ELIMINAR=false blocks; a read-only-send tenant can still delete', async () => {
+    const tenant = {
+      CORREO_MODO: 'mock',
+      CORREO_INQUILINOS: 'gss',
+      CORREO_GSS_TENANT_ID: '3409fd29-f351-4a98-8ef4-d98c8874a836',
+      CORREO_GSS_CLIENT_ID: '28c47cc5-342a-4781-909e-d234db1bb993',
+      CORREO_GSS_CLIENT_SECRET: 'x',
+      CORREO_GSS_DOMINIOS: 'gsslatam.com',
+    };
+    const sinEliminar = deps({ ...tenant, CORREO_GSS_ELIMINAR: 'false' });
+    await expect(eliminarMensajes(sinEliminar, yo, ['mock-msg-0003AAAA'], { confirmarVinculados: false }, null)).rejects.toMatchObject({ status: 403 });
+    expect(estadoConexion(sinEliminar, yo).eliminarHabilitado).toBe(false);
+    const soloLectura = estadoConexion(deps({ ...tenant, CORREO_GSS_ENVIO: 'false' }), yo);
+    expect(soloLectura).toMatchObject({ envioHabilitado: false, envioRestringidoInquilino: true, etiquetarHabilitado: true, eliminarHabilitado: true });
+  });
+
   it('límites: sin ids, más de 100 o ids inválidos → 400', async () => {
     await expect(eliminarMensajes(deps(), yo, [], { confirmarVinculados: false }, null)).rejects.toMatchObject({ status: 400 });
     await expect(eliminarMensajes(deps(), yo, Array.from({ length: 101 }, (_, i) => `AAMkX${String(i).padStart(5, '0')}`), { confirmarVinculados: false }, null)).rejects.toMatchObject({ status: 400 });

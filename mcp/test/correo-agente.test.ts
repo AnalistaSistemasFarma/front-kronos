@@ -19,6 +19,7 @@ import {
   urlDeBuzon,
   type LectorCorreo,
   type MensajeTexto,
+  envioPermitido,
 } from '../src/correo/graph.js';
 import { callJson, connectClient, createMockPrisma, type CapturedRawQuery, type MockPrisma } from './helpers.js';
 
@@ -110,9 +111,9 @@ function preparar(parcial: Partial<Estado> = {}) {
   lecturas = [];
 }
 
-async function cliente(scope: AuthScope = ORUS) {
+async function cliente(scope: AuthScope = ORUS, envio?: (mailbox: string) => boolean) {
   const server = new McpServer({ name: 't', version: '1' });
-  registerCorreoAgenteTools(server, { scope, audit: { log: async () => {} }, lector });
+  registerCorreoAgenteTools(server, { scope, audit: { log: async () => {} }, lector, ...(envio ? { envio } : {}) });
   return connectClient(server);
 }
 
@@ -310,5 +311,50 @@ describe('lector de Graph: solo GET y solo el buzón de la concesión', () => {
   it('destinatarios: a todos sin la persona; solo remitente si no', () => {
     expect(destinatarios(hilo[0]!, 'laura@gsslatam.com', true)).toEqual(['proveedor@externo.com', 'juridica@gsslatam.com']);
     expect(destinatarios(hilo[0]!, 'laura@gsslatam.com', false)).toEqual(['proveedor@externo.com']);
+  });
+});
+
+describe('read-only tenant (CORREO_<K>_ENVIO=false): reading allowed, replies not offered', () => {
+  const GUID = '11111111-2222-3333-4444-555555555555';
+  const env = {
+    CORREO_MODO: 'graph',
+    CORREO_INQUILINOS: 'gss,olp',
+    CORREO_GSS_TENANT_ID: GUID,
+    CORREO_GSS_CLIENT_ID: GUID,
+    CORREO_GSS_CLIENT_SECRET: 's',
+    CORREO_GSS_DOMINIOS: 'gsslatam.com',
+    CORREO_OLP_TENANT_ID: GUID,
+    CORREO_OLP_CLIENT_ID: GUID,
+    CORREO_OLP_CLIENT_SECRET: 's',
+    CORREO_OLP_DOMINIOS: 'onelatampharma.com',
+    CORREO_OLP_ENVIO: 'false',
+  };
+
+  it('envioPermitido: per tenant, default true, ANDed with CORREO_ENVIO_HABILITADO', () => {
+    const cfg = readCorreoMcpConfig(env);
+    expect(envioPermitido('laura@gsslatam.com', cfg)).toBe(true);
+    expect(envioPermitido('mauricio@onelatampharma.com', cfg)).toBe(false);
+    expect(envioPermitido('laura@gsslatam.com', readCorreoMcpConfig({ ...env, CORREO_ENVIO_HABILITADO: 'false' }))).toBe(false);
+    expect(envioPermitido('laura@gsslatam.com', readCorreoMcpConfig({}))).toBe(true);
+  });
+
+  it('correo_proponer_respuesta is rejected and nothing is written', async () => {
+    const r = await callJson(await cliente(ORUS, () => false), 'correo_proponer_respuesta', { share_id: TOKEN, cuerpo_markdown: 'Hola', responder_a_todos: false });
+    expect(r.isError).toBe(true);
+    expect(String(r.data)).toMatch(/solo lectura/);
+    expect(mock.capturedRaw.some((q) => /INSERT INTO email_agent_action/.test(q.text))).toBe(false);
+  });
+
+  it('correo_hilo_compartido still reads, and does not suggest replying', async () => {
+    const r = await callJson(await cliente(ORUS, () => false), 'correo_hilo_compartido', { share_id: TOKEN });
+    expect(r.isError).toBeFalsy();
+    const como = (r.data as { como_actuar: string }).como_actuar;
+    expect(como).toMatch(/solo lectura/);
+    expect(como).not.toMatch(/use correo_proponer_respuesta/);
+  });
+
+  it('correo_crear_solicitud_desde_hilo is still allowed', async () => {
+    const r = await callJson(await cliente(ORUS, () => false), 'correo_crear_solicitud_desde_hilo', { share_id: TOKEN, proceso: 5, titulo: 'Contrato', descripcion: 'Revisar contrato' });
+    expect(r.isError).toBeFalsy();
   });
 });
