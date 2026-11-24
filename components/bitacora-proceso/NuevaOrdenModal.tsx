@@ -30,8 +30,8 @@ import { fmtFecha, otSend, useOtFetch } from './otClient';
  * «Nueva bitácora» (solo supervisor, «desde afuera»). Hora inicio = la del servidor al abrir.
  * Reunión con Farmalógica del 2026-10-14: los OPERARIOS no tienen usuario (A1: se
  * eligen del maestro de la empresa), el ÁREA sale del catálogo (A5: precargada si
- * hay una sola). B1 (2026-10-15): se designan, por separado, el INSPECTOR y el JEFE DE
- * PRODUCCIÓN (usuarios de SynerLink, distintos entre sí y de quien abre). B5: la OP
+ * hay una sola). B1 (2026-10-15): se designa el JEFE DE PRODUCCIÓN (usuario de SynerLink).
+ * El INSPECTOR salió del flujo el 2026-11-24 (reunión de mejoras con Farmalógica). B5: la OP
  * (opcional) se busca entre las PLANIFICADAS y LIBERADAS; al escribir su número exacto
  * se elige sola y completa producto, código y lote.
  * Diseño para CELULAR primero: modal a pantalla completa en el celular, campos de
@@ -69,7 +69,6 @@ export default function NuevaOrdenModal({
 }) {
   const mobile = useMediaQuery('(max-width: 48em)') ?? false;
   // Solo los ASIGNADOS a cada rol en la empresa (Catálogo → Responsables, 2026-10-16).
-  const inspectores = useOtFetch<{ responsables: Usuario[] }>(opened ? `/api/bitacora-proceso/responsables?company=${idCompany}&rol=INSPECTOR` : null);
   const jefes = useOtFetch<{ responsables: Usuario[] }>(opened ? `/api/bitacora-proceso/responsables?company=${idCompany}&rol=JEFE_PROD` : null);
   const maestro = useOtFetch<{ operadores: OperadorMaestro[] }>(opened ? `/api/bitacora-proceso/operadores?company=${idCompany}` : null);
   const areasCat = useOtFetch<{ areas: AreaCatalogo[] }>(opened ? `/api/bitacora-proceso/areas?company=${idCompany}` : null);
@@ -88,7 +87,6 @@ export default function NuevaOrdenModal({
   const [idArea, setIdArea] = useState<string | null>(null);
   const [operarios, setOperarios] = useState<string[]>([]);
   const [filtroOp, setFiltroOp] = useState('');
-  const [inspector, setInspector] = useState<string | null>(null);
   const [jefe, setJefe] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -106,7 +104,6 @@ export default function NuevaOrdenModal({
     setIdArea(null);
     setOperarios([]);
     setFiltroOp('');
-    setInspector(null);
     setJefe(null);
     setError(null);
   }, [opened]);
@@ -174,7 +171,6 @@ export default function NuevaOrdenModal({
     !turno && 'turno',
     areas.length > 0 && !idArea && 'área',
     operarios.length === 0 && 'al menos un operario',
-    !inspector && 'inspector',
     !jefe && 'jefe de producción',
   ].filter(Boolean);
 
@@ -194,7 +190,6 @@ export default function NuevaOrdenModal({
         turno,
         idArea: idArea ? Number(idArea) : null,
         operadores: operarios.map(Number),
-        inspector,
         jefeProduccion: jefe,
         sapOp,
       });
@@ -403,24 +398,12 @@ export default function NuevaOrdenModal({
         </Box>
 
         <PersonaPicker
-          titulo='Inspector'
-          descripcion='Da su visto bueno después del cierre. Debe ser distinto de quien abre y del jefe.'
-          usuarios={inspectores.data?.responsables ?? null}
-          vacio='No hay inspectores asignados en esta empresa. Asígnelos en Catálogo → Responsables.'
-          value={inspector}
-          onChange={setInspector}
-          excluir={jefe}
-          mobile={mobile}
-          testId='ot-inspector'
-        />
-        <PersonaPicker
           titulo='Jefe de producción'
           descripcion='Puede ser usted mismo. El jefe designado también puede cerrar; si cierra el supervisor, el jefe da el último visto bueno.'
           usuarios={jefes.data?.responsables ?? null}
           vacio='No hay jefes de producción asignados en esta empresa. Asígnelos en Catálogo → Responsables.'
           value={jefe}
           onChange={setJefe}
-          excluir={inspector}
           mobile={mobile}
           testId='ot-jefe'
         />
@@ -467,8 +450,8 @@ function PersonaPicker({
   vacio: string;
   value: string | null;
   onChange: (v: string | null) => void;
-  /** La otra persona ya elegida (inspector y jefe son distintos). */
-  excluir: string | null;
+  /** Persona que no se ofrece (opcional). */
+  excluir?: string | null;
   mobile: boolean;
   testId: string;
 }) {

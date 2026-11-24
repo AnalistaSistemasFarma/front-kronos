@@ -4,7 +4,7 @@ import { useMemo, useState } from 'react';
 import { Alert, Badge, Button, Card, Group, Loader, NumberInput, Radio, ScrollArea, SegmentedControl, Stack, Switch, Text, TextInput, Title } from '@mantine/core';
 import { IconAlertTriangle, IconCheck, IconDeviceFloppy, IconPencil, IconPlus, IconSearch, IconX } from '@tabler/icons-react';
 import toast from 'react-hot-toast';
-import { OT_LIMITS, OT_RESPONSABLE_AYUDA, OT_RESPONSABLE_ROLES, OT_ROL_LABEL, type OtResponsableRol } from '../../lib/bitacora-proceso/constants';
+import { OT_LIMITS, OT_RESPONSABLE_AYUDA, OT_RESPONSABLE_ROLES_ASIGNABLES, OT_ROL_LABEL, type OtResponsableRol } from '../../lib/bitacora-proceso/constants';
 import type { OtCompanyAccess } from '../../lib/bitacora-proceso/rules';
 import { otSend, useOtFetch } from './otClient';
 import { OtImportarOperadores } from './OtImportarYPin';
@@ -278,7 +278,7 @@ interface Candidato {
   gestion: boolean;
 }
 
-const ROLES_DATA = OT_RESPONSABLE_ROLES.map((r) => ({ value: r, label: OT_ROL_LABEL[r] }));
+const ROLES_DATA = OT_RESPONSABLE_ROLES_ASIGNABLES.map((r) => ({ value: r, label: OT_ROL_LABEL[r] }));
 
 /**
  * Responsables (2026-10-16): asignación por empresa de supervisor, inspector y jefe de
@@ -384,13 +384,13 @@ export function OtResponsables({ company }: { company: OtCompanyAccess }) {
         Responsables <Badge variant='light' ml={4}>{lista.filter((r) => r.activo).length} activos</Badge>
       </Title>
       <Text size='sm' c='dimmed'>
-        Al abrir y cerrar la bitácora solo se pueden elegir las personas asignadas aquí. En una misma bitácora el inspector es distinto de quien abre y del jefe de producción; el jefe puede abrir y cerrar su propia bitácora. No se borran: desactive a quien ya no cumple el rol.
+        Al abrir y cerrar la bitácora solo se pueden elegir las personas asignadas aquí. El jefe de producción puede abrir y cerrar su propia bitácora. No se borran: desactive a quien ya no cumple el rol.
       </Text>
       {loading && !data ? (
         <Loader />
       ) : (
         <Stack gap='sm' data-testid='ot-responsables-lista'>
-          {OT_RESPONSABLE_ROLES.map((r) => {
+          {OT_RESPONSABLE_ROLES_ASIGNABLES.map((r) => {
             const delRol = lista.filter((x) => x.rol === r);
             return (
               <Stack key={r} gap='xs' data-testid={`ot-responsables-${r}`}>
