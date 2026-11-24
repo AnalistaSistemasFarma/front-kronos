@@ -38,6 +38,8 @@ export default defineConfig({
       'app/api/chat/compartir/**/*.test.ts',
       // `app/api/biomedica/**`: Ingeniería biomédica (permiso del módulo, PDF en línea, control de vigencia).
       'app/api/biomedica/**/*.test.ts',
+      // `app/api/integrations/orion/**`: búsqueda de socios de firma (solo empresas del usuario, 403).
+      'app/api/integrations/orion/**/*.test.ts',
       // `app/api/help-desk/dashboard/**`: Dashboard Helpdesk (subprocess access, aggregates only).
       'app/api/help-desk/dashboard/**/*.test.ts',
       'components/sgc/**/*.test.ts',
