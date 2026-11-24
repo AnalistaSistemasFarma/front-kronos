@@ -459,6 +459,7 @@ export default function SalesPdfImport({ companyId, companyName, cardCode, onLoa
                       onChange={(e) => { const c = e.currentTarget.checked; setSim({ ...sim, lines: sim.lines.map((l) => ({ ...l, include: c })) }); }} /></Table.Th>
                     <Table.Th title="Renglón de la OC">#</Table.Th><Table.Th>Artículo en SAP</Table.Th><Table.Th style={{ textAlign: 'right' }}>Cantidad</Table.Th>
                     <Table.Th style={{ textAlign: 'right' }}>Precio OC</Table.Th><Table.Th style={{ textAlign: 'right' }}>Precio lista</Table.Th>
+                    <Table.Th style={{ textAlign: 'right' }}>Total línea</Table.Th>
                   </Table.Tr>
                 </Table.Thead>
                 <Table.Tbody>
@@ -473,11 +474,17 @@ export default function SalesPdfImport({ companyId, companyName, cardCode, onLoa
                       <Table.Td style={{ textAlign: 'right' }}>{Number(l.Quantity).toLocaleString('es-CO')}</Table.Td>
                       <Table.Td style={{ textAlign: 'right' }}>{money(l.UnitPrice)}</Table.Td>
                       <Table.Td style={{ textAlign: 'right' }}>{money(l.ListPrice)}</Table.Td>
+                      <Table.Td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}><Text size="sm" fw={500} c={l.include ? undefined : 'dimmed'}>{money(Number(l.Quantity ?? 0) * Number(l.UnitPrice ?? 0))}</Text></Table.Td>
                     </Table.Tr>
                   ))}
                 </Table.Tbody>
               </Table>
             </ScrollArea.Autosize>
+            <Group justify="flex-end">
+              <Text fw={700}>
+                Total del documento (antes de impuestos): {money(sim.lines.filter((l) => l.include).reduce((a, l) => a + Number(l.Quantity ?? 0) * Number(l.UnitPrice ?? 0), 0))}
+              </Text>
+            </Group>
             <Group justify="space-between">
               <Text size="xs" c="dimmed">Desmarque las líneas que no correspondan. Lo marcado «Revisar» se eligió por la descripción.</Text>
               <Group gap="xs">
