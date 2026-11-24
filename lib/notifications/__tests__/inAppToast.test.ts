@@ -217,3 +217,37 @@ describe('samePage', () => {
     expect(samePage(null, '/x')).toBe(false);
   });
 });
+
+describe('expressive content (msg 38382)', () => {
+  it('emoji-only messages become a big emoji', async () => {
+    const { emojiOnlyText } = await import('../inAppToast');
+    expect(emojiOnlyText('👍')).toBe('👍');
+    expect(emojiOnlyText(' 🎉 🎉 ')).toBe('🎉🎉');
+    expect(emojiOnlyText('👏🏽')).toBe('👏🏽');
+    expect(emojiOnlyText('👨‍👩‍👧')).toBe('👨‍👩‍👧');
+    expect(emojiOnlyText('ok 👍')).toBeNull();
+    expect(emojiOnlyText('123')).toBeNull();
+    expect(emojiOnlyText('😀😀😀😀😀😀😀')).toBeNull();
+    expect(emojiOnlyText('')).toBeNull();
+  });
+
+  it('celebration by emoji or words', async () => {
+    const { isCelebration } = await import('../inAppToast');
+    expect(isCelebration('🎉')).toBe(true);
+    expect(isCelebration('¡Felicitaciones al equipo!')).toBe(true);
+    expect(isCelebration('Bien hecho, gracias')).toBe(true);
+    expect(isCelebration('Congrats!')).toBe(true);
+    expect(isCelebration('Revise la solicitud #10')).toBe(false);
+  });
+
+  it('sticker / GIF / image as preview', async () => {
+    const { mediaFromMessage, mediaLabel } = await import('../inAppToast');
+    const sticker = { media: { kind: 'sticker', title: 'Pulgar', src: '/stickers/a.webp', poster: '/stickers/a.png' }, attachments: [] };
+    expect(mediaFromMessage(sticker)).toEqual({ src: '/stickers/a.webp', poster: '/stickers/a.png', alt: 'Pulgar' });
+    expect(mediaLabel(sticker)).toBe('Envió un sticker');
+    const image = { attachments: [{ fileName: 'foto.jpg', contentType: 'image/jpeg', downloadUrl: '/api/chat/attachments/4' }] };
+    expect(mediaFromMessage(image)).toEqual({ src: '/api/chat/attachments/4', poster: null, alt: 'foto.jpg' });
+    expect(mediaLabel(image)).toBe('Envió una imagen');
+    expect(mediaFromMessage({ attachments: [{ fileName: 'a.pdf', contentType: 'application/pdf', downloadUrl: '/x' }] })).toBeNull();
+  });
+});

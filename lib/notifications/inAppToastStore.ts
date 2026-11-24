@@ -5,7 +5,16 @@
  * live in different React trees and only need to push a card; the host subscribes with
  * useSyncExternalStore.
  */
-import { addToStack, removeFromStack, samePage, type InAppToast } from './inAppToast';
+import {
+  addToStack,
+  mediaFromMessage,
+  mediaLabel,
+  removeFromStack,
+  samePage,
+  withExpressiveContent,
+  type InAppToast,
+  type MessageMediaInput,
+} from './inAppToast';
 
 let stack: InAppToast[] = [];
 const listeners = new Set<() => void>();
@@ -44,7 +53,7 @@ export function showInAppToast(toast: InAppToast | null): boolean {
   if (!inAppToastsAvailable()) return false;
   if (document.visibilityState !== 'visible') return false;
   if (toast.url && samePage(`${window.location.pathname}${window.location.search}`, toast.url)) return false;
-  stack = addToStack(stack, toast);
+  stack = addToStack(stack, withExpressiveContent(toast));
   emit();
   dismissMatchingSystemNotifications(toast.url);
   return true;
@@ -94,4 +103,30 @@ export function dismissMatchingSystemNotifications(url: string | null): void {
   };
   void pass();
   window.setTimeout(() => void pass(), SECOND_PASS_MS);
+}
+
+/**
+ * Message without text (sticker, GIF or image only): read the last message of the conversation with
+ * the existing, access-checked chat API and show the sticker/thumbnail instead of «Envió un archivo».
+ * Falls back to the text card on any error.
+ */
+export async function showInAppToastWithMedia(toast: InAppToast | null, conversationId: number): Promise<void> {
+  if (!toast) return;
+  try {
+    const res = await fetch(`/api/chat/conversations/${conversationId}/messages?limit=1`, {
+      credentials: 'same-origin',
+      cache: 'no-store',
+      headers: { Accept: 'application/json' },
+    });
+    const data = res.ok ? ((await res.json()) as { messages?: MessageMediaInput[] }) : null;
+    const last = data?.messages?.[0];
+    const media = mediaFromMessage(last);
+    if (last && media) {
+      showInAppToast({ ...toast, media, preview: mediaLabel(last) });
+      return;
+    }
+  } catch {
+    /* text card below */
+  }
+  showInAppToast(toast);
 }

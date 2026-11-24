@@ -209,6 +209,88 @@
   animation-play-state: paused;
 }
 
+.mediaBox {
+  display: flex;
+}
+
+.media {
+  max-width: 100%;
+  max-height: 120px;
+  border-radius: 10px;
+  object-fit: contain;
+  background: color-mix(in srgb, var(--app-text, #1a1d21) 5%, transparent);
+}
+
+.emojiBig {
+  margin: 2px 0 0;
+  font-size: 40px;
+  line-height: 1.15;
+  animation: emoji-pop 520ms cubic-bezier(0.34, 1.56, 0.64, 1);
+  transform-origin: left center;
+}
+
+/* Emoji-only cards enter with a bounce instead of the plain slide. */
+.emojiCard {
+  animation: toast-bounce-in 420ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.confetti {
+  position: absolute;
+  left: 50%;
+  top: 45%;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+}
+
+.confettiPiece {
+  position: absolute;
+  width: 7px;
+  height: 10px;
+  border-radius: 2px;
+  opacity: 0;
+  animation: confetti-burst 1000ms ease-out forwards;
+}
+
+@keyframes confetti-burst {
+  0% {
+    opacity: 1;
+    transform: translate(0, 0) rotate(0deg) scale(0.6);
+  }
+  70% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translate(var(--dx), calc(var(--dy) + 24px)) rotate(var(--rot)) scale(1);
+  }
+}
+
+@keyframes emoji-pop {
+  0% {
+    transform: scale(0.3);
+    opacity: 0;
+  }
+  60% {
+    transform: scale(1.25);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+@keyframes toast-bounce-in {
+  0% {
+    opacity: 0;
+    transform: translateY(24px) scale(0.9);
+  }
+  100% {
+    opacity: 1;
+    transform: none;
+  }
+}
+
 @keyframes toast-in {
   from {
     opacity: 0;
@@ -230,8 +312,15 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .card {
+  .card,
+  .emojiCard {
+    animation: toast-fade 160ms linear;
+  }
+  .emojiBig {
     animation: none;
+  }
+  .confetti {
+    display: none;
   }
   .progress {
     display: none;
@@ -246,5 +335,14 @@
     right: 8px;
     width: auto;
     max-width: none;
+  }
+}
+
+@keyframes toast-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
   }
 }
