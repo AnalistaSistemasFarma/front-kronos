@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import ExcelJS from 'exceljs';
 import {
   ajustarPaginaUnaDeAncho,
+  filasFirmaJefe,
   assertMismoLote,
   elegirOpBatchRecord,
   buildBatchRecordXlsx,
@@ -89,6 +90,19 @@ describe('Bitácora de Proceso · Excel del batch record (2026-11-24)', () => {
     expect(elegirOpBatchRecord(base, [], null)).toEqual({ op: '', absEntry: null, origen: null });
   });
 
+  it('firma del jefe de producción al final (2026-11-25): nombre precargado si hay un solo jefe; firma y fecha en blanco', () => {
+    const e = { seccion: 1, linea: 2, encabezadoTabla: 3, celda: 4, pie: 5 };
+    const [titulo, firma] = filasFirmaJefe([orden(1, '2026-11-03T11:00:00.000Z'), orden(2, '2026-11-03T19:00:00.000Z')], e);
+    expect(titulo.celdas[0].texto).toBe('Revisión del jefe de producción');
+    expect(firma.celdas.map((c) => c.texto)).toEqual(['Nombre: Natalia Velandia', 'Firma:', 'Fecha:']);
+    expect(firma.alto).toBeGreaterThanOrEqual(50);
+    // Columnas A–J completas, sin huecos.
+    expect(firma.celdas.map((c) => [c.desde, c.hasta])).toEqual([[1, 4], [5, 6], [7, 10]]);
+    // Dos jefes distintos: no se adivina el nombre.
+    const otro = orden(3, '2026-11-04T11:00:00.000Z', { jefe: { id: 'x', name: 'Otra Persona' } });
+    expect(filasFirmaJefe([orden(1, '2026-11-03T11:00:00.000Z'), otro], e)[1].celdas[0].texto).toBe('Nombre: ');
+  });
+
   it('todas las bitácoras del archivo son del mismo lote', () => {
     expect(() => assertMismoLote([orden(1, '2026-11-03T11:00:00.000Z'), orden(2, '2026-11-03T19:00:00.000Z')])).not.toThrow();
     expect(errorOf(() => assertMismoLote([orden(1, '2026-11-03T11:00:00.000Z'), orden(2, '2026-11-03T19:00:00.000Z', { lote: 'OTRO' })])).status).toBe(400);
@@ -125,6 +139,9 @@ describe('Bitácora de Proceso · Excel del batch record (2026-11-24)', () => {
     expect(todo).toContain('07:00:05'); // hora del servidor en Colombia (UTC−5)
     expect(todo).toMatch(/Supervisor \(cerró\): Sandra Supervisora — 03\/11\/2026 14:00 \(PIN en tablet\)/);
     expect(todo).toContain('Jefe de producción: pendiente — Natalia Velandia');
+    // Bloque de firma antes del pie.
+    expect(todo.indexOf('Revisión del jefe de producción')).toBeGreaterThan(todo.lastIndexOf('Vistos buenos'));
+    expect(todo.indexOf('Revisión del jefe de producción')).toBeLessThan(todo.indexOf('Generado por SynerLink'));
     expect(ws.pageSetup.printArea).toMatch(/^A1:K\d+$/);
     expect(wb.creator).toBe('SynerLink');
     // Estilos propios agregados al final (no se reescriben los de la plantilla): borde y negrita.
