@@ -1847,13 +1847,16 @@ body.chat-inmersivo.con-chat-rail .chat-escritorio {
    `viewportFit: 'cover'` (app/layout.tsx) or iOS reports the inset as 0 and
    the pill lands under the home indicator (msg 39057). 8 px minimum where
    there is no inset (Android, desktop browsers). With the keyboard open the
-   home indicator is hidden: 14 px above the keyboard, like Gemini. */
+   home indicator is hidden, so the inset is dropped and the pill sits 8 px
+   above the keyboard / its accessory bar (Nicolás, IMG_0246: the 34 pt inset
+   was still applied because iOS shrinks innerHeight with the keyboard and the
+   class never got set; see lib/chat/keyboard-open.ts). */
 @media (max-width: 768px) {
   .chat-thread__composer {
     padding-bottom: max(8px, env(safe-area-inset-bottom, 0px));
   }
   html.teclado-abierto .chat-thread__composer {
-    padding-bottom: 14px;
+    padding-bottom: 8px;
   }
 }
 
