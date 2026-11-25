@@ -72,6 +72,7 @@ import { ReenviarModal } from './CompartirAdjunto';
 import { avisoMensajeReenviado } from '../../lib/chat/reenviar-mensaje-rules';
 import type { MediaParaEnviar } from './useChatConversation';
 import StickerAnimado from './StickerAnimado';
+import CopiarBoton from './CopiarBoton';
 import { AGENT_INITIATED_BADGE } from '../../lib/chat/agent-initiated-rules';
 
 /**
@@ -386,6 +387,7 @@ const MessageBubble = memo(function MessageBubble({
   }
 
   const esSticker = message.media?.kind === 'sticker';
+  const puedeCopiar = !message.media && message.body.trim().length > 0 && !message.pending;
   const botonReenviar =
     onReenviar && esReenviable(message) ? <BotonReenviar onReenviar={() => onReenviar(message)} /> : null;
   const reaccionarBoton =
@@ -506,8 +508,18 @@ const MessageBubble = memo(function MessageBubble({
               ? 'Enviando…'
               : formatChatTime(message.createdAt)}
         </Text>
+
+        {/* Actions row under the reply, like Gemini (msg 39133): copy the
+            whole answer, react and forward. Copy is local (clipboard). */}
+        {!isUser && (puedeCopiar || reaccionarBoton) && (
+          <Group gap={2} wrap='nowrap' className='chat-bubble__acciones'>
+            {puedeCopiar && (
+              <CopiarBoton texto={message.body} etiqueta='Copiar respuesta' className='chat-copiar--mensaje' size={26} />
+            )}
+            {reaccionarBoton}
+          </Group>
+        )}
       </Box>
-      {!isUser && reaccionarBoton}
     </Group>
   );
 });
@@ -1427,7 +1439,9 @@ export default function ChatThread({
     <AbrirAdjuntoContext.Provider value={abrirAdjunto}>
     <Box
       ref={raizRef}
-      className={`chat-thread${dragging ? ' chat-thread--dragging' : ''}`}
+      // Agent chats (direct and projects) use the Gemini message style:
+      // own message in a neutral pill, the reply as plain text (msg 39133).
+      className={`chat-thread${dragging ? ' chat-thread--dragging' : ''}${!enGrupo && !enPersonas ? ' chat-thread--agente' : ''}`}
       style={height ? { height } : undefined}
       onDragEnter={onDragEnter}
       onDragOver={onDragOver}
