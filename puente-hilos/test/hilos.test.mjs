@@ -135,3 +135,10 @@ test('escribirContexto deja cronograma.md en ./contexto (fuera de ./trabajo)', (
   assert.ok(rutas.cronograma.includes(`${path.sep}contexto${path.sep}`));
   assert.match(readFileSync(rutas.cronograma, 'utf8'), /Tarea #12/);
 });
+
+test('the turn header carries the SQL safety rule (2026-11-25)', () => {
+  const s = textoSistema({ agente: 'Play', contexto, instruccionesEn: 'system-prompt' });
+  assert.match(s, /REGLA SQL/);
+  assert.match(s, /SET XACT_ABORT ON; SET LOCK_TIMEOUT 5000;/);
+  assert.match(s, /COMMIT o ROLLBACK en el MISMO lote/);
+});
