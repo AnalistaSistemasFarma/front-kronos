@@ -4098,18 +4098,111 @@ html[data-font='gemini'] .chat-md__h {
   font-weight: 700;
 }
 
-/* Gemini answers are plain text, no bubble: full width, text 25 pt from the
-   screen edge on the phone. Only with this font. */
-html[data-font='gemini'] .chat-bubble--agent:not(.chat-bubble--media) {
+
+/* ── Gemini message style in agent chats (Nicolás, msg 39133) ──
+   For everybody, in chats with an assistant (direct and projects):
+   - own message: neutral pill, 24 px radius, no tail, right, max ~70 %;
+   - assistant reply: no container, plain text on the page, full width, with
+     the actions row (copy, react, forward) underneath.
+   Person-to-person chats and groups keep their bubbles: there several people
+   write, and the bubble colour is what tells who said what.
+   All colours come from the --app-* tokens (light, dark, profile palette). */
+.chat-thread--agente {
+  --chat-pill-usuario: color-mix(in srgb, var(--app-text, #0f172a) 6%, var(--app-surface, #ffffff));
+}
+
+.dark .chat-thread--agente {
+  --chat-pill-usuario: color-mix(in srgb, var(--app-text, #f8fafc) 11%, var(--app-surface, #0f172a));
+}
+
+.chat-thread--agente .chat-bubble--agent:not(.chat-bubble--media) {
   background-color: transparent;
   border-color: transparent;
   max-width: 100%;
-  padding-left: 11px;
-  padding-right: 0;
+  padding: 2px 4px;
 }
 
-html[data-font='gemini'] .chat-bubble--user:not(.chat-bubble--media) {
+.chat-thread--agente .chat-bubble--user:not(.chat-bubble--media) {
+  background-color: var(--chat-pill-usuario);
+  color: var(--app-text, var(--foreground));
   border-radius: 24px;
+  padding: 10px 18px;
+  max-width: min(70%, 640px);
+}
+
+.chat-thread--agente .chat-bubble--user .chat-md,
+.chat-thread--agente .chat-bubble--user .chat-bubble__meta {
+  color: var(--app-text, var(--foreground));
+}
+
+.chat-thread--agente .chat-bubble--user .chat-bubble__meta {
+  opacity: 0.6;
+}
+
+.chat-thread--agente .chat-bubble--user .chat-md__link {
+  color: var(--app-accent, #2563eb);
+}
+
+.chat-thread--agente .chat-bubble--user .chat-cita--burbuja {
+  background-color: color-mix(in srgb, var(--app-text, #0f172a) 6%, transparent);
+}
+
+.dark .chat-thread--agente .chat-bubble--user .chat-cita--burbuja {
+  background-color: color-mix(in srgb, var(--app-text, #f8fafc) 8%, transparent);
+}
+
+.chat-thread--agente .chat-bubble--user .chat-cita--burbuja .chat-text-muted,
+.chat-thread--agente .chat-bubble--user .chat-cita--burbuja .mantine-Text-root {
+  color: var(--app-text, var(--foreground)) !important;
+}
+
+.chat-thread--agente .chat-bubble--user .chat-cita--burbuja .chat-cita__barra {
+  background-color: var(--app-accent, #2563eb);
+}
+
+.chat-thread--agente .chat-bubble--user .chat-attachment,
+.chat-thread--agente .chat-bubble--user .chat-reacciones .chat-reaccion,
+.chat-thread--agente .chat-bubble--user .chat-md__code-inline,
+.chat-thread--agente .chat-bubble--user .chat-md__pre,
+.chat-thread--agente .chat-bubble--user .chat-copiar--codigo {
+  background-color: var(--app-surface, var(--surface));
+  border-color: var(--app-border, var(--border-subtle));
+  color: var(--app-text, var(--foreground));
+}
+
+.chat-thread--agente .chat-bubble--user .chat-reacciones .chat-reaccion--mia {
+  border-color: var(--app-accent, #2563eb);
+}
+
+/* Actions row under each reply (copy, react, forward). */
+.chat-bubble__acciones {
+  margin-top: 2px;
+  margin-left: -4px;
+  color: var(--app-text-muted, #64748b);
+}
+
+.chat-bubble__acciones .chat-reaccionar-btn {
+  margin-bottom: 0;
+}
+
+.chat-copiar--mensaje {
+  opacity: 0.75;
+}
+
+.chat-copiar--mensaje:hover,
+.chat-copiar--mensaje:focus-visible {
+  opacity: 1;
+}
+
+@media (max-width: 767px) {
+  .chat-thread--agente .chat-bubble--agent:not(.chat-bubble--media) {
+    /* Text 25 pt from the screen edge, like Gemini. */
+    padding-left: 11px;
+    padding-right: 0;
+  }
+  .chat-thread--agente .chat-bubble--user:not(.chat-bubble--media) {
+    max-width: 80%;
+  }
 }
 
 /* Composer text like Gemini's (18 px Regular); placeholder stays lighter. */
