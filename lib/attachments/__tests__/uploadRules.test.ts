@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   IIS_MAX_REQUEST_BYTES,
+  MAX_ORION_CORRECTION_PDF_BASE64_LENGTH,
+  MAX_ORION_CORRECTION_PDF_BYTES,
   MAX_UPLOAD_REQUEST_BYTES,
   REQUEST_ATTACHMENT_ACCEPT,
   fileExtension,
@@ -42,6 +44,16 @@ describe('fileExtension', () => {
 describe('topes y mensajes', () => {
   it('el tope del navegador queda por debajo del límite de IIS', () => {
     expect(MAX_UPLOAD_REQUEST_BYTES).toBeLessThan(IIS_MAX_REQUEST_BYTES);
+  });
+
+  it('el PDF corregido de Orion en base64 cabe en el tope de IIS y del middleware', () => {
+    expect(MAX_ORION_CORRECTION_PDF_BASE64_LENGTH).toBeGreaterThanOrEqual(
+      (MAX_ORION_CORRECTION_PDF_BYTES * 4) / 3
+    );
+    // Margen de 512 KB para el resto del JSON (ids, nombre, motivo, validadores).
+    const cuerpo = MAX_ORION_CORRECTION_PDF_BASE64_LENGTH + 512 * 1024;
+    expect(cuerpo).toBeLessThan(IIS_MAX_REQUEST_BYTES);
+    expect(cuerpo).toBeLessThan(30 * 1024 * 1024);
   });
 
   it('el accept lleva extensiones y MIME', () => {
