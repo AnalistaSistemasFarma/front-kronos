@@ -10,7 +10,10 @@ import {
   Group,
   Modal,
   MultiSelect,
+  Paper,
+  Progress,
   ScrollArea,
+  SegmentedControl,
   Select,
   Skeleton,
   Stack,
@@ -19,7 +22,14 @@ import {
   TextInput,
   Tooltip,
 } from '@mantine/core';
-import { IconAlertCircle, IconExternalLink, IconFilterOff, IconSearch, IconX } from '@tabler/icons-react';
+import {
+  IconAlertCircle,
+  IconExternalLink,
+  IconFilterOff,
+  IconListNumbers,
+  IconSearch,
+  IconX,
+} from '@tabler/icons-react';
 import type {
   CaseBucket,
   CaseDimensionFilter,
@@ -30,7 +40,10 @@ import {
   distinctValues,
   EMPTY_CASE_FILTERS,
   filterCaseDetails,
+  rankCombinations,
   type CaseColumnFilters,
+  type CaseCombination,
+  type CombinationOrder,
 } from '../../../lib/help-desk/dashboard/caseFilters';
 import { companyRowStyle } from '../../../lib/ui/companyColors';
 import { PREF_COMPANY_COLORS } from '../../../lib/ui/preferences';
@@ -79,6 +92,10 @@ function statusColor(status: string): string {
   if (s.includes('cancel')) return 'gray';
   if (s.includes('abiert')) return 'blue';
   return 'orange';
+}
+
+function showDaysFor(bucket: CaseBucket | null): boolean {
+  return bucket === 'resolved' || bucket === 'measured';
 }
 
 /** Small text filter with a clear button, for the filter row under the headers. */
@@ -167,6 +184,7 @@ export default function HelpdeskCasesModal({
   const [filters, setFilters] = useState<CaseColumnFilters>(EMPTY_CASE_FILTERS);
   // Same per-user preference as the request lists (Perfil → «Distinguir compañías por color en las tablas»).
   const [companyColors] = useUiPreference<boolean>(PREF_COMPANY_COLORS, false);
+  const [rankOrder, setRankOrder] = useState<CombinationOrder>('most');
 
   const setFilter = <K extends keyof CaseColumnFilters>(key: K, value: CaseColumnFilters[K]) =>
     setFilters((prev) => ({ ...prev, [key]: value }));
@@ -211,11 +229,26 @@ export default function HelpdeskCasesModal({
       company: distinctValues(cases, (c) => c.company),
       technician: distinctValues(cases, (c) => c.technician),
       category: distinctValues(cases, (c) => c.category),
+      subcategory: distinctValues(cases, (c) => c.subcategory),
+      activity: distinctValues(cases, (c) => c.activity),
     }),
     [cases]
   );
 
-  const showDays = bucket === 'resolved' || bucket === 'measured';
+  /** Ranking of category · subcategory · activity over the cases that pass the filters. */
+  const ranking = useMemo(() => rankCombinations(visible, rankOrder, 10), [visible, rankOrder]);
+  const rankMax = Math.max(1, ...ranking.map((r) => r.total));
+
+  const applyCombination = (r: CaseCombination) =>
+    setFilters((prev) => ({
+      ...prev,
+      category: [r.category],
+      subcategory: [r.subcategory],
+      activity: [r.activity],
+    }));
+  const columnCount = showDaysFor(bucket) ? 11 : 10;
+
+  const showDays = showDaysFor(bucket);
 
   return (
     <Modal
@@ -286,13 +319,94 @@ export default function HelpdeskCasesModal({
           </Text>
         ) : data ? (
           <>
+            <Paper withBorder radius='md' p='sm'>
+              <Group justify='space-between' wrap='wrap' gap='xs' mb='xs'>
+                <Group gap={6} wrap='nowrap'>
+                  <IconListNumbers size={18} />
+                  <Text fw={600} size='sm'>
+                    Categoría · subcategoría · actividad {rankOrder === 'most' ? 'que más se repite' : 'que menos se repite'}
+                  </Text>
+                </Group>
+                <SegmentedControl
+                  size='xs'
+                  value={rankOrder}
+                  onChange={(v) => setRankOrder(v as CombinationOrder)}
+                  data={[
+                    { value: 'most', label: 'Más repetidos' },
+                    { value: 'least', label: 'Menos repetidos' },
+                  ]}
+                />
+              </Group>
+              <Text size='xs' c='dimmed' mb='xs'>
+                Sobre los {formatNumber(visible.length)} casos que cumplen los filtros. Haga clic en una fila para ver solo esos casos.
+              </Text>
+              {ranking.length === 0 ? (
+                <Text size='sm' c='dimmed' ta='center' py='xs'>
+                  Sin casos para clasificar.
+                </Text>
+              ) : (
+                <ScrollArea.Autosize mah={220} type='auto'>
+                  <Table highlightOnHover verticalSpacing={4} fz='sm'>
+                    <Table.Thead>
+                      <Table.Tr>
+                        <Table.Th w={36}>#</Table.Th>
+                        <Table.Th>Categoría</Table.Th>
+                        <Table.Th>Subcategoría</Table.Th>
+                        <Table.Th>Actividad</Table.Th>
+                        <Table.Th ta='right'>Casos</Table.Th>
+                        <Table.Th w={160}>%</Table.Th>
+                      </Table.Tr>
+                    </Table.Thead>
+                    <Table.Tbody>
+                      {ranking.map((r, i) => (
+                        <Table.Tr
+                          key={`${r.category}|${r.subcategory}|${r.activity}`}
+                          onClick={() => applyCombination(r)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' || e.key === ' ') {
+                              e.preventDefault();
+                              applyCombination(r);
+                            }
+                          }}
+                          tabIndex={0}
+                          role='button'
+                          aria-label={`Filtrar ${r.category}, ${r.subcategory}, ${r.activity}`}
+                          style={{ cursor: 'pointer' }}
+                        >
+                          <Table.Td>
+                            <Badge size='sm' variant='filled' color={rankOrder === 'most' ? 'blue' : 'gray'} circle>
+                              {i + 1}
+                            </Badge>
+                          </Table.Td>
+                          <Table.Td>{r.category}</Table.Td>
+                          <Table.Td>{r.subcategory}</Table.Td>
+                          <Table.Td>{r.activity}</Table.Td>
+                          <Table.Td ta='right' fw={600}>
+                            {formatNumber(r.total)}
+                          </Table.Td>
+                          <Table.Td>
+                            <Group gap={6} wrap='nowrap'>
+                              <Progress value={(r.total / rankMax) * 100} size='sm' radius='xl' style={{ flex: 1 }} />
+                              <Text size='xs' c='dimmed' w={42} ta='right'>
+                                {new Intl.NumberFormat('es-CO', { maximumFractionDigits: 1 }).format(r.percent)} %
+                              </Text>
+                            </Group>
+                          </Table.Td>
+                        </Table.Tr>
+                      ))}
+                    </Table.Tbody>
+                  </Table>
+                </ScrollArea.Autosize>
+              )}
+            </Paper>
+
             <Text size='xs' c='dimmed'>
               {activeFilters > 0
                 ? `${formatNumber(visible.length)} de ${formatNumber(cases.length)} casos cumplen los filtros`
                 : `${formatNumber(cases.length)} casos · use la fila de filtros bajo cada encabezado para acotar`}
             </Text>
             <ScrollArea.Autosize mah='60vh' type='auto'>
-              <Table striped={!companyColors} highlightOnHover withTableBorder stickyHeader miw={1250}>
+              <Table striped={!companyColors} highlightOnHover withTableBorder stickyHeader miw={1550}>
                 <Table.Thead>
                   <Table.Tr>
                     <Table.Th>N.º</Table.Th>
@@ -301,6 +415,8 @@ export default function HelpdeskCasesModal({
                     <Table.Th>Empresa</Table.Th>
                     <Table.Th>Técnico</Table.Th>
                     <Table.Th>Categoría</Table.Th>
+                    <Table.Th>Subcategoría</Table.Th>
+                    <Table.Th>Actividad</Table.Th>
                     <Table.Th>Creado</Table.Th>
                     <Table.Th>Cierre</Table.Th>
                     {showDays ? <Table.Th ta='right'>Días</Table.Th> : null}
@@ -323,6 +439,12 @@ export default function HelpdeskCasesModal({
                     </Table.Th>
                     <Table.Th>
                       <ListFilter value={filters.category} onChange={(v) => setFilter('category', v)} options={options.category} label='categoría' width={170} />
+                    </Table.Th>
+                    <Table.Th>
+                      <ListFilter value={filters.subcategory} onChange={(v) => setFilter('subcategory', v)} options={options.subcategory} label='subcategoría' width={160} />
+                    </Table.Th>
+                    <Table.Th>
+                      <ListFilter value={filters.activity} onChange={(v) => setFilter('activity', v)} options={options.activity} label='actividad' width={160} />
                     </Table.Th>
                     <Table.Th>
                       <Stack gap={4}>
@@ -385,7 +507,7 @@ export default function HelpdeskCasesModal({
                 <Table.Tbody>
                   {visible.length === 0 ? (
                     <Table.Tr>
-                      <Table.Td colSpan={showDays ? 9 : 8}>
+                      <Table.Td colSpan={columnCount}>
                         <Text c='dimmed' ta='center' py='lg' size='sm'>
                           Ningún caso cumple los filtros.
                         </Text>
@@ -430,9 +552,12 @@ export default function HelpdeskCasesModal({
                         </Table.Td>
                         <Table.Td>
                           <Text size='sm'>{c.category}</Text>
-                          <Text size='xs' c='dimmed' lineClamp={1}>
-                            {c.subcategory} · {c.activity}
-                          </Text>
+                        </Table.Td>
+                        <Table.Td>
+                          <Text size='sm'>{c.subcategory}</Text>
+                        </Table.Td>
+                        <Table.Td>
+                          <Text size='sm'>{c.activity}</Text>
                         </Table.Td>
                         <Table.Td style={{ whiteSpace: 'nowrap' }}>{formatDate(c.createdAt)}</Table.Td>
                         <Table.Td style={{ whiteSpace: 'nowrap' }}>{formatDate(c.endDate)}</Table.Td>
