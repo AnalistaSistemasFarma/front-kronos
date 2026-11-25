@@ -182,11 +182,12 @@ for (const oscuro of [false, true]) {
       await expect(pill).toBeVisible();
       const cap = (await pill.boundingBox())!;
       // Gemini geometry at 390 pt (msg 39036): 72 tall, 32 pt side margins,
-      // right on the bottom safe area (0 here: no notch in the test browser).
+      // right on the bottom safe area (34 pt on an iPhone with home
+      // indicator; the test browser has none, so the 8 px minimum applies).
       expect(Math.round(cap.height)).toBe(72);
       expect(Math.round(cap.x)).toBe(32);
       expect(Math.round(390 - (cap.x + cap.width))).toBe(32);
-      expect(Math.round(844 - (cap.y + cap.height))).toBe(0);
+      expect(Math.round(844 - (cap.y + cap.height))).toBe(8);
       await capturar(page, `celular-${modo}-1-compositor`);
 
       // Text that no longer fits: expanded card (16 pt margins, text row on
