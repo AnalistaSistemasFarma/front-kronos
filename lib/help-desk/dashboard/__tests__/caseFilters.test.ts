@@ -6,7 +6,10 @@ import {
   EMPTY_CASE_FILTERS,
   filterCaseDetails,
   normalizeText,
+  isSelectedCombination,
   rankCombinations,
+  toggleCombination,
+  withoutCombination,
   type CaseColumnFilters,
 } from '../caseFilters';
 
@@ -95,6 +98,20 @@ describe('case preview column filters', () => {
       ['Sin Asignar', 'Impresoras', 1],
     ]);
     expect(rankCombinations([], 'most')).toEqual([]);
+  });
+
+  it('a ranking row toggles its combination and keeps the other filters', () => {
+    const combo = { category: 'Hardware', subcategory: 'Portátil', activity: 'Diagnóstico' };
+    const base: CaseColumnFilters = { ...EMPTY_CASE_FILTERS, status: ['Abierto'] };
+    const selected = toggleCombination(base, combo);
+    expect(isSelectedCombination(selected, combo)).toBe(true);
+    expect(selected.status).toEqual(['Abierto']);
+    const back = toggleCombination(selected, combo);
+    expect(isSelectedCombination(back, combo)).toBe(false);
+    expect(back).toEqual(base);
+    const other = toggleCombination(selected, { ...combo, activity: 'Cambio' });
+    expect(other.activity).toEqual(['Cambio']);
+    expect(withoutCombination({ ...selected, category: ['A', 'B'] })).toEqual(base);
   });
 
   it('counts the active filters and lists distinct values', () => {

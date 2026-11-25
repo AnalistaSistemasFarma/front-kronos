@@ -40,7 +40,10 @@ import {
   distinctValues,
   EMPTY_CASE_FILTERS,
   filterCaseDetails,
+  isSelectedCombination,
   rankCombinations,
+  toggleCombination,
+  withoutCombination,
   type CaseColumnFilters,
   type CaseCombination,
   type CombinationOrder,
@@ -235,17 +238,18 @@ export default function HelpdeskCasesModal({
     [cases]
   );
 
-  /** Ranking of category · subcategory · activity over the cases that pass the filters. */
-  const ranking = useMemo(() => rankCombinations(visible, rankOrder, 10), [visible, rankOrder]);
+  /**
+   * Ranking of category · subcategory · activity. It ignores the category, subcategory and
+   * activity filters (it would otherwise shrink to the selected row) and keeps every other filter.
+   */
+  const rankingBase = useMemo(() => filterCaseDetails(cases, withoutCombination(filters)), [cases, filters]);
+  const ranking = useMemo(() => rankCombinations(rankingBase, rankOrder, 10), [rankingBase, rankOrder]);
   const rankMax = Math.max(1, ...ranking.map((r) => r.total));
+  const combinationActive =
+    filters.category.length > 0 || filters.subcategory.length > 0 || filters.activity.length > 0;
 
-  const applyCombination = (r: CaseCombination) =>
-    setFilters((prev) => ({
-      ...prev,
-      category: [r.category],
-      subcategory: [r.subcategory],
-      activity: [r.activity],
-    }));
+  const applyCombination = (r: CaseCombination) => setFilters((prev) => toggleCombination(prev, r));
+  const clearCombination = () => setFilters((prev) => withoutCombination(prev));
   const columnCount = showDaysFor(bucket) ? 11 : 10;
 
   const showDays = showDaysFor(bucket);
@@ -327,6 +331,18 @@ export default function HelpdeskCasesModal({
                     Categoría · subcategoría · actividad {rankOrder === 'most' ? 'que más se repite' : 'que menos se repite'}
                   </Text>
                 </Group>
+                <Group gap='xs' wrap='nowrap'>
+                {combinationActive ? (
+                  <Button
+                    size='xs'
+                    variant='light'
+                    color='red'
+                    leftSection={<IconX size={14} />}
+                    onClick={clearCombination}
+                  >
+                    Quitar filtro y ver todos
+                  </Button>
+                ) : null}
                 <SegmentedControl
                   size='xs'
                   value={rankOrder}
@@ -336,9 +352,11 @@ export default function HelpdeskCasesModal({
                     { value: 'least', label: 'Menos repetidos' },
                   ]}
                 />
+                </Group>
               </Group>
               <Text size='xs' c='dimmed' mb='xs'>
-                Sobre los {formatNumber(visible.length)} casos que cumplen los filtros. Haga clic en una fila para ver solo esos casos.
+                Sobre los {formatNumber(rankingBase.length)} casos que cumplen los demás filtros. Haga clic en una fila para ver
+                solo esos casos; vuelva a hacer clic en ella (o en «Quitar filtro y ver todos») para regresar a la lista completa.
               </Text>
               {ranking.length === 0 ? (
                 <Text size='sm' c='dimmed' ta='center' py='xs'>
@@ -358,9 +376,12 @@ export default function HelpdeskCasesModal({
                       </Table.Tr>
                     </Table.Thead>
                     <Table.Tbody>
-                      {ranking.map((r, i) => (
+                      {ranking.map((r, i) => {
+                        const selected = isSelectedCombination(filters, r);
+                        return (
                         <Table.Tr
                           key={`${r.category}|${r.subcategory}|${r.activity}`}
+                          aria-pressed={selected}
                           onClick={() => applyCombination(r)}
                           onKeyDown={(e) => {
                             if (e.key === 'Enter' || e.key === ' ') {
@@ -370,13 +391,31 @@ export default function HelpdeskCasesModal({
                           }}
                           tabIndex={0}
                           role='button'
-                          aria-label={`Filtrar ${r.category}, ${r.subcategory}, ${r.activity}`}
-                          style={{ cursor: 'pointer' }}
+                          aria-label={
+                            selected
+                              ? `Quitar el filtro ${r.category}, ${r.subcategory}, ${r.activity}`
+                              : `Filtrar ${r.category}, ${r.subcategory}, ${r.activity}`
+                          }
+                          title={selected ? 'Clic para quitar el filtro' : 'Clic para ver solo estos casos'}
+                          style={{
+                            cursor: 'pointer',
+                            ...(selected
+                              ? { background: 'var(--mantine-color-blue-light)', fontWeight: 600 }
+                              : combinationActive
+                                ? { opacity: 0.55 }
+                                : {}),
+                          }}
                         >
                           <Table.Td>
-                            <Badge size='sm' variant='filled' color={rankOrder === 'most' ? 'blue' : 'gray'} circle>
-                              {i + 1}
-                            </Badge>
+                            {selected ? (
+                              <Badge size='sm' variant='filled' color='red' circle aria-hidden>
+                                <IconX size={10} />
+                              </Badge>
+                            ) : (
+                              <Badge size='sm' variant='filled' color={rankOrder === 'most' ? 'blue' : 'gray'} circle>
+                                {i + 1}
+                              </Badge>
+                            )}
                           </Table.Td>
                           <Table.Td>{r.category}</Table.Td>
                           <Table.Td>{r.subcategory}</Table.Td>
@@ -393,7 +432,8 @@ export default function HelpdeskCasesModal({
                             </Group>
                           </Table.Td>
                         </Table.Tr>
-                      ))}
+                        );
+                      })}
                     </Table.Tbody>
                   </Table>
                 </ScrollArea.Autosize>
