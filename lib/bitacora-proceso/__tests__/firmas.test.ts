@@ -73,16 +73,16 @@ describe('Bitácora de Proceso · cuatro vistos buenos (B2/B3, 2026-10-15)', () 
     expect(vistosCompletos(vieja, [cerro])).toBe(false);
   });
 
-  it('orden: (operario opcional) → cierre → inspector → jefe; solo se exigen los actores que la bitácora tiene (R4)', () => {
-    expect(vistosRequeridos(abierta)).toEqual(['SUPERVISOR', 'INSPECTOR', 'JEFE_PROD']);
+  it('orden (2026-11-24): (operario opcional) → cierre → jefe; el inspector ya no se exige, ni en las bitácoras que lo tenían', () => {
+    expect(vistosRequeridos(abierta)).toEqual(['SUPERVISOR', 'JEFE_PROD']);
     // R4: el del operario ya no es requisito: lo siguiente en una abierta es el cierre.
     expect(siguienteVistoBueno(abierta, [])).toBe('SUPERVISOR');
     const op = { ...f('OPERARIO', 'tablet'), id_operador: 7 };
     expect(siguienteVistoBueno(abierta, [op])).toBe('SUPERVISOR');
-    // Cerrada sin visto bueno del operario: igual se completa con inspector y jefe.
-    expect(vistosCompletos(cerrada, [cerro, f('INSPECTOR', 'insp'), f('JEFE_PROD', 'jefe')])).toBe(true);
-    expect(siguienteVistoBueno(cerrada, [op, cerro])).toBe('INSPECTOR');
-    expect(siguienteVistoBueno(cerrada, [op, cerro, f('INSPECTOR', 'insp')])).toBe('JEFE_PROD');
+    // Cerrada (aunque tenga inspector designado): después del cierre va el jefe.
+    expect(siguienteVistoBueno(cerrada, [op, cerro])).toBe('JEFE_PROD');
+    expect(vistosCompletos(cerrada, [cerro, f('JEFE_PROD', 'jefe')])).toBe(true);
+    // Un visto bueno viejo del inspector no estorba.
     expect(vistosCompletos(cerrada, [op, cerro, f('INSPECTOR', 'insp'), f('JEFE_PROD', 'jefe')])).toBe(true);
     expect(vistosRequeridos({ ...abierta, operadores: [] })[0]).toBe('SUPERVISOR');
   });
@@ -114,19 +114,18 @@ describe('Bitácora de Proceso · cuatro vistos buenos (B2/B3, 2026-10-15)', () 
     expect(() => assertPuedeConfirmar({ ...abierta, operadores: [] }, [], { rol: 'SUPERVISOR', idUser: 'sup', idOperador: null, access: sup })).not.toThrow();
   });
 
-  it('inspector y jefe: solo el designado, después del cierre, el jefe después del inspector y nunca quien cerró', () => {
+  it('jefe: solo el designado, después del cierre y nunca quien cerró; el inspector ya no confirma (2026-11-24)', () => {
     const c = (rol: 'INSPECTOR' | 'JEFE_PROD', idUser: string) => ({ rol, idUser, idOperador: null, access: op_ });
-    expect(errorOf(() => assertPuedeConfirmar(abierta, [], c('INSPECTOR', 'insp'))).status).toBe(409);
-    expect(errorOf(() => assertPuedeConfirmar(cerrada, [cerro], c('INSPECTOR', 'otro'))).status).toBe(403);
-    expect(() => assertPuedeConfirmar(cerrada, [cerro], c('INSPECTOR', 'insp'))).not.toThrow();
-    expect(errorOf(() => assertPuedeConfirmar(cerrada, [cerro], c('JEFE_PROD', 'jefe'))).message).toMatch(/inspector/);
-    expect(() => assertPuedeConfirmar(cerrada, [cerro, f('INSPECTOR', 'insp')], c('JEFE_PROD', 'jefe'))).not.toThrow();
-    expect(errorOf(() => assertPuedeConfirmar(cerrada, [cerro, f('INSPECTOR', 'insp')], c('INSPECTOR', 'insp'))).status).toBe(409);
-    expect(errorOf(() => assertPuedeConfirmar({ ...cerrada, inspector: null }, [cerro], c('INSPECTOR', 'insp'))).status).toBe(409);
-    // Sin inspector designado (bitácoras del #617), el jefe va directo después del cierre.
+    const insp = errorOf(() => assertPuedeConfirmar(cerrada, [cerro], c('INSPECTOR', 'insp')));
+    expect(insp.status).toBe(409);
+    expect(insp.message).toMatch(/inspector ya no forma parte/);
+    expect(errorOf(() => assertPuedeConfirmar(abierta, [], c('JEFE_PROD', 'jefe'))).status).toBe(409);
+    expect(errorOf(() => assertPuedeConfirmar(cerrada, [cerro], c('JEFE_PROD', 'otro'))).status).toBe(403);
+    expect(() => assertPuedeConfirmar(cerrada, [cerro], c('JEFE_PROD', 'jefe'))).not.toThrow();
     expect(() => assertPuedeConfirmar({ ...cerrada, inspector: null }, [cerro], c('JEFE_PROD', 'jefe'))).not.toThrow();
+    expect(errorOf(() => assertPuedeConfirmar(cerrada, [cerro, f('JEFE_PROD', 'jefe')], c('JEFE_PROD', 'jefe'))).status).toBe(409);
     // Quien cerró no da otro visto bueno.
-    expect(errorOf(() => assertPuedeConfirmar({ ...cerrada, inspector: 'sup' }, [cerro], c('INSPECTOR', 'sup'))).status).toBe(403);
+    expect(errorOf(() => assertPuedeConfirmar({ ...cerrada, jefe: 'sup' }, [cerro], c('JEFE_PROD', 'sup'))).status).toBe(403);
     // El «Verificó» viejo cuenta como el del jefe: no se repite.
     expect(errorOf(() => assertPuedeConfirmar({ ...cerrada, inspector: null }, [cerro, f('INSPECTOR', 'jefe', 'Verificó')], c('JEFE_PROD', 'jefe'))).status).toBe(409);
   });
@@ -150,18 +149,15 @@ describe('Bitácora de Proceso · cuatro vistos buenos (B2/B3, 2026-10-15)', () 
     expect(esCierreDelJefe(cerroJefe)).toBe(true);
     expect(esCierreDelJefe(cerro)).toBe(false);
     expect(rolVisible(cerroJefe)).toBe('SUPERVISOR');
-    // Después del cierre del jefe solo falta el inspector; el jefe no firma otra vez.
-    expect(vistosRequeridos(cerrada, [cerroJefe])).toEqual(['SUPERVISOR', 'INSPECTOR']);
-    expect(siguienteVistoBueno(cerrada, [cerroJefe])).toBe('INSPECTOR');
-    expect(() => assertPuedeConfirmar(cerrada, [cerroJefe], c('INSPECTOR', 'insp'))).not.toThrow();
-    expect(vistosCompletos(cerrada, [cerroJefe, f('INSPECTOR', 'insp')])).toBe(true);
-    const otraVez = errorOf(() => assertPuedeConfirmar(cerrada, [cerroJefe, f('INSPECTOR', 'insp')], c('JEFE_PROD', 'jefe')));
+    // Después del cierre del jefe ya está completa (el inspector salió del flujo, 2026-11-24).
+    expect(vistosRequeridos(cerrada, [cerroJefe])).toEqual(['SUPERVISOR']);
+    expect(siguienteVistoBueno(cerrada, [cerroJefe])).toBeNull();
+    expect(vistosCompletos(cerrada, [cerroJefe])).toBe(true);
+    const otraVez = errorOf(() => assertPuedeConfirmar(cerrada, [cerroJefe], c('JEFE_PROD', 'jefe')));
     expect(otraVez.status).toBe(409);
     expect(otraVez.message).toMatch(/su cierre cuenta como su visto bueno/);
-    // Sin inspector designado (#617), el cierre del jefe la deja completa.
-    expect(vistosCompletos({ ...cerrada, inspector: null }, [cerroJefe])).toBe(true);
-    // Si cierra el supervisor, el jefe sigue dando el último visto bueno.
-    expect(siguienteVistoBueno(cerrada, [cerro, f('INSPECTOR', 'insp')])).toBe('JEFE_PROD');
+    // Si cierra el supervisor, el jefe da el último visto bueno.
+    expect(siguienteVistoBueno(cerrada, [cerro])).toBe('JEFE_PROD');
   });
 
   it('R3: la huella del cierre del jefe incluye con qué rol cerró; la del supervisor no cambia (huellas anteriores intactas)', () => {

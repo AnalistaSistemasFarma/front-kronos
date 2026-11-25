@@ -49,3 +49,27 @@ export async function buscarOps(idCompany: number, q: string): Promise<SapOpSnap
     await sapLogout(session).catch(() => undefined);
   }
 }
+
+/**
+ * Datos de la OP para el encabezado del batch record (2026-11-24), SOLO LECTURA: descripción del
+ * producto (de ahí se sugiere la concentración) y observaciones (ahí Farmalógica anota los lotes
+ * de materia prima dispensados). Si SAP no responde, el Excel se genera igual con lo que la
+ * persona escriba: devuelve null en vez de fallar.
+ */
+export async function leerOpBatchRecord(idCompany: number, absEntry: number): Promise<{ ProductDescription: string | null; Remarks: string | null } | null> {
+  const creds = await credencialesSap(idCompany);
+  if (!creds) return null;
+  try {
+    const session = await sapLogin(creds);
+    try {
+      const row = await sapGet<Record<string, unknown>>(session, `ProductionOrders(${Math.trunc(absEntry)})?$select=ProductDescription,Remarks`);
+      const s = (v: unknown) => (typeof v === 'string' && v.trim() ? v.trim() : null);
+      return { ProductDescription: s(row.ProductDescription), Remarks: s(row.Remarks) };
+    } finally {
+      await sapLogout(session).catch(() => undefined);
+    }
+  } catch (error) {
+    console.error('[bitacora-proceso/sap] batch record OP', error);
+    return null;
+  }
+}

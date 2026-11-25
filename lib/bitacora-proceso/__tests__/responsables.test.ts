@@ -36,6 +36,9 @@ describe('Bitácora de Proceso · responsables', () => {
     expect(status(() => parseNuevoResponsable({ company: 1, rol: 'INSPECTOR' }))).toBe(400);
     expect(status(() => parseNuevoResponsable({ company: 1, id_user: 'x'.repeat(51), rol: 'INSPECTOR' }))).toBe(400);
     expect(status(() => parseNuevoResponsable({ company: 1, id_user: 'u1', rol: 'OPERARIO' }))).toBe(400);
+    // 2026-11-24: el inspector salió del flujo y ya no se asigna.
+    expect(status(() => parseNuevoResponsable({ company: 1, id_user: 'u1', rol: 'INSPECTOR' }))).toBe(400);
+    expect(parseNuevoResponsable({ company: 1, id_user: 'u1', rol: 'SUPERVISOR' }).rol).toBe('SUPERVISOR');
   });
 
   it('parseCambioResponsable: solo activar o desactivar (no se borran)', () => {

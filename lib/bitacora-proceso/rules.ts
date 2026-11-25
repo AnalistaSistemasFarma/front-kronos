@@ -1,7 +1,9 @@
 import {
   isOtIcono,
   isOtResponsableRol,
+  OT_INSPECTOR_EN_FLUJO,
   OT_LIMITS,
+  OT_RESPONSABLE_ROLES_ASIGNABLES,
   OT_ROL_LABEL,
   OT_TURNOS,
   otPermissionFromUrl,
@@ -178,8 +180,8 @@ export interface NuevaOrdenInput {
   idArea: number | null;
   /** Operarios SIN usuario del maestro de la empresa (A1; en la base, ot_orden_operador). */
   operadores: number[];
-  /** Inspector (usuario de SynerLink, columna id_inspector; B1, 2026-10-15). */
-  inspector: string;
+  /** Inspector (columna id_inspector; B1, 2026-10-15). Null desde el 2026-11-24: salió del flujo. */
+  inspector: string | null;
   /** Jefe de producción (usuario de SynerLink, columna id_jefe_produccion; B1). */
   jefeProduccion: string;
   sapOp: SapOpSnapshot | null;
@@ -226,8 +228,9 @@ export function parseNuevaOrden(body: Record<string, unknown> | null): NuevaOrde
   }
   const operadores = parseIdList(body.operadores, 'Operarios', OT_LIMITS.maxOperarios);
   if (operadores.length === 0) throw new OtError('Seleccione al menos un operario.', 400);
-  const inspector = str(body.inspector);
-  if (!inspector) throw new OtError('Seleccione el inspector.', 400);
+  // 2026-11-24: el inspector salió del flujo; si un cliente viejo lo manda, se ignora.
+  const inspector = OT_INSPECTOR_EN_FLUJO ? str(body.inspector) : '';
+  if (OT_INSPECTOR_EN_FLUJO && !inspector) throw new OtError('Seleccione el inspector.', 400);
   if (inspector.length > 50) throw new OtError('Inspector no válido.', 400);
   const jefeProduccion = str(body.jefeProduccion);
   if (!jefeProduccion) throw new OtError('Seleccione el jefe de producción.', 400);
@@ -240,7 +243,7 @@ export function parseNuevaOrden(body: Record<string, unknown> | null): NuevaOrde
     turno: turno as OtTurno,
     idArea: optPositiveInt(body.idArea ?? body.id_area, 'El área'),
     operadores,
-    inspector,
+    inspector: inspector || null,
     jefeProduccion,
     sapOp: parseSapOp(body.sapOp),
   };
@@ -606,7 +609,9 @@ export function parseNuevoResponsable(body: Record<string, unknown> | null): Nue
   if (!idCompany) throw new OtError('Falta la empresa.', 400);
   const idUser = typeof body.id_user === 'string' ? body.id_user.trim() : '';
   if (!idUser || idUser.length > 50) throw new OtError('Elija la persona.', 400);
-  if (!isOtResponsableRol(body.rol)) throw new OtError('Rol no válido: supervisor, inspector o jefe de producción.', 400);
+  if (!isOtResponsableRol(body.rol) || !OT_RESPONSABLE_ROLES_ASIGNABLES.includes(body.rol)) {
+    throw new OtError('Rol no válido: supervisor o jefe de producción.', 400);
+  }
   return { idCompany, idUser, rol: body.rol };
 }
 

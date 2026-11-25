@@ -55,6 +55,7 @@ import {
 import type { OrdenDetalle } from '../../lib/bitacora-proceso/db';
 import type { OtCompanyAccess } from '../../lib/bitacora-proceso/rules';
 import { OtIconoActividad } from './otIconos';
+import OtRelojServidor from './OtRelojServidor';
 import ConfirmacionBitacoraModal, { type Confirmante, type DatosConfirmacion } from './ConfirmacionBitacoraModal';
 import { codigoOt, fmtFechaHora, fmtFechaHoraSeg, fmtHora, otHref, otSend, turnoLabel, useOtFetch } from './otClient';
 
@@ -97,7 +98,7 @@ const BOTON_VISTO: Record<OtFirmaRol, string> = {
 
 export default function OtPlanta({ company, idOrden }: { company: OtCompanyAccess; idOrden: number }) {
   const mobile = useMediaQuery('(max-width: 48em)') ?? false;
-  const detalle = useOtFetch<{ orden: OrdenDetalle }>(`/api/bitacora-proceso/${idOrden}?company=${company.idCompany}`, 20_000);
+  const detalle = useOtFetch<{ orden: OrdenDetalle; ahoraServidor?: string }>(`/api/bitacora-proceso/${idOrden}?company=${company.idCompany}`, 20_000);
   const acts = useOtFetch<{ actividades: Actividad[] }>(`/api/bitacora-proceso/actividades?company=${company.idCompany}`);
   const [operador, setOperador] = useState<{ id: number; nombre: string } | null>(null);
   const [conObs, setConObs] = useState(false);
@@ -247,6 +248,7 @@ export default function OtPlanta({ company, idOrden }: { company: OtCompanyAcces
           Inicio <b>{fmtHora(o.abiertaEn)}</b> · Final <b>{o.cerradaEn ? fmtHora(o.cerradaEn) : '—'}</b>
           {o.area ? ` · ${o.area}` : ''}
         </Text>
+        {abierta && <OtRelojServidor ahoraServidor={detalle.data?.ahoraServidor} />}
       </Card>
 
       {aviso && (
@@ -272,7 +274,7 @@ export default function OtPlanta({ company, idOrden }: { company: OtCompanyAcces
       )}
       {abierta && !o.puedeRegistrar && (
         <Alert color='yellow' icon={<IconAlertTriangle size={18} />} data-testid='ot-no-operario'>
-          Usted no figura como auxiliar, inspector ni jefe de producción de esta bitácora: puede consultarla, pero no registrar. Pida al supervisor que lo incluya.
+          Usted no figura como auxiliar ni jefe de producción de esta bitácora: puede consultarla, pero no registrar. Pida al supervisor que lo incluya.
         </Alert>
       )}
 
@@ -476,10 +478,12 @@ export default function OtPlanta({ company, idOrden }: { company: OtCompanyAcces
               <Text c='dimmed'>Pendiente (abierta)</Text>
             )}
           </div>
-          <div>
-            <Text size='xs' c='dimmed' tt='uppercase' fw={600}>{OT_INSPECTOR_LABEL}</Text>
-            <Text>{o.inspector?.name ?? '—'}</Text>
-          </div>
+          {o.inspector && (
+            <div>
+              <Text size='xs' c='dimmed' tt='uppercase' fw={600}>{OT_INSPECTOR_LABEL}</Text>
+              <Text>{o.inspector.name}</Text>
+            </div>
+          )}
           <div>
             <Text size='xs' c='dimmed' tt='uppercase' fw={600}>{OT_JEFE_PRODUCCION_LABEL}</Text>
             <Text>{o.jefe?.name ?? '—'}</Text>
