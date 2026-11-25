@@ -308,6 +308,7 @@ export interface HelpdeskCaseDetail {
  */
 export const CASE_DIMENSIONS = {
   department: (r: HelpdeskCaseRow) => cleanLabel(r.department, 'Sin departamento'),
+  technician: (r: HelpdeskCaseRow) => cleanLabel(r.technician, 'Sin técnico asignado'),
 } as const;
 export type CaseDimension = keyof typeof CASE_DIMENSIONS;
 
