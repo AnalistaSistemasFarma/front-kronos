@@ -38,7 +38,7 @@ import {
   IconMoodSmile,
   IconPaperclip,
   IconPlus,
-  IconSend,
+  IconArrowUp,
   IconStrikethrough,
   IconTypography,
   IconX,
@@ -777,7 +777,7 @@ const ChatComposer = forwardRef<ChatComposerHandle, {
           title='Más opciones'
           onMouseDown={sinRobarFoco}
         >
-          <IconPlus size={22} stroke={1.7} />
+          <IconPlus size={36} stroke={1.75} />
         </ActionIcon>
       </Menu.Target>
       <Menu.Dropdown className='chat-surface'>
@@ -856,24 +856,91 @@ const ChatComposer = forwardRef<ChatComposerHandle, {
         onClick={() => void submit()}
         aria-label='Enviar mensaje'
       >
-        <IconSend size={19} stroke={1.9} />
+        <IconArrowUp size={26} stroke={2.2} />
       </ActionIcon>
     </Tooltip>
   );
+
+  /*
+   * Expanded card (Nicolás, msg 39042, like Gemini): once the text no longer
+   * fits on the single-line pill, the pill turns into a card with the text on
+   * top across the whole width and «+» / voice / send on a row below. It goes
+   * back to the pill when the text fits again or is cleared.
+   *
+   * "Fits" is measured against the COLLAPSED text width whatever the current
+   * state is, so the card never flips back and forth at the edge (the text
+   * row is wider once expanded).
+   */
+  const pillRef = useRef<HTMLDivElement>(null);
+  const [expandida, setExpandida] = useState(false);
+  const measureCtxRef = useRef<CanvasRenderingContext2D | null>(null);
+  useLayoutEffect(() => {
+    const pillEl = pillRef.current;
+    if (!pillEl) return;
+    const decide = () => {
+      const text = valorRef.current;
+      if (!text) return setExpandida(false);
+      if (text.includes('\n')) return setExpandida(true);
+      const area = textareaRef.current;
+      if (!area) return; // preview: keep the current shape
+      if (!measureCtxRef.current) measureCtxRef.current = document.createElement('canvas').getContext('2d');
+      const ctx = measureCtxRef.current;
+      if (!ctx) return;
+      const ta = window.getComputedStyle(area);
+      ctx.font = `${ta.fontStyle} ${ta.fontWeight} ${ta.fontSize} ${ta.fontFamily}`;
+      const ps = window.getComputedStyle(pillEl);
+      const px = (v: string) => parseFloat(v) || 0;
+      const width = (sel: string) => (pillEl.querySelector(sel) as HTMLElement | null)?.offsetWidth ?? 0;
+      const micEl = pillEl.querySelector('.chat-composer__mic') as HTMLElement | null;
+      // Width of the COLLAPSED pill inside its border, whatever the state:
+      // the expanded card drops its side margins and is wider.
+      const collapsedInner =
+        (pillEl.parentElement?.clientWidth ?? pillEl.offsetWidth) -
+        2 * px(ps.getPropertyValue('--pill-collapsed-margin')) -
+        px(ps.borderLeftWidth) -
+        px(ps.borderRightWidth);
+      const available =
+        collapsedInner -
+        px(ps.paddingLeft) -
+        px(ps.paddingRight) -
+        width('.chat-composer__plus') -
+        width('.chat-composer__send') -
+        (micEl ? micEl.offsetWidth + px(window.getComputedStyle(micEl).marginRight) : 0) -
+        px(ps.getPropertyValue('--pill-text-pad-collapsed'));
+      // 2 px of slack for the caret at the end of the line.
+      setExpandida(ctx.measureText(text).width > available - 2);
+    };
+    decide();
+    const observer = new ResizeObserver(decide);
+    observer.observe(pillEl);
+    return () => observer.disconnect();
+  }, [value, preview]);
+
+  // The textarea autosize only re-measures on window resize; the expanded
+  // card changes the text width without one, so it is nudged here.
+  useLayoutEffect(() => {
+    const frame = requestAnimationFrame(() => window.dispatchEvent(new Event('resize')));
+    return () => cancelAnimationFrame(frame);
+  }, [expandida]);
 
   /* Gemini-style floating pill (2026-11-24, Nicolás, msg 39009): «+» on the
      left, the auto-growing box in the middle (one line, up to 6, then it
      scrolls), and on the right the voice button (only where the conversation
      has realtime voice) and the round send button. */
   const pill = (
-    <div className='chat-composer__pill' data-disabled={disabled || undefined} data-testid='chat-composer-pill'>
+    <div
+      ref={pillRef}
+      className={expandida ? 'chat-composer__pill chat-composer__pill--expandida' : 'chat-composer__pill'}
+      data-disabled={disabled || undefined}
+      data-testid='chat-composer-pill'
+    >
       {panelAbiertoEnCelular ? botonTeclado : menuMas}
       {preview ? (
-        <Box className='chat-composer__preview' onDoubleClick={() => setPreview(false)}>
+        <Box className='chat-composer__preview chat-composer__texto' onDoubleClick={() => setPreview(false)}>
           <ChatMarkdown content={value} />
         </Box>
       ) : (
-        <Box pos='relative' style={{ display: 'flex', flex: 1, minWidth: 0 }}>
+        <Box pos='relative' className='chat-composer__texto' style={{ display: 'flex', minWidth: 0 }}>
           <Textarea
             ref={textareaRef}
             value={value}
@@ -920,7 +987,11 @@ const ChatComposer = forwardRef<ChatComposerHandle, {
           {letterFxActive && <ComposerLetterFx textareaRef={textareaRef} value={value} />}
         </Box>
       )}
-      {voiceConversationId && <ChatVoice key={voiceConversationId} conversationId={voiceConversationId} />}
+      {voiceConversationId && (
+        <span className='chat-composer__mic'>
+          <ChatVoice key={voiceConversationId} conversationId={voiceConversationId} />
+        </span>
+      )}
       {botonEnviar}
     </div>
   );
