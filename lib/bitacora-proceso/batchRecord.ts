@@ -123,8 +123,9 @@ function textoVisto(o: OrdenDetalle, v: OrdenDetalle['vistos'][number]): string 
 // Como el SGC (lib/sgc/pdf/officePdf.ts, prepareXlsxForMicrosoft), la plantilla NO pasa por una
 // librería que la lea y la reescriba: se abre el .xlsx con JSZip y solo se tocan, en su XML, las
 // celdas del encabezado, las filas nuevas desde la 10, sus estilos (se AGREGAN al final de
-// styles.xml), las celdas combinadas y el área de impresión. Logo, estilos, filas 1–9, títulos
-// que se repiten en cada página y configuración de página quedan byte a byte como en Excel.
+// styles.xml), las celdas combinadas, el área de impresión y el ajuste a una página de ancho
+// (ver ajustarPaginaUnaDeAncho). Logo, estilos, filas 1–9 y títulos que se repiten en cada página
+// quedan byte a byte como en Excel.
 // ---------------------------------------------------------------------------
 
 const SHEET = 'xl/worksheets/sheet1.xml';
@@ -282,6 +283,45 @@ export function filasBitacora(ordenes: OrdenDetalle[], e: EstilosBitacora, gener
   return filas;
 }
 
+/**
+ * ONE PAGE WIDE (2026-11-25, Nicolás's screenshot: Excel split the sheet in two pages, A–H and I–L).
+ * The template prints at a FIXED 63 % scale (portrait, Letter, zero side margins), which only fits
+ * one page wide with the fonts and printer of the plant PC; Excel for Mac, other printers and Excel
+ * Online (the Microsoft preview) measure the columns a bit wider and cut the sheet in two.
+ * Same orientation and paper as the template (portrait, Letter), but "fit to 1 page wide, as many
+ * pages tall as needed" instead of the fixed scale, and small side/bottom margins so the printer
+ * does not clip the borders. Print titles (rows 1–8) and print area (A:K) are unchanged.
+ */
+export const BATCH_RECORD_PAGINA = {
+  orientation: 'portrait',
+  paperSize: 1, // Letter, as in the template's printer settings
+  margins: { left: 0.2, right: 0.2, top: 0.19685039370078741, bottom: 0.2, header: 0.15748031496062992, footer: 0 },
+} as const;
+
+export function ajustarPaginaUnaDeAncho(sheet: string): string {
+  let s = sheet;
+  // <sheetPr> must be the first child of <worksheet>: add fitToPage to the existing one or create it.
+  if (/<sheetPr\b/.test(s)) {
+    if (/<pageSetUpPr\b[^>]*\/>/.test(s)) {
+      s = s.replace(/<pageSetUpPr\b([^>]*?)\/>/, (_m, attrs: string) => `<pageSetUpPr${attrs.replace(/\s*fitToPage="[^"]*"/, '')} fitToPage="1"/>`);
+    } else if (/<sheetPr\b[^>]*\/>/.test(s)) {
+      s = s.replace(/<sheetPr\b([^>]*?)\/>/, '<sheetPr$1><pageSetUpPr fitToPage="1"/></sheetPr>');
+    } else {
+      s = s.replace('</sheetPr>', '<pageSetUpPr fitToPage="1"/></sheetPr>');
+    }
+  } else {
+    s = s.replace(/(<worksheet\b[^>]*>)/, '$1<sheetPr><pageSetUpPr fitToPage="1"/></sheetPr>');
+  }
+  const m = BATCH_RECORD_PAGINA.margins;
+  s = s.replace(/<pageMargins\b[^>]*\/>/, `<pageMargins left="${m.left}" right="${m.right}" top="${m.top}" bottom="${m.bottom}" header="${m.header}" footer="${m.footer}"/>`);
+  // Keep the template's r:id (printer settings); replace scale/fit/orientation.
+  s = s.replace(/<pageSetup\b([^>]*?)\/>/, (_m, attrs: string) => {
+    const rid = / r:id="[^"]*"/.exec(attrs)?.[0] ?? '';
+    return `<pageSetup paperSize="${BATCH_RECORD_PAGINA.paperSize}" fitToWidth="1" fitToHeight="0" orientation="${BATCH_RECORD_PAGINA.orientation}"${rid}/>`;
+  });
+  return s;
+}
+
 /** Genera el .xlsx sobre la plantilla del batch record (edición del XML; ver arriba). */
 export async function buildBatchRecordXlsx(enc: BatchRecordEncabezado, ordenes: OrdenDetalle[], generado: Date = new Date()): Promise<Buffer> {
   if (ordenes.length === 0) throw new OtError('No hay bitácoras para el archivo.', 400);
@@ -319,6 +359,7 @@ export async function buildBatchRecordXlsx(enc: BatchRecordEncabezado, ordenes: 
     return `<mergeCells count="${Number(n) + merges.length}">${body}${merges.map((ref) => `<mergeCell ref="${ref}"/>`).join('')}</mergeCells>`;
   });
   sheet = sheet.replace(/<dimension ref="[^"]*"\/>/, `<dimension ref="A1:K${ultima}"/>`);
+  sheet = ajustarPaginaUnaDeAncho(sheet);
 
   // Área de impresión hasta la última fila; los títulos que se repiten (1:8) quedan como en la plantilla.
   const workbook = (await leer(WORKBOOK)).replace(/(<definedName name="_xlnm\.Print_Area"[^>]*>[^<]*?\$A\$1:\$K\$)\d+(<\/definedName>)/, `$1${ultima}$2`);
