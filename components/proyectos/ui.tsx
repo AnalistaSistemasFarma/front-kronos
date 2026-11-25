@@ -6,7 +6,7 @@ import { IconAlertCircle, IconAlertTriangle, IconChevronRight, IconCircleCheck, 
 import type { ReactNode } from 'react';
 import AgentAvatar from '../chat/AgentAvatar';
 import { PROJECT_ROLE_LABELS, type ProjectRole } from '../../lib/chat/projects-rules';
-import type { AgenteMiniDto } from '../../lib/proyectos/tipos';
+import type { AgenteMiniDto, MiembroDto } from '../../lib/proyectos/tipos';
 import css from './proyectos.module.css';
 
 /** Corte de celular/tableta: el mismo del chat y del Correo (62em). */
@@ -40,6 +40,27 @@ export function AgentesApilados({ agentes, size = 26 }: { agentes: AgenteMiniDto
             showStatus={false}
             withTooltip={false}
           />
+        ))}
+        {resto > 0 && (
+          <Avatar size={size} radius='xl'>
+            +{resto}
+          </Avatar>
+        )}
+      </Avatar.Group>
+    </Tooltip>
+  );
+}
+
+/** Avatares de las personas miembro del proyecto (foto o iniciales), encimados (máx. 5 + contador). */
+export function MiembrosApilados({ miembros, size = 26 }: { miembros: MiembroDto[]; size?: number }) {
+  const visibles = miembros.slice(0, 5);
+  const resto = miembros.length - visibles.length;
+  if (miembros.length === 0) return null;
+  return (
+    <Tooltip label={miembros.map((m) => m.name).join(', ')} withArrow openDelay={300} multiline maw={280}>
+      <Avatar.Group spacing={size / 3} data-testid='proyecto-miembros-apilados'>
+        {visibles.map((m) => (
+          <AgentAvatar key={m.id} code={m.id} displayName={m.name} avatarUrl={m.avatarUrl} size={size} showStatus={false} withTooltip={false} />
         ))}
         {resto > 0 && (
           <Avatar size={size} radius='xl'>

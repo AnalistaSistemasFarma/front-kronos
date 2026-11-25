@@ -4,7 +4,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useState } from 'reac
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useSession } from 'next-auth/react';
-import { ActionIcon, Anchor, Badge, Box, Card, Group, Menu, NavLink, Skeleton, Stack, Tabs, Text, ThemeIcon, Title } from '@mantine/core';
+import { ActionIcon, Anchor, Badge, Box, Card, Divider, Group, Menu, NavLink, Skeleton, Stack, Tabs, Text, ThemeIcon, Title } from '@mantine/core';
 import { useMediaQuery } from '@mantine/hooks';
 import {
   IconArrowLeft,
@@ -48,7 +48,7 @@ import SeccionPermisos from './permisos/SeccionPermisos';
 import SeccionMesas from './mesas/SeccionMesas';
 import SeccionMatrices from './matrices/SeccionMatrices';
 import SeccionReuniones from './reuniones/SeccionReuniones';
-import { AgentesApilados, AvisoArriba, BadgeRol, CONSULTA_ESCRITORIO, Encabezado, EsqueletoFilas, type Aviso } from './ui';
+import { AgentesApilados, AvisoArriba, MiembrosApilados, BadgeRol, CONSULTA_ESCRITORIO, Encabezado, EsqueletoFilas, type Aviso } from './ui';
 import css from './proyectos.module.css';
 import { useEstadosAgentes } from './useEstadosAgentes';
 import { BadgeSilenciado, BotonSilenciar } from './BotonSilenciar';
@@ -77,6 +77,14 @@ import type { EstadoAgenteProyectoDto } from '../../lib/proyectos/estado-agente'
 // «Reuniones» (2026-11-24): meetings assigned to the project and the agent's analysis.
 type Seccion = 'conversaciones' | 'mesas' | 'matrices' | 'cronograma' | 'reuniones' | 'equipo' | 'vinculados' | 'archivos' | 'miembros' | 'permisos' | 'detalles';
 const SECCIONES: Seccion[] = ['conversaciones', 'mesas', 'matrices', 'cronograma', 'reuniones', 'equipo', 'vinculados', 'archivos', 'miembros', 'permisos', 'detalles'];
+
+/** «Orus, Troy, Doki · 3 miembros»: los asistentes por nombre y las personas contadas. */
+function resumenEquipo(p: { agents: { displayName: string }[]; members: unknown[] }): string {
+  const agentes = p.agents.map((a) => a.displayName).join(', ');
+  const n = p.members.length;
+  const miembros = n > 0 ? `${n} ${n === 1 ? 'miembro' : 'miembros'}` : '';
+  return [agentes, miembros].filter(Boolean).join(' · ');
+}
 
 function esSeccion(v: string | null): v is Seccion {
   return v !== null && (SECCIONES as string[]).includes(v);
@@ -665,8 +673,14 @@ export default function ProyectoPage({ idProject }: { idProject: number }) {
           </Group>
           <Group gap={8} mt={8} wrap='nowrap'>
             <AgentesApilados agentes={proyecto.agents} size={24} />
+            {proyecto.members.length > 0 && (
+              <>
+                <Divider orientation='vertical' />
+                <MiembrosApilados miembros={proyecto.members} size={24} />
+              </>
+            )}
             <Text size='xs' c='dimmed' className={css.truncar}>
-              {proyecto.agents.map((a) => a.displayName).join(', ')}
+              {resumenEquipo(proyecto)}
             </Text>
           </Group>
         </>
@@ -762,7 +776,7 @@ export default function ProyectoPage({ idProject }: { idProject: number }) {
               </Title>
               <Group gap={6} wrap='nowrap'>
                 <Text size='xs' c='dimmed' className={css.truncar}>
-                  {proyecto.company.companyName} · {proyecto.agents.map((a) => a.displayName).join(', ')}
+                  {proyecto.company.companyName} · {resumenEquipo(proyecto)}
                 </Text>
               </Group>
             </>
