@@ -6,6 +6,7 @@ import {
   EMPTY_CASE_FILTERS,
   filterCaseDetails,
   normalizeText,
+  rankCombinations,
   type CaseColumnFilters,
 } from '../caseFilters';
 
@@ -66,6 +67,34 @@ describe('case preview column filters', () => {
     expect(ids({ daysMin: '5' })).toEqual([312]);
     expect(ids({ daysMax: '2' })).toEqual([396]);
     expect(ids({ daysMin: 'abc' })).toEqual([396, 395, 364, 312]);
+  });
+
+  it('filters by subcategory and activity', () => {
+    expect(ids({ subcategory: ['Impresoras'], activity: ['Atasco'] })).toEqual([396, 395, 364, 312]);
+    expect(ids({ activity: ['Otra'] })).toEqual([]);
+  });
+
+  it('ranks category · subcategory · activity from most and least repeated', () => {
+    const data = [
+      ...cases,
+      detail({ id: 500, category: 'Hardware', subcategory: 'Portátil', activity: 'Diagnóstico' }),
+      detail({ id: 501, category: 'Hardware', subcategory: 'Portátil', activity: 'Diagnóstico' }),
+      detail({ id: 502, category: 'Hardware', subcategory: 'Monitor', activity: 'Cambio' }),
+    ];
+    const most = rankCombinations(data, 'most');
+    expect(most.map((r) => [r.category, r.subcategory, r.activity, r.total])).toEqual([
+      ['Soporte Area De Sistemas', 'Impresoras', 'Atasco', 3],
+      ['Hardware', 'Portátil', 'Diagnóstico', 2],
+      ['Hardware', 'Monitor', 'Cambio', 1],
+      ['Sin Asignar', 'Impresoras', 'Atasco', 1],
+    ]);
+    expect(most[0].percent).toBe(42.9);
+    const least = rankCombinations(data, 'least', 2);
+    expect(least.map((r) => [r.category, r.subcategory, r.total])).toEqual([
+      ['Hardware', 'Monitor', 1],
+      ['Sin Asignar', 'Impresoras', 1],
+    ]);
+    expect(rankCombinations([], 'most')).toEqual([]);
   });
 
   it('counts the active filters and lists distinct values', () => {

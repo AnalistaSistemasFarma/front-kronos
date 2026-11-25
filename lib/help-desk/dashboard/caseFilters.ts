@@ -15,6 +15,8 @@ export interface CaseColumnFilters {
   company: string[];
   technician: string[];
   category: string[];
+  subcategory: string[];
+  activity: string[];
   /** YYYY-MM-DD, inclusive. */
   createdFrom: string;
   createdTo: string;
@@ -33,6 +35,8 @@ export const EMPTY_CASE_FILTERS: CaseColumnFilters = {
   company: [],
   technician: [],
   category: [],
+  subcategory: [],
+  activity: [],
   createdFrom: '',
   createdTo: '',
   closed: 'all',
@@ -61,6 +65,8 @@ export function countActiveFilters(f: CaseColumnFilters): number {
     f.company.length > 0,
     f.technician.length > 0,
     f.category.length > 0,
+    f.subcategory.length > 0,
+    f.activity.length > 0,
     f.createdFrom !== '' || f.createdTo !== '',
     f.closed !== 'all',
     toNumber(f.daysMin) != null || toNumber(f.daysMax) != null,
@@ -86,6 +92,8 @@ export function matchesCaseFilters(c: HelpdeskCaseDetail, f: CaseColumnFilters):
   if (f.company.length > 0 && !f.company.includes(c.company)) return false;
   if (f.technician.length > 0 && !f.technician.includes(c.technician)) return false;
   if (f.category.length > 0 && !f.category.includes(c.category)) return false;
+  if (f.subcategory.length > 0 && !f.subcategory.includes(c.subcategory)) return false;
+  if (f.activity.length > 0 && !f.activity.includes(c.activity)) return false;
 
   // ISO dates (YYYY-MM-DD) compare correctly as strings.
   if (f.createdFrom && (!c.createdAt || c.createdAt < f.createdFrom)) return false;
@@ -107,6 +115,43 @@ export function matchesCaseFilters(c: HelpdeskCaseDetail, f: CaseColumnFilters):
 
 export function filterCaseDetails(cases: HelpdeskCaseDetail[], f: CaseColumnFilters): HelpdeskCaseDetail[] {
   return cases.filter((c) => matchesCaseFilters(c, f));
+}
+
+/** One category · subcategory · activity combination and how many cases have it. */
+export interface CaseCombination {
+  category: string;
+  subcategory: string;
+  activity: string;
+  total: number;
+  /** Share of the cases given, 0-100. */
+  percent: number;
+}
+
+export type CombinationOrder = 'most' | 'least';
+
+/**
+ * Ranks the category · subcategory · activity combinations of the given cases.
+ * 'most' = most repeated first; 'least' = least repeated first. Ties keep a stable
+ * alphabetical order so the list does not jump around.
+ */
+export function rankCombinations(
+  cases: HelpdeskCaseDetail[],
+  order: CombinationOrder = 'most',
+  limit = 10
+): CaseCombination[] {
+  const map = new Map<string, CaseCombination>();
+  for (const c of cases) {
+    const key = `${c.category}\u0000${c.subcategory}\u0000${c.activity}`;
+    const entry = map.get(key) ?? { category: c.category, subcategory: c.subcategory, activity: c.activity, total: 0, percent: 0 };
+    entry.total += 1;
+    map.set(key, entry);
+  }
+  const total = cases.length || 1;
+  const label = (x: CaseCombination) => `${x.category} ${x.subcategory} ${x.activity}`;
+  return [...map.values()]
+    .map((x) => ({ ...x, percent: Math.round((x.total / total) * 1000) / 10 }))
+    .sort((a, b) => (order === 'most' ? b.total - a.total : a.total - b.total) || label(a).localeCompare(label(b), 'es'))
+    .slice(0, limit);
 }
 
 /** Distinct values of a column, sorted, for the select filters. */
