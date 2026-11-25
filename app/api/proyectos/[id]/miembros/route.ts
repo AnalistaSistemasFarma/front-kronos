@@ -34,7 +34,7 @@ export async function GET(_request: NextRequest, { params }: Ctx) {
     if (!capabilitiesFor(guard.project.role).manageMembers) return forbidden('Solo el dueño del proyecto puede invitar.');
 
     const [elegibles, actuales] = await Promise.all([
-      eligibleProjectUsers(guard.project.idCompany),
+      eligibleProjectUsers(guard.project.idCompany, undefined, guard.project.idProject),
       prisma.chatProjectMember.findMany({ where: { id_project: guard.project.idProject }, select: { id_user: true } }),
     ]);
     const yaEstan = new Set(actuales.map((m) => m.id_user));

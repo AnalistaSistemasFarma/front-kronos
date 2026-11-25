@@ -48,6 +48,9 @@ vi.mock('../../chat/projects', () => ({
   whereProyectoDelAgente: (id: number) => ({ archived: false, agents: { some: { id_agent: id } } }),
   projectModuleCompanies: h.moduleCompanies,
   designableAgents: h.designables,
+  // Agentes de otra empresa (2026-11-25): la ruta pide la lista del proyecto; aquí, la de su empresa.
+  designableAgentsForProject: async (email: string, idCompany: number, profile?: string) =>
+    ((await h.designables(email, profile)) as Map<number, unknown[]>).get(idCompany) ?? [],
   listProjectsForUser: vi.fn(),
 }));
 vi.mock('../../chat/agent-auth', () => ({ authenticateAgent: h.agent }));

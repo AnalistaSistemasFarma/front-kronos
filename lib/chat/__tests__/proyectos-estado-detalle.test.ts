@@ -28,7 +28,7 @@ describe('getProjectDetail · estado del agente por conversación', () => {
       created_at: new Date('2026-10-18T10:00:00Z'),
       updated_at: new Date('2026-10-20T16:00:00Z'),
       company: { id_company: 3, company: 'FARMALOGICA ' },
-      agents: [{ agent: { ...agente, is_active: true } }],
+      agents: [{ added_by: 'u-nr', agent: { ...agente, is_active: true, companies: [{ id_company: 3 }] } }],
       members: [{ id_user: 'u-nr', role: 'owner', added_at: new Date(), user: { name: 'Nicolás Rivera', email: 'n@x', image: null } }],
       files: [],
       folders: [],
