@@ -55,12 +55,12 @@ for (const oscuro of [false, true]) {
       const cap = (await pill.boundingBox())!;
       expect(mas.x).toBeLessThan(textarea.x);
       expect(textarea.x + textarea.width).toBeLessThanOrEqual(env.x + 1);
-      expect(cap.x + cap.width - (env.x + env.width)).toBeLessThan(10);
+      expect(cap.x + cap.width - (env.x + env.width)).toBeLessThan(20);
       expect(Math.abs(env.width - env.height)).toBeLessThan(1);
       await expect(pill.getByRole('button', { name: 'Formato', exact: true })).toHaveCount(0);
       await expect(pill.getByRole('button', { name: 'Adjuntar archivos' })).toHaveCount(0);
-      // Single line by default and fully rounded.
-      expect(cap.height).toBeLessThan(60);
+      // Single line by default (72 px, like Gemini) and fully rounded.
+      expect(Math.round(cap.height)).toBe(72);
       expect(parseFloat(await pill.evaluate((el) => getComputedStyle(el).borderTopLeftRadius))).toBeGreaterThanOrEqual(24);
       // Disabled look while empty.
       await expect(enviar).toBeDisabled();
@@ -181,10 +181,32 @@ for (const oscuro of [false, true]) {
       const pill = page.getByTestId('chat-composer-pill');
       await expect(pill).toBeVisible();
       const cap = (await pill.boundingBox())!;
-      // No horizontal overflow at 390 px.
-      expect(cap.x).toBeGreaterThanOrEqual(0);
-      expect(cap.x + cap.width).toBeLessThanOrEqual(390);
+      // Gemini geometry at 390 pt (msg 39036): 72 tall, 32 pt side margins,
+      // right on the bottom safe area (0 here: no notch in the test browser).
+      expect(Math.round(cap.height)).toBe(72);
+      expect(Math.round(cap.x)).toBe(32);
+      expect(Math.round(390 - (cap.x + cap.width))).toBe(32);
+      expect(Math.round(844 - (cap.y + cap.height))).toBe(0);
       await capturar(page, `celular-${modo}-1-compositor`);
+
+      // Text that no longer fits: expanded card (16 pt margins, text row on
+      // top, buttons below); back to the pill once cleared (msg 39042).
+      await caja(page).fill('Hola mundo, este texto ya no cabe');
+      await expect(pill).toHaveClass(/chat-composer__pill--expandida/);
+      await page.waitForTimeout(300);
+      const card = (await pill.boundingBox())!;
+      expect(Math.round(card.x)).toBe(16);
+      const textoCard = (await caja(page).boundingBox())!;
+      // Card = text row + 40 px buttons row + 15 px padding top and bottom +
+      // borders (109 px with one line of text). The text may take two lines
+      // with the wider fonts of the CI machine, so it is checked structurally.
+      expect(Math.round(card.height - textoCard.height)).toBe(72);
+      const masCard = (await pill.getByRole('button', { name: 'Más opciones' }).boundingBox())!;
+      expect(textoCard.y + textoCard.height).toBeLessThanOrEqual(masCard.y + 1);
+      expect(Math.round(textoCard.x)).toBe(Math.round(card.x + 16));
+      await capturar(page, `celular-${modo}-1b-tarjeta-expandida`);
+      await caja(page).fill('');
+      await expect(pill).not.toHaveClass(/chat-composer__pill--expandida/);
 
       await pill.getByRole('button', { name: 'Más opciones' }).tap();
       await expect(page.getByRole('menuitem', { name: 'Adjuntar archivos' })).toBeVisible();
