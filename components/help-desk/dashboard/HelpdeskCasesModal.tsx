@@ -2,12 +2,16 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import {
+  ActionIcon,
   Alert,
   Anchor,
   Badge,
+  Button,
   Group,
   Modal,
+  MultiSelect,
   ScrollArea,
+  Select,
   Skeleton,
   Stack,
   Table,
@@ -15,13 +19,23 @@ import {
   TextInput,
   Tooltip,
 } from '@mantine/core';
-import { IconAlertCircle, IconExternalLink, IconSearch } from '@tabler/icons-react';
+import { IconAlertCircle, IconExternalLink, IconFilterOff, IconSearch, IconX } from '@tabler/icons-react';
 import type {
   CaseBucket,
   CaseDimensionFilter,
-  HelpdeskCaseDetail,
   HelpdeskCaseDetailResult,
 } from '../../../lib/help-desk/dashboard/aggregate';
+import {
+  countActiveFilters,
+  distinctValues,
+  EMPTY_CASE_FILTERS,
+  filterCaseDetails,
+  type CaseColumnFilters,
+} from '../../../lib/help-desk/dashboard/caseFilters';
+import { companyRowStyle } from '../../../lib/ui/companyColors';
+import { PREF_COMPANY_COLORS } from '../../../lib/ui/preferences';
+import CompanyLogo from '../../ui/CompanyLogo';
+import { useUiPreference } from '../../ui/useUiPreference';
 
 export const BUCKET_TITLES: Record<CaseBucket, string> = {
   all: 'Casos en el periodo',
@@ -36,6 +50,16 @@ const BUCKET_DESCRIPTIONS: Record<CaseBucket, string> = {
   pending: 'Casos abiertos y demás estados sin cerrar (ni Resuelto ni Cancelado).',
   measured: 'Casos resueltos con fecha de cierre: son los que entran en el tiempo medio de resolución.',
 };
+
+const DIMENSION_LABELS: Record<CaseDimensionFilter['dimension'], string> = {
+  department: 'Departamento',
+};
+
+const CLOSED_OPTIONS = [
+  { value: 'all', label: 'Todos' },
+  { value: 'with', label: 'Con fecha' },
+  { value: 'without', label: 'Sin fecha' },
+];
 
 const formatNumber = (n: number) => new Intl.NumberFormat('es-CO').format(n);
 
@@ -57,29 +81,69 @@ function statusColor(status: string): string {
   return 'orange';
 }
 
-function matchesSearch(c: HelpdeskCaseDetail, term: string): boolean {
-  if (!term) return true;
-  const haystack = [
-    String(c.id),
-    c.subject,
-    c.status,
-    c.company,
-    c.department,
-    c.technician,
-    c.category,
-    c.subcategory,
-    c.activity,
-  ]
-    .join(' ')
-    .toLowerCase()
-    .normalize('NFD')
-    .replace(/\p{M}/gu, '');
-  return haystack.includes(term);
+/** Small text filter with a clear button, for the filter row under the headers. */
+function TextFilter({
+  value,
+  onChange,
+  placeholder,
+  label,
+  width,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  placeholder: string;
+  label: string;
+  width?: number;
+}) {
+  return (
+    <TextInput
+      size='xs'
+      value={value}
+      placeholder={placeholder}
+      aria-label={label}
+      onChange={(e) => onChange(e.currentTarget.value)}
+      miw={width}
+      rightSection={
+        value ? (
+          <ActionIcon size='xs' variant='subtle' color='gray' onClick={() => onChange('')} aria-label={`Quitar filtro de ${label}`}>
+            <IconX size={12} />
+          </ActionIcon>
+        ) : null
+      }
+    />
+  );
 }
 
-const DIMENSION_LABELS: Record<CaseDimensionFilter['dimension'], string> = {
-  department: 'Departamento',
-};
+function ListFilter({
+  value,
+  onChange,
+  options,
+  label,
+  width,
+}: {
+  value: string[];
+  onChange: (value: string[]) => void;
+  options: string[];
+  label: string;
+  width: number;
+}) {
+  return (
+    <MultiSelect
+      size='xs'
+      data={options}
+      value={value}
+      onChange={onChange}
+      placeholder={value.length ? undefined : 'Todos'}
+      aria-label={`Filtrar por ${label}`}
+      searchable
+      clearable
+      maxDropdownHeight={260}
+      nothingFoundMessage='Sin coincidencias'
+      miw={width}
+      comboboxProps={{ withinPortal: true }}
+    />
+  );
+}
 
 export default function HelpdeskCasesModal({
   bucket,
@@ -100,14 +164,19 @@ export default function HelpdeskCasesModal({
   const [data, setData] = useState<HelpdeskCaseDetailResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [search, setSearch] = useState('');
+  const [filters, setFilters] = useState<CaseColumnFilters>(EMPTY_CASE_FILTERS);
+  // Same per-user preference as the request lists (Perfil → «Distinguir compañías por color en las tablas»).
+  const [companyColors] = useUiPreference<boolean>(PREF_COMPANY_COLORS, false);
+
+  const setFilter = <K extends keyof CaseColumnFilters>(key: K, value: CaseColumnFilters[K]) =>
+    setFilters((prev) => ({ ...prev, [key]: value }));
 
   useEffect(() => {
     if (!bucket) return;
     let cancelled = false;
     setData(null);
     setError(null);
-    setSearch('');
+    setFilters(EMPTY_CASE_FILTERS);
     setLoading(true);
     (async () => {
       try {
@@ -132,8 +201,20 @@ export default function HelpdeskCasesModal({
     };
   }, [bucket, query, dimension]);
 
-  const term = search.trim().toLowerCase().normalize('NFD').replace(/\p{M}/gu, '');
-  const visible = useMemo(() => (data?.cases ?? []).filter((c) => matchesSearch(c, term)), [data, term]);
+  const cases = useMemo(() => data?.cases ?? [], [data]);
+  const visible = useMemo(() => filterCaseDetails(cases, filters), [cases, filters]);
+  const activeFilters = countActiveFilters(filters);
+
+  const options = useMemo(
+    () => ({
+      status: distinctValues(cases, (c) => c.status),
+      company: distinctValues(cases, (c) => c.company),
+      technician: distinctValues(cases, (c) => c.technician),
+      category: distinctValues(cases, (c) => c.category),
+    }),
+    [cases]
+  );
+
   const showDays = bucket === 'resolved' || bucket === 'measured';
 
   return (
@@ -177,29 +258,41 @@ export default function HelpdeskCasesModal({
           </Alert>
         ) : null}
 
-        <TextInput
-          placeholder='Buscar por número, asunto, empresa, técnico o categoría'
-          leftSection={<IconSearch size={16} />}
-          value={search}
-          onChange={(e) => setSearch(e.currentTarget.value)}
-          disabled={loading || !data}
-        />
+        <Group gap='sm' wrap='nowrap' align='center'>
+          <TextInput
+            style={{ flex: 1 }}
+            placeholder='Buscar en todas las columnas'
+            leftSection={<IconSearch size={16} />}
+            value={filters.search}
+            onChange={(e) => setFilter('search', e.currentTarget.value)}
+            disabled={loading || !data}
+          />
+          <Button
+            variant='light'
+            color='gray'
+            leftSection={<IconFilterOff size={16} />}
+            onClick={() => setFilters(EMPTY_CASE_FILTERS)}
+            disabled={activeFilters === 0}
+          >
+            Limpiar filtros{activeFilters > 0 ? ` (${activeFilters})` : ''}
+          </Button>
+        </Group>
 
         {loading ? (
           <Skeleton height={320} />
-        ) : data && visible.length === 0 ? (
+        ) : data && data.total === 0 ? (
           <Text c='dimmed' ta='center' py='lg' size='sm'>
-            {data.total === 0 ? 'No hay casos en este indicador para los filtros seleccionados.' : 'Ningún caso coincide con la búsqueda.'}
+            No hay casos en este indicador para los filtros seleccionados.
           </Text>
         ) : data ? (
           <>
-            {term ? (
-              <Text size='xs' c='dimmed'>
-                {formatNumber(visible.length)} de {formatNumber(data.cases.length)} casos coinciden con la búsqueda
-              </Text>
-            ) : null}
+            <Text size='xs' c='dimmed'>
+              {activeFilters > 0
+                ? `${formatNumber(visible.length)} de ${formatNumber(cases.length)} casos cumplen los filtros`
+                : `${formatNumber(cases.length)} casos · use la fila de filtros bajo cada encabezado para acotar`}
+            </Text>
             <ScrollArea.Autosize mah='60vh' type='auto'>
-              <Table striped highlightOnHover withTableBorder stickyHeader miw={1000}>
+              <Table striped={!companyColors} highlightOnHover withTableBorder stickyHeader miw={1250}>
                 <Table.Thead>
                   <Table.Tr>
                     <Table.Th>N.º</Table.Th>
@@ -212,61 +305,147 @@ export default function HelpdeskCasesModal({
                     <Table.Th>Cierre</Table.Th>
                     {showDays ? <Table.Th ta='right'>Días</Table.Th> : null}
                   </Table.Tr>
+                  <Table.Tr>
+                    <Table.Th>
+                      <TextFilter value={filters.id} onChange={(v) => setFilter('id', v)} placeholder='N.º' label='número' width={70} />
+                    </Table.Th>
+                    <Table.Th>
+                      <TextFilter value={filters.subject} onChange={(v) => setFilter('subject', v)} placeholder='Contiene…' label='asunto' width={180} />
+                    </Table.Th>
+                    <Table.Th>
+                      <ListFilter value={filters.status} onChange={(v) => setFilter('status', v)} options={options.status} label='estado' width={120} />
+                    </Table.Th>
+                    <Table.Th>
+                      <ListFilter value={filters.company} onChange={(v) => setFilter('company', v)} options={options.company} label='empresa' width={150} />
+                    </Table.Th>
+                    <Table.Th>
+                      <ListFilter value={filters.technician} onChange={(v) => setFilter('technician', v)} options={options.technician} label='técnico' width={150} />
+                    </Table.Th>
+                    <Table.Th>
+                      <ListFilter value={filters.category} onChange={(v) => setFilter('category', v)} options={options.category} label='categoría' width={170} />
+                    </Table.Th>
+                    <Table.Th>
+                      <Stack gap={4}>
+                        <TextInput
+                          size='xs'
+                          type='date'
+                          aria-label='Creado desde'
+                          title='Desde'
+                          value={filters.createdFrom}
+                          onChange={(e) => setFilter('createdFrom', e.currentTarget.value)}
+                        />
+                        <TextInput
+                          size='xs'
+                          type='date'
+                          aria-label='Creado hasta'
+                          title='Hasta'
+                          value={filters.createdTo}
+                          onChange={(e) => setFilter('createdTo', e.currentTarget.value)}
+                        />
+                      </Stack>
+                    </Table.Th>
+                    <Table.Th>
+                      <Select
+                        size='xs'
+                        data={CLOSED_OPTIONS}
+                        value={filters.closed}
+                        onChange={(v) => setFilter('closed', (v as CaseColumnFilters['closed']) ?? 'all')}
+                        allowDeselect={false}
+                        aria-label='Filtrar por fecha de cierre'
+                        miw={100}
+                        comboboxProps={{ withinPortal: true }}
+                      />
+                    </Table.Th>
+                    {showDays ? (
+                      <Table.Th>
+                        <Group gap={4} wrap='nowrap'>
+                          <TextInput
+                            size='xs'
+                            w={56}
+                            inputMode='decimal'
+                            placeholder='Mín'
+                            aria-label='Días mínimo'
+                            value={filters.daysMin}
+                            onChange={(e) => setFilter('daysMin', e.currentTarget.value)}
+                          />
+                          <TextInput
+                            size='xs'
+                            w={56}
+                            inputMode='decimal'
+                            placeholder='Máx'
+                            aria-label='Días máximo'
+                            value={filters.daysMax}
+                            onChange={(e) => setFilter('daysMax', e.currentTarget.value)}
+                          />
+                        </Group>
+                      </Table.Th>
+                    ) : null}
+                  </Table.Tr>
                 </Table.Thead>
                 <Table.Tbody>
-                  {visible.map((c) => (
-                    <Table.Tr key={c.id}>
-                      <Table.Td>
-                        <Tooltip label='Abrir el ticket en otra pestaña'>
-                          <Anchor
-                            href={`/process/help-desk/view-ticket?id=${c.id}`}
-                            target='_blank'
-                            rel='noopener noreferrer'
-                            size='sm'
-                          >
-                            <Group gap={4} wrap='nowrap'>
-                              {c.id}
-                              <IconExternalLink size={12} />
-                            </Group>
-                          </Anchor>
-                        </Tooltip>
-                      </Table.Td>
-                      <Table.Td>
-                        <Text size='sm' lineClamp={2}>
-                          {c.subject}
-                        </Text>
-                        <Text size='xs' c='dimmed' lineClamp={1}>
-                          {c.department} · {c.caseType}
+                  {visible.length === 0 ? (
+                    <Table.Tr>
+                      <Table.Td colSpan={showDays ? 9 : 8}>
+                        <Text c='dimmed' ta='center' py='lg' size='sm'>
+                          Ningún caso cumple los filtros.
                         </Text>
                       </Table.Td>
-                      <Table.Td>
-                        <Badge size='sm' variant='light' color={statusColor(c.status)}>
-                          {c.status}
-                        </Badge>
-                      </Table.Td>
-                      <Table.Td>
-                        <Text size='sm'>{c.company}</Text>
-                      </Table.Td>
-                      <Table.Td>
-                        <Text size='sm'>{c.technician}</Text>
-                      </Table.Td>
-                      <Table.Td>
-                        <Text size='sm'>{c.category}</Text>
-                        <Text size='xs' c='dimmed' lineClamp={1}>
-                          {c.subcategory} · {c.activity}
-                        </Text>
-                      </Table.Td>
-                      <Table.Td style={{ whiteSpace: 'nowrap' }}>{formatDate(c.createdAt)}</Table.Td>
-                      <Table.Td style={{ whiteSpace: 'nowrap' }}>{formatDate(c.endDate)}</Table.Td>
-                      {showDays ? (
-                        <Table.Td ta='right'>
-                          {c.resolutionDays == null
-                            ? '—'
-                            : new Intl.NumberFormat('es-CO', { maximumFractionDigits: 1 }).format(c.resolutionDays)}
-                        </Table.Td>
-                      ) : null}
                     </Table.Tr>
-                  ))}
+                  ) : (
+                    visible.map((c) => (
+                      <Table.Tr key={c.id} style={companyRowStyle(c.company, companyColors)}>
+                        <Table.Td>
+                          <Tooltip label='Abrir el ticket en otra pestaña'>
+                            <Anchor
+                              href={`/process/help-desk/view-ticket?id=${c.id}`}
+                              target='_blank'
+                              rel='noopener noreferrer'
+                              size='sm'
+                            >
+                              <Group gap={4} wrap='nowrap'>
+                                {c.id}
+                                <IconExternalLink size={12} />
+                              </Group>
+                            </Anchor>
+                          </Tooltip>
+                        </Table.Td>
+                        <Table.Td>
+                          <Text size='sm' lineClamp={2}>
+                            {c.subject}
+                          </Text>
+                          <Text size='xs' c='dimmed' lineClamp={1}>
+                            {c.department} · {c.caseType}
+                          </Text>
+                        </Table.Td>
+                        <Table.Td>
+                          <Badge size='sm' variant='light' color={statusColor(c.status)}>
+                            {c.status}
+                          </Badge>
+                        </Table.Td>
+                        <Table.Td>
+                          <CompanyLogo name={c.company} />
+                        </Table.Td>
+                        <Table.Td>
+                          <Text size='sm'>{c.technician}</Text>
+                        </Table.Td>
+                        <Table.Td>
+                          <Text size='sm'>{c.category}</Text>
+                          <Text size='xs' c='dimmed' lineClamp={1}>
+                            {c.subcategory} · {c.activity}
+                          </Text>
+                        </Table.Td>
+                        <Table.Td style={{ whiteSpace: 'nowrap' }}>{formatDate(c.createdAt)}</Table.Td>
+                        <Table.Td style={{ whiteSpace: 'nowrap' }}>{formatDate(c.endDate)}</Table.Td>
+                        {showDays ? (
+                          <Table.Td ta='right'>
+                            {c.resolutionDays == null
+                              ? '—'
+                              : new Intl.NumberFormat('es-CO', { maximumFractionDigits: 1 }).format(c.resolutionDays)}
+                          </Table.Td>
+                        ) : null}
+                      </Table.Tr>
+                    ))
+                  )}
                 </Table.Tbody>
               </Table>
             </ScrollArea.Autosize>
