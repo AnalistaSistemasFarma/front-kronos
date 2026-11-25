@@ -40,6 +40,7 @@
  * sondea ids que el proyecto existe.
  */
 import { prisma } from '../prisma';
+import type { Prisma } from '../../app/generated/prisma';
 import { isProjectMuted, mutedProjectIds } from '../proyectos/mute';
 import { getChatAccess } from './access';
 import { parseAgentTasks } from './status-tasks';
@@ -478,12 +479,13 @@ export function whereProyectoDelAgente(idAgent: number) {
  * assertAgentProjectConversation: trabaja con los conectores de SU empresa, o
  * no trabaja.
  */
-export async function filtroProyectosDelPuente(idAgent: number, code: string, config: ConfigProyectos) {
+export async function filtroProyectosDelPuente(idAgent: number, code: string, config: ConfigProyectos): Promise<Prisma.ChatProjectWhereInput> {
   const propias = await prisma.agentCompany.findMany({ where: { id_agent: idAgent }, select: { id_company: true } });
-  return {
-    ...whereProyectoDelAgente(idAgent),
-    OR: [config.filtroEmpresas(code), { id_company: { notIn: propias.map((c) => c.id_company) } }],
-  };
+  const ramas: Prisma.ChatProjectWhereInput[] = [
+    config.filtroEmpresas(code) as Prisma.ChatProjectWhereInput,
+    { id_company: { notIn: propias.map((c) => c.id_company) } },
+  ];
+  return { archived: false, agents: { some: { id_agent: idAgent } }, OR: ramas };
 }
 
 /* ─────────────────────────── Personas elegibles ───────────────────────── */
@@ -513,7 +515,7 @@ export async function eligibleProjectUsers(
           .map((f) => f.agent.id_subprocess)
           .filter((x): x is number => typeof x === 'number')
       : [];
-  const ramas: Record<string, unknown>[] = [{ companyUsers: { some: { id_company: idCompany, ...conModulo } } }];
+  const ramas: Prisma.UserWhereInput[] = [{ companyUsers: { some: { id_company: idCompany, ...conModulo } } }];
   if (subprocesosAgentes.length > 0) {
     ramas.push({
       AND: [
