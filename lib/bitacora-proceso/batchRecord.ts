@@ -255,6 +255,27 @@ interface FilaNueva {
   celdas: Array<{ desde: number; hasta: number; texto: string; estilo: number }>;
 }
 
+/**
+ * FIRMA DEL JEFE DE PRODUCCIÓN al final del Excel (Farmalógica, 2026-11-25): espacio en blanco
+ * para firmar a mano el batch record impreso. Nombre (precargado si todas las bitácoras tienen el
+ * mismo jefe), firma y fecha; la fila es alta para que quepa la firma.
+ */
+export function filasFirmaJefe(ordenes: OrdenDetalle[], e: EstilosBitacora): FilaNueva[] {
+  const jefes = [...new Set(ordenes.map((o) => o.jefe?.name?.trim()).filter((x): x is string => Boolean(x)))];
+  const nombre = jefes.length === 1 ? jefes[0] : '';
+  return [
+    { alto: 20, celdas: [{ desde: 1, hasta: 10, texto: 'Revisión del jefe de producción', estilo: e.seccion }] },
+    {
+      alto: 54,
+      celdas: [
+        { desde: 1, hasta: 4, texto: `Nombre: ${nombre}`, estilo: e.celda },
+        { desde: 5, hasta: 6, texto: 'Firma:', estilo: e.celda },
+        { desde: 7, hasta: 10, texto: 'Fecha:', estilo: e.celda },
+      ],
+    },
+  ];
+}
+
 /** XML de una fila: cada celda del rango combinado lleva el estilo (para que el borde salga completo). */
 function filaXml(n: number, f: FilaNueva): { xml: string; merges: string[] } {
   const celdas: string[] = [];
@@ -313,6 +334,7 @@ export function filasBitacora(ordenes: OrdenDetalle[], e: EstilosBitacora, gener
     ancho(`Vistos buenos — ${o.vistos.map((v) => textoVisto(o, v)).join(' · ')}`, e.linea);
     filas.push({ alto: 9, celdas: [] }); // separación entre bitácoras
   }
+  filas.push(...filasFirmaJefe(ordenes, e));
   ancho(`Generado por SynerLink (Bitácora de Proceso) el ${fmtFechaHora(generado.toISOString())}. Fechas y horas del servidor, hora de Colombia. Los registros no se editan ni se borran.`, e.pie, 150);
   return filas;
 }
