@@ -69,6 +69,12 @@ const BUCKET_DESCRIPTIONS: Record<CaseBucket, string> = {
 
 const DIMENSION_LABELS: Record<CaseDimensionFilter['dimension'], string> = {
   department: 'Departamento',
+  technician: 'Técnico',
+};
+
+const DIMENSION_DESCRIPTIONS: Record<CaseDimensionFilter['dimension'], string> = {
+  department: 'Casos reportados por este departamento.',
+  technician: 'Casos asignados a este técnico.',
 };
 
 const CLOSED_OPTIONS = [
@@ -272,7 +278,7 @@ export default function HelpdeskCasesModal({
           </Text>
           <Text size='xs' c='dimmed'>
             {dimension
-              ? `Casos reportados por este ${DIMENSION_LABELS[dimension.dimension].toLowerCase()}.`
+              ? DIMENSION_DESCRIPTIONS[dimension.dimension]
               : bucket
                 ? BUCKET_DESCRIPTIONS[bucket]
                 : ''}{' '}
