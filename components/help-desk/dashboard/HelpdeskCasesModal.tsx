@@ -32,6 +32,10 @@ import {
   filterCaseDetails,
   type CaseColumnFilters,
 } from '../../../lib/help-desk/dashboard/caseFilters';
+import { companyRowStyle } from '../../../lib/ui/companyColors';
+import { PREF_COMPANY_COLORS } from '../../../lib/ui/preferences';
+import CompanyLogo from '../../ui/CompanyLogo';
+import { useUiPreference } from '../../ui/useUiPreference';
 
 export const BUCKET_TITLES: Record<CaseBucket, string> = {
   all: 'Casos en el periodo',
@@ -161,6 +165,8 @@ export default function HelpdeskCasesModal({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [filters, setFilters] = useState<CaseColumnFilters>(EMPTY_CASE_FILTERS);
+  // Same per-user preference as the request lists (Perfil → «Distinguir compañías por color en las tablas»).
+  const [companyColors] = useUiPreference<boolean>(PREF_COMPANY_COLORS, false);
 
   const setFilter = <K extends keyof CaseColumnFilters>(key: K, value: CaseColumnFilters[K]) =>
     setFilters((prev) => ({ ...prev, [key]: value }));
@@ -286,7 +292,7 @@ export default function HelpdeskCasesModal({
                 : `${formatNumber(cases.length)} casos · use la fila de filtros bajo cada encabezado para acotar`}
             </Text>
             <ScrollArea.Autosize mah='60vh' type='auto'>
-              <Table striped highlightOnHover withTableBorder stickyHeader miw={1250}>
+              <Table striped={!companyColors} highlightOnHover withTableBorder stickyHeader miw={1250}>
                 <Table.Thead>
                   <Table.Tr>
                     <Table.Th>N.º</Table.Th>
@@ -387,7 +393,7 @@ export default function HelpdeskCasesModal({
                     </Table.Tr>
                   ) : (
                     visible.map((c) => (
-                      <Table.Tr key={c.id}>
+                      <Table.Tr key={c.id} style={companyRowStyle(c.company, companyColors)}>
                         <Table.Td>
                           <Tooltip label='Abrir el ticket en otra pestaña'>
                             <Anchor
@@ -417,7 +423,7 @@ export default function HelpdeskCasesModal({
                           </Badge>
                         </Table.Td>
                         <Table.Td>
-                          <Text size='sm'>{c.company}</Text>
+                          <CompanyLogo name={c.company} />
                         </Table.Td>
                         <Table.Td>
                           <Text size='sm'>{c.technician}</Text>
