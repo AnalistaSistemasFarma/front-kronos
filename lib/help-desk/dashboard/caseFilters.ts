@@ -154,6 +154,35 @@ export function rankCombinations(
     .slice(0, limit);
 }
 
+/** The same filters without category / subcategory / activity (the base of the ranking). */
+export function withoutCombination(f: CaseColumnFilters): CaseColumnFilters {
+  return { ...f, category: [], subcategory: [], activity: [] };
+}
+
+/** True when the filters select exactly this combination (one value in each of the three columns). */
+export function isSelectedCombination(f: CaseColumnFilters, r: Pick<CaseCombination, 'category' | 'subcategory' | 'activity'>): boolean {
+  return (
+    f.category.length === 1 &&
+    f.subcategory.length === 1 &&
+    f.activity.length === 1 &&
+    f.category[0] === r.category &&
+    f.subcategory[0] === r.subcategory &&
+    f.activity[0] === r.activity
+  );
+}
+
+/**
+ * Click on a ranking row: selects that combination, or removes it when it was
+ * already selected (back to the full list). Other filters are kept.
+ */
+export function toggleCombination(
+  f: CaseColumnFilters,
+  r: Pick<CaseCombination, 'category' | 'subcategory' | 'activity'>
+): CaseColumnFilters {
+  if (isSelectedCombination(f, r)) return withoutCombination(f);
+  return { ...f, category: [r.category], subcategory: [r.subcategory], activity: [r.activity] };
+}
+
 /** Distinct values of a column, sorted, for the select filters. */
 export function distinctValues(
   cases: HelpdeskCaseDetail[],
