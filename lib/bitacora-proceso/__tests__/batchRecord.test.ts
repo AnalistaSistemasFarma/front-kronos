@@ -3,6 +3,7 @@ import ExcelJS from 'exceljs';
 import {
   ajustarPaginaUnaDeAncho,
   assertMismoLote,
+  elegirOpBatchRecord,
   buildBatchRecordXlsx,
   nombreArchivoBatchRecord,
   parseBatchRecordInput,
@@ -64,12 +65,28 @@ describe('Bitácora de Proceso · Excel del batch record (2026-11-24)', () => {
     const ok = parseBatchRecordInput({ ids: [3, 2, 2], producto: ' MEROPENEM ', concentracion: '500 mg', lote: '2421626', op: '14118', loteMp: '8MT2606117' }, 2);
     expect(ok.ids).toEqual([2, 3]);
     expect(ok.producto).toBe('MEROPENEM');
-    expect(parseBatchRecordInput({ producto: 'X', lote: 'L' }, 5).ids).toEqual([5]);
-    expect(errorOf(() => parseBatchRecordInput({ producto: '', lote: 'L' }, 1)).status).toBe(400);
-    expect(errorOf(() => parseBatchRecordInput({ producto: 'X', lote: '' }, 1)).status).toBe(400);
-    expect(errorOf(() => parseBatchRecordInput({ producto: 'X', lote: 'L', loteMp: 'x'.repeat(121) }, 1)).status).toBe(400);
-    expect(errorOf(() => parseBatchRecordInput({ producto: 'X', lote: 'L', ids: ['a'] }, 1)).status).toBe(400);
+    expect(parseBatchRecordInput({ producto: 'X', lote: 'L', op: '1' }, 5).ids).toEqual([5]);
+    expect(errorOf(() => parseBatchRecordInput({ producto: 'X', lote: 'L' }, 1)).message).toMatch(/O\.P\./);
+    expect(errorOf(() => parseBatchRecordInput({ producto: '', lote: 'L', op: '1' }, 1)).status).toBe(400);
+    expect(errorOf(() => parseBatchRecordInput({ producto: 'X', lote: '', op: '1' }, 1)).status).toBe(400);
+    expect(errorOf(() => parseBatchRecordInput({ producto: 'X', lote: 'L', op: '1', loteMp: 'x'.repeat(121) }, 1)).status).toBe(400);
+    expect(errorOf(() => parseBatchRecordInput({ producto: 'X', lote: 'L', op: '1', ids: ['a'] }, 1)).status).toBe(400);
     expect(errorOf(() => parseBatchRecordInput(null, 1)).status).toBe(400);
+  });
+
+  it('OP del encabezado (2026-11-25): la de la bitácora, la de otra del lote o la de SAP por el lote; nunca adivina', () => {
+    const sin = { sapOpDocNum: null, sapOpAbsEntry: null };
+    const base = { ...sin, itemCode: 'PPSB0103' };
+    expect(elegirOpBatchRecord({ sapOpDocNum: 14212, sapOpAbsEntry: 14426, itemCode: null }, [], null)).toEqual({ op: '14212', absEntry: 14426, origen: 'bitacora' });
+    // BP-0094 (sin OP) junto a BP-0096 (con OP 14212), mismo lote.
+    expect(elegirOpBatchRecord(base, [sin, { sapOpDocNum: 14212, sapOpAbsEntry: 14426 }], null)).toEqual({ op: '14212', absEntry: 14426, origen: 'lote' });
+    const sap = [{ AbsoluteEntry: 14426, DocumentNumber: 14212, ItemNo: 'PPSB0103' }];
+    expect(elegirOpBatchRecord(base, [sin], sap)).toEqual({ op: '14212', absEntry: 14426, origen: 'sap' });
+    // Varias OP con el lote: la del mismo artículo; si no se puede decidir, vacía.
+    const dos = [...sap, { AbsoluteEntry: 1, DocumentNumber: 99, ItemNo: 'PTSB0103' }];
+    expect(elegirOpBatchRecord(base, [], dos).op).toBe('14212');
+    expect(elegirOpBatchRecord({ ...base, itemCode: null }, [], dos)).toEqual({ op: '', absEntry: null, origen: null });
+    expect(elegirOpBatchRecord(base, [], null)).toEqual({ op: '', absEntry: null, origen: null });
   });
 
   it('todas las bitácoras del archivo son del mismo lote', () => {
@@ -97,7 +114,7 @@ describe('Bitácora de Proceso · Excel del batch record (2026-11-24)', () => {
     expect(ws.getCell('C1').value).toBe('BATCH RECORD');
     expect(ws.pageSetup.printTitlesRow).toBe('1:8');
     expect(ws.getImages()).toHaveLength(1); // logo de la plantilla
-    expect(String(ws.getCell('A10').value)).toMatch(/^Bitácora BP-0001 · Turno Mañana/);
+    expect(String(ws.getCell('A10').value)).toMatch(/^Bitácora BP-0001 · OP 14118 · Turno Mañana/);
     const textos: string[] = [];
     ws.eachRow((row) => row.eachCell((c) => textos.push(String(c.value ?? ''))));
     const todo = textos.join('\n');
