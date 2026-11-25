@@ -78,14 +78,48 @@ export function parseBatchRecordInput(body: Record<string, unknown> | null, idBa
   if (!producto) throw new OtError('Falta el producto.', 400);
   const lote = campo(body.lote, 'Lote');
   if (!lote) throw new OtError('Falta el lote.', 400);
+  // 2026-11-25: el formato del batch record siempre lleva la OP; sin ella no se genera.
+  const op = campo(body.op, 'O.P.');
+  if (!op) throw new OtError('Falta la O.P.', 400);
   return {
     ids,
     producto: producto.slice(0, OT_LIMITS.producto),
     concentracion: campo(body.concentracion, 'Concentración'),
     lote,
-    op: campo(body.op, 'O.P.'),
+    op,
     loteMp: campo(body.loteMp, 'Lote de materia prima'),
   };
+}
+
+/** De dónde salió la OP sugerida para el encabezado (se le dice a la persona en la vista previa). */
+export type OrigenOp = 'bitacora' | 'lote' | 'sap' | null;
+
+export interface OpSap {
+  AbsoluteEntry: number;
+  DocumentNumber: number;
+  ItemNo: string | null;
+}
+
+/**
+ * OP del encabezado (2026-11-25: «en el Excel no sale el dato de la OP»). La OP es opcional al abrir
+ * y hay bitácoras sin ella (p. ej. BP-0094) aunque otras del MISMO lote sí la tengan. Orden:
+ *   1. la de la bitácora desde la que se exporta;
+ *   2. la de otra bitácora del mismo lote (la primera que la tenga);
+ *   3. la OP de SAP con ese lote (U_Cod_Lote; solo lectura). Si hay varias, la del mismo artículo;
+ *      si siguen siendo varias, no se adivina: queda vacía para que la persona la escriba.
+ */
+export function elegirOpBatchRecord(
+  base: { sapOpDocNum: number | null; sapOpAbsEntry: number | null; itemCode: string | null },
+  delLote: ReadonlyArray<{ sapOpDocNum: number | null; sapOpAbsEntry: number | null }>,
+  sapPorLote: ReadonlyArray<OpSap> | null
+): { op: string; absEntry: number | null; origen: OrigenOp } {
+  if (base.sapOpDocNum) return { op: String(base.sapOpDocNum), absEntry: base.sapOpAbsEntry, origen: 'bitacora' };
+  const hermana = delLote.find((b) => b.sapOpDocNum);
+  if (hermana?.sapOpDocNum) return { op: String(hermana.sapOpDocNum), absEntry: hermana.sapOpAbsEntry, origen: 'lote' };
+  const ops = sapPorLote ?? [];
+  const delArticulo = base.itemCode ? ops.filter((x) => x.ItemNo === base.itemCode) : [];
+  const unica = ops.length === 1 ? ops[0] : delArticulo.length === 1 ? delArticulo[0] : null;
+  return unica ? { op: String(unica.DocumentNumber), absEntry: unica.AbsoluteEntry, origen: 'sap' } : { op: '', absEntry: null, origen: null };
 }
 
 /** Las bitácoras de un archivo deben ser del mismo lote (el encabezado es uno solo). */
@@ -242,7 +276,7 @@ export function filasBitacora(ordenes: OrdenDetalle[], e: EstilosBitacora, gener
     filas.push({ alto: Math.max(minimo, Math.ceil(texto.length / porLinea) * 16), celdas: [{ desde: 1, hasta: 10, texto, estilo }] });
   for (const o of ordenes) {
     const turno = OT_TURNO_LABEL[o.turno as OtTurno] ?? o.turno;
-    ancho(`Bitácora ${codigo(o.consecutivo)} · Turno ${turno} · Inicio ${fmtFechaHora(o.abiertaEn)} · Final ${o.cerradaEn ? fmtFechaHora(o.cerradaEn) : 'abierta'}${o.area ? ` · Área ${o.area}` : ''}`, e.seccion, 110, 20);
+    ancho(`Bitácora ${codigo(o.consecutivo)}${o.sapOpDocNum ? ` · OP ${o.sapOpDocNum}` : ''} · Turno ${turno} · Inicio ${fmtFechaHora(o.abiertaEn)} · Final ${o.cerradaEn ? fmtFechaHora(o.cerradaEn) : 'abierta'}${o.area ? ` · Área ${o.area}` : ''}`, e.seccion, 110, 20);
     const cerro = o.cierre ? `${o.cierre.nombre}${o.cierre.como === 'JEFE_PROD' ? ' (jefe de producción)' : ''}` : 'pendiente';
     // La cuenta que registró (casi siempre la de la tablet) va una vez aquí, no en cada fila.
     const cuentas = [...new Set(o.registros.map((x) => x.usuario))];
