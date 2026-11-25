@@ -33,6 +33,7 @@ import {
 import { mantineTupleFromHex } from '../lib/theme/customPalette';
 import { UserProvider } from '../lib/user-context';
 import { SapProvider } from '../lib/sap-context';
+import VoiceCallBar from './chat/VoiceCallBar';
 import {
   appCssVariablesResolver,
   buildDarkTheme,
@@ -219,7 +220,11 @@ export function Providers({
     <SessionProvider session={session} refetchOnWindowFocus={false}>
       <ThemeProvider>
         <UserProvider>
-          <SapProvider>{children}</SapProvider>
+          <SapProvider>
+            {children}
+            {/* App-level voice call controls: survive navigation (2026-11-25). */}
+            <VoiceCallBar />
+          </SapProvider>
         </UserProvider>
       </ThemeProvider>
     </SessionProvider>
