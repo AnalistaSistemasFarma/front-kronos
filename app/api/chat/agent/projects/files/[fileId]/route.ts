@@ -5,7 +5,7 @@ import { jsonNoStore, NO_STORE, serverError, unauthorized } from '../../../../..
 import { buildContentDisposition, safeDownloadContentType } from '../../../../../../../lib/chat/attachments';
 import { downloadChatAttachment } from '../../../../../../../lib/chat/attachmentStorage';
 import { cargarConfigProyectos } from '../../../../../../../lib/proyectos/config-agentes';
-import { whereProyectoDelAgente } from '../../../../../../../lib/chat/projects';
+import { filtroProyectosDelPuente } from '../../../../../../../lib/chat/projects';
 
 export const dynamic = 'force-dynamic';
 
@@ -32,7 +32,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
         id_project_file: idFile,
         // ANCLA DE SEGURIDAD: proyecto activo donde el agente de la llave
         // está designado, en una empresa donde está habilitado para Proyectos.
-        project: { ...whereProyectoDelAgente(agent.idAgent), ...config.filtroEmpresas(agent.code) },
+        project: await filtroProyectosDelPuente(agent.idAgent, agent.code, config),
       },
       select: { file_name: true, content_type: true, onedrive_item_id: true },
     });
