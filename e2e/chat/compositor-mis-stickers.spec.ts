@@ -196,8 +196,11 @@ for (const oscuro of [false, true]) {
       await page.waitForTimeout(300);
       const card = (await pill.boundingBox())!;
       expect(Math.round(card.x)).toBe(16);
-      expect(Math.round(card.height)).toBe(109);
       const textoCard = (await caja(page).boundingBox())!;
+      // Card = text row + 40 px buttons row + 15 px padding top and bottom +
+      // borders (109 px with one line of text). The text may take two lines
+      // with the wider fonts of the CI machine, so it is checked structurally.
+      expect(Math.round(card.height - textoCard.height)).toBe(72);
       const masCard = (await pill.getByRole('button', { name: 'Más opciones' }).boundingBox())!;
       expect(textoCard.y + textoCard.height).toBeLessThanOrEqual(masCard.y + 1);
       expect(Math.round(textoCard.x)).toBe(Math.round(card.x + 16));
