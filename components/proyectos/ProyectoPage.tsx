@@ -671,7 +671,7 @@ export default function ProyectoPage({ idProject }: { idProject: number }) {
               </Badge>
             )}
           </Group>
-          <Group gap={8} rowGap={4} mt={8} wrap='wrap'>
+          <Group gap={8} mt={8} wrap='wrap' style={{ rowGap: 4 }}>
             <AgentesApilados agentes={proyecto.agents} size={24} />
             {proyecto.members.length > 0 && (
               <>
