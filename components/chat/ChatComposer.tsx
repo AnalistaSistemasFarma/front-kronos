@@ -933,6 +933,13 @@ const ChatComposer = forwardRef<ChatComposerHandle, {
       className={expandida ? 'chat-composer__pill chat-composer__pill--expandida' : 'chat-composer__pill'}
       data-disabled={disabled || undefined}
       data-testid='chat-composer-pill'
+      // The card's width animates (side margins); measure the text height
+      // again once it settles, or the autosize keeps the narrower height.
+      onTransitionEnd={(event) => {
+        if (event.target === event.currentTarget && event.propertyName.startsWith('margin')) {
+          window.dispatchEvent(new Event('resize'));
+        }
+      }}
     >
       {panelAbiertoEnCelular ? botonTeclado : menuMas}
       {preview ? (
