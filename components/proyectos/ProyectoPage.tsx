@@ -671,7 +671,7 @@ export default function ProyectoPage({ idProject }: { idProject: number }) {
               </Badge>
             )}
           </Group>
-          <Group gap={8} mt={8} wrap='nowrap'>
+          <Group gap={8} rowGap={4} mt={8} wrap='wrap'>
             <AgentesApilados agentes={proyecto.agents} size={24} />
             {proyecto.members.length > 0 && (
               <>
@@ -679,7 +679,7 @@ export default function ProyectoPage({ idProject }: { idProject: number }) {
                 <MiembrosApilados miembros={proyecto.members} size={24} />
               </>
             )}
-            <Text size='xs' c='dimmed' className={css.truncar}>
+            <Text size='xs' c='dimmed' className={css.truncar} style={{ flex: '1 1 140px' }}>
               {resumenEquipo(proyecto)}
             </Text>
           </Group>
