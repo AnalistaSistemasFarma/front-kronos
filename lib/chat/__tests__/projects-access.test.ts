@@ -15,13 +15,16 @@ const moduleCount = vi.hoisted(() => vi.fn());
 const findDesignation = vi.hoisted(() => vi.fn());
 const chatAccess = vi.hoisted(() => vi.fn());
 const configRows = vi.hoisted(() => vi.fn());
+const findUsers = vi.hoisted(() => vi.fn());
+const findDesignations = vi.hoisted(() => vi.fn());
 
 vi.mock('../../prisma', () => ({
   prisma: {
     chatProject: { findUnique: findProject },
     chatConversation: { findFirst: findConversation },
     subprocessUserCompany: { count: moduleCount },
-    chatProjectAgent: { findFirst: findDesignation },
+    chatProjectAgent: { findFirst: findDesignation, findMany: findDesignations },
+    user: { findMany: findUsers },
     // Configuración del módulo por empresa (2026-10-20): vacía = manda CHAT_PROJECTS_AGENTS, como antes.
     chatProjectAgentConfig: { findMany: configRows },
   },
@@ -44,7 +47,10 @@ const PLAY = 21;
 function proyecto(over: Record<string, unknown> = {}) {
   return { id_project: 7, name: 'Comex Latam', id_company: EMPRESA, profile: 'comex-latam', archived: false, members: [{ role: 'editor' }], ...over };
 }
-const designado = (over: Record<string, unknown> = {}) => ({ agent: { id_agent: PLAY, code: 'play', is_active: true, ...over } });
+const designado = (over: Record<string, unknown> = {}, addedBy: string | null = 'u-ana') => ({
+  added_by: addedBy,
+  agent: { id_agent: PLAY, code: 'play', is_active: true, companies: [{ id_company: EMPRESA }], ...over },
+});
 const conAgente = (empresas: number[]) => ({
   canUseChat: true,
   companies: [],
@@ -59,6 +65,8 @@ beforeEach(() => {
   process.env.CHAT_PROJECTS_AGENTS = '{"play":["comex-latam","olp"]}';
   moduleCount.mockResolvedValue(1);
   findDesignation.mockResolvedValue(designado());
+  findDesignations.mockResolvedValue([]);
+  findUsers.mockResolvedValue([{ id: ANA.id, email: ANA.email }]);
   chatAccess.mockResolvedValue(conAgente([EMPRESA]));
 });
 
@@ -196,7 +204,7 @@ describe('assertAgentProjectConversation (llave del puente)', () => {
   const fila = (over: Record<string, unknown> = {}, code = 'play') => ({
     id: 40,
     id_agent: PLAY,
-    project: { id_project: 7, name: 'Comex', profile: 'comex-latam', id_company: EMPRESA, agents: [{ agent: { code } }] },
+    project: { id_project: 7, name: 'Comex', profile: 'comex-latam', id_company: EMPRESA, agents: [{ added_by: 'u-ana', agent: { id_agent: PLAY, code, is_active: true, companies: [{ id_company: EMPRESA }] } }] },
     ...over,
   });
 
@@ -235,17 +243,130 @@ describe('assertAgentProjectConversation (llave del puente)', () => {
   it('sin interruptor para el agente, o sin el perfil del proyecto: nada', async () => {
     findConversation.mockResolvedValue(fila({}, 'horus'));
     expect(await assertAgentProjectConversation(99, 40)).toBeNull();
-    findConversation.mockResolvedValue(fila({ project: { id_project: 7, name: 'X', profile: 'gss', id_company: EMPRESA, agents: [{ agent: { code: 'play' } }] } }));
+    findConversation.mockResolvedValue(fila({ project: { id_project: 7, name: 'X', profile: 'gss', id_company: EMPRESA, agents: [{ added_by: 'u-ana', agent: { id_agent: PLAY, code: 'play', is_active: true, companies: [{ id_company: EMPRESA }] } }] } }));
     expect(await assertAgentProjectConversation(PLAY, 40)).toBeNull();
   });
 
   it('MESA de discusión: sin el perfil del proyecto, el agente entra SIN conectores (2026-11-05)', async () => {
     findConversation.mockResolvedValue(
-      fila({ mesa: { id_mesa: 3 }, project: { id_project: 7, name: 'X', profile: 'gss', id_company: EMPRESA, agents: [{ agent: { code: 'play' } }] } })
+      fila({ mesa: { id_mesa: 3 }, project: { id_project: 7, name: 'X', profile: 'gss', id_company: EMPRESA, agents: [{ added_by: 'u-ana', agent: { id_agent: PLAY, code: 'play', is_active: true, companies: [{ id_company: EMPRESA }] } }] } })
     );
     expect(await assertAgentProjectConversation(PLAY, 40)).toMatchObject({ perfil: 'sin-conectores' });
     // Sin Proyectos habilitado en la empresa, ni en una mesa.
     findConversation.mockResolvedValue(fila({ mesa: { id_mesa: 3 } }, 'horus'));
     expect(await assertAgentProjectConversation(99, 40)).toBeNull();
+  });
+});
+
+/*
+ * Agentes de OTRA empresa (2026-11-25, SynerLink conv 1, msg 39725): Doki (solo
+ * OLP) en un proyecto de GSS. Trabaja con los conectores de SU empresa, nunca
+ * con los del proyecto, y solo le escribe quien lo tiene en esa empresa.
+ */
+describe('agente de OTRA empresa', () => {
+  const GSS = 8;
+  const OLP = 3;
+  const DOKI = 43;
+  const NICO = { id: 'u-nico', email: 'nico@gsslatam.com' };
+  const proyectoGss = { idProject: 32, name: 'GSS', idCompany: GSS, profile: 'gss', role: 'owner' as const, archived: false };
+  const doki = (addedBy: string | null = NICO.id) => ({
+    added_by: addedBy,
+    agent: { id_agent: DOKI, code: 'doki', is_active: true, companies: [{ id_company: OLP }] },
+  });
+  const conDoki = (empresas: number[]) => ({
+    canUseChat: true,
+    companies: [],
+    agents: [{ idAgent: DOKI, code: 'doki', companies: empresas.map((idCompany) => ({ idCompany, companyName: 'OLP', isPrimary: false })) }],
+  });
+
+  beforeEach(() => {
+    process.env.CHAT_PROJECTS_AGENTS = '{"doki":["olp"],"play":["comex-latam","olp"]}';
+    __resetProjectAgentsCache();
+    findUsers.mockResolvedValue([{ id: NICO.id, email: NICO.email }]);
+    chatAccess.mockResolvedValue(conDoki([OLP]));
+  });
+
+  it('quien lo tiene en la empresa de sus conectores (OLP) le escribe, aunque el proyecto sea de GSS', async () => {
+    findDesignation.mockResolvedValue(doki());
+    expect(await writeAccessForAgent(NICO, proyectoGss, DOKI)).toEqual({ ok: true });
+  });
+
+  it('quien no lo tiene en OLP no le escribe (el agente no es una puerta a datos de OLP)', async () => {
+    findDesignation.mockResolvedValue(doki());
+    chatAccess.mockImplementation(async (email: string) => (email === NICO.email ? conDoki([OLP]) : conDoki([])));
+    const juan = { id: 'u-juan', email: 'juan@gsslatam.com' };
+    expect((await writeAccessForAgent(juan, proyectoGss, DOKI)).ok).toBe(false);
+  });
+
+  it('el puente recibe el perfil de SU empresa (olp), nunca el del proyecto (gss)', async () => {
+    findConversation.mockResolvedValue({
+      id: 90,
+      id_agent: DOKI,
+      project: { id_project: 32, name: 'GSS', profile: 'gss', id_company: GSS, agents: [doki()] },
+    });
+    expect(await assertAgentProjectConversation(DOKI, 90)).toMatchObject({ perfil: 'olp' });
+  });
+
+  it('aunque la empresa del proyecto (por el .env) le habilite el perfil del proyecto, no lo usa', async () => {
+    process.env.CHAT_PROJECTS_AGENTS = '{"doki":["gss","olp"]}';
+    __resetProjectAgentsCache();
+    findConversation.mockResolvedValue({
+      id: 90,
+      id_agent: DOKI,
+      project: { id_project: 32, name: 'GSS', profile: 'gss', id_company: GSS, agents: [doki()] },
+    });
+    // SU empresa (OLP, por el .env) lista «gss» primero: igual se salta el del proyecto.
+    expect((await assertAgentProjectConversation(DOKI, 90))?.perfil).toBe('olp');
+    process.env.CHAT_PROJECTS_AGENTS = '{"doki":["gss"]}';
+    __resetProjectAgentsCache();
+    invalidarConfigProyectos();
+    // Solo el del proyecto: sin conectores.
+    expect((await assertAgentProjectConversation(DOKI, 90))?.perfil).toBe('sin-conectores');
+    // Con la tabla de OLP diciendo solo «olp», ese manda.
+    invalidarConfigProyectos();
+    configRows.mockResolvedValue([{ id_company: OLP, id_agent: DOKI, enabled: true, profiles: 'olp', agent: { code: 'doki' } }]);
+    expect((await assertAgentProjectConversation(DOKI, 90))?.perfil).toBe('olp');
+  });
+
+  it('si quien lo agregó ya no lo tiene, o no hay quién, no trabaja (falla cerrado)', async () => {
+    chatAccess.mockResolvedValue(conDoki([]));
+    findConversation.mockResolvedValue({
+      id: 90,
+      id_agent: DOKI,
+      project: { id_project: 32, name: 'GSS', profile: 'gss', id_company: GSS, agents: [doki()] },
+    });
+    expect(await assertAgentProjectConversation(DOKI, 90)).toBeNull();
+    chatAccess.mockResolvedValue(conDoki([OLP]));
+    findConversation.mockResolvedValue({
+      id: 90,
+      id_agent: DOKI,
+      project: { id_project: 32, name: 'GSS', profile: 'gss', id_company: GSS, agents: [doki(null)] },
+    });
+    expect(await assertAgentProjectConversation(DOKI, 90)).toBeNull();
+  });
+
+  it('en una MESA entra sin conectores', async () => {
+    findConversation.mockResolvedValue({
+      id: 90,
+      id_agent: DOKI,
+      mesa: { id_mesa: 1 },
+      project: { id_project: 32, name: 'GSS', profile: 'gss', id_company: GSS, agents: [doki()] },
+    });
+    expect(await assertAgentProjectConversation(DOKI, 90)).toMatchObject({ perfil: 'sin-conectores' });
+  });
+
+  it('entrar: sin «Proyectos» en GSS, entra con «Proyectos» en otra empresa y uno de los agentes asignado', async () => {
+    findProject.mockResolvedValue({ id_project: 32, name: 'GSS', id_company: GSS, profile: 'gss', archived: false, members: [{ role: 'editor' }] });
+    moduleCount.mockResolvedValueOnce(0).mockResolvedValueOnce(1);
+    findDesignations.mockResolvedValue([{ id_agent: DOKI }]);
+    expect(await resolveProjectForUser(NICO, 32)).toMatchObject({ idProject: 32, role: 'editor' });
+    // Sin ninguno de los agentes del proyecto: no entra.
+    moduleCount.mockResolvedValueOnce(0).mockResolvedValueOnce(1);
+    chatAccess.mockResolvedValue(conDoki([]));
+    expect(await resolveProjectForUser(NICO, 32)).toBeNull();
+    // Sin «Proyectos» en ninguna empresa: no entra.
+    moduleCount.mockResolvedValueOnce(0).mockResolvedValueOnce(0);
+    chatAccess.mockResolvedValue(conDoki([OLP]));
+    expect(await resolveProjectForUser(NICO, 32)).toBeNull();
   });
 });

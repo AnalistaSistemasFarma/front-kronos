@@ -35,6 +35,8 @@ export interface AgenteDesignableDto extends AgenteMiniDto {
   profiles: string[];
   /** Agente de DESARROLLO (2026-10-27): solo a estos se les ofrece código y repos. */
   esDesarrollo?: boolean;
+  /** Agente de OTRA empresa (2026-11-25): trabaja con los conectores de esa empresa. */
+  otraEmpresa?: { idCompany: number; companyName: string; profile: string; profileLabel: string } | null;
 }
 
 /** Agente designado en un proyecto, visto por ESTA persona. */
@@ -45,6 +47,8 @@ export interface AgenteProyectoDto extends AgenteMiniDto {
   puedoEscribir: boolean;
   /** Si no puede, por qué (texto para la interfaz). */
   motivo: string | null;
+  /** Agente de OTRA empresa (2026-11-25): el perfil de SU empresa con el que trabaja aquí. */
+  conectoresOtraEmpresa?: { profile: string; profileLabel: string } | null;
 }
 
 export interface ProyectoResumenDto {

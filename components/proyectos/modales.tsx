@@ -626,7 +626,8 @@ export function DesignarAgenteModal({
     if (!perfiles || !candidatos) return [];
     const marcados = candidatos.filter((a) => elegidos.includes(a.code));
     if (marcados.length === 0) return [];
-    return perfiles.filter((p) => marcados.every((a) => a.profiles.includes(p.key)));
+    // Uno de OTRA empresa trabaja con el perfil de SU empresa: no restringe el del proyecto.
+    return perfiles.filter((p) => marcados.every((a) => Boolean(a.otraEmpresa) || a.profiles.includes(p.key)));
   })();
   const perfilValido = perfil !== null && comunes.some((p) => p.key === perfil) ? perfil : comunes[0]?.key ?? null;
   const avisoNegocio = conCodigo
@@ -685,9 +686,16 @@ export function DesignarAgenteModal({
                 <Group wrap='nowrap' gap='sm'>
                   <Checkbox.Indicator />
                   <AgentAvatar code={a.code} displayName={a.displayName} avatarUrl={a.avatarUrl} avatarVersion={a.avatarVersion} size={30} showStatus={false} withTooltip={false} />
-                  <Text size='sm' fw={600}>
-                    {a.displayName}
-                  </Text>
+                  <Stack gap={0}>
+                    <Text size='sm' fw={600}>
+                      {a.displayName}
+                    </Text>
+                    {a.otraEmpresa && (
+                      <Text size='xs' c='dimmed' data-testid='proyecto-agente-otra-empresa'>
+                        De {a.otraEmpresa.companyName}: trabaja con los conectores de {a.otraEmpresa.profileLabel}
+                      </Text>
+                    )}
+                  </Stack>
                 </Group>
               </Checkbox.Card>
             ))}

@@ -13,7 +13,7 @@ import {
 import { jsonNoStore, serverError, unauthorized } from '../../../../../lib/chat/http';
 import type { ChatAgentIdentity } from '../../../../../lib/chat/agent-auth';
 import { cargarConfigProyectos } from '../../../../../lib/proyectos/config-agentes';
-import { whereProyectoDelAgente } from '../../../../../lib/chat/projects';
+import { filtroProyectosDelPuente } from '../../../../../lib/chat/projects';
 import { mensajesConEntregaPendiente } from '../../../../../lib/chat/entregas-pendientes';
 import { EVENT_TYPE_TURNO, tickMesas, turnoParaAgente } from '../../../../../lib/proyectos/mesas';
 import { ANALYSIS_AUTHOR_NAME, analysisTurnForAgent } from '../../../../../lib/meetings/projects/analysis';
@@ -270,7 +270,8 @@ async function bandejaDeProyectos(opciones: {
   if (!config.habilitadoEnAlguna(agent.code)) {
     return jsonNoStore({ error: 'Proyectos no habilitados para este agente.' }, { status: 404 });
   }
-  const empresas = config.filtroEmpresas(agent.code);
+  // Empresas habilitadas, o proyectos de otra empresa donde lo designaron (2026-11-25).
+  const delPuente = await filtroProyectosDelPuente(agent.idAgent, agent.code, config);
 
   // MESAS DE DISCUSIÓN (2026-11-04): motor perezoso. Cualquier puente que
   // pregunte por su bandeja empuja las mesas que tengan ronda o turno vencido
@@ -297,8 +298,8 @@ async function bandejaDeProyectos(opciones: {
           kind: 'project',
           archived: false,
           id_agent: agent.idAgent,
-          // …y solo de empresas donde el agente está habilitado para Proyectos.
-          project: { ...whereProyectoDelAgente(agent.idAgent), ...empresas },
+          // …y solo de empresas donde el agente está habilitado para Proyectos (o de otra empresa, ver filtroProyectosDelPuente).
+          project: delPuente,
         },
       },
       orderBy: { id: 'asc' },
@@ -331,7 +332,7 @@ async function bandejaDeProyectos(opciones: {
           conversation: {
             kind: 'project',
             archived: false,
-            project: { ...whereProyectoDelAgente(agent.idAgent), ...empresas },
+            project: delPuente,
           },
         },
         orderBy: { id: 'asc' },

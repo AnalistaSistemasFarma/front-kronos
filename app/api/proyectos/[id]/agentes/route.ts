@@ -1,7 +1,7 @@
 import { NextRequest } from 'next/server';
 import { prisma } from '../../../../../lib/prisma';
 import { badRequest, forbidden, jsonNoStore, readJsonBody, serverError } from '../../../../../lib/chat/http';
-import { designableAgents } from '../../../../../lib/chat/projects';
+import { designableAgentsForProject } from '../../../../../lib/chat/projects';
 import { guardProject } from '../../../../../lib/chat/projects-guard';
 import { capabilitiesFor, isKnownProfile, MAX_PROJECT_AGENTS, normalizeAgentCodes, PROJECT_PROFILES } from '../../../../../lib/chat/projects-rules';
 import { checkAdminPrivileges } from '../../../../../lib/access-control';
@@ -15,7 +15,10 @@ export const dynamic = 'force-dynamic';
 /**
  * AGENTES designados en un proyecto. El DUEÑO o un ADMINISTRADOR de SynerLink
  * que sea miembro (2026-11-10). Solo se agregan agentes que quien los agrega
- * tiene asignados en la empresa del proyecto (designableAgents).
+ * tiene asignados: en la empresa del proyecto o, desde el 2026-11-25 (msg
+ * 39725), en OTRA empresa si el agente no pertenece a la del proyecto; ese
+ * trabaja con los conectores de SU empresa, nunca con los del proyecto
+ * (designableAgentsForProject, lib/proyectos/agentes-otra-empresa-rules.ts).
  *
  *   GET    agentes que puede agregar: los que tiene asignados en la empresa del
  *          proyecto, con proyectos habilitados y con el perfil. Si el proyecto
@@ -48,9 +51,9 @@ async function candidatos(email: string, idProject: number, idCompany: number, p
   // de un hilo dejaría una sesión con contexto de otra empresa. Un proyecto SIN
   // asistentes y SIN conversaciones no tiene hilos: ahí sí se escoge el perfil.
   const eligePerfil = actuales.length === 0 && conversaciones === 0;
-  const porEmpresa = await designableAgents(email, eligePerfil ? undefined : profile);
+  const disponibles = await designableAgentsForProject(email, idCompany, eligePerfil ? undefined : profile);
   const ya = new Set(actuales.map((a) => a.id_agent));
-  return { lista: (porEmpresa.get(idCompany) ?? []).filter((a) => !ya.has(a.idAgent)), actuales: actuales.length, eligePerfil };
+  return { lista: disponibles.filter((a) => !ya.has(a.idAgent)), actuales: actuales.length, eligePerfil };
 }
 
 export async function GET(_request: NextRequest, { params }: Ctx) {
@@ -83,14 +86,15 @@ export async function POST(request: NextRequest, { params }: Ctx) {
     const { lista, actuales, eligePerfil } = await candidatos(guard.user.email, guard.project.idProject, guard.project.idCompany, guard.project.profile);
     const porCodigo = new Map(lista.map((a) => [a.code.toLowerCase(), a]));
     if (codigos.value.some((c) => !porCodigo.has(c))) {
-      return forbidden('Alguno de los asistentes no está disponible para usted en la empresa del proyecto con su perfil de conectores.');
+      return forbidden('Alguno de los asistentes no está disponible para usted: no lo tiene asignado o no tiene Proyectos habilitado.');
     }
     // Primer asistente de un proyecto creado sin asistentes: escoge el perfil.
     let perfilNuevo: string | null = null;
     if (eligePerfil) {
       if (!isKnownProfile(payload?.profile)) return badRequest('Escoja el perfil de conectores del proyecto.');
       const perfil = payload.profile as string;
-      if (codigos.value.some((c) => !porCodigo.get(c)!.profiles.includes(perfil))) {
+      // Uno de OTRA empresa trabaja con el perfil de SU empresa: el del proyecto no le aplica.
+      if (codigos.value.some((c) => !porCodigo.get(c)!.otraEmpresa && !porCodigo.get(c)!.profiles.includes(perfil))) {
         return badRequest('Alguno de los asistentes escogidos no admite ese perfil de conectores.');
       }
       perfilNuevo = perfil;
