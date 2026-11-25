@@ -35,6 +35,7 @@ import {
 } from '../../../lib/charts/builders';
 import type {
   CaseBucket,
+  CaseDimensionFilter,
   HelpdeskDashboardData,
   NamedCount,
 } from '../../../lib/help-desk/dashboard/aggregate';
@@ -78,12 +79,15 @@ function CountTable({
   column,
   items,
   loading,
+  onSelect,
 }: {
   title: string;
   description: string;
   column: string;
   items: NamedCount[];
   loading: boolean;
+  /** When set, each row is clickable and opens the detail of its cases. */
+  onSelect?: (name: string) => void;
 }) {
   const total = items.reduce((sum, item) => sum + item.total, 0);
   return (
@@ -105,9 +109,26 @@ function CountTable({
             </Table.Thead>
             <Table.Tbody>
               {items.map((item) => (
-                <Table.Tr key={item.name}>
+                <Table.Tr
+                  key={item.name}
+                  onClick={onSelect ? () => onSelect(item.name) : undefined}
+                  onKeyDown={
+                    onSelect
+                      ? (e) => {
+                          if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault();
+                            onSelect(item.name);
+                          }
+                        }
+                      : undefined
+                  }
+                  tabIndex={onSelect ? 0 : undefined}
+                  role={onSelect ? 'button' : undefined}
+                  aria-label={onSelect ? `Ver los casos de ${item.name}` : undefined}
+                  style={onSelect ? { cursor: 'pointer' } : undefined}
+                >
                   <Table.Td>
-                    <Text size='sm' lineClamp={2}>
+                    <Text size='sm' lineClamp={2} c={onSelect ? 'blue' : undefined} td={onSelect ? 'underline' : undefined}>
                       {item.name}
                     </Text>
                   </Table.Td>
@@ -172,6 +193,16 @@ export default function HelpdeskDashboardView() {
   const [error, setError] = useState<string | null>(null);
   const [forbidden, setForbidden] = useState(false);
   const [detailBucket, setDetailBucket] = useState<CaseBucket | null>(null);
+  const [detailDimension, setDetailDimension] = useState<CaseDimensionFilter | null>(null);
+
+  const openBucket = (bucket: CaseBucket) => {
+    setDetailDimension(null);
+    setDetailBucket(bucket);
+  };
+  const openDepartment = (value: string) => {
+    setDetailDimension({ dimension: 'department', value });
+    setDetailBucket('all');
+  };
 
   const filterQuery = useMemo(() => {
     const params = new URLSearchParams();
@@ -385,7 +416,7 @@ export default function HelpdeskDashboardView() {
         description='Casos del periodo y empresa seleccionados. Haga clic en un indicador para ver el detalle de sus casos.'
       >
         <SimpleGrid cols={{ base: 1, xs: 2, lg: 4 }} spacing={{ base: 'sm', sm: 'md' }}>
-          <ClickableKpi onOpen={() => setDetailBucket('all')} disabled={kpiDisabled}>
+          <ClickableKpi onOpen={() => openBucket('all')} disabled={kpiDisabled}>
           <KpiStatCard
             label='Casos en el periodo'
             value={kpis ? formatNumber(kpis.total) : '—'}
@@ -395,7 +426,7 @@ export default function HelpdeskDashboardView() {
             loading={loading && !data}
           />
           </ClickableKpi>
-          <ClickableKpi onOpen={() => setDetailBucket('resolved')} disabled={kpiDisabled}>
+          <ClickableKpi onOpen={() => openBucket('resolved')} disabled={kpiDisabled}>
           <KpiStatCard
             label='Resueltos'
             value={kpis ? formatNumber(kpis.resolved) : '—'}
@@ -406,7 +437,7 @@ export default function HelpdeskDashboardView() {
             loading={loading && !data}
           />
           </ClickableKpi>
-          <ClickableKpi onOpen={() => setDetailBucket('pending')} disabled={kpiDisabled}>
+          <ClickableKpi onOpen={() => openBucket('pending')} disabled={kpiDisabled}>
           <KpiStatCard
             label='Pendientes'
             value={kpis ? formatNumber(kpis.pending) : '—'}
@@ -417,7 +448,7 @@ export default function HelpdeskDashboardView() {
             loading={loading && !data}
           />
           </ClickableKpi>
-          <ClickableKpi onOpen={() => setDetailBucket('measured')} disabled={kpiDisabled}>
+          <ClickableKpi onOpen={() => openBucket('measured')} disabled={kpiDisabled}>
           <KpiStatCard
             label='Tiempo medio de resolución'
             value={kpis ? formatDays(kpis.avgResolutionDays) : '—'}
@@ -436,9 +467,13 @@ export default function HelpdeskDashboardView() {
 
       <HelpdeskCasesModal
         bucket={detailBucket}
+        dimension={detailDimension}
         query={filterQuery}
         periodLabel={`${companyLabel} · ${periodLabel}.`}
-        onClose={() => setDetailBucket(null)}
+        onClose={() => {
+          setDetailBucket(null);
+          setDetailDimension(null);
+        }}
       />
 
       <ActividadesSection priority={5} title='Evolución y demanda' description='Casos por mes y por departamento.'>
@@ -464,10 +499,11 @@ export default function HelpdeskDashboardView() {
           </div>
           <CountTable
             title='Recuento por departamento'
-            description='Departamento que reporta el caso'
+            description='Departamento que reporta el caso · haga clic en uno para ver sus casos'
             column='Departamento'
             items={data?.byDepartment ?? []}
             loading={loading && !data}
+            onSelect={openDepartment}
           />
         </SimpleGrid>
       </ActividadesSection>

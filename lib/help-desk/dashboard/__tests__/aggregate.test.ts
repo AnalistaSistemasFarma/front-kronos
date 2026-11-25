@@ -5,6 +5,7 @@ import {
   buildMonthSeries,
   matchesBucket,
   parseCaseBucket,
+  parseDimensionFilter,
   resolutionDays,
   cleanLabel,
   computeKpis,
@@ -171,6 +172,35 @@ describe('KPI drill-down', () => {
       [5, 1],
       [1, 2],
     ]);
+  });
+});
+
+describe('department drill-down', () => {
+  it('parses only known dimensions with a value', () => {
+    expect(parseDimensionFilter(new URLSearchParams('dimension=department&value=GERENCIA'))).toEqual({
+      dimension: 'department',
+      value: 'GERENCIA',
+    });
+    expect(parseDimensionFilter(new URLSearchParams('dimension=department&value='))).toBeNull();
+    expect(parseDimensionFilter(new URLSearchParams('dimension=toString&value=x'))).toBeNull();
+    expect(parseDimensionFilter(new URLSearchParams('dimension=company&value=x'))).toBeNull();
+  });
+
+  it('returns only the cases of the department, matching the count of its row', () => {
+    const data = [
+      ...rows,
+      row({ id: 6, department: 'PRODUCCIÓN', createdAt: '2026-03-05T00:00:00.000Z' }),
+      row({ id: 7, department: null, createdAt: '2026-03-06T00:00:00.000Z' }),
+    ];
+    const counts = aggregateHelpdeskDashboard(data, {}, NOW).byDepartment;
+    for (const { name, total } of counts) {
+      const detail = buildCaseDetail(data, {}, 'all', 1000, { dimension: 'department', value: name });
+      expect(detail.total).toBe(total);
+      expect(detail.cases.every((c) => c.department === name)).toBe(true);
+    }
+    expect(
+      buildCaseDetail(data, {}, 'all', 1000, { dimension: 'department', value: 'Sin departamento' }).cases.map((c) => c.id)
+    ).toEqual([7]);
   });
 });
 

@@ -6,6 +6,7 @@ import {
   buildCaseDetail,
   parseCaseBucket,
   parseDashboardFilters,
+  parseDimensionFilter,
 } from '../../../../../lib/help-desk/dashboard/aggregate';
 import { loadHelpdeskCaseRows } from '../../../../../lib/help-desk/dashboard/db';
 
@@ -13,6 +14,7 @@ export const dynamic = 'force-dynamic';
 
 /**
  * GET /api/help-desk/dashboard/cases?bucket=all|resolved|pending|measured&company=&year=&month=
+ *     [&dimension=department&value=<label shown in the table>]
  * Dashboard Helpdesk: cases behind one KPI card (subject and classification, never the
  * description or resolution text). Requires the /process/help-desk/dashboard subprocess.
  */
@@ -30,8 +32,13 @@ export async function GET(req: Request) {
     const bucket = parseCaseBucket(params.get('bucket'));
     if (!bucket) return NextResponse.json({ error: 'El indicador solicitado no es válido.' }, { status: 400 });
 
+    const dimension = params.has('dimension') ? parseDimensionFilter(params) : null;
+    if (params.has('dimension') && !dimension) {
+      return NextResponse.json({ error: 'El filtro solicitado no es válido.' }, { status: 400 });
+    }
+
     const rows = await loadHelpdeskCaseRows({ withSubject: true });
-    const data = buildCaseDetail(rows, parseDashboardFilters(params), bucket);
+    const data = buildCaseDetail(rows, parseDashboardFilters(params), bucket, 1000, dimension);
 
     return NextResponse.json(data, { headers: { 'Cache-Control': 'no-store' } });
   } catch (err) {
