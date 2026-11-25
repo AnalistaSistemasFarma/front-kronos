@@ -78,14 +78,48 @@ export function parseBatchRecordInput(body: Record<string, unknown> | null, idBa
   if (!producto) throw new OtError('Falta el producto.', 400);
   const lote = campo(body.lote, 'Lote');
   if (!lote) throw new OtError('Falta el lote.', 400);
+  // 2026-11-25: el formato del batch record siempre lleva la OP; sin ella no se genera.
+  const op = campo(body.op, 'O.P.');
+  if (!op) throw new OtError('Falta la O.P.', 400);
   return {
     ids,
     producto: producto.slice(0, OT_LIMITS.producto),
     concentracion: campo(body.concentracion, 'Concentración'),
     lote,
-    op: campo(body.op, 'O.P.'),
+    op,
     loteMp: campo(body.loteMp, 'Lote de materia prima'),
   };
+}
+
+/** De dónde salió la OP sugerida para el encabezado (se le dice a la persona en la vista previa). */
+export type OrigenOp = 'bitacora' | 'lote' | 'sap' | null;
+
+export interface OpSap {
+  AbsoluteEntry: number;
+  DocumentNumber: number;
+  ItemNo: string | null;
+}
+
+/**
+ * OP del encabezado (2026-11-25: «en el Excel no sale el dato de la OP»). La OP es opcional al abrir
+ * y hay bitácoras sin ella (p. ej. BP-0094) aunque otras del MISMO lote sí la tengan. Orden:
+ *   1. la de la bitácora desde la que se exporta;
+ *   2. la de otra bitácora del mismo lote (la primera que la tenga);
+ *   3. la OP de SAP con ese lote (U_Cod_Lote; solo lectura). Si hay varias, la del mismo artículo;
+ *      si siguen siendo varias, no se adivina: queda vacía para que la persona la escriba.
+ */
+export function elegirOpBatchRecord(
+  base: { sapOpDocNum: number | null; sapOpAbsEntry: number | null; itemCode: string | null },
+  delLote: ReadonlyArray<{ sapOpDocNum: number | null; sapOpAbsEntry: number | null }>,
+  sapPorLote: ReadonlyArray<OpSap> | null
+): { op: string; absEntry: number | null; origen: OrigenOp } {
+  if (base.sapOpDocNum) return { op: String(base.sapOpDocNum), absEntry: base.sapOpAbsEntry, origen: 'bitacora' };
+  const hermana = delLote.find((b) => b.sapOpDocNum);
+  if (hermana?.sapOpDocNum) return { op: String(hermana.sapOpDocNum), absEntry: hermana.sapOpAbsEntry, origen: 'lote' };
+  const ops = sapPorLote ?? [];
+  const delArticulo = base.itemCode ? ops.filter((x) => x.ItemNo === base.itemCode) : [];
+  const unica = ops.length === 1 ? ops[0] : delArticulo.length === 1 ? delArticulo[0] : null;
+  return unica ? { op: String(unica.DocumentNumber), absEntry: unica.AbsoluteEntry, origen: 'sap' } : { op: '', absEntry: null, origen: null };
 }
 
 /** Las bitácoras de un archivo deben ser del mismo lote (el encabezado es uno solo). */
@@ -123,8 +157,9 @@ function textoVisto(o: OrdenDetalle, v: OrdenDetalle['vistos'][number]): string 
 // Como el SGC (lib/sgc/pdf/officePdf.ts, prepareXlsxForMicrosoft), la plantilla NO pasa por una
 // librería que la lea y la reescriba: se abre el .xlsx con JSZip y solo se tocan, en su XML, las
 // celdas del encabezado, las filas nuevas desde la 10, sus estilos (se AGREGAN al final de
-// styles.xml), las celdas combinadas y el área de impresión. Logo, estilos, filas 1–9, títulos
-// que se repiten en cada página y configuración de página quedan byte a byte como en Excel.
+// styles.xml), las celdas combinadas, el área de impresión y el ajuste a una página de ancho
+// (ver ajustarPaginaUnaDeAncho). Logo, estilos, filas 1–9 y títulos que se repiten en cada página
+// quedan byte a byte como en Excel.
 // ---------------------------------------------------------------------------
 
 const SHEET = 'xl/worksheets/sheet1.xml';
@@ -241,7 +276,7 @@ export function filasBitacora(ordenes: OrdenDetalle[], e: EstilosBitacora, gener
     filas.push({ alto: Math.max(minimo, Math.ceil(texto.length / porLinea) * 16), celdas: [{ desde: 1, hasta: 10, texto, estilo }] });
   for (const o of ordenes) {
     const turno = OT_TURNO_LABEL[o.turno as OtTurno] ?? o.turno;
-    ancho(`Bitácora ${codigo(o.consecutivo)} · Turno ${turno} · Inicio ${fmtFechaHora(o.abiertaEn)} · Final ${o.cerradaEn ? fmtFechaHora(o.cerradaEn) : 'abierta'}${o.area ? ` · Área ${o.area}` : ''}`, e.seccion, 110, 20);
+    ancho(`Bitácora ${codigo(o.consecutivo)}${o.sapOpDocNum ? ` · OP ${o.sapOpDocNum}` : ''} · Turno ${turno} · Inicio ${fmtFechaHora(o.abiertaEn)} · Final ${o.cerradaEn ? fmtFechaHora(o.cerradaEn) : 'abierta'}${o.area ? ` · Área ${o.area}` : ''}`, e.seccion, 110, 20);
     const cerro = o.cierre ? `${o.cierre.nombre}${o.cierre.como === 'JEFE_PROD' ? ' (jefe de producción)' : ''}` : 'pendiente';
     // La cuenta que registró (casi siempre la de la tablet) va una vez aquí, no en cada fila.
     const cuentas = [...new Set(o.registros.map((x) => x.usuario))];
@@ -282,6 +317,45 @@ export function filasBitacora(ordenes: OrdenDetalle[], e: EstilosBitacora, gener
   return filas;
 }
 
+/**
+ * ONE PAGE WIDE (2026-11-25, Nicolás's screenshot: Excel split the sheet in two pages, A–H and I–L).
+ * The template prints at a FIXED 63 % scale (portrait, Letter, zero side margins), which only fits
+ * one page wide with the fonts and printer of the plant PC; Excel for Mac, other printers and Excel
+ * Online (the Microsoft preview) measure the columns a bit wider and cut the sheet in two.
+ * Same orientation and paper as the template (portrait, Letter), but "fit to 1 page wide, as many
+ * pages tall as needed" instead of the fixed scale, and small side/bottom margins so the printer
+ * does not clip the borders. Print titles (rows 1–8) and print area (A:K) are unchanged.
+ */
+export const BATCH_RECORD_PAGINA = {
+  orientation: 'portrait',
+  paperSize: 1, // Letter, as in the template's printer settings
+  margins: { left: 0.2, right: 0.2, top: 0.19685039370078741, bottom: 0.2, header: 0.15748031496062992, footer: 0 },
+} as const;
+
+export function ajustarPaginaUnaDeAncho(sheet: string): string {
+  let s = sheet;
+  // <sheetPr> must be the first child of <worksheet>: add fitToPage to the existing one or create it.
+  if (/<sheetPr\b/.test(s)) {
+    if (/<pageSetUpPr\b[^>]*\/>/.test(s)) {
+      s = s.replace(/<pageSetUpPr\b([^>]*?)\/>/, (_m, attrs: string) => `<pageSetUpPr${attrs.replace(/\s*fitToPage="[^"]*"/, '')} fitToPage="1"/>`);
+    } else if (/<sheetPr\b[^>]*\/>/.test(s)) {
+      s = s.replace(/<sheetPr\b([^>]*?)\/>/, '<sheetPr$1><pageSetUpPr fitToPage="1"/></sheetPr>');
+    } else {
+      s = s.replace('</sheetPr>', '<pageSetUpPr fitToPage="1"/></sheetPr>');
+    }
+  } else {
+    s = s.replace(/(<worksheet\b[^>]*>)/, '$1<sheetPr><pageSetUpPr fitToPage="1"/></sheetPr>');
+  }
+  const m = BATCH_RECORD_PAGINA.margins;
+  s = s.replace(/<pageMargins\b[^>]*\/>/, `<pageMargins left="${m.left}" right="${m.right}" top="${m.top}" bottom="${m.bottom}" header="${m.header}" footer="${m.footer}"/>`);
+  // Keep the template's r:id (printer settings); replace scale/fit/orientation.
+  s = s.replace(/<pageSetup\b([^>]*?)\/>/, (_m, attrs: string) => {
+    const rid = / r:id="[^"]*"/.exec(attrs)?.[0] ?? '';
+    return `<pageSetup paperSize="${BATCH_RECORD_PAGINA.paperSize}" fitToWidth="1" fitToHeight="0" orientation="${BATCH_RECORD_PAGINA.orientation}"${rid}/>`;
+  });
+  return s;
+}
+
 /** Genera el .xlsx sobre la plantilla del batch record (edición del XML; ver arriba). */
 export async function buildBatchRecordXlsx(enc: BatchRecordEncabezado, ordenes: OrdenDetalle[], generado: Date = new Date()): Promise<Buffer> {
   if (ordenes.length === 0) throw new OtError('No hay bitácoras para el archivo.', 400);
@@ -319,6 +393,7 @@ export async function buildBatchRecordXlsx(enc: BatchRecordEncabezado, ordenes: 
     return `<mergeCells count="${Number(n) + merges.length}">${body}${merges.map((ref) => `<mergeCell ref="${ref}"/>`).join('')}</mergeCells>`;
   });
   sheet = sheet.replace(/<dimension ref="[^"]*"\/>/, `<dimension ref="A1:K${ultima}"/>`);
+  sheet = ajustarPaginaUnaDeAncho(sheet);
 
   // Área de impresión hasta la última fila; los títulos que se repiten (1:8) quedan como en la plantilla.
   const workbook = (await leer(WORKBOOK)).replace(/(<definedName name="_xlnm\.Print_Area"[^>]*>[^<]*?\$A\$1:\$K\$)\d+(<\/definedName>)/, `$1${ultima}$2`);

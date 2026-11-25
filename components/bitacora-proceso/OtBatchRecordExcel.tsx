@@ -26,6 +26,14 @@ interface BitacoraLote {
   area: string | null;
 }
 
+/** De dónde salió la OP sugerida (2026-11-25: había bitácoras sin OP y el Excel salía sin ella). */
+const AYUDA_OP: Record<'bitacora' | 'lote' | 'sap' | 'ninguna', string> = {
+  bitacora: 'Tomada de la bitácora.',
+  lote: 'Esta bitácora no tiene OP: se tomó de otra bitácora del mismo lote. Confírmela.',
+  sap: 'Ninguna bitácora del lote tiene OP: se encontró en SAP por el lote. Confírmela.',
+  ninguna: 'Número de la orden de producción de SAP.',
+};
+
 const CAMPOS: Array<{ key: keyof Encabezado; label: string; ayuda?: string }> = [
   { key: 'producto', label: 'Producto' },
   { key: 'concentracion', label: 'Concentración', ayuda: 'Sugerida desde la descripción del producto. Confírmela.' },
@@ -100,7 +108,7 @@ export default function OtBatchRecordExcel({ company, idOrden }: { company: OtCo
   const mobile = useMediaQuery('(max-width: 48em)') ?? false;
   const [opened, setOpened] = useState(false);
   const base = `/api/bitacora-proceso/${idOrden}/batch-record?company=${company.idCompany}`;
-  const prev = useOtFetch<{ encabezado: Encabezado; sapConsultado: boolean; bitacoras: BitacoraLote[] }>(opened ? base : null);
+  const prev = useOtFetch<{ encabezado: Encabezado; opOrigen?: 'bitacora' | 'lote' | 'sap' | null; sapConsultado: boolean; bitacoras: BitacoraLote[] }>(opened ? base : null);
   const [enc, setEnc] = useState<Encabezado | null>(null);
   const [ids, setIds] = useState<string[]>([]);
   const [busy, setBusy] = useState<'vista' | 'excel' | null>(null);
@@ -221,10 +229,11 @@ export default function OtBatchRecordExcel({ company, idOrden }: { company: OtCo
                     key={c.key}
                     size='md'
                     label={c.label}
-                    description={c.ayuda}
+                    description={c.key === 'op' ? AYUDA_OP[prev.data?.opOrigen ?? 'ninguna'] : c.ayuda}
+                    error={c.key === 'op' && !enc.op.trim() ? 'Escriba la OP: no está en la bitácora, ni en otras del lote, ni se encontró en SAP por el lote.' : undefined}
                     value={enc[c.key]}
                     maxLength={120}
-                    required={c.key === 'producto' || c.key === 'lote'}
+                    required={c.key === 'producto' || c.key === 'lote' || c.key === 'op'}
                     onChange={(e) => {
                       const v = e.currentTarget.value;
                       setEnc((x) => (x ? { ...x, [c.key]: v } : x));
@@ -264,7 +273,7 @@ export default function OtBatchRecordExcel({ company, idOrden }: { company: OtCo
               <Button
                 leftSection={<IconEye size={18} />}
                 loading={busy === 'vista'}
-                disabled={!enc.producto.trim() || !enc.lote.trim() || ids.length === 0}
+                disabled={!enc.producto.trim() || !enc.lote.trim() || !enc.op.trim() || ids.length === 0}
                 onClick={verVistaPrevia}
                 data-testid='ot-batch-ver-vista'
               >
