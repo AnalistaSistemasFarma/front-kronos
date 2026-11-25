@@ -1052,6 +1052,10 @@ export default function ChatThread({
   // necesita leer el valor VIGENTE, no el del primer render.
   const stickToBottomRef = useRef(true);
   stickToBottomRef.current = stickToBottom;
+  // Turn pinned at the top after sending (see ajustarTurno): active flag and
+  // how many own messages were on screen when it was sent.
+  const turnoActivoRef = useRef(false);
+  const turnoDesdeRef = useRef(0);
   const lastCountRef = useRef(0);
 
   // Qué mensajes ya estaban cuando se abrió la conversación. Solo se animan
@@ -1073,6 +1077,7 @@ export default function ChatThread({
     usuarioMovioRef.current = false;
     lastCountRef.current = 0;
     stickToBottomRef.current = true;
+    turnoActivoRef.current = false;
     if (!stickToBottom) setStickToBottom(true);
   }
   // PARPADEO AL CAMBIAR DE HILO (2026-10-17, «a veces vuelve»): en el render
@@ -1084,6 +1089,56 @@ export default function ChatThread({
   if (yaEstaban.current === null && !thread.stale && thread.messages.length > 0) {
     yaEstaban.current = new Set(thread.messages.map((m) => m.id));
   }
+
+  /*
+   * TURN AT THE TOP (Nicolás, msg 39065, like Gemini): after sending, the new
+   * message is pinned near the top of the conversation and the reply appears
+   * below it, with empty space underneath. A spacer at the end of the list
+   * makes "the bottom" be exactly that position, so every existing
+   * stick-to-bottom path (new messages, keyboard, activity indicator) keeps
+   * the turn at the top. The spacer shrinks as the reply grows; once the
+   * reply no longer fits, the turn ends and the list stops following the
+   * bottom, so a long reply grows without yanking the view.
+   */
+  const espaciadorRef = useRef<HTMLDivElement>(null);
+  const ajustarTurno = useCallback(() => {
+    const viewport = viewportRef.current;
+    const contenido = contenidoRef.current;
+    const espaciador = espaciadorRef.current;
+    if (!viewport || !contenido || !espaciador) return;
+    const poner = (px: number) => {
+      const valor = `${Math.max(0, Math.round(px))}px`;
+      if (espaciador.style.height !== valor) espaciador.style.height = valor;
+    };
+    if (!turnoActivoRef.current) return poner(0);
+    const propios = contenido.querySelectorAll('.chat-bubble--user');
+    // Until the message just sent is on screen there is no turn to pin yet.
+    if (propios.length <= turnoDesdeRef.current) return;
+    const fila = (propios[propios.length - 1]?.closest('.chat-msg') ?? null) as HTMLElement | null;
+    if (!fila) return poner(0);
+    // Everything in scroll coordinates: where the turn starts and how tall
+    // the list is without the spacer.
+    const inicioTurno = fila.getBoundingClientRect().top - viewport.getBoundingClientRect().top + viewport.scrollTop;
+    const altoSinEspaciador = viewport.scrollHeight - espaciador.offsetHeight;
+    // 8 px under the header, like Gemini.
+    const falta = viewport.clientHeight - (altoSinEspaciador - inicioTurno) - 8;
+    let hayRespuesta = false;
+    for (let n = fila.nextElementSibling; n && !hayRespuesta; n = n.nextElementSibling) {
+      hayRespuesta = Boolean(n.querySelector('.chat-bubble--agent'));
+    }
+    // Only a REPLY that no longer fits ends the turn; a viewport made small
+    // for a moment (keyboard, sticker sheet) does not.
+    if (falta <= 0 && hayRespuesta && espaciador.offsetHeight === 0) {
+      // The reply already fills the screen: stop following the bottom.
+      turnoActivoRef.current = false;
+      stickToBottomRef.current = false;
+      setStickToBottom(false);
+    }
+    poner(falta);
+  }, []);
+  useLayoutEffect(() => {
+    ajustarTurno();
+  }, [thread.messages, thread.status, ajustarTurno]);
 
   // Autoscroll al final SOLO si el usuario ya estaba abajo: si subió a leer
   // algo, un mensaje nuevo no debe arrancarle la vista.
@@ -1190,6 +1245,7 @@ export default function ChatThread({
     if (!contenido || !viewport || typeof ResizeObserver === 'undefined') return;
 
     const observador = new ResizeObserver(() => {
+      ajustarTurno();
       // Nunca re-anclar con el dedo puesto o en plena inercia: eso era lo que
       // "subía" (o bajaba) el hilo en contra del gesto.
       if (!stickToBottomRef.current || usuarioInteractuando()) return;
@@ -1204,8 +1260,10 @@ export default function ChatThread({
       });
     });
     observador.observe(contenido);
+    // The viewport changes size with the keyboard: the turn's spacer too.
+    observador.observe(viewport);
     return () => observador.disconnect();
-  }, [claveHilo]);
+  }, [claveHilo, ajustarTurno]);
 
   // ── Arrastrar y soltar archivos sobre la conversación ────────────────────
   // El área de soltar es TODO el hilo (mensajes + compositor), no solo la caja
@@ -1231,6 +1289,8 @@ export default function ChatThread({
       // mensaje optimista no vuelva a soltar el anclaje a mitad de camino.
       usuarioMovioRef.current = false;
       stickToBottomRef.current = true;
+      turnoActivoRef.current = true;
+      turnoDesdeRef.current = contenidoRef.current?.querySelectorAll('.chat-bubble--user').length ?? 0;
       setStickToBottom(true);
       const vp = viewportRef.current;
       if (vp) vp.scrollTop = vp.scrollHeight;
@@ -1275,6 +1335,8 @@ export default function ChatThread({
     async (media: MediaParaEnviar) => {
       usuarioMovioRef.current = false;
       stickToBottomRef.current = true;
+      turnoActivoRef.current = true;
+      turnoDesdeRef.current = contenidoRef.current?.querySelectorAll('.chat-bubble--user').length ?? 0;
       setStickToBottom(true);
       const enviado = await enviarMediaHilo(media, cita);
       if (enviado) setCita(null);
@@ -1487,6 +1549,14 @@ export default function ChatThread({
               status={thread.status}
             />
           )}
+          {/* Empty space under the last turn (see ajustarTurno). The negative
+              margin cancels the Stack gap so it costs nothing when empty. */}
+          <div
+            ref={espaciadorRef}
+            className='chat-thread__espaciador-turno'
+            aria-hidden
+            style={{ height: 0, marginTop: 'calc(-1 * var(--stack-gap, 12px))', flexShrink: 0 }}
+          />
         </Stack>
       </ScrollArea>
 
