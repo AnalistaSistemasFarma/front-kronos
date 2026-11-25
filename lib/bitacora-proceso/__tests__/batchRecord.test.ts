@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import ExcelJS from 'exceljs';
 import {
+  ajustarPaginaUnaDeAncho,
   assertMismoLote,
   buildBatchRecordXlsx,
   nombreArchivoBatchRecord,
@@ -154,5 +155,40 @@ describe('Bitácora de Proceso · Excel del batch record (2026-11-24)', () => {
     await wb.xlsx.load(buf as unknown as ArrayBuffer);
     expect(wb.worksheets).toHaveLength(1);
     expect(wb.worksheets[0].rowCount).toBeGreaterThan(190);
+  });
+
+  it('prints one page wide: portrait Letter, fit to 1 page wide and unlimited pages tall (2026-11-25)', async () => {
+    const enc = { producto: 'PIPERACILINA Y TAZOBACTAM 4.5g (10 UNID. X PLEGADIZA)', concentracion: '4.5 g', lote: '1271126', op: '14062', loteMp: '' };
+    const buf = await buildBatchRecordXlsx(enc, [orden(1, '2026-11-03T11:00:00.000Z')]);
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(buf as unknown as ArrayBuffer);
+    const ps = wb.worksheets[0].pageSetup;
+    expect(ps.orientation).toBe('portrait');
+    expect(ps.paperSize).toBe(1);
+    expect(ps.fitToPage).toBe(true);
+    expect(ps.fitToWidth).toBe(1);
+    expect(ps.fitToHeight).toBe(0);
+    expect(ps.scale ?? 100).toBe(100); // no fixed 63 % scale anymore
+    expect(ps.printTitlesRow).toBe('1:8');
+    expect(ps.printArea).toMatch(/^A1:K\d+$/);
+    expect(ps.margins?.left).toBeGreaterThan(0);
+    expect(ps.margins?.right).toBeGreaterThan(0);
+
+    const JSZip = (await import('jszip')).default;
+    const sheet = await (await JSZip.loadAsync(buf)).file('xl/worksheets/sheet1.xml')!.async('string');
+    // <sheetPr> is the first child of <worksheet> (schema order) and keeps the printer settings link.
+    expect(sheet).toMatch(/<worksheet\b[^>]*><sheetPr><pageSetUpPr fitToPage="1"\/><\/sheetPr><dimension /);
+    expect(sheet).toMatch(/<pageSetup paperSize="1" fitToWidth="1" fitToHeight="0" orientation="portrait" r:id="rId1"\/>/);
+    expect(sheet).not.toContain('scale="63"');
+    expect(sheet.match(/<pageSetup\b/g)).toHaveLength(1);
+  });
+
+  it('page fit also works when the sheet already has <sheetPr>', () => {
+    const base = '<worksheet xmlns="x"><sheetPr codeName="H"><pageSetUpPr fitToPage="0" autoPageBreaks="0"/></sheetPr><pageMargins left="0" right="0" top="0" bottom="0" header="0" footer="0"/><pageSetup scale="63" orientation="portrait"/></worksheet>';
+    const out = ajustarPaginaUnaDeAncho(base);
+    expect(out).toContain('<pageSetUpPr autoPageBreaks="0" fitToPage="1"/>');
+    expect(out).toContain('<pageSetup paperSize="1" fitToWidth="1" fitToHeight="0" orientation="portrait"/>');
+    expect(ajustarPaginaUnaDeAncho('<worksheet><sheetPr codeName="H"/><pageSetup/></worksheet>')).toContain('<sheetPr codeName="H"><pageSetUpPr fitToPage="1"/></sheetPr>');
+    expect(ajustarPaginaUnaDeAncho('<worksheet><sheetPr><tabColor rgb="FF000000"/></sheetPr></worksheet>')).toContain('<tabColor rgb="FF000000"/><pageSetUpPr fitToPage="1"/></sheetPr>');
   });
 });
