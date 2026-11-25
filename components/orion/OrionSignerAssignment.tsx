@@ -17,8 +17,9 @@ import {
   TextInput,
   ThemeIcon,
   Tooltip,
+  UnstyledButton,
 } from '@mantine/core';
-import { IconArrowDown, IconArrowUp, IconCheck, IconClock, IconX } from '@tabler/icons-react';
+import { IconArrowDown, IconArrowUp, IconCheck, IconClock, IconPencil, IconX } from '@tabler/icons-react';
 import { useCallback, useEffect, useState } from 'react';
 import type { OrionParticipant, OrionParticipantType } from '../../lib/orion/participants';
 import {
@@ -176,11 +177,15 @@ export function PartnerSearch({
   };
 
   if (pending) {
+    const hasSapEmail = Boolean(pending.email);
     return (
       <Stack gap={4}>
         <Text size='xs'>
-          <b>{pending.cardName}</b> · {pending.cardCode} no tiene correo en SAP. Escriba el correo
-          donde recibirá la invitación a firmar:
+          <b>{pending.cardName}</b>
+          {pending.cardCode ? ` · ${pending.cardCode}` : ''}
+          {hasSapEmail
+            ? '. Confirme o cambie el correo donde recibirá la invitación a firmar:'
+            : ' no tiene correo en SAP. Escriba el correo donde recibirá la invitación a firmar:'}
         </Text>
         <Group gap='xs' wrap='nowrap'>
           <TextInput
@@ -220,37 +225,76 @@ export function PartnerSearch({
     );
   }
 
+  const pick = (match: PartnerOption) => {
+    try {
+      setQ('');
+      setOptions([]);
+      // Socios SAP: siempre confirmar correo (permite usar el suyo en pruebas).
+      // Usuarios SynerLink con correo: se asignan directo.
+      if (match.source === 'sap' || !match.email) {
+        setPending(match);
+        setPendingEmail(match.email || '');
+        return;
+      }
+      onPick(match);
+    } catch (err) {
+      console.error('[orion] PartnerSearch pick', err);
+      setSearchError('No se pudo asignar este socio. Intente de nuevo.');
+    }
+  };
+
   return (
     <Stack gap={4}>
-      <Autocomplete
+      <TextInput
         placeholder={
           companyId
-            ? 'Buscar socio por nombre, código o correo…'
+            ? 'Buscar socio por nombre, NIT, código o correo…'
             : 'Falta empresa de la solicitud para buscar socios'
         }
-        data={options.map((o) => ({ value: o.value, label: o.label }))}
         value={q}
-        onChange={setQ}
+        onChange={(e) => setQ(e.currentTarget.value)}
         disabled={disabled || !companyId}
-        limit={25}
         rightSection={loading ? <Loader size={14} /> : null}
-        onOptionSubmit={(value) => {
-          try {
-            const match = options.find((o) => o.value === value);
-            if (!match) return;
-            setQ('');
-            setOptions([]);
-            if (!match.email) {
-              setPending(match);
-              return;
-            }
-            onPick(match);
-          } catch (err) {
-            console.error('[orion] PartnerSearch onOptionSubmit', err);
-            setSearchError('No se pudo asignar este socio. Intente de nuevo.');
-          }
-        }}
       />
+      {options.length > 0 ? (
+        <Stack
+          gap={2}
+          style={{
+            maxHeight: 180,
+            overflowY: 'auto',
+            border: '1px solid var(--mantine-color-default-border)',
+            borderRadius: 8,
+            padding: 4,
+          }}
+        >
+          {options.map((o) => (
+            <UnstyledButton
+              key={o.value}
+              onClick={() => pick(o)}
+              disabled={disabled}
+              style={{
+                display: 'block',
+                width: '100%',
+                textAlign: 'left',
+                padding: '6px 8px',
+                borderRadius: 6,
+                fontSize: 12,
+                lineHeight: 1.35,
+              }}
+              className='orion-partner-option'
+            >
+              <Text size='xs' fw={600}>
+                {o.cardName}
+              </Text>
+              <Text size='xs' c='dimmed'>
+                {o.cardCode}
+                {o.email ? ` · ${o.email}` : ' · sin correo en SAP'}
+                {o.source === 'user' ? ' · Usuario SynerLink' : ''}
+              </Text>
+            </UnstyledButton>
+          ))}
+        </Stack>
+      ) : null}
       {searchError ? (
         <Text size='xs' c='red'>
           {searchError}
@@ -263,7 +307,9 @@ export function PartnerSearch({
       ) : null}
       {!loading && q.trim().length >= 2 && options.length === 0 && !searchError ? (
         <Text size='xs' c='dimmed'>
-          Sin socios activos en SAP que coincidan.
+          Sin socios activos en SAP de esta empresa. Pruebe con parte del nombre,
+          el NIT, el código o el correo. El socio debe existir en el SAP de la
+          compañía de la solicitud.
         </Text>
       ) : null}
     </Stack>
@@ -293,6 +339,9 @@ export default function OrionSignerAssignment({
   readOnly = false,
 }: Props) {
   const [slotSource, setSlotSource] = useState<Record<number, 'internal' | 'external'>>({});
+  const [editingEmailOrder, setEditingEmailOrder] = useState<number | null>(null);
+  const [editingEmailValue, setEditingEmailValue] = useState('');
+  const [editingEmailError, setEditingEmailError] = useState<string | null>(null);
 
   const slots = Array.from({ length: signerCount }, (_, idx) => {
     const order = idx + 1;
@@ -383,43 +432,136 @@ export default function OrionSignerAssignment({
 
                   <Box style={{ flex: 1, minWidth: 0 }}>
                     {person.email ? (
-                      <Group justify='space-between' wrap='nowrap' gap='xs' mb={6}>
-                        <Box style={{ minWidth: 0 }}>
-                          <Group gap={6} mb={2}>
-                            <Text size='sm' fw={700} lineClamp={1}>
-                              {person.name}
-                            </Text>
-                            <Badge size='xs' variant='light' color={person.type === 'external' ? 'orange' : 'blue'}>
-                              {person.type === 'external' ? 'Externo' : 'Interno'}
-                            </Badge>
-                          </Group>
-                          <Text size='xs' c='dimmed' lineClamp={1}>
-                            {person.email}
-                            {person.cardCode ? ` · ${person.cardCode}` : ''}
-                          </Text>
-                        </Box>
-                        <Group gap={6} style={{ flexShrink: 0 }}>
-                          <Badge
-                            size='sm'
-                            variant='light'
-                            color={status.color}
-                            leftSection={status.done ? <IconCheck size={12} /> : <IconClock size={12} />}
-                          >
-                            {status.label}
-                          </Badge>
-                          <Tooltip label='Quitar firmante'>
-                            <ActionIcon
+                      <Stack gap={6} mb={6}>
+                        <Group justify='space-between' wrap='nowrap' gap='xs'>
+                          <Box style={{ minWidth: 0 }}>
+                            <Group gap={6} mb={2}>
+                              <Text size='sm' fw={700} lineClamp={1}>
+                                {person.name}
+                              </Text>
+                              <Badge
+                                size='xs'
+                                variant='light'
+                                color={person.type === 'external' ? 'orange' : 'blue'}
+                              >
+                                {person.type === 'external' ? 'Externo' : 'Interno'}
+                              </Badge>
+                            </Group>
+                            {editingEmailOrder === person.order ? null : (
+                              <Text size='xs' c='dimmed' lineClamp={1}>
+                                {person.email}
+                                {person.cardCode ? ` · ${person.cardCode}` : ''}
+                              </Text>
+                            )}
+                          </Box>
+                          <Group gap={6} style={{ flexShrink: 0 }}>
+                            <Badge
                               size='sm'
-                              variant='subtle'
-                              color='red'
-                              disabled={readOnly}
-                              onClick={() => onClear(person.order)}
+                              variant='light'
+                              color={status.color}
+                              leftSection={status.done ? <IconCheck size={12} /> : <IconClock size={12} />}
                             >
-                              <IconX size={14} />
-                            </ActionIcon>
-                          </Tooltip>
+                              {status.label}
+                            </Badge>
+                            {person.type === 'external' && !readOnly && status.label !== 'Firmado' ? (
+                              <Tooltip label='Cambiar correo de invitación'>
+                                <ActionIcon
+                                  size='sm'
+                                  variant='subtle'
+                                  color='gray'
+                                  onClick={() => {
+                                    setEditingEmailOrder(person.order);
+                                    setEditingEmailValue(person.email);
+                                    setEditingEmailError(null);
+                                  }}
+                                >
+                                  <IconPencil size={14} />
+                                </ActionIcon>
+                              </Tooltip>
+                            ) : null}
+                            <Tooltip label='Quitar firmante'>
+                              <ActionIcon
+                                size='sm'
+                                variant='subtle'
+                                color='red'
+                                disabled={readOnly}
+                                onClick={() => {
+                                  setEditingEmailOrder(null);
+                                  onClear(person.order);
+                                }}
+                              >
+                                <IconX size={14} />
+                              </ActionIcon>
+                            </Tooltip>
+                          </Group>
                         </Group>
-                      </Group>
+                        {editingEmailOrder === person.order ? (
+                          <Stack gap={4}>
+                            <Text size='xs' c='dimmed'>
+                              Correo donde llegará la invitación a firmar
+                              {person.cardCode ? ` · ${person.cardCode}` : ''}
+                            </Text>
+                            <Group gap='xs' wrap='nowrap'>
+                              <TextInput
+                                size='xs'
+                                value={editingEmailValue}
+                                onChange={(e) => setEditingEmailValue(e.currentTarget.value)}
+                                onKeyDown={(e) => {
+                                  if (e.key !== 'Enter') return;
+                                  const email = editingEmailValue.trim().toLowerCase();
+                                  if (!EMAIL_RE.test(email)) {
+                                    setEditingEmailError('Escriba un correo válido.');
+                                    return;
+                                  }
+                                  onAssign(person.order, email, person.name, {
+                                    type: 'external',
+                                    cardCode: person.cardCode ?? null,
+                                  });
+                                  setEditingEmailOrder(null);
+                                  setEditingEmailError(null);
+                                }}
+                                style={{ flex: 1 }}
+                                autoFocus
+                                aria-label='Correo de invitación'
+                              />
+                              <Button
+                                size='xs'
+                                onClick={() => {
+                                  const email = editingEmailValue.trim().toLowerCase();
+                                  if (!EMAIL_RE.test(email)) {
+                                    setEditingEmailError('Escriba un correo válido.');
+                                    return;
+                                  }
+                                  onAssign(person.order, email, person.name, {
+                                    type: 'external',
+                                    cardCode: person.cardCode ?? null,
+                                  });
+                                  setEditingEmailOrder(null);
+                                  setEditingEmailError(null);
+                                }}
+                              >
+                                Guardar
+                              </Button>
+                              <Button
+                                size='xs'
+                                variant='subtle'
+                                color='gray'
+                                onClick={() => {
+                                  setEditingEmailOrder(null);
+                                  setEditingEmailError(null);
+                                }}
+                              >
+                                Cancelar
+                              </Button>
+                            </Group>
+                            {editingEmailError ? (
+                              <Text size='xs' c='red'>
+                                {editingEmailError}
+                              </Text>
+                            ) : null}
+                          </Stack>
+                        ) : null}
+                      </Stack>
                     ) : (
                       <Stack gap='xs'>
                         <SegmentedControl
