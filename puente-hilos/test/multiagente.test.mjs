@@ -83,3 +83,11 @@ test('openclaw: el encabezado lleva la ruta ABSOLUTA del historial y la invitaci
   assert.ok(e.includes(rutas.hilo));
   assert.match(e, /MENCIONARON/);
 });
+
+test('openclaw: the turn header carries the SQL safety rule (2026-11-25)', () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'hilos-regla-sql-'));
+  const rutas = rutasDelHilo(dir, 7, 40);
+  const e = textoEncabezadoOpenclaw({ agente: 'Duo', contexto: invitado, rutas, idConversation: 40, topeMs: 3_600_000 });
+  assert.match(e, /REGLA SQL/);
+  assert.match(e, /COMMIT o ROLLBACK en el MISMO lote/);
+});
