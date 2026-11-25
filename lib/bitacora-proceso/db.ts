@@ -646,7 +646,7 @@ export async function listOrdenesDelLote(db: OtDb, idCompany: number, lote: stri
     where: { id_company: idCompany, lote },
     orderBy: [{ abierta_en: 'asc' }, { consecutivo: 'asc' }],
     take: 60,
-    select: { id_orden_trabajo: true, consecutivo: true, turno: true, estado: true, abierta_en: true, cerrada_en: true, area: true },
+    select: { id_orden_trabajo: true, consecutivo: true, turno: true, estado: true, abierta_en: true, cerrada_en: true, area: true, sap_op_docnum: true, sap_op_absentry: true },
   });
   return filas.map((f) => ({
     id: f.id_orden_trabajo,
@@ -656,6 +656,8 @@ export async function listOrdenesDelLote(db: OtDb, idCompany: number, lote: stri
     abiertaEn: f.abierta_en.toISOString(),
     cerradaEn: f.cerrada_en ? f.cerrada_en.toISOString() : null,
     area: f.area,
+    sapOpDocNum: f.sap_op_docnum,
+    sapOpAbsEntry: f.sap_op_absentry,
   }));
 }
 
