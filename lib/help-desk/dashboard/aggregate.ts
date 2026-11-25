@@ -302,8 +302,32 @@ export interface HelpdeskCaseDetail {
   resolutionDays: number | null;
 }
 
+/**
+ * Dimensions a count table can drill into. The value is the SAME cleaned label
+ * the table shows (e.g. "Sin departamento" for cases without one).
+ */
+export const CASE_DIMENSIONS = {
+  department: (r: HelpdeskCaseRow) => cleanLabel(r.department, 'Sin departamento'),
+} as const;
+export type CaseDimension = keyof typeof CASE_DIMENSIONS;
+
+export interface CaseDimensionFilter {
+  dimension: CaseDimension;
+  value: string;
+}
+
+/** Reads ?dimension=&value= ; null when absent or invalid. */
+export function parseDimensionFilter(params: URLSearchParams): CaseDimensionFilter | null {
+  const dimension = params.get('dimension');
+  const value = params.get('value');
+  if (!dimension || !Object.prototype.hasOwnProperty.call(CASE_DIMENSIONS, dimension)) return null;
+  if (value == null || value.trim() === '' || value.length > 200) return null;
+  return { dimension: dimension as CaseDimension, value: value.trim() };
+}
+
 export interface HelpdeskCaseDetailResult {
   bucket: CaseBucket;
+  dimension: CaseDimensionFilter | null;
   filters: HelpdeskDashboardFilters;
   total: number;
   /** True when `cases` was cut at `limit`. */
@@ -331,15 +355,18 @@ export function toCaseDetail(row: HelpdeskCaseRow): HelpdeskCaseDetail {
   };
 }
 
-/** Cases of one KPI bucket, newest first, cut at `limit`. */
+/** Cases of one KPI bucket (optionally of one department), newest first, cut at `limit`. */
 export function buildCaseDetail(
   allRows: HelpdeskCaseRow[],
   filters: HelpdeskDashboardFilters,
   bucket: CaseBucket,
-  limit = 1000
+  limit = 1000,
+  dimension: CaseDimensionFilter | null = null
 ): HelpdeskCaseDetailResult {
+  const pick = dimension ? CASE_DIMENSIONS[dimension.dimension] : null;
   const rows = filterCases(allRows, filters)
     .filter((row) => matchesBucket(row, bucket))
+    .filter((row) => !pick || !dimension || pick(row) === dimension.value)
     .sort((a, b) => {
       const da = toDate(a.createdAt)?.getTime() ?? 0;
       const db = toDate(b.createdAt)?.getTime() ?? 0;
@@ -347,6 +374,7 @@ export function buildCaseDetail(
     });
   return {
     bucket,
+    dimension,
     filters,
     total: rows.length,
     truncated: rows.length > limit,

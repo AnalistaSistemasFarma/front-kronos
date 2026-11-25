@@ -54,6 +54,8 @@ describe('GET /api/help-desk/dashboard/cases', () => {
 
     m.canViewHelpdeskDashboard.mockResolvedValue(true);
     expect((await GET(get('?bucket=nope'))).status).toBe(400);
+    expect((await GET(get('?bucket=all&dimension=company&value=GSS'))).status).toBe(400);
+    expect((await GET(get('?bucket=all&dimension=department&value='))).status).toBe(400);
     expect(m.loadHelpdeskCaseRows).not.toHaveBeenCalled();
   });
 
@@ -66,6 +68,18 @@ describe('GET /api/help-desk/dashboard/cases', () => {
     expect(body.bucket).toBe('pending');
     expect(body.total).toBe(1);
     expect(body.cases.map((c: { id: number; subject: string }) => [c.id, c.subject])).toEqual([[1, 'Impresora']]);
+  });
+
+  it('filters by department when dimension=department', async () => {
+    m.loadHelpdeskCaseRows.mockResolvedValue([
+      { ...base, id: 1, subject: 'A', createdAt: new Date('2026-01-10T00:00:00Z'), endDate: null, statusId: 1, status: 'Abierto', companyId: 8, department: 'PRODUCCIÓN' },
+      { ...base, id: 2, subject: 'B', createdAt: new Date('2026-01-11T00:00:00Z'), endDate: null, statusId: 1, status: 'Abierto', companyId: 8, department: 'GERENCIA' },
+    ]);
+    const res = await GET(get(`?bucket=all&dimension=department&value=${encodeURIComponent('PRODUCCIÓN')}`));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.dimension).toEqual({ dimension: 'department', value: 'PRODUCCIÓN' });
+    expect(body.cases.map((c: { id: number }) => c.id)).toEqual([1]);
   });
 
   it('500 with a generic message when the query fails', async () => {

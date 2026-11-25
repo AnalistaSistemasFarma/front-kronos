@@ -18,6 +18,7 @@ import {
 import { IconAlertCircle, IconExternalLink, IconSearch } from '@tabler/icons-react';
 import type {
   CaseBucket,
+  CaseDimensionFilter,
   HelpdeskCaseDetail,
   HelpdeskCaseDetailResult,
 } from '../../../lib/help-desk/dashboard/aggregate';
@@ -76,14 +77,21 @@ function matchesSearch(c: HelpdeskCaseDetail, term: string): boolean {
   return haystack.includes(term);
 }
 
+const DIMENSION_LABELS: Record<CaseDimensionFilter['dimension'], string> = {
+  department: 'Departamento',
+};
+
 export default function HelpdeskCasesModal({
   bucket,
+  dimension = null,
   query,
   periodLabel,
   onClose,
 }: {
   /** null = closed */
   bucket: CaseBucket | null;
+  /** Optional: only the cases of one department (value = label shown in the table). */
+  dimension?: CaseDimensionFilter | null;
   /** Current filters as a query string (company, year, month). */
   query: string;
   periodLabel: string;
@@ -105,6 +113,10 @@ export default function HelpdeskCasesModal({
       try {
         const params = new URLSearchParams(query);
         params.set('bucket', bucket);
+        if (dimension) {
+          params.set('dimension', dimension.dimension);
+          params.set('value', dimension.value);
+        }
         const res = await fetch(`/api/help-desk/dashboard/cases?${params.toString()}`, { cache: 'no-store' });
         const json = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(json.error ?? 'No se pudo cargar el detalle de los casos.');
@@ -118,7 +130,7 @@ export default function HelpdeskCasesModal({
     return () => {
       cancelled = true;
     };
-  }, [bucket, query]);
+  }, [bucket, query, dimension]);
 
   const term = search.trim().toLowerCase().normalize('NFD').replace(/\p{M}/gu, '');
   const visible = useMemo(() => (data?.cases ?? []).filter((c) => matchesSearch(c, term)), [data, term]);
@@ -133,11 +145,20 @@ export default function HelpdeskCasesModal({
       title={
         <Stack gap={2}>
           <Text fw={700} size='lg'>
-            {bucket ? BUCKET_TITLES[bucket] : ''}
-            {data ? ` · ${formatNumber(data.total)}` : ''}
+            {dimension
+              ? `${DIMENSION_LABELS[dimension.dimension]}: ${dimension.value}`
+              : bucket
+                ? BUCKET_TITLES[bucket]
+                : ''}
+            {data ? ` · ${formatNumber(data.total)} ${data.total === 1 ? 'caso' : 'casos'}` : ''}
           </Text>
           <Text size='xs' c='dimmed'>
-            {bucket ? BUCKET_DESCRIPTIONS[bucket] : ''} {periodLabel}
+            {dimension
+              ? `Casos reportados por este ${DIMENSION_LABELS[dimension.dimension].toLowerCase()}.`
+              : bucket
+                ? BUCKET_DESCRIPTIONS[bucket]
+                : ''}{' '}
+            {periodLabel}
           </Text>
         </Stack>
       }
