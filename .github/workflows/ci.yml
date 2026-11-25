@@ -55,6 +55,11 @@ jobs:
         run: cp .github/dbconfig.ci.stub.js dbconfig.js
 
       - name: Chequeo de tipos (tsc --noEmit)
+        # A full check already uses ~4 GB of heap (10.7M instantiations, mostly the
+        # Prisma client); node's default limit on the runner is about that, so it
+        # sometimes dies with "heap out of memory". Give it explicit headroom.
+        env:
+          NODE_OPTIONS: --max-old-space-size=6144
         run: npx tsc --noEmit
 
       - name: Lint (eslint)
