@@ -65,6 +65,9 @@ export function useAltoVisible(alCambiar?: () => void) {
       ultimoOffset = offset;
       raiz.style.setProperty('--alto-visible', `${alto}px`);
       raiz.style.setProperty('--desplazamiento-visible', `${offset}px`);
+      // Keyboard open (the visual viewport lost more than 150 px): the
+      // composer drops the home-indicator inset (see globals.css).
+      raiz.classList?.toggle('teclado-abierto', window.innerHeight - alto > 150);
       if (!usuarioInteractuando()) avisar.current?.();
     };
 
@@ -184,6 +187,7 @@ export function useAltoVisible(alCambiar?: () => void) {
     if (tactil) window.addEventListener('focusin', alEnfocar);
 
     return () => {
+      raiz.classList?.remove('teclado-abierto');
       if (pendiente) window.cancelAnimationFrame(pendiente);
       reanclas.forEach((t) => window.clearTimeout(t));
       vv.removeEventListener('resize', tactil ? alRedimensionar : actualizar);

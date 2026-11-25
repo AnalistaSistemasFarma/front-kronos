@@ -18,8 +18,13 @@ it('coalesces viewport events and skips identical geometry; removes listeners on
     addEventListener: (name: string, fn: () => void) => listeners.set(name, fn),
     removeEventListener: (name: string) => listeners.delete(name),
   };
-  vi.stubGlobal('document', { documentElement: { style: { setProperty, removeProperty } } });
-  vi.stubGlobal('window', { visualViewport: vv,
+  const classes = new Set<string>();
+  const classList = {
+    toggle: (c: string, on: boolean) => (on ? classes.add(c) : classes.delete(c)),
+    remove: (c: string) => classes.delete(c),
+  };
+  vi.stubGlobal('document', { documentElement: { style: { setProperty, removeProperty }, classList } });
+  vi.stubGlobal('window', { visualViewport: vv, innerHeight: 720,
     requestAnimationFrame: (fn: () => void) => { frames.push(fn); return frames.length; },
     cancelAnimationFrame: vi.fn(),
   });
@@ -37,7 +42,10 @@ it('coalesces viewport events and skips identical geometry; removes listeners on
   frames.shift()!();
   expect(notify).toHaveBeenCalledTimes(2);
   expect(setProperty).toHaveBeenLastCalledWith('--desplazamiento-visible', '12px');
+  // 320 px less than the window: the keyboard is open.
+  expect(classes.has('teclado-abierto')).toBe(true);
   cleanup?.();
+  expect(classes.has('teclado-abierto')).toBe(false);
   expect(listeners.size).toBe(0);
   expect(removeProperty).toHaveBeenCalledTimes(2);
 });

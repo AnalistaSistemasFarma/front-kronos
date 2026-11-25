@@ -1843,10 +1843,17 @@ body.chat-inmersivo.con-chat-rail .chat-escritorio {
 }
 
 /* Phone: the pill sits right on the bottom safe area, with no extra gap
-   (Gemini: 0 pt above the home indicator; Nicolás msg 39036). */
+   (Gemini: 0 pt above the home indicator; Nicolás msg 39036). Needs
+   `viewportFit: 'cover'` (app/layout.tsx) or iOS reports the inset as 0 and
+   the pill lands under the home indicator (msg 39057). 8 px minimum where
+   there is no inset (Android, desktop browsers). With the keyboard open the
+   home indicator is hidden: 14 px above the keyboard, like Gemini. */
 @media (max-width: 768px) {
   .chat-thread__composer {
-    padding-bottom: env(safe-area-inset-bottom, 0px);
+    padding-bottom: max(8px, env(safe-area-inset-bottom, 0px));
+  }
+  html.teclado-abierto .chat-thread__composer {
+    padding-bottom: 14px;
   }
 }
 
@@ -1985,8 +1992,7 @@ html[data-mantine-color-scheme='dark'] .chat-bubble--user .chat-cita--burbuja {
   color: #ffffff;
 }
 
-.chat-bubble--user .chat-md__code-inline,
-.chat-bubble--user /* ── Botón de copiar en bloques de código y enlaces ──
+/* ── Botón de copiar en bloques de código y enlaces ──
    Pedido de Nicolás: "para no tener que seleccionar todo". Seleccionar un
    bloque de código a mano en el celular es incómodo y casi siempre se lleva un
    salto de línea de más. */
@@ -2051,8 +2057,14 @@ html[data-mantine-color-scheme='dark'] .chat-bubble--user .chat-cita--burbuja {
   color: #ffffff;
 }
 
-.chat-md__pre {
+/* User bubble (accent background): light code. This rule had lost its
+   `.chat-bubble--user` selector when the copy-button CSS was inserted in the
+   middle of it, so EVERY code block got white text and was invisible in light
+   mode (Nicolás, msg 39057). */
+.chat-bubble--user .chat-md__code-inline,
+.chat-bubble--user .chat-md__pre {
   background-color: rgba(255, 255, 255, 0.18);
+  border-color: rgba(255, 255, 255, 0.3);
   color: #ffffff;
 }
 
@@ -4171,6 +4183,7 @@ html[data-font='gemini'] .chat-composer__input {
   padding: 1px 5px;
   border-radius: 5px;
   background-color: var(--app-surface-raised, var(--surface-muted));
+  color: var(--app-text, var(--foreground));
 }
 
 .chat-md__pre {
@@ -4180,6 +4193,7 @@ html[data-font='gemini'] .chat-composer__input {
   overflow-x: auto;
   background-color: var(--app-surface-raised, var(--surface-muted));
   border: 1px solid var(--app-border, var(--border-subtle));
+  color: var(--app-text, var(--foreground));
 }
 
 .chat-md__code-block {
