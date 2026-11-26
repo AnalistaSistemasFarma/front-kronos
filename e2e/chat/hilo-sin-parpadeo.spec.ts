@@ -236,14 +236,20 @@ for (const pantalla of [
       await page.waitForTimeout(800);
       await medir(page);
 
-      // Escritorio: desde la columna de la izquierda, SIN desmontar el hilo
-      // (es el mismo ChatThread con otro agente). Celular: flecha de volver
-      // y tocar al otro asistente en la lista.
+      // Escritorio: desde la barra de chats, SIN desmontar el hilo (es el mismo
+      // ChatThread con otro agente). Con la barra puesta, la lista propia de la
+      // página se esconde (menú doble, 2026-11-26). Celular: flecha de volver
+      // («Volver a las carpetas») y tocar al otro asistente en la lista.
       const abrir = async (nombre: string) => {
         if (pantalla.nombre === 'celular') {
-          await page.getByRole('button', { name: 'Cerrar la conversación' }).click();
+          await page.getByRole('button', { name: 'Volver a las carpetas' }).click();
+          await page.getByRole('button', { name: `Abrir el chat con ${nombre}` }).first().click();
+          return;
         }
-        await page.getByRole('button', { name: `Abrir el chat con ${nombre}` }).first().click();
+        await page
+          .getByRole('complementary', { name: 'Chats' })
+          .getByRole('button', { name: new RegExp(`Chat con ${nombre}`) })
+          .click();
       };
 
       await abrir('Mark');
