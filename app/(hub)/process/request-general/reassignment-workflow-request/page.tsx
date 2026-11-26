@@ -122,12 +122,15 @@ const KIND_META: Record<Kind, { one: string; many: string; label: string; color:
 };
 
 type ReassignMode = 'person' | 'selected';
-type ReassignCounts = Record<Kind, number>;
+type ReassignCounts = Record<Kind, number> & { templates?: number };
+
+const templatesLabel = (n: number) => `tareas futuras de ${n} plantilla${n === 1 ? '' : 's'}`;
 
 const describeCounts = (c: ReassignCounts) =>
-  KINDS.filter((k) => c[k] > 0)
-    .map((k) => plural(c[k], k))
-    .join(' · ') || 'nada';
+  [
+    ...KINDS.filter((k) => c[k] > 0).map((k) => plural(c[k], k)),
+    ...(c.templates ? [templatesLabel(c.templates)] : []),
+  ].join(' · ') || 'nada';
 
 const tomorrowIso = () => {
   const d = new Date();
@@ -433,15 +436,10 @@ function ReassignmentBoard() {
   );
 
   const toggleItem = (item: BoardItem) =>
-    setSelection((prev) => {
-      const next = new Set(prev[item.kind]);
-      if (next.has(item.id)) next.delete(item.id);
-      else next.add(item.id);
-      return { ...prev, [item.kind]: next };
-    });
+    setSelection((prev) => setSelected(prev, [item], !prev[item.kind].has(item.id), allItems));
 
   const toggleItems = (list: BoardItem[], checked: boolean) =>
-    setSelection((prev) => setSelected(prev, list, checked));
+    setSelection((prev) => setSelected(prev, list, checked, allItems));
 
   const clearSelection = () => setSelection(emptySelection());
 
@@ -507,7 +505,9 @@ function ReassignmentBoard() {
     };
   }, [modalOpen, reassignMode, fromUserId]);
 
-  const previewTotal = preview?.counts ? preview.counts.workflows + preview.counts.tasks : 0;
+  const previewTotal = preview?.counts
+    ? preview.counts.workflows + preview.counts.tasks + (preview.counts.templates ?? 0)
+    : 0;
   const minReturnDate = tomorrowIso();
   const returnDateError =
     willReturn && dateToReturn && dateToReturn < minReturnDate ? 'La fecha de retorno debe ser posterior a hoy' : null;
@@ -843,8 +843,18 @@ function ReassignmentBoard() {
   );
 
   const selectedItems = allItems.filter((i) => isSelected(selection, i));
+  const flowSummary = new Map<number, { title: string; requests: number }>();
+  for (const i of selectedItems) {
+    if (i.kind === 'tasks' || i.flowId == null) continue;
+    const entry = flowSummary.get(i.flowId) ?? { title: i.process || `Flujo #${i.flowId}`, requests: 0 };
+    if (i.kind === 'workflows') entry.title = i.title;
+    else entry.requests += 1;
+    flowSummary.set(i.flowId, entry);
+  }
   const selectedNames: Record<Kind, string[]> = {
-    workflows: selectedItems.filter((i) => i.kind === 'workflows').map((i) => i.title),
+    workflows: [...flowSummary.values()].map(
+      (f) => `${f.title} — ${f.requests} solicitud${f.requests === 1 ? '' : 'es'}`
+    ),
     requests: selectedItems.filter((i) => i.kind === 'requests').map((i) => `${i.ref} · ${i.title}`),
     tasks: selectedItems.filter((i) => i.kind === 'tasks').map((i) => `${i.ref} · ${i.title}`),
   };
@@ -910,7 +920,12 @@ function ReassignmentBoard() {
         />
 
         {view === 'history' ? (
-          <ReassignmentHistory departmentIds={departmentIds} refreshKey={historyKey} isMobile={isMobile} />
+          <ReassignmentHistory
+            departmentIds={departmentIds}
+            refreshKey={historyKey}
+            isMobile={isMobile}
+            onReverted={reload}
+          />
         ) : (
         <>
         <Grid mt='md' gutter='sm' visibleFrom='sm'>
@@ -1130,6 +1145,15 @@ function ReassignmentBoard() {
                 </Tabs.List>
               </Tabs>
 
+              {(tab === 'requests' || tab === 'all') && (
+                <Alert icon={<IconAlertCircle size={16} />} color='blue' variant='light' radius='md' p='xs' mb='md'>
+                  <Text size='sm'>
+                    Las solicitudes se reasignan por flujo: al elegir una se cambia el líder del flujo y se
+                    marcan todas sus solicitudes abiertas.
+                  </Text>
+                </Alert>
+              )}
+
               {mobileList}
               {desktopTable}
 
@@ -1298,15 +1322,21 @@ function ReassignmentBoard() {
                             </Badge>
                           );
                         })}
+                        {(preview.counts.templates ?? 0) > 0 && (
+                          <Badge size='lg' variant='light' color='blue' styles={{ root: { textTransform: 'none' } }}>
+                            {templatesLabel(preview.counts.templates ?? 0)}
+                          </Badge>
+                        )}
                       </Group>
                       {previewTotal === 0 ? (
                         <Text size='xs' c='dimmed'>
-                          Esta persona no tiene flujos ni tareas abiertas para reasignar.
+                          Esta persona no tiene flujos, tareas abiertas ni tareas futuras para reasignar.
                         </Text>
                       ) : (
                         <Text size='xs' c='dimmed'>
                           Las solicitudes son las abiertas de los flujos que lidera: pasan con el flujo. Los demás
-                          líderes de esos flujos se conservan y los asignados de las tareas plantilla no cambian.
+                          líderes de esos flujos se conservan. La plantilla no cambia: mientras la reasignación siga
+                          activa, las tareas nuevas que le tocarían a esta persona llegan a quien recibe.
                         </Text>
                       )}
                     </Stack>
@@ -1361,12 +1391,15 @@ function ReassignmentBoard() {
             <Alert icon={<IconAlertCircle size={16} />} color='yellow' radius='md' p='xs'>
               <Text size='xs'>
                 En flujos y solicitudes se cambia el <b>líder del proceso</b>: la nueva persona queda como
-                única asignada del flujo y eso aplica a todas sus solicitudes. Los asignados de las tareas
-                del flujo no cambian.
+                única asignada del flujo y eso aplica a <b>todas sus solicitudes abiertas</b>.
                 {selectedCount.tasks > 0 ? ' Las tareas seleccionadas pasan solo esas a la nueva persona.' : ''}
               </Text>
             </Alert>
           )}
+          <Text size='xs' c='dimmed'>
+            Tareas futuras: mientras la reasignación siga activa, las tareas nuevas de esos flujos (y de las
+            tareas elegidas) que le tocarían a la persona anterior llegan a quien recibe. La plantilla no cambia.
+          </Text>
           </>
           )}
 
