@@ -164,7 +164,7 @@ const DOCX = Buffer.concat([Buffer.from('PK'), Buffer.alloc(100)]);
 
 const perms = async (actor: typeof ela) =>
   (await getOrionDraftInfo(pool, { requestId: REQ, fileId: FILE, actor, isAdmin: false })).permissions!;
-const draft = () => (h.bag.drafts as Record<string, { status: string; versionLabel: string; internalReview: { versionLabel: string; round: number; approvals: Array<{ email: string; decision: string; correctedIn?: string | null; correctionVersion?: string | null }> } }>)[FILE];
+const draft = () => (h.bag.drafts as Record<string, { status: string; versionLabel: string; internalReview: { versionLabel: string; round: number; approvals: Array<{ email: string; decision: string; correctedIn?: string | null; correctionVersion?: string | null; autoApprovedIn?: string | null }> } }>)[FILE];
 const sentTo = (email: string) => h.notifications.filter((n) => n.to.includes(email));
 
 beforeEach(() => {
@@ -237,48 +237,28 @@ describe('flujo completo de validación en Word (servicio real, BD simulada)', (
       /Primero suba la versión corregida/
     );
 
-    // 3. Sube la versión corregida: los validadores NO reciben aviso ni tarea todavía.
+    // 3. Sube la versión corregida: sin doble validación, queda validado de una vez. Ana recibe
+    // solo un aviso informativo (sin tarea) y nadie vuelve a validar.
     const before = h.notifications.length;
     const tasksBefore = h.taskOpens.length;
     await uploadOrionDraftVersion(pool, { requestId: REQ, fileId: FILE, actor: ela, content: DOCX, baseVersion: 'v0.1' });
     expect(draft().versionLabel).toBe('v0.2');
-    // Con la versión corregida arriba, ya no se marca hasta que la reenvíe.
+    expect(draft().status).toBe('VALIDADO_INTERNO');
+    expect(draft().internalReview.approvals.map((a) => [a.email, a.decision, a.autoApprovedIn ?? null])).toEqual([
+      ['ana@x.com', 'APROBADO', 'v0.2'],
+      ['beto@x.com', 'APROBADO', null],
+    ]);
     expect((await perms(ana)).canMark).toBe(false);
-    expect(h.notifications.slice(before).filter((n) => n.to.includes('ana@x.com') || n.to.includes('beto@x.com'))).toEqual([]);
+    expect(
+      h.notifications
+        .slice(before)
+        .filter((n) => n.to.includes('ana@x.com') || n.to.includes('beto@x.com'))
+        .map((n) => [n.to, n.title])
+    ).toEqual([[['ana@x.com'], 'Corrección subida: Contrato.docx']]);
     expect(h.taskOpens.length).toBe(tasksBefore);
     // Kronos detectó solo que la fecha quedó corregida (la marca pasa a "corregida").
     expect(h.marks[0].status).toBe('corregida');
-
-    // 4. Ya puede enviar; con una marca abierta no lo deja.
-    expect(await perms(ela)).toMatchObject({ canMarkFixed: true, canResendInternal: true });
-    h.marks[0].status = 'abierta';
-    await expect(resendOrionDraftInternal(pool, { requestId: REQ, fileId: FILE, actor: ela })).rejects.toThrow(/Falta atender la marca 1/);
-    await orionDraftMarkAction(pool, { requestId: REQ, fileId: FILE, actor: ela, isAdmin: false, input: { action: 'mark-fixed', markId: 1 } });
-    expect(h.marks[0].status).toBe('corregida');
-
-    // 5. Envía la corrección: UN aviso por validador y su misma tarea se reactiva (sin segundo aviso).
-    const sentBefore = h.notifications.length;
-    await resendOrionDraftInternal(pool, { requestId: REQ, fileId: FILE, actor: ela, baseVersion: 'v0.2' });
-    const sent = h.notifications.slice(sentBefore);
-    expect(sent.map((n) => [n.to, n.title])).toEqual([
-      [['ana@x.com'], 'Nueva versión para validar: Contrato.docx'],
-      [['beto@x.com'], 'Nueva versión para validar: Contrato.docx'],
-    ]);
-    expect(h.taskOpens.slice(-2)).toEqual([
-      { email: 'ana@x.com', notify: false },
-      { email: 'beto@x.com', notify: false },
-    ]);
-    expect(draft().internalReview.round).toBe(2);
-    expect(draft().internalReview.approvals.map((a) => [a.email, a.decision, a.correctedIn ?? null])).toEqual([
-      ['ana@x.com', 'PENDIENTE', 'v0.2'],
-      ['beto@x.com', 'PENDIENTE', null],
-    ]);
-
-    // 6. Ana confirma su marca y ambos validan la versión nueva.
-    await orionDraftMarkAction(pool, { requestId: REQ, fileId: FILE, actor: ana, isAdmin: false, input: { action: 'confirm', markId: 1 } });
-    await decideOrionDraftInternal(pool, { requestId: REQ, fileId: FILE, actor: ana, decision: 'approve', baseVersion: 'v0.2' });
-    await decideOrionDraftInternal(pool, { requestId: REQ, fileId: FILE, actor: beto, decision: 'approve', baseVersion: 'v0.2' });
-    expect(draft().status).toBe('VALIDADO_INTERNO');
+    expect(await perms(ela)).toMatchObject({ canResendInternal: false, canConvertPdf: true });
 
     // 7. Convertir a PDF: nace validado con los validadores del Word (sin otra validación).
     const { pdfFileId } = await convertOrionDraftToPdf(pool, { requestId: REQ, fileId: FILE, actor: ela });
@@ -306,6 +286,7 @@ describe('flujo completo de validación en Word (servicio real, BD simulada)', (
     await decideOrionDraftInternal(pool, { requestId: REQ, fileId: FILE, actor: beto, decision: 'approve' });
     expect(draft().status).toBe('VALIDADO_INTERNO');
     expect(sentTo('ela@x.com').at(-1)?.title).toBe('Validado internamente: Contrato.docx');
-    expect(await perms(ela)).toMatchObject({ canUpload: false, canConvertPdf: true });
+    // Validado: puede subir otra versión (conserva la validación) o convertir a PDF.
+    expect(await perms(ela)).toMatchObject({ canUpload: true, canConvertPdf: true });
   });
 });

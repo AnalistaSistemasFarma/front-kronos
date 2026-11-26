@@ -1515,6 +1515,14 @@ body.chat-inmersivo.con-chat-rail .chat-escritorio {
   left: 0;
 }
 
+/* En la página de chats (escritorio) la barra de chats ya lista las conversaciones a la
+   izquierda: la lista propia de la página salía al lado con los mismos chats, como un menú
+   doble (reporte de Juan, 2026-11-26). Con la barra puesta se esconde esa lista; en pantalla
+   completa (modo inmersivo) la barra se va y la lista vuelve, para no quedar sin menú. */
+body.chat-escritorio-abierto.con-chat-rail:not(.chat-inmersivo) .chat-escritorio__lateral {
+  display: none;
+}
+
 .chat-rail__cabecera {
   display: flex;
   align-items: center;
@@ -3096,6 +3104,29 @@ body.chat-escritorio-abierto {
   overflow: hidden;
 }
 
+/* Expandir / restaurar el chat: zoom tipo macOS (transición de vista sobre la ventana del
+   chat). El nombre se pone SOLO durante la animación para no interferir con el fundido de
+   claro/oscuro, que usa la misma API. */
+html.chat-ventana-animando .chat-escritorio {
+  view-transition-name: chat-ventana;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  ::view-transition-group(chat-ventana) {
+    animation-duration: 340ms;
+    animation-timing-function: cubic-bezier(0.2, 0.8, 0.2, 1);
+  }
+
+  ::view-transition-old(chat-ventana),
+  ::view-transition-new(chat-ventana) {
+    animation-duration: 340ms;
+    /* La ventana se estira como un todo (sin deformar el texto a mitad de camino). */
+    height: 100%;
+    object-fit: cover;
+    object-position: top left;
+  }
+}
+
 .chat-escritorio__lateral {
   flex: 0 0 340px;
   width: 340px;
@@ -4099,14 +4130,11 @@ html[data-font='gemini'] .chat-md__h {
 }
 
 
-/* ── Gemini message style in agent chats (Nicolás, msg 39133) ──
-   For everybody, in chats with an assistant (direct and projects):
-   - own message: neutral pill, 24 px radius, no tail, right, max ~70 %;
-   - assistant reply: no container, plain text on the page, full width, with
-     the actions row (copy, react, forward) underneath.
-   Person-to-person chats and groups keep their bubbles: there several people
-   write, and the bubble colour is what tells who said what.
-   All colours come from the --app-* tokens (light, dark, profile palette). */
+/* ── Estilo de mensajes en chats con asistente (Nicolás, msg 39133; ajuste Juan 2026-11-26) ──
+   - mensaje propio: pastilla neutra, radio 24 px, máx. ~70 %;
+   - respuesta del asistente: recuadro clásico (fondo + borde) + fila de acciones;
+   - persona a persona y grupos: burbujas de siempre.
+   Colores desde tokens --app-*. */
 .chat-thread--agente {
   --chat-pill-usuario: color-mix(in srgb, var(--app-text, #0f172a) 6%, var(--app-surface, #ffffff));
 }
@@ -4115,11 +4143,12 @@ html[data-font='gemini'] .chat-md__h {
   --chat-pill-usuario: color-mix(in srgb, var(--app-text, #f8fafc) 11%, var(--app-surface, #0f172a));
 }
 
+/* Respuestas del agente: se mantiene el recuadro clásico (fondo + borde). El
+   estilo Gemini las dejaba en texto plano y se veía “sin cuadro” en la ventanita
+   y en la página (reporte de Juan, 2026-11-26). La pastilla del usuario y la
+   fila de acciones (copiar / reaccionar) sí se quedan. */
 .chat-thread--agente .chat-bubble--agent:not(.chat-bubble--media) {
-  background-color: transparent;
-  border-color: transparent;
-  max-width: 100%;
-  padding: 2px 4px;
+  max-width: min(85%, 640px);
 }
 
 .chat-thread--agente .chat-bubble--user:not(.chat-bubble--media) {
@@ -4195,11 +4224,6 @@ html[data-font='gemini'] .chat-md__h {
 }
 
 @media (max-width: 767px) {
-  .chat-thread--agente .chat-bubble--agent:not(.chat-bubble--media) {
-    /* Text 25 pt from the screen edge, like Gemini. */
-    padding-left: 11px;
-    padding-right: 0;
-  }
   .chat-thread--agente .chat-bubble--user:not(.chat-bubble--media) {
     max-width: 80%;
   }
