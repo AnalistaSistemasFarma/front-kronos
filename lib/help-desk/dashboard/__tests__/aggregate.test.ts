@@ -184,6 +184,22 @@ describe('department drill-down', () => {
     expect(parseDimensionFilter(new URLSearchParams('dimension=department&value='))).toBeNull();
     expect(parseDimensionFilter(new URLSearchParams('dimension=toString&value=x'))).toBeNull();
     expect(parseDimensionFilter(new URLSearchParams('dimension=company&value=x'))).toBeNull();
+    expect(parseDimensionFilter(new URLSearchParams('dimension=technician&value=Rafael%20Solarte'))).toEqual({
+      dimension: 'technician',
+      value: 'Rafael Solarte',
+    });
+  });
+
+  it('technician drill-down matches the count of each bar, including cases without technician', () => {
+    const counts = aggregateHelpdeskDashboard(rows, {}, NOW).byTechnician;
+    for (const { name, total } of counts) {
+      const detail = buildCaseDetail(rows, {}, 'all', 1000, { dimension: 'technician', value: name });
+      expect(detail.total).toBe(total);
+      expect(detail.cases.every((c) => c.technician === name)).toBe(true);
+    }
+    expect(
+      buildCaseDetail(rows, {}, 'all', 1000, { dimension: 'technician', value: 'Sin técnico asignado' }).cases.map((c) => c.id)
+    ).toEqual([4]);
   });
 
   it('returns only the cases of the department, matching the count of its row', () => {

@@ -290,6 +290,25 @@ export default function HelpdeskDashboardView() {
     [technicianItems, isMobile, chartViewport.isCompact]
   );
 
+  /** Pointer cursor over the technician bars: a click opens the cases of that technician. */
+  const technicianChartOptions = useMemo(
+    () => ({
+      ...technicianChart.options,
+      onHover: (event: { native?: Event | null }, elements: unknown[]) => {
+        const target = event.native?.target as HTMLElement | null | undefined;
+        if (target) target.style.cursor = elements.length > 0 ? 'pointer' : 'default';
+      },
+    }),
+    [technicianChart.options]
+  );
+
+  const openTechnician = (index: number | null) => {
+    const item = index == null ? undefined : technicianItems[index];
+    if (!item) return;
+    setDetailDimension({ dimension: 'technician', value: item.label });
+    setDetailBucket('all');
+  };
+
   const categoryChart = useMemo(
     () =>
       buildHorizontalMultiColorBarChart(categoryItems, isMobile, {
@@ -512,7 +531,7 @@ export default function HelpdeskDashboardView() {
         <SimpleGrid cols={{ base: 1, lg: 2 }} spacing='lg'>
           <ChartCard
             title='Recuento por técnico'
-            description={`Técnico asignado${(data?.byTechnician.length ?? 0) > MAX_BARS ? ` · los ${MAX_BARS} con más casos` : ''}`}
+            description={`Técnico asignado${(data?.byTechnician.length ?? 0) > MAX_BARS ? ` · los ${MAX_BARS} con más casos` : ''} · haga clic en una barra para ver sus casos`}
             height='auto'
           >
             {loading && !data ? (
@@ -521,8 +540,9 @@ export default function HelpdeskDashboardView() {
               <ChartContainer
                 type='bar'
                 data={technicianChart.data}
-                options={technicianChart.options}
+                options={technicianChartOptions}
                 height={barHeight(technicianItems.length)}
+                onChartClick={openTechnician}
               />
             ) : (
               <Text c='dimmed' ta='center' py='md' size='sm'>
