@@ -2617,6 +2617,41 @@ html[data-mantine-color-scheme='dark'] .sl-pensando {
   }
 }
 
+/* ── iOS: NO input may zoom on focus — GLOBAL rule (2026-11-26, msg 40593) ──
+   Nicolás: «ya te había dicho que ningún input de búsqueda en iOS debería hacer
+   zoom». Safari on iPhone zooms the page when a focused text field has a
+   computed font-size below 16 px. The per-screen fixes above (composer, chat
+   panel, login) kept missing new fields (notification quick reply, Bitácora
+   search…), so this is the floor for EVERY text field on touch devices:
+   - `@media (pointer: coarse)` = phones/tablets; `@supports
+     (-webkit-touch-callout: none)` = iOS/iPadOS Safari even with a trackpad.
+     Desktop (fine pointer) keeps its compact sizes untouched.
+   - `max(16px, …)` only RAISES the size: Mantine fields keep a bigger
+     `--input-fz` (size lg/xl, PIN input) and other fields keep 1em of the
+     parent when that is already ≥ 16 px.
+   - `!important` because @mantine/core/styles.css loads AFTER this file and
+     wins ties (see `.chat-composer__input`). More specific !important rules
+     that are ≥ 16 px (composer 16/18 px, portal code 22 px) still apply.
+   - Pinch-zoom stays enabled (no `maximum-scale=1`): accessibility.
+   Guarded by e2e/ios-input-zoom.spec.ts. Do not remove or scope it down. */
+@media (pointer: coarse) {
+  input:where(:not([type='checkbox'], [type='radio'], [type='range'], [type='button'], [type='submit'], [type='reset'], [type='color'], [type='file'], [type='image'], [type='hidden'])),
+  textarea,
+  select,
+  [contenteditable]:not([contenteditable='false']) {
+    font-size: max(16px, var(--input-fz, 1em)) !important;
+  }
+}
+
+@supports (-webkit-touch-callout: none) {
+  input:where(:not([type='checkbox'], [type='radio'], [type='range'], [type='button'], [type='submit'], [type='reset'], [type='color'], [type='file'], [type='image'], [type='hidden'])),
+  textarea,
+  select,
+  [contenteditable]:not([contenteditable='false']) {
+    font-size: max(16px, var(--input-fz, 1em)) !important;
+  }
+}
+
 /* ── Animación de letras del compositor (ComposerLetterFx.tsx, 2026-09-22) ──
    Capa puramente decorativa: cada carácter que se escribe o se borra al final
    del mensaje entra/sale con un fundido + leve escala, usando SOLO
