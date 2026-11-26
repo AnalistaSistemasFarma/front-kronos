@@ -47,6 +47,7 @@ import AgentAvatar from './AgentAvatar';
 import ChatMarkdown from './ChatMarkdown';
 import ComposerLetterFx from './ComposerLetterFx';
 import { MAX_USER_MESSAGE_CHARS } from '../../lib/chat/constants';
+import { clipboardHtmlToMarkdown } from '../../lib/chat/paste-links';
 import {
   MAX_CHAT_ATTACHMENTS_PER_MESSAGE,
   formatBytes,
@@ -459,11 +460,28 @@ const ChatComposer = forwardRef<ChatComposerHandle, {
     (event: React.ClipboardEvent<HTMLTextAreaElement>) => {
       if (disabled) return;
       const pegados = Array.from(event.clipboardData?.files ?? []);
-      if (pegados.length === 0) return;
+      if (pegados.length > 0) {
+        event.preventDefault();
+        addFiles(pegados);
+        return;
+      }
+      // Links copied from Teams, GitHub or a browser carry their URL only in
+      // text/html; text/plain has just the title. Keep it as a Markdown link.
+      const markdown = clipboardHtmlToMarkdown(event.clipboardData?.getData('text/html'));
+      if (!markdown) return;
       event.preventDefault();
-      addFiles(pegados);
+      const el = event.currentTarget;
+      const start = el.selectionStart ?? value.length;
+      const end = el.selectionEnd ?? value.length;
+      const next = value.slice(0, start) + markdown + value.slice(end);
+      const cursor = start + markdown.length;
+      setValue(next);
+      requestAnimationFrame(() => {
+        el.focus();
+        el.setSelectionRange(cursor, cursor);
+      });
     },
-    [addFiles, disabled]
+    [addFiles, disabled, value]
   );
 
   /**
