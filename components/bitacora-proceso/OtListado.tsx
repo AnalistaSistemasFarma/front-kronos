@@ -10,8 +10,15 @@ import toast from 'react-hot-toast';
 import { isOtPlanta, OT_BASE_URL, OT_DIAS_CERRADAS, OT_PLANTA_COLOR, OT_PLANTA_LABEL, OT_ROL_LABEL } from '../../lib/bitacora-proceso/constants';
 
 /** Planta con su color (2026-11-26): que nadie registre en la bitácora de la otra planta. */
-function BadgePlanta({ planta, size = 'lg' }: { planta: number | null; size?: 'md' | 'lg' }) {
-  if (!isOtPlanta(planta)) return null;
+function BadgePlanta({ planta, size = 'lg', sinPlanta = false }: { planta: number | null; size?: 'md' | 'lg'; sinPlanta?: boolean }) {
+  if (!isOtPlanta(planta)) {
+    // Abiertas antes de la planta: se marcan para que el supervisor se la asigne.
+    return sinPlanta ? (
+      <Badge color='yellow' variant='outline' size={size} data-testid='ot-sin-planta'>
+        Sin planta
+      </Badge>
+    ) : null;
+  }
   return (
     <Badge color={OT_PLANTA_COLOR[planta]} variant='filled' size={size} data-testid='ot-planta-badge'>
       {OT_PLANTA_LABEL[planta]}
@@ -133,7 +140,7 @@ export default function OtListado({ company }: { company: OtCompanyAccess }) {
                 <Group justify='space-between' wrap='nowrap' mb={6}>
                   <Group gap={8} wrap='nowrap'>
                     <Text fw={700} size='lg'>{codigoOt(o.consecutivo)}</Text>
-                    <BadgePlanta planta={o.planta} />
+                    <BadgePlanta planta={o.planta} sinPlanta />
                   </Group>
                   <Group gap={6} wrap='nowrap'>
                     <Badge color='green' variant='light' size='lg'>Abierta</Badge>

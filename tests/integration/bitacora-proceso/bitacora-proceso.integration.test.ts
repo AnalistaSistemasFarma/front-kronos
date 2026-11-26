@@ -19,6 +19,7 @@ import {
   crearArea,
   crearOperador,
   crearOrden,
+  cambiarPlanta,
   crearNotaRegistro,
   crearRegistro,
   getOrdenDetalle,
@@ -471,6 +472,21 @@ describe.skipIf(!url)('Bitácora de Proceso · integración con SQL Server', () 
     expect(await status(crearNotaRegistro(prisma, o.id, BigInt(reg.id), ajeno, 'tarde', actor(ajenoId)))).toBe(409);
     det = await getOrdenDetalle(prisma, o.id, supervisor, supervisorId);
     expect(det?.registros[0].notas).toHaveLength(1);
+    // Cerrada: la planta ya no se cambia.
+    expect(await status(cambiarPlanta(prisma, o.id, supervisor, 1, actor(supervisorId)))).toBe(409);
+  });
+
+  it('2026-11-26: bitácora viva SIN planta: el supervisor se la asigna (queda quién y cuándo); un operario sin Gestión no', async () => {
+    const o = await crearOrden(prisma, orden({ producto: 'PRUEBA IT SIN PLANTA', lote: `SP-${sufijo}` }), actor(supervisorId));
+    await prisma.$executeRaw`UPDATE dbo.ot_orden_trabajo SET planta = NULL WHERE id_orden_trabajo = ${o.id}`;
+    let det = await getOrdenDetalle(prisma, o.id, supervisor, supervisorId);
+    expect(det).toMatchObject({ planta: null, plantaAsignada: null, puedeCambiarPlanta: true });
+    expect(await status(cambiarPlanta(prisma, o.id, operario, 1, actor(operarioId)))).toBe(403);
+    expect(await cambiarPlanta(prisma, o.id, supervisor, 1, actor(supervisorId))).toEqual({ planta: 1, anterior: null });
+    expect(await cambiarPlanta(prisma, o.id, supervisor, 2, actor(supervisorId))).toEqual({ planta: 2, anterior: 1 });
+    det = await getOrdenDetalle(prisma, o.id, supervisor, supervisorId);
+    expect(det?.planta).toBe(2);
+    expect(det?.plantaAsignada?.en).toBeTruthy();
   });
 
   it('TEXTO LIBRE (2026-10-17): Gestión marca la actividad; el texto es obligatorio, queda saneado y marcado en el registro aunque luego cambie el catálogo', async () => {
