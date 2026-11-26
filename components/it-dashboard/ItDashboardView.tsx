@@ -1,10 +1,8 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import Link from 'next/link';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useSession } from 'next-auth/react';
 import {
-  ActionIcon,
   Alert,
   Badge,
   Box,
@@ -19,7 +17,6 @@ import {
   Skeleton,
   Stack,
   Switch,
-  Table,
   Text,
   ThemeIcon,
   Title,
@@ -33,41 +30,21 @@ import {
   IconBuildingSkyscraper,
   IconCheck,
   IconCoin,
-  IconExternalLink,
   IconPackage,
   IconRefresh,
-  IconX,
 } from '@tabler/icons-react';
 import { buildPieChart } from '../../lib/charts/builders';
-import {
-  formatTypeName,
-  type CountedItem,
-  type ItDashboardData,
-} from '../../lib/it-dashboard/aggregate';
-import type { ItAssetListItem } from '../../lib/it-dashboard/db';
+import { formatTypeName, type CountedItem, type ItDashboardData } from '../../lib/it-dashboard/aggregate';
 import { ActividadesSection, ChartCard, KpiStatCard } from '../dashboard/actividades/ActividadesUi';
 import { ChartContainer } from '../dashboard/ChartContainer';
 import DashboardPageShell from '../dashboard/DashboardPageShell';
 import { useDashboardChartPalette } from '../dashboard/useDashboardChartPalette';
 import { useProjectColors } from '../dashboard/useProjectColors';
+import AssetListModal from './AssetListModal';
+import { formatMoney, formatNumber } from './assetFormat';
 import { iconForAssetType } from './assetTypeIcons';
 
 const ALL = 'all';
-
-const formatNumber = (n: number) => new Intl.NumberFormat('es-CO').format(n);
-const formatMoney = (n: number) =>
-  new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(n);
-
-function formatDate(value: string | Date | null): string {
-  if (!value) return '—';
-  const d = new Date(value);
-  if (Number.isNaN(d.getTime())) return '—';
-  return new Intl.DateTimeFormat('es-CO', { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'UTC' }).format(d);
-}
-
-const text = (value: string | null | undefined) => (value && value.trim() ? value.trim() : '—');
-
-type AssetListResponse = { assets: ItAssetListItem[]; limit: number; truncated: boolean };
 
 /* ------------------------------------------------------------------ */
 /* Left panel: companies                                               */
@@ -139,7 +116,7 @@ function AssetTypeTile({
   const label = formatTypeName(item.name);
   const empty = item.total === 0;
   return (
-    <Tooltip label={empty ? 'Sin activos de este tipo' : `Ver los ${label.toLowerCase()}`} withArrow>
+    <Tooltip label={empty ? 'Sin activos de este tipo' : `Ver los activos de ${label.toLowerCase()}`} withArrow>
       <UnstyledButton
         onClick={onClick}
         disabled={empty}
@@ -180,148 +157,6 @@ function AssetTypeTile({
 }
 
 /* ------------------------------------------------------------------ */
-/* Drill-down list                                                     */
-/* ------------------------------------------------------------------ */
-
-function AssetList({
-  title,
-  query,
-  onClose,
-}: {
-  title: string;
-  query: string;
-  onClose: () => void;
-}) {
-  const [data, setData] = useState<AssetListResponse | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-    setError(null);
-    fetch(`/api/it-dashboard/assets?${query}`, { cache: 'no-store' })
-      .then(async (res) => {
-        const json = await res.json().catch(() => ({}));
-        if (!res.ok) throw new Error(json.error ?? 'No se pudo cargar el listado de activos.');
-        if (!cancelled) setData(json as AssetListResponse);
-      })
-      .catch((err: unknown) => {
-        if (!cancelled) setError(err instanceof Error ? err.message : 'No se pudo conectar con el servidor.');
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [query]);
-
-  return (
-    <Card shadow='sm' padding='md' radius='md' withBorder>
-      <Group justify='space-between' mb='sm' wrap='nowrap'>
-        <Stack gap={2} style={{ minWidth: 0 }}>
-          <Title order={5}>{title}</Title>
-          <Text size='xs' c='dimmed'>
-            {loading
-              ? 'Cargando…'
-              : data
-                ? `${formatNumber(data.assets.length)} activos${data.truncated ? ` (se muestran los ${formatNumber(data.limit)} más recientes)` : ''} · haga clic en uno para abrir su hoja de vida`
-                : ''}
-          </Text>
-        </Stack>
-        <Tooltip label='Cerrar el listado' withArrow>
-          <ActionIcon variant='subtle' color='gray' onClick={onClose} aria-label='Cerrar el listado'>
-            <IconX size={18} />
-          </ActionIcon>
-        </Tooltip>
-      </Group>
-      {error ? (
-        <Alert icon={<IconAlertCircle size={20} />} color='red' variant='light' title='Error al cargar'>
-          {error}
-        </Alert>
-      ) : loading ? (
-        <Skeleton height={220} />
-      ) : (data?.assets.length ?? 0) === 0 ? (
-        <Text c='dimmed' ta='center' py='md' size='sm'>
-          Sin activos para la selección
-        </Text>
-      ) : (
-        <ScrollArea.Autosize mah={460} type='auto'>
-          <Table striped highlightOnHover withTableBorder stickyHeader miw={900}>
-            <Table.Thead>
-              <Table.Tr>
-                <Table.Th>Nombre</Table.Th>
-                <Table.Th>Etiqueta</Table.Th>
-                <Table.Th>Serial</Table.Th>
-                <Table.Th>Tipo de equipo</Table.Th>
-                <Table.Th>Modelo</Table.Th>
-                <Table.Th>Usuario</Table.Th>
-                <Table.Th>Empresa</Table.Th>
-                <Table.Th>Estado</Table.Th>
-                <Table.Th>Compra</Table.Th>
-                <Table.Th aria-label='Abrir' />
-              </Table.Tr>
-            </Table.Thead>
-            <Table.Tbody>
-              {data!.assets.map((a) => (
-                <Table.Tr key={a.id}>
-                  <Table.Td>
-                    <Text size='sm' fw={500}>
-                      {text(a.name)}
-                    </Text>
-                  </Table.Td>
-                  <Table.Td>{text(a.label)}</Table.Td>
-                  <Table.Td>{text(a.serial)}</Table.Td>
-                  <Table.Td>{text(a.subtype)}</Table.Td>
-                  <Table.Td>{text(a.model)}</Table.Td>
-                  <Table.Td>
-                    <Text size='sm'>{text(a.user)}</Text>
-                    {a.department ? (
-                      <Text size='xs' c='dimmed'>
-                        {a.department.trim()}
-                      </Text>
-                    ) : null}
-                  </Table.Td>
-                  <Table.Td>{text(a.company)}</Table.Td>
-                  <Table.Td>
-                    <Badge variant='light' color={statusColor(a.status)}>
-                      {text(a.status)}
-                    </Badge>
-                  </Table.Td>
-                  <Table.Td>{formatDate(a.purchaseDate)}</Table.Td>
-                  <Table.Td>
-                    <Tooltip label='Abrir la hoja de vida del activo' withArrow>
-                      <ActionIcon
-                        component={Link}
-                        href={`/process/help-desk/view-asset?id=${a.id}`}
-                        variant='subtle'
-                        aria-label={`Abrir el activo ${text(a.name)}`}
-                      >
-                        <IconExternalLink size={16} />
-                      </ActionIcon>
-                    </Tooltip>
-                  </Table.Td>
-                </Table.Tr>
-              ))}
-            </Table.Tbody>
-          </Table>
-        </ScrollArea.Autosize>
-      )}
-    </Card>
-  );
-}
-
-function statusColor(status: string | null): string {
-  const s = (status ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase();
-  if (s === 'en uso') return 'green';
-  if (s === 'stock') return 'blue';
-  if (s === 'en prestamo') return 'orange';
-  if (s === 'baja') return 'red';
-  return 'gray';
-}
-
-/* ------------------------------------------------------------------ */
 /* Page                                                                */
 /* ------------------------------------------------------------------ */
 
@@ -337,7 +172,6 @@ export default function ItDashboardView() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [forbidden, setForbidden] = useState(false);
-  const listRef = useRef<HTMLDivElement>(null);
 
   const filterQuery = useMemo(() => {
     const params = new URLSearchParams();
@@ -368,15 +202,6 @@ export default function ItDashboardView() {
   useEffect(() => {
     if (sessionStatus === 'authenticated') void load();
   }, [sessionStatus, load]);
-
-  // A new company or filter closes the drill-down list.
-  useEffect(() => {
-    setSelectedType(null);
-  }, [filterQuery]);
-
-  useEffect(() => {
-    if (selectedType != null) listRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  }, [selectedType]);
 
   const companyName =
     company === ALL
@@ -565,23 +390,13 @@ export default function ItDashboardView() {
                         item={t}
                         color={typeColor(t.id)}
                         selected={selectedType === t.id}
-                        onClick={() => setSelectedType((current) => (current === t.id ? null : t.id))}
+                        onClick={() => setSelectedType(t.id)}
                       />
                     ))}
                   </SimpleGrid>
                 </Box>
               )}
             </ActividadesSection>
-
-            <div ref={listRef} style={{ scrollMarginTop: 16 }}>
-              {selectedType != null && selectedTypeItem ? (
-                <AssetList
-                  title={`${formatTypeName(selectedTypeItem.name)} · ${companyName}`}
-                  query={listQuery}
-                  onClose={() => setSelectedType(null)}
-                />
-              ) : null}
-            </div>
 
             <ChartCard title='Activos por estado' description={companyName} height='auto' refreshing={loading && Boolean(data)}>
               {firstLoad ? (
@@ -599,6 +414,13 @@ export default function ItDashboardView() {
           </Stack>
         </Grid.Col>
       </Grid>
+
+      <AssetListModal
+        opened={selectedType != null && selectedTypeItem != null}
+        title={selectedTypeItem ? `${formatTypeName(selectedTypeItem.name)} · ${companyName}` : ''}
+        query={listQuery}
+        onClose={() => setSelectedType(null)}
+      />
     </DashboardPageShell>
   );
 }
