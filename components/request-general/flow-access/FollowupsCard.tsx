@@ -1,7 +1,8 @@
 'use client';
 
-import { Button, Card, Group, NumberInput, Select, SimpleGrid, Stack, Switch, Table, Text, TextInput } from '@mantine/core';
+import { Anchor, Button, Card, Group, NumberInput, Select, SimpleGrid, Stack, Switch, Table, Text, TextInput } from '@mantine/core';
 import { IconCalendarDue } from '@tabler/icons-react';
+import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import toast from 'react-hot-toast';
 
@@ -10,6 +11,10 @@ interface Data {
   tableFields: { id: number; label: string; columns: { key: string; label: string; type: string }[] }[];
   tracking: { idFormField: number; dateCol: string; extensionCol: string | null; statusCol: string | null; doneValue: string | null; warnBusinessDays: number; singleExtension: boolean } | null;
   tasks: { id: number; task: string; startDelayDays: number | null }[];
+  calendarField: number | null;
+  calendarGroupField: number | null;
+  dateFields: { id: number; label: string }[];
+  selectFields: { id: number; label: string }[];
 }
 
 /**
@@ -29,6 +34,8 @@ export function FollowupsCard({ processId }: { processId: number }) {
   const [single, setSingle] = useState(true);
   const [delays, setDelays] = useState<Record<number, number | string>>({});
   const [saving, setSaving] = useState(false);
+  const [calField, setCalField] = useState<string | null>(null);
+  const [calGroup, setCalGroup] = useState<string | null>(null);
 
   const load = async () => {
     const res = await fetch(`/api/requests-general/followups-config?id=${processId}`, { cache: 'no-store' });
@@ -45,6 +52,8 @@ export function FollowupsCard({ processId }: { processId: number }) {
     setWarn(t?.warnBusinessDays ?? 7);
     setSingle(t?.singleExtension ?? true);
     setDelays(Object.fromEntries(d.tasks.map((x) => [x.id, x.startDelayDays ?? ''])));
+    setCalField(d.calendarField ? String(d.calendarField) : null);
+    setCalGroup(d.calendarGroupField ? String(d.calendarGroupField) : null);
   };
   useEffect(() => {
     void load();
@@ -66,6 +75,8 @@ export function FollowupsCard({ processId }: { processId: number }) {
           id: processId,
           tracking: on && field && dateCol ? { idFormField: Number(field), dateCol, extensionCol: extCol, statusCol, doneValue, warnBusinessDays: warn === '' ? 7 : warn, singleExtension: single } : null,
           delays: Object.entries(delays).map(([id, days]) => ({ id: Number(id), days: days === '' ? null : days })),
+          calendarField: calField ? Number(calField) : null,
+          calendarGroupField: calGroup ? Number(calGroup) : null,
         }),
       });
       const d = await res.json().catch(() => ({}));
@@ -103,6 +114,15 @@ export function FollowupsCard({ processId }: { processId: number }) {
                 ? `Fechas comprometidas en «${data.tableFields.find((f) => f.id === data.tracking!.idFormField)?.label ?? 'tabla'}»: aviso ${data.tracking.warnBusinessDays} días hábiles antes y al vencer${data.tracking.singleExtension ? '; una sola prórroga' : ''}.`
                 : 'Sin seguimiento de fechas comprometidas.'}
             </Text>
+            {data.calendarField ? (
+              <Text size='sm'>
+                Cronograma anual por «{data.dateFields.find((f) => f.id === data.calendarField)?.label}»
+                {data.calendarGroupField ? ` y «${data.selectFields.find((f) => f.id === data.calendarGroupField)?.label}»` : ''}.{' '}
+                <Anchor component={Link} href={`/process/request-general/cronograma?id=${processId}`} size='sm'>
+                  Ver cronograma
+                </Anchor>
+              </Text>
+            ) : null}
             {delayed.map((t) => (
               <Text key={t.id} size='sm'>
                 «{t.task}» se activa {t.startDelayDays} día(s) después de cerrarse la tarea anterior.
@@ -130,6 +150,12 @@ export function FollowupsCard({ processId }: { processId: number }) {
               <Text size='sm' c='dimmed'>
                 El flujo no tiene campos tipo tabla para vigilar fechas.
               </Text>
+            )}
+            {data.dateFields.length > 0 && (
+              <SimpleGrid cols={{ base: 1, md: 2 }} spacing='xs'>
+                <Select label='Cronograma anual: campo de fecha programada' data={data.dateFields.map((f) => ({ value: String(f.id), label: f.label }))} value={calField} onChange={setCalField} clearable placeholder='Sin cronograma' />
+                <Select label='Filas del cronograma (campo lista)' data={data.selectFields.map((f) => ({ value: String(f.id), label: f.label }))} value={calGroup} onChange={setCalGroup} clearable disabled={!calField} />
+              </SimpleGrid>
             )}
             <div>
               <Text size='sm' fw={600} mb={4}>
