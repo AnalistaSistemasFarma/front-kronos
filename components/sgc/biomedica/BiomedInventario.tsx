@@ -46,6 +46,8 @@ import {
 } from '@tabler/icons-react';
 import SgcSelect from '../SgcSelect';
 import BiomedHojaVida from './BiomedHojaVida';
+import BiomedCronograma from './BiomedCronograma';
+import BiomedRepuestos from './BiomedRepuestos';
 import { sgcSend, useSgcFetch } from '../useSgcFetch';
 import type { AccionMovimiento, EquipoDto, EstadoEquipo, ResumenInventario } from '../../../lib/biomedica/inventario';
 
@@ -90,7 +92,7 @@ function query(f: Filtro) {
 }
 
 export default function BiomedInventario({ idCompany, empresa = '' }: { idCompany: number; empresa?: string }) {
-  const [vista, setVista] = useState<'equipos' | 'cobros' | 'valores'>('equipos');
+  const [vista, setVista] = useState<'equipos' | 'cronograma' | 'repuestos' | 'cobros' | 'valores'>('equipos');
   const [version, setVersion] = useState(0);
   const cambio = () => setVersion((v) => v + 1);
   return (
@@ -100,6 +102,8 @@ export default function BiomedInventario({ idCompany, empresa = '' }: { idCompan
         onChange={(v) => setVista(v as typeof vista)}
         data={[
           { value: 'equipos', label: 'Equipos' },
+          { value: 'cronograma', label: 'Cronograma de mantenimiento' },
+          { value: 'repuestos', label: 'Repuestos e insumos' },
           { value: 'cobros', label: 'Cobros (faltantes y dañados)' },
           { value: 'valores', label: 'Valores unitarios' },
         ]}
@@ -107,6 +111,8 @@ export default function BiomedInventario({ idCompany, empresa = '' }: { idCompan
         data-testid='biomed-inv-vista'
       />
       {vista === 'equipos' && <Equipos idCompany={idCompany} empresa={empresa} version={version} onCambio={cambio} />}
+      {vista === 'cronograma' && <BiomedCronograma idCompany={idCompany} />}
+      {vista === 'repuestos' && <BiomedRepuestos idCompany={idCompany} />}
       {vista === 'cobros' && <Cobros idCompany={idCompany} version={version} />}
       {vista === 'valores' && <Valores idCompany={idCompany} onCambio={cambio} />}
     </Stack>
