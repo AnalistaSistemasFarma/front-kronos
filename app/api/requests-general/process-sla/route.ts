@@ -1,4 +1,5 @@
 import { getServerSession } from 'next-auth';
+import { logFlowChange, requireFlowEditor } from '../../../../lib/workflow/flowAccess';
 import { NextResponse } from 'next/server';
 import { authOptions } from '../../auth/[...nextauth]/route';
 import { sql, withMssqlPool } from '../../../../lib/mssqlPool';
@@ -43,6 +44,9 @@ export async function PUT(req: Request) {
   const body = (await req.json().catch(() => null)) as Record<string, unknown> | null;
   const id = Number(body?.id);
   if (!Number.isInteger(id) || id <= 0) return NextResponse.json({ error: 'Subproceso no válido' }, { status: 400 });
+  // 2026-11-24: a restricted flow only accepts changes from its editors.
+  const guard = await requireFlowEditor(id);
+  if (guard instanceof Response) return guard as NextResponse;
   const parsed = parseSlaInput({ value: body?.value, unit: body?.unit, warnPct: body?.warnPct });
   if (!parsed.ok) return NextResponse.json({ error: parsed.error }, { status: 400 });
   try {
@@ -64,6 +68,7 @@ export async function PUT(req: Request) {
       return r.rowsAffected?.[0] ?? 0;
     });
     if (!updated) return NextResponse.json({ error: 'Subproceso no encontrado' }, { status: 404 });
+    await logFlowChange(id, email, 'ANS', parsed.value === null ? 'Sin ANS' : `${parsed.value} ${parsed.unit}`);
     return NextResponse.json({ ok: true });
   } catch (e) {
     if (isMissingSchema(e)) return NextResponse.json({ error: 'El ANS aún no está habilitado en esta base' }, { status: 409 });
