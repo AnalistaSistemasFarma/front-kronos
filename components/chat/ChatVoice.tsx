@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { ActionIcon, Alert, Button, Group, Popover, Stack, Text, Tooltip } from '@mantine/core';
-import { IconMicrophone, IconPhoneOff } from '@tabler/icons-react';
+import { IconHeadset, IconPhoneOff } from '@tabler/icons-react';
 import { useVoiceCall } from './useVoiceCall';
 
 /**
@@ -36,7 +36,7 @@ export default function ChatVoice({ conversationId }: { conversationId: number }
             setOpened(!opened);
             if (state === 'idle' && !elsewhere) start();
           }}>
-          <IconMicrophone size={20} />
+          <IconHeadset size={20} />
         </ActionIcon>
       </Tooltip>
     </Popover.Target>

@@ -29,6 +29,9 @@ import {
   uploadChatAttachments,
   type UploadedChatAttachment,
 } from '../../../../../../lib/chat/attachmentStorage';
+import { prepareVoiceNote } from '../../../../../../lib/chat/voice-note-server';
+import { transcribeVoiceNote, type VoiceTranscriptionResult } from '../../../../../../lib/chat/voice-transcription';
+import { buildVoiceNoteBody, type AudioContainer } from '../../../../../../lib/chat/voice-note';
 
 /**
  * Histórico de mensajes de una conversación, MÁS RECIENTES PRIMERO y paginado
@@ -166,8 +169,19 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       files = collected.files;
     }
 
+    // VOICE NOTE (2026-11-26): one checked audio file; the body is written by
+    // the server (lib/chat/voice-note.ts), any text from the client is ignored.
+    const now = new Date();
+    let voice: { container: AudioContainer; durationMs: number } | null = null;
+    if (payload.form && payload.fields.voiceNote === '1') {
+      const checked = await prepareVoiceNote(files, payload.fields.voiceDurationMs, now);
+      if (!checked.ok) return badRequest(checked.error);
+      files = [checked.file];
+      voice = { container: checked.container, durationMs: checked.durationMs };
+    }
+
     // Con adjuntos, el texto es opcional. Sin adjuntos, se exige como siempre.
-    const rawBody = typeof payload.fields.body === 'string' ? payload.fields.body : '';
+    const rawBody = voice ? '' : typeof payload.fields.body === 'string' ? payload.fields.body : '';
     let body = '';
     if (files.length === 0 || rawBody.trim() !== '') {
       const normalized = normalizeMessageBody(payload.fields.body, MAX_USER_MESSAGE_CHARS);
@@ -200,8 +214,6 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       idReplyTo = candidato;
     }
 
-    const now = new Date();
-
     // Origen de la conexión, para la auditoría. Sale de las cabeceras de la
     // petición, nunca del cuerpo; queda NULL si el proxy no las manda.
     const { clientIp, userAgent } = readClientOrigin(request);
@@ -209,6 +221,10 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     // OneDrive primero (operación externa, no transaccional). Si falla, se
     // responde sin haber escrito nada: no hay mensaje ni adjunto a medias.
     let uploaded: UploadedChatAttachment[] = [];
+    // The transcription runs alongside the upload and never fails the message.
+    const transcription: Promise<VoiceTranscriptionResult | null> = voice
+      ? transcribeVoiceNote(files[0].blob, voice.container)
+      : Promise.resolve(null);
     if (files.length > 0) {
       try {
         uploaded = await uploadChatAttachments(guard.conversationId, files, now);
@@ -219,6 +235,14 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
           { status: 502 }
         );
       }
+    }
+
+    if (voice) {
+      const result = await transcription;
+      if (result && result.status === 'failed') {
+        console.warn(`[chat] voice note transcription failed (${result.reason}); saved without transcript.`);
+      }
+      body = buildVoiceNoteBody(voice.durationMs, result?.status === 'ok' ? result.text : null);
     }
 
     // Mensaje + adjuntos + entregas + bandeja en una transacción, y el push
