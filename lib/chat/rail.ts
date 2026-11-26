@@ -415,10 +415,22 @@ export function chatCreateHref(tipo: ChatCreateKind): string {
  */
 const CHAT_RUTA_ANTES_KEY = 'synerlink:chat-ruta-antes';
 
-/** ¿Es una ruta interna de SynerLink fuera del módulo de chats? */
+/**
+ * ¿Es una ruta interna de SynerLink fuera del módulo de chats?
+ * `?from=` llega desde la URL: se rechaza todo lo que el navegador pueda leer como otro sitio
+ * (`//x`, `/\x`, tabuladores o saltos de línea que el parser de URL descarta) para que
+ * `router.push` nunca saque al usuario de SynerLink (redirección abierta).
+ */
 export function esRutaFueraDeChat(url: string): boolean {
-  const path = url.split('?')[0] ?? '';
-  return path.startsWith('/') && !path.startsWith('//') && !path.startsWith('/process/chat');
+  if (!url.startsWith('/') || /[\\\u0000-\u001f\u007f]/.test(url)) return false;
+  const path = url.split(/[?#]/)[0] ?? '';
+  if (path.startsWith('//') || path.startsWith('/process/chat')) return false;
+  try {
+    const base = 'https://synerlink.local';
+    return new URL(url, base).origin === base;
+  } catch {
+    return false;
+  }
 }
 
 /** Guarda de dónde vino al abrir/ampliar el chat a página completa. */
