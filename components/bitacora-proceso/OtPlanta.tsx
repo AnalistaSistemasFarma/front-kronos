@@ -40,8 +40,19 @@ import {
 } from '@tabler/icons-react';
 import toast from 'react-hot-toast';
 import {
+  isOtPlanta,
+  isOtTipoPersonal,
   OT_BASE_URL,
   OT_INSPECTOR_LABEL,
+  OT_NOTA_MAX,
+  OT_NOTA_MIN,
+  OT_PLANTA_COLOR,
+  OT_PLANTA_LABEL,
+  OT_PLANTAS,
+  OT_TIPO_PERSONAL_COLOR,
+  OT_TIPO_PERSONAL_LABEL,
+  OT_TIPO_PERSONAL_PLURAL,
+  OT_TIPOS_PERSONAL,
   OT_JEFE_PRODUCCION_LABEL,
   OT_LIMITS,
   OT_METODO_LABEL,
@@ -108,6 +119,13 @@ export default function OtPlanta({ company, idOrden }: { company: OtCompanyAcces
   const [confirmar, setConfirmar] = useState<Confirmar>(null);
   const supervisores = useOtFetch<{ supervisores: Confirmante[] }>(confirmar === 'SUPERVISOR' ? `/api/bitacora-proceso/supervisores?company=${company.idCompany}` : null);
   const [agregar, setAgregar] = useState(false);
+  // Nota de corrección (2026-11-26): registro al que se le está escribiendo una nota.
+  const [notaPara, setNotaPara] = useState<{ id: string; actividad: string; hora: string } | null>(null);
+  const [notaTexto, setNotaTexto] = useState('');
+  const [notaBusy, setNotaBusy] = useState(false);
+  // Planta (2026-11-26): asignarla a las bitácoras vivas sin planta, o corregirla mientras está abierta.
+  const [cambiandoPlanta, setCambiandoPlanta] = useState(false);
+  const [plantaBusy, setPlantaBusy] = useState(false);
   /** Actividad de texto libre que espera su texto (modal). */
   const [textoPara, setTextoPara] = useState<Actividad | null>(null);
   const [texto, setTexto] = useState('');
@@ -220,7 +238,16 @@ export default function OtPlanta({ company, idOrden }: { company: OtCompanyAcces
   return (
     <Stack gap='md' pb={mobile ? 88 : 0}>
       {/* Encabezado fijo: producto, lote, OP y turno siempre a la vista. */}
-      <Card withBorder shadow='sm' radius='md' p={{ base: 'sm', sm: 'md' }} pos='sticky' top={0} style={{ zIndex: 20 }} data-testid='ot-encabezado'>
+      <Card
+        withBorder
+        shadow='sm'
+        radius='md'
+        p={{ base: 'sm', sm: 'md' }}
+        pos='sticky'
+        top={0}
+        style={{ zIndex: 20, ...(isOtPlanta(o.planta) ? { borderTop: `10px solid var(--mantine-color-${OT_PLANTA_COLOR[o.planta]}-6)` } : {}) }}
+        data-testid='ot-encabezado'
+      >
         <Group justify='space-between' wrap='nowrap' align='center' gap='xs' mb={6}>
           <Breadcrumbs separator={<IconChevronRight size={14} />} style={{ flexWrap: 'wrap', minWidth: 0 }}>
             {!mobile && (
@@ -233,9 +260,16 @@ export default function OtPlanta({ company, idOrden }: { company: OtCompanyAcces
             </Anchor>
             <Text size='sm' fw={700}>{codigoOt(o.consecutivo)}</Text>
           </Breadcrumbs>
-          <Badge color={estadoColor} variant='light' size='lg' style={{ flexShrink: 0 }} data-testid='ot-estado'>
-            {estadoLabel}
-          </Badge>
+          <Group gap={6} wrap='nowrap' style={{ flexShrink: 0 }}>
+            {isOtPlanta(o.planta) && (
+              <Badge color={OT_PLANTA_COLOR[o.planta]} variant='filled' size='lg' data-testid='ot-planta-badge'>
+                {OT_PLANTA_LABEL[o.planta]}
+              </Badge>
+            )}
+            <Badge color={estadoColor} variant='light' size='lg' data-testid='ot-estado'>
+              {estadoLabel}
+            </Badge>
+          </Group>
         </Group>
         <Title order={1} size='h3' lineClamp={2}>
           {o.producto}
@@ -246,9 +280,63 @@ export default function OtPlanta({ company, idOrden }: { company: OtCompanyAcces
         </Text>
         <Text size='sm' c='dimmed'>
           Inicio <b>{fmtHora(o.abiertaEn)}</b> · Final <b>{o.cerradaEn ? fmtHora(o.cerradaEn) : '—'}</b>
-          {o.area ? ` · ${o.area}` : ''}
+          {(o.areaCatalogo ?? o.area) ? ` · ${o.areaCatalogo ?? o.area}` : ''}
         </Text>
         {abierta && <OtRelojServidor ahoraServidor={detalle.data?.ahoraServidor} />}
+        {abierta && o.puedeCambiarPlanta && (!isOtPlanta(o.planta) || cambiandoPlanta) && (
+          <Alert
+            mt='xs'
+            color={isOtPlanta(o.planta) ? 'gray' : 'yellow'}
+            icon={<IconAlertTriangle size={18} />}
+            title={isOtPlanta(o.planta) ? 'Corregir la planta' : 'Esta bitácora no tiene planta'}
+            data-testid='ot-asignar-planta'
+          >
+            <Text size='sm' mb='xs'>
+              {isOtPlanta(o.planta) ? 'Elija la planta correcta. Queda registrado quién la cambió y cuándo.' : 'Se abrió antes de que existiera la planta. Asígnela para que se vea con su color.'}
+            </Text>
+            <Group gap='sm'>
+              {OT_PLANTAS.map((p) => (
+                <Button
+                  key={p}
+                  color={OT_PLANTA_COLOR[p]}
+                  variant={o.planta === p ? 'filled' : 'light'}
+                  loading={plantaBusy}
+                  onClick={async () => {
+                    setPlantaBusy(true);
+                    try {
+                      await otSend(`/api/bitacora-proceso/${o.id}/planta?company=${company.idCompany}`, 'POST', { planta: p });
+                      toast.success(`Bitácora asignada a ${OT_PLANTA_LABEL[p]}.`);
+                      setCambiandoPlanta(false);
+                      await detalle.reload(true);
+                    } catch (e) {
+                      toast.error(e instanceof Error ? e.message : String(e));
+                    } finally {
+                      setPlantaBusy(false);
+                    }
+                  }}
+                  data-testid={`ot-asignar-planta-${p}`}
+                >
+                  {OT_PLANTA_LABEL[p]}
+                </Button>
+              ))}
+              {isOtPlanta(o.planta) && (
+                <Button variant='subtle' color='gray' onClick={() => setCambiandoPlanta(false)} disabled={plantaBusy}>
+                  Cancelar
+                </Button>
+              )}
+            </Group>
+          </Alert>
+        )}
+        {abierta && o.puedeCambiarPlanta && isOtPlanta(o.planta) && !cambiandoPlanta && (
+          <Group gap={6} mt={4}>
+            <Button size='compact-xs' variant='subtle' color='gray' onClick={() => setCambiandoPlanta(true)} data-testid='ot-cambiar-planta'>
+              Cambiar planta
+            </Button>
+            {o.plantaAsignada && (
+              <Text size='xs' c='dimmed'>Asignada por {o.plantaAsignada.por} · {fmtFechaHora(o.plantaAsignada.en)}</Text>
+            )}
+          </Group>
+        )}
       </Card>
 
       {aviso && (
@@ -298,6 +386,11 @@ export default function OtPlanta({ company, idOrden }: { company: OtCompanyAcces
                   setAviso(null);
                   setOperador({ id: p.id, nombre: p.nombre });
                 }}
+                rightSection={
+                  isOtTipoPersonal(p.tipo) && p.tipo !== 'OPERARIO' ? (
+                    <Badge size='sm' variant='light' color={OT_TIPO_PERSONAL_COLOR[p.tipo]}>{OT_TIPO_PERSONAL_LABEL[p.tipo]}</Badge>
+                  ) : undefined
+                }
                 styles={{ label: { whiteSpace: 'normal', textAlign: 'center', lineHeight: 1.2 } }}
                 data-testid='ot-operador'
               >
@@ -401,8 +494,30 @@ export default function OtPlanta({ company, idOrden }: { company: OtCompanyAcces
                         {r.textoLibre ? <><b>Texto libre:</b> {r.observacion}</> : r.observacion}
                       </Text>
                     )}
+                    {(r.notas ?? []).map((n) => (
+                      <Text key={n.id} size='sm' mt={4} c='orange.9' style={{ overflowWrap: 'anywhere' }} data-testid='ot-registro-nota'>
+                        <b>Nota {fmtHora(n.creadaEn)}</b> ({n.usuario}): {n.texto}
+                      </Text>
+                    ))}
                   </div>
-                  <Text fw={700} size='md' style={{ whiteSpace: 'nowrap' }}>{fmtHora(r.registradoEn)}</Text>
+                  <Stack gap={4} align='flex-end'>
+                    <Text fw={700} size='md' style={{ whiteSpace: 'nowrap' }}>{fmtHora(r.registradoEn)}</Text>
+                    {abierta && o.puedeRegistrar && (
+                      <Button
+                        size='xs'
+                        variant='subtle'
+                        color='orange'
+                        leftSection={<IconMessagePlus size={14} />}
+                        onClick={() => {
+                          setNotaTexto('');
+                          setNotaPara({ id: r.id, actividad: r.actividad, hora: fmtHora(r.registradoEn) });
+                        }}
+                        data-testid='ot-registro-nota-agregar'
+                      >
+                        Nota
+                      </Button>
+                    )}
+                  </Stack>
                 </Group>
               </Paper>
             ))}
@@ -491,14 +606,22 @@ export default function OtPlanta({ company, idOrden }: { company: OtCompanyAcces
         </SimpleGrid>
         {o.operadores.length > 0 && (
           <>
-            <Text size='xs' c='dimmed' tt='uppercase' fw={600} mt='sm' mb={4}>Operarios</Text>
-            <Group gap={6} wrap='wrap'>
-              {o.operadores.map((p) => (
-                <Badge key={p.id} variant='outline' size='lg' color={p.activo ? undefined : 'gray'} style={{ textTransform: 'none' }}>
-                  {p.nombre}
-                </Badge>
-              ))}
-            </Group>
+            {OT_TIPOS_PERSONAL.map((t) => {
+              const del = o.operadores.filter((p) => (isOtTipoPersonal(p.tipo) ? p.tipo : 'OPERARIO') === t);
+              if (del.length === 0) return null;
+              return (
+                <Box key={t}>
+                  <Text size='xs' c='dimmed' tt='uppercase' fw={600} mt='sm' mb={4}>{OT_TIPO_PERSONAL_PLURAL[t]}</Text>
+                  <Group gap={6} wrap='wrap'>
+                    {del.map((p) => (
+                      <Badge key={p.id} variant='outline' size='lg' color={p.activo ? (t === 'OPERARIO' ? undefined : OT_TIPO_PERSONAL_COLOR[t]) : 'gray'} style={{ textTransform: 'none' }}>
+                        {p.nombre}
+                      </Badge>
+                    ))}
+                  </Group>
+                </Box>
+              );
+            })}
           </>
         )}
         {o.operarios.length > 0 && (
@@ -630,6 +753,56 @@ export default function OtPlanta({ company, idOrden }: { company: OtCompanyAcces
           }}
         />
       )}
+      <Modal
+        opened={notaPara !== null}
+        onClose={() => !notaBusy && setNotaPara(null)}
+        title={<Text fw={700} size='lg'>Nota de corrección</Text>}
+        fullScreen={mobile}
+        size='md'
+        radius={mobile ? 0 : 'md'}
+      >
+        {notaPara && (
+          <Stack gap='sm'>
+            <Text size='sm'>
+              Registro: <b>{notaPara.actividad}</b> a las <b>{notaPara.hora}</b>. El registro no se borra ni se edita: la nota queda debajo, con la hora del servidor y su usuario.
+            </Text>
+            <Textarea
+              size='md'
+              autosize
+              minRows={3}
+              maxLength={OT_NOTA_MAX}
+              placeholder='Ej.: me equivoqué de actividad, era Alimentación tapón.'
+              value={notaTexto}
+              onChange={(e) => setNotaTexto(e.currentTarget.value)}
+              data-testid='ot-nota-texto'
+            />
+            <Group justify='flex-end'>
+              <Button variant='default' onClick={() => setNotaPara(null)} disabled={notaBusy}>Cancelar</Button>
+              <Button
+                color='orange'
+                loading={notaBusy}
+                disabled={notaTexto.trim().length < OT_NOTA_MIN}
+                onClick={async () => {
+                  setNotaBusy(true);
+                  try {
+                    await otSend(`/api/bitacora-proceso/${o.id}/registros/${notaPara.id}/notas?company=${company.idCompany}`, 'POST', { texto: notaTexto });
+                    toast.success('Nota registrada.');
+                    setNotaPara(null);
+                    await detalle.reload(true);
+                  } catch (e) {
+                    toast.error(e instanceof Error ? e.message : String(e));
+                  } finally {
+                    setNotaBusy(false);
+                  }
+                }}
+                data-testid='ot-nota-guardar'
+              >
+                Guardar nota
+              </Button>
+            </Group>
+          </Stack>
+        )}
+      </Modal>
     </Stack>
   );
 }
