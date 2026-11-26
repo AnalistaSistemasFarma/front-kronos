@@ -1,4 +1,5 @@
 import sql from 'mssql';
+import { flowEditDecision } from '../../../../lib/workflow/flowAccess';
 import { getServerSession } from 'next-auth';
 import { NextRequest, NextResponse } from 'next/server';
 import sqlConfig from '../../../../dbconfig.js';
@@ -89,9 +90,12 @@ export async function PUT(request: NextRequest) {
     const current = await pool
       .request()
       .input('id', sql.Int, taskId)
-      .query(`SELECT id, is_authorization, type_authorization FROM task_process_category WHERE id = @id;`);
+      .query(`SELECT id, is_authorization, type_authorization, id_process_category FROM task_process_category WHERE id = @id;`);
     const task = current.recordset[0];
     if (!task) return NextResponse.json({ error: 'Tarea no encontrada' }, { status: 404 });
+    // 2026-11-24: restricted flows are changed only by their editors (or a system administrator).
+    const d = await flowEditDecision(session.user.email, task.id_process_category);
+    if (!d.canEdit) return NextResponse.json({ error: d.reason }, { status: 403 });
 
     // El tipo «autorización» lo define la propia tarea (is_authorization): aquí no se cambia.
     if ((taskKind === 'authorization') !== Boolean(task.is_authorization)) {
