@@ -18,7 +18,7 @@ import { prepararCodigoOpenclaw } from './openclaw/codigo.mjs';
 import { copiarABandeja, dirBandeja, podarBandeja } from './openclaw/bandeja.mjs';
 import { jsonParaCodigo } from './politica.mjs';
 import { esNegocio } from './perfil-agente.mjs';
-import { prepareVaultTurn, updateProjectNote, vaultHeaderText } from './vault-proyectos.mjs';
+import { prepareVaultTurn, saveProjectToEngram, updateProjectNote, vaultHeaderText } from './vault-proyectos.mjs';
 import { analizarComando, AYUDA, LIMPIAR } from './comandos.mjs';
 import {
   asegurarCarpetas,
@@ -379,6 +379,10 @@ export function crearAtenderOpenclaw({
       if (vault.ok && s.ok && !abortado) {
         const nota = updateProjectNote({ dir: cfg.vaultProyectos.dir, rutas, contexto, agent: cfg.agenteNombre ?? cfg.agente, idConversation, lote, reply: cuerpo });
         if (!nota.ok || nota.reason) log(`conversación ${idConversation}: project note in the vault: ${nota.ok ? 'updated' : 'NOT updated'}${nota.reason ? ` (${nota.reason})` : ''}.`);
+        if (nota.ok && cfg.vaultProyectos.engram) {
+          const mem = await saveProjectToEngram({ engram: cfg.vaultProyectos.engram, file: nota.file });
+          if (!mem.ok) log(`conversación ${idConversation}: project memory in engram NOT saved (${mem.reason}).`);
+        }
       }
 
       if (s.tokens) {

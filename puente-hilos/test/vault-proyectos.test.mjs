@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import { cargarConfig } from '../src/config.mjs';
-import { AGENT_NOTE_FILE, INDEX_FILE, logLine, noteProjectId, prepareVaultTurn, projectSlug, updateProjectNote, vaultHeaderText } from '../src/vault-proyectos.mjs';
+import { AGENT_NOTE_FILE, INDEX_FILE, logLine, noteProjectId, prepareVaultTurn, projectSlug, saveProjectToEngram, updateProjectNote, vaultHeaderText } from '../src/vault-proyectos.mjs';
 
 function context(over = {}) {
   return {
@@ -156,3 +156,43 @@ function baseEnv(dir, extra = {}) {
     ...extra,
   };
 }
+
+test('engram: one memory per project (fixed topic), with state and latest log lines', async () => {
+  const { dir, rutas } = setup();
+  writeFileSync(path.join(rutas.trabajo, AGENT_NOTE_FILE), '### Objetivo\nOrdenar');
+  const r = updateProjectNote({ dir, rutas, contexto: context(), agent: 'Orus', idConversation: 205, lote, reply: 'hecho', now });
+  const calls = [];
+  const res = await saveProjectToEngram({ engram: { bin: '/x/engram', project: 'gsslatam-graph', dataDir: '/d' }, file: r.file, run: async (bin, args, opts) => calls.push({ bin, args, opts }), env: { HOME: '/h', PATH: '/p', SECRET: 'no' } });
+  assert.equal(res.ok, true);
+  assert.equal(calls.length, 1);
+  const { bin, args, opts } = calls[0];
+  assert.equal(bin, '/x/engram');
+  assert.equal(args[0], 'save');
+  assert.match(args[1], /Proyecto SynerLink #39/);
+  assert.match(args[2], /### Objetivo\nOrdenar/);
+  assert.match(args[2], /hecho/);
+  assert.deepEqual(args.slice(3), ['--type', 'project', '--project', 'gsslatam-graph', '--topic', 'synerlink/proyecto-39']);
+  assert.deepEqual(opts.env, { HOME: '/h', PATH: '/p', ENGRAM_DATA_DIR: '/d' });
+});
+
+test('engram: off without config and never throws', async () => {
+  assert.equal((await saveProjectToEngram({ engram: null, file: '/x' })).ok, false);
+  const { dir, rutas } = setup();
+  const r = updateProjectNote({ dir, rutas, contexto: context(), agent: 'Orus', idConversation: 205, lote, reply: 'x', now });
+  const res = await saveProjectToEngram({ engram: { bin: '/x', project: 'p' }, file: r.file, run: async () => { throw Object.assign(new Error('boom'), { stderr: 'fallo' }); } });
+  assert.equal(res.ok, false);
+  assert.match(res.reason, /fallo/);
+});
+
+test('config: engram project from the vault git repo, explicit bin, and off with «no»', () => {
+  const base = mkdtempSync(path.join(tmpdir(), 'vault-eng-'));
+  const repo = path.join(base, 'gsslatam-graph');
+  mkdirSync(path.join(repo, '.git'), { recursive: true });
+  const vault = path.join(repo, 'shared-brain', 'horus', 'proyectos', 'synerlink');
+  const bin = path.join(base, 'engram');
+  writeFileSync(bin, '');
+  const cfg = cargarConfig(baseEnv(base, { HILOS_VAULT_PROYECTOS_DIR: vault, HILOS_VAULT_ENGRAM_BIN: bin }));
+  assert.deepEqual(cfg.vaultProyectos.engram, { bin, dataDir: null, project: 'gsslatam-graph' });
+  assert.equal(cargarConfig(baseEnv(base, { HILOS_VAULT_PROYECTOS_DIR: vault, HILOS_VAULT_ENGRAM: 'no' })).vaultProyectos.engram, null);
+  assert.throws(() => cargarConfig(baseEnv(base, { HILOS_VAULT_PROYECTOS_DIR: vault, HILOS_VAULT_ENGRAM_BIN: 'engram' })), /absoluta/);
+});

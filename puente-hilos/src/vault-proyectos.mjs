@@ -22,12 +22,19 @@
  *   - «Notas propias»: never touched by the bridge (the agent's main bot or a person may write);
  *   - «Bitácora»: one short line per turn, newest first, capped.
  *
+ * ENGRAM (2026-11-26, «también en engram»): after the note, the same summary (state + latest log
+ * lines + where the note is) is saved in the agent's engram with a fixed topic
+ * `synerlink/proyecto-<id>`, so every turn UPDATES one memory per project instead of adding new ones.
+ * It uses the agent's own engram base (HILOS_VAULT_ENGRAM_* or the HILOS_CONECTORES_AGENTE_ENGRAM_*
+ * values); with openclaw the data dir must be explicit (several agents share one OS user).
+ *
  * Safety: text that looks like a secret is never written (memoria.mjs patterns); the bridge
  * only writes inside the configured folder, atomically, and never follows symlinks. It never
  * throws: a failure is logged and the reply is not affected.
  */
 import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
+import { execFile } from 'node:child_process';
 import { buscarSecreto } from './memoria.mjs';
 
 /** File the agent writes in ./trabajo with the full current «Estado» of the project. */
@@ -390,5 +397,59 @@ export function updateProjectNote({ dir, rutas, contexto, agent, idConversation,
     return { ok: true, file, stateUpdated, ...(stateNote ? { reason: `agent state ignored: ${stateNote}` } : {}) };
   } catch (e) {
     return { ok: false, reason: e?.message ?? String(e) };
+  }
+}
+
+/* ─────────────────────────────── Engram ─────────────────────────────── */
+
+export const ENGRAM_TIMEOUT_MS = 20_000;
+export const MAX_ENGRAM_STATE_CHARS = 6_000;
+export const ENGRAM_LOG_LINES = 5;
+
+/** Topic key of a project in engram: one memory per project, updated on every turn. */
+export const engramTopic = (idProject) => `synerlink/proyecto-${idProject}`;
+
+/** Title and content of the engram memory, from the note just written. Pure. */
+export function engramMemory({ noteText, file }) {
+  const id = noteProjectId(noteText);
+  const name = frontmatterValue(noteText, 'nombre') ?? `Proyecto ${id}`;
+  const company = frontmatterValue(noteText, 'empresa') ?? '—';
+  const p = parseNote(noteText);
+  const state = cut(p.state?.trim() || EMPTY_STATE, MAX_ENGRAM_STATE_CHARS);
+  const content = [
+    `Proyecto de SynerLink #${id} «${oneLine(name)}» (empresa ${oneLine(company)}).`,
+    `Nota ordenada en el vault de Obsidian: ${file}`,
+    '',
+    '## Estado',
+    state,
+    '',
+    '## Últimos turnos',
+    ...(p.logLines.length ? p.logLines.slice(0, ENGRAM_LOG_LINES) : ['- (sin turnos todavía)']),
+  ].join('\n');
+  return { title: `Proyecto SynerLink #${id}: ${cut(oneLine(name), 80)}`, content, topic: engramTopic(id) };
+}
+
+function runFile(bin, args, opts) {
+  return new Promise((resolve, reject) => {
+    execFile(bin, args, opts, (err, stdout, stderr) => (err ? reject(Object.assign(err, { stderr })) : resolve({ stdout, stderr })));
+  });
+}
+
+/**
+ * Saves (upserts by topic) the project memory in the agent's engram. Never throws.
+ * @param {{ engram: { bin: string, project: string, dataDir?: string|null }|null, file: string, run?: Function, env?: object }} o
+ */
+export async function saveProjectToEngram({ engram, file, run = runFile, env = process.env }) {
+  if (!engram?.bin || !engram?.project || !file) return { ok: false, reason: 'off' };
+  try {
+    const noteText = readPlain(file);
+    if (!noteText || noteProjectId(noteText) === null) return { ok: false, reason: 'note not found' };
+    const m = engramMemory({ noteText, file });
+    if (buscarSecreto(`${m.title}\n${m.content}`)) return { ok: false, reason: 'looked like it had a secret; not saved' };
+    const childEnv = { HOME: env.HOME, PATH: env.PATH ?? '/usr/bin:/bin', ...(engram.dataDir ? { ENGRAM_DATA_DIR: engram.dataDir } : {}) };
+    await run(engram.bin, ['save', m.title, m.content, '--type', 'project', '--project', engram.project, '--topic', m.topic], { env: childEnv, timeout: ENGRAM_TIMEOUT_MS, maxBuffer: 256 * 1024 });
+    return { ok: true, topic: m.topic };
+  } catch (e) {
+    return { ok: false, reason: oneLine(e?.stderr || e?.message || e).slice(0, 300) };
   }
 }

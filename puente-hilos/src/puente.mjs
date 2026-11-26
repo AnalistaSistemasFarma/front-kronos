@@ -57,7 +57,7 @@ import { crearClienteSynerLink } from './synerlink.mjs';
 import { crearMedidorCuota } from './cuota.mjs';
 import { carpetaAgenteOpenclaw, crearLectorCredencialOpenclaw } from './openclaw/credencial.mjs';
 import { crearArchivador, textoArchivarProyecto } from './archivar-proyecto.mjs';
-import { prepareVaultTurn, updateProjectNote, vaultHeaderText } from './vault-proyectos.mjs';
+import { prepareVaultTurn, saveProjectToEngram, updateProjectNote, vaultHeaderText } from './vault-proyectos.mjs';
 import { prepararAdjuntos } from './adjuntos-salida.mjs';
 import { archivosDelTurno, archivosModificadosDesde, crearSupervisor, duracionLegible, errorSinReintento, PROMPT_CONTINUACION, PROMPT_REINTENTO_ERROR, textoAvisoProgreso, textoCorte, TEXTO_ERROR_FINAL, textoTiempoTurno } from './progreso.mjs';
 import { convertirHtmlAPdf, convertirMarcasPdf, recursosDePlugins, resolverChrome, textoPdf } from './pdf.mjs';
@@ -876,6 +876,10 @@ export function crearPuente({ cfg, synerlink, estado, correr = correrTurno, conv
       if (vault.ok && r.resultado?.ok) {
         const nota = updateProjectNote({ dir: cfg.vaultProyectos.dir, rutas, contexto, agent: agenteNombre, idConversation, lote, reply: cuerpo, secret: codigo?.token ?? null });
         if (!nota.ok || nota.reason) log(`conversación ${idConversation}: project note in the vault: ${nota.ok ? 'updated' : 'NOT updated'}${nota.reason ? ` (${nota.reason})` : ''}.`);
+        if (nota.ok && cfg.vaultProyectos.engram) {
+          const mem = await saveProjectToEngram({ engram: cfg.vaultProyectos.engram, file: nota.file });
+          if (!mem.ok) log(`conversación ${idConversation}: project memory in engram NOT saved (${mem.reason}).`);
+        }
       }
 
       const fin = new Date();
