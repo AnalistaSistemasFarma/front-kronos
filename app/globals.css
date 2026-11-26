@@ -1515,6 +1515,14 @@ body.chat-inmersivo.con-chat-rail .chat-escritorio {
   left: 0;
 }
 
+/* En la página de chats (escritorio) la barra de chats ya lista las conversaciones a la
+   izquierda: la lista propia de la página salía al lado con los mismos chats, como un menú
+   doble (reporte de Juan, 2026-11-26). Con la barra puesta se esconde esa lista; en pantalla
+   completa (modo inmersivo) la barra se va y la lista vuelve, para no quedar sin menú. */
+body.chat-escritorio-abierto.con-chat-rail:not(.chat-inmersivo) .chat-escritorio__lateral {
+  display: none;
+}
+
 .chat-rail__cabecera {
   display: flex;
   align-items: center;
@@ -2991,6 +2999,29 @@ html[data-mantine-color-scheme='dark'] .sl-pensando {
 /* Mientras el marco está puesto, la página de atrás no se desplaza. */
 body.chat-escritorio-abierto {
   overflow: hidden;
+}
+
+/* Expandir / restaurar el chat: zoom tipo macOS (transición de vista sobre la ventana del
+   chat). El nombre se pone SOLO durante la animación para no interferir con el fundido de
+   claro/oscuro, que usa la misma API. */
+html.chat-ventana-animando .chat-escritorio {
+  view-transition-name: chat-ventana;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  ::view-transition-group(chat-ventana) {
+    animation-duration: 340ms;
+    animation-timing-function: cubic-bezier(0.2, 0.8, 0.2, 1);
+  }
+
+  ::view-transition-old(chat-ventana),
+  ::view-transition-new(chat-ventana) {
+    animation-duration: 340ms;
+    /* La ventana se estira como un todo (sin deformar el texto a mitad de camino). */
+    height: 100%;
+    object-fit: cover;
+    object-position: top left;
+  }
 }
 
 .chat-escritorio__lateral {

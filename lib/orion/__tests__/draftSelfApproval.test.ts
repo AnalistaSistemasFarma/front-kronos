@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest';
 import {
   applyDraftInternalDecision,
   applyDraftNewVersion,
-  applyDraftResendInternal,
   applyDraftSelfApproval,
   applyDraftSubmitInternal,
   createDraftState,
@@ -60,7 +59,7 @@ describe('Word: la preparadora también valida', () => {
     expect(fin.status).toBe('VALIDADO_INTERNO');
   });
 
-  it('tras una corrección, al reenviar su aprobación queda sobre la versión nueva', () => {
+  it('tras una corrección, subir la versión corregida deja el Word validado (sin reenviar)', () => {
     let s = enviar([elaV, anaV]);
     s = applyDraftInternalDecision(s, { actor: ana, decision: 'return', comment: 'Ajustar', baseVersion: 'v0.1' });
     expect(draftReviewPhase(s)).toBe('correccion');
@@ -74,9 +73,12 @@ describe('Word: la preparadora también valida', () => {
         createdAt: '2026-11-03T11:00:00.000Z',
       },
     });
-    s = applyDraftSelfApproval(applyDraftResendInternal(s, { actor: ela }), ela);
-    expect(pendingDraftValidators(s).map((a) => a.email)).toEqual(['ana@x.com']);
-    expect(s.internalReview?.approvals.find((a) => a.email === 'ela@x.com')?.approvedVersion).toBe(s.versionLabel);
+    expect(s.status).toBe('VALIDADO_INTERNO');
+    expect(pendingDraftValidators(s)).toEqual([]);
+    expect(s.internalReview?.approvals.find((a) => a.email === 'ana@x.com')).toMatchObject({
+      decision: 'APROBADO',
+      autoApprovedIn: s.versionLabel,
+    });
   });
 
   it('si no es validadora no cambia nada', () => {

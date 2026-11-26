@@ -39,6 +39,7 @@ import dynamic from 'next/dynamic';
 // El panel (hilo, editor, voz, markdown) solo se descarga al abrir un asistente: la barra
 // va en la cabecera de TODAS las páginas.
 const AgentChatPanel = dynamic(() => import('./AgentChatPanel'), { ssr: false });
+import type { FloatingConversation } from './AgentChatPanel';
 import { useChatOverview } from './useChatOverview';
 import { useChatPins } from './useChatPins';
 import { useTituloDeEstado } from './useTituloDeEstado';
@@ -62,6 +63,7 @@ import {
   buildRailSections,
   conversationKey,
   formatUnread,
+  guardarRutaAntesDeChat,
   railItemHref,
   railOpenDetail,
   totalUnread,
@@ -254,6 +256,8 @@ const RailRow = memo(function RailRow({
         <Tooltip label={tooltip} position='right' withArrow openDelay={150}>
           <UnstyledButton
             className={`chat-rail__icono${activo ? ' chat-rail__icono--activo' : ''}`}
+            // Destino de la animación "genio" de la ventana flotante (components/chat/genie.ts).
+            data-chat-key={item.key}
             onClick={() => onOpen(item)}
             aria-label={etiqueta}
             aria-current={activo ? 'page' : undefined}
@@ -272,6 +276,7 @@ const RailRow = memo(function RailRow({
     <li className={`chat-rail__fila${activo ? ' chat-rail__fila--activa' : ''}`}>
       <UnstyledButton
         className='chat-rail__fila-boton'
+        data-chat-key={item.key}
         onClick={() => onOpen(item)}
         aria-label={etiqueta}
         aria-current={activo ? 'page' : undefined}
@@ -409,9 +414,11 @@ export default function ChatRail({
   const tactil = Boolean(useMediaQuery('(pointer: coarse)'));
   const [busqueda, setBusqueda] = useState('');
   const [openAgentId, setOpenAgentId] = useState<number | null>(null);
+  // Chat con una persona o un grupo abierto en la ventanita flotante (en escritorio).
+  const [openConversationId, setOpenConversationId] = useState<number | null>(null);
   // Tras abrirlo una vez se queda montado (conserva la animación de cierre y el estado).
   const [panelUsado, setPanelUsado] = useState(false);
-  if (openAgentId !== null && !panelUsado) setPanelUsado(true);
+  if ((openAgentId !== null || openConversationId !== null) && !panelUsado) setPanelUsado(true);
   const buscadorRef = useRef<HTMLInputElement>(null);
   const enfocarBuscador = useRef(false);
 
@@ -461,14 +468,40 @@ export default function ChatRail({
   const pendientes = useMemo(() => totalUnread(items), [items]);
 
   const activeKey = useMemo(
-    () => (openAgentId !== null ? agentKey(openAgentId) : claveActivaDeRuta(pathname, items)),
-    [openAgentId, pathname, items]
+    () =>
+      openAgentId !== null
+        ? agentKey(openAgentId)
+        : openConversationId !== null
+          ? conversationKey(openConversationId)
+          : claveActivaDeRuta(pathname, items),
+    [openAgentId, openConversationId, pathname, items]
   );
 
   const openAgent = useMemo(
     () => overview.agents.find((a) => a.idAgent === openAgentId) ?? null,
     [overview.agents, openAgentId]
   );
+
+  // La persona o el grupo de la ventanita, con lo que necesita el hilo (participantes para el
+  // `@` del grupo, zumbidos silenciados de la persona).
+  const openConversation = useMemo<FloatingConversation | null>(() => {
+    if (openConversationId === null) return null;
+    const item = items.find((i) => i.kind !== 'agent' && i.idConversation === openConversationId);
+    if (!item || item.kind === 'agent') return null;
+    const datos =
+      item.kind === 'group'
+        ? overview.groups.find((g) => g.id === openConversationId)
+        : overview.people.find((p) => p.id === openConversationId);
+    return {
+      kind: item.kind,
+      idConversation: openConversationId,
+      name: item.name,
+      avatarCode: item.avatarCode,
+      avatarUrl: item.avatarUrl,
+      participants: datos?.participants ?? null,
+      nudgesMuted: Boolean(datos?.nudgesMuted),
+    };
+  }, [openConversationId, items, overview.groups, overview.people]);
 
   const hayChats = items.length > 0;
   const barraFija = visible && hayChats && enCelular === false;
@@ -558,18 +591,38 @@ export default function ChatRail({
         });
         if (!window.dispatchEvent(evento)) {
           setOpenAgentId(null);
+          setOpenConversationId(null);
           return;
         }
       }
 
       if (item.kind === 'agent' && !enCelularRef.current && item.idAgent) {
         const id = item.idAgent;
+        setOpenConversationId(null);
         setOpenAgentId((actual) => (actual === id ? null : id));
         return;
       }
 
+      // Personas y grupos también se abren en la ventanita flotante en escritorio (como los
+      // asistentes); en el celular siguen yendo a la página del chat.
+      if (item.kind !== 'agent' && !enCelularRef.current && item.idConversation) {
+        const id = item.idConversation;
+        setOpenAgentId(null);
+        setOpenConversationId((actual) => (actual === id ? null : id));
+        return;
+      }
+
       setOpenAgentId(null);
-      router.push(railItemHref(item));
+      setOpenConversationId(null);
+      // Desde otra pantalla (p. ej. Solicitudes): al cerrar el chat ampliado vuelve ahí.
+      let destino = railItemHref(item);
+      if (!pathnameRef.current.startsWith('/process/chat')) {
+        const desde = `${window.location.pathname}${window.location.search}`;
+        guardarRutaAntesDeChat(desde);
+        const sep = destino.includes('?') ? '&' : '?';
+        destino = `${destino}${sep}from=${encodeURIComponent(desde)}`;
+      }
+      router.push(destino);
     },
     [router]
   );
@@ -593,6 +646,7 @@ export default function ChatRail({
     (tipo: ChatCreateKind) => {
       setDrawerAbierto(false);
       setOpenAgentId(null);
+      setOpenConversationId(null);
       if (pathnameRef.current.startsWith('/process/chat')) {
         const evento = new CustomEvent<ChatCreateDetail>(CHAT_RAIL_CREATE_EVENT, {
           detail: { tipo },
@@ -670,9 +724,14 @@ export default function ChatRail({
   const panel = panelUsado && (
     <AgentChatPanel
       agent={openAgent}
+      conversation={openAgent ? null : openConversation}
+      currentUserId={session?.user?.id}
       status={openAgent ? overview.statusByAgent.get(openAgent.idAgent) ?? null : null}
-      opened={openAgent !== null}
-      onClose={() => setOpenAgentId(null)}
+      opened={openAgent !== null || openConversation !== null}
+      onClose={() => {
+        setOpenAgentId(null);
+        setOpenConversationId(null);
+      }}
     />
   );
 

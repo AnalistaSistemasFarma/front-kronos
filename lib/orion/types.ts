@@ -103,6 +103,11 @@ export type OrionReviewApproval = {
   correctionVersion?: string | null;
   /** Tablero Word: subversión en la que la preparadora resolvió su pedido (vuelve a revisar). */
   correctedIn?: string | null;
+  /**
+   * Tablero Word: subversión corregida con la que su pedido de corrección quedó aprobado solo
+   * (sin volver a revisar). Al subir la corrección, el documento queda validado.
+   */
+  autoApprovedIn?: string | null;
 };
 
 /** Validación previa a firma (validadores en secuencia configurados por flujo). */

@@ -39,7 +39,11 @@ export default function RecuperacionActualizacion() {
   }, []);
 
   useEffect(() => {
-    if (!BUILD_CLIENTE) return;
+    // Solo con un build real (producción / pruebas). En `npm run dev` el id se calcula con
+    // `Date.now()` en next.config cada vez que Next vuelve a leer la configuración (proceso
+    // principal, trabajadores, recargas), así que el del navegador y el de /api/health/version
+    // casi nunca coinciden: el aviso salía a cada rato y "Actualizar" no lo quitaba.
+    if (!BUILD_CLIENTE || process.env.NODE_ENV !== 'production') return;
     let vivo = true;
     const revisar = async () => {
       try {
