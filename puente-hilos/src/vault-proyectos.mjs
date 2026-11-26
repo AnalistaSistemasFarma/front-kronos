@@ -57,6 +57,12 @@ const EMPTY_OWN = '_Espacio libre: el puente nunca modifica esta sección._';
 const oneLine = (v) => String(v ?? '').replace(/[\r\n]+/g, ' ').replace(/\s+/g, ' ').trim();
 const cut = (s, n) => (s.length > n ? `${s.slice(0, n - 1).trimEnd()}…` : s);
 const yamlString = (v) => JSON.stringify(oneLine(v));
+const BOGOTA = new Intl.DateTimeFormat('sv-SE', { timeZone: 'America/Bogota', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+/** «AAAA-MM-DD HH:MM» in Bogotá time; the raw value when it is not a date. */
+const bogotaTime = (v) => {
+  const d = v instanceof Date ? v : new Date(String(v ?? ''));
+  return Number.isNaN(d.getTime()) ? oneLine(v) || '—' : BOGOTA.format(d);
+};
 
 /** File-name slug for a project (Obsidian-friendly, stable, no path characters). */
 export function projectSlug(name, idProject) {
@@ -210,13 +216,13 @@ function cardBlock({ contexto, agent, conversations }) {
       l.push(`| ${title} | ${t.startDate}${t.endDate !== t.startDate ? ` → ${t.endDate}` : ''} | ${TASK_STATUS[t.status] ?? oneLine(t.status)}${late} | ${t.progress ?? '—'}${t.progress !== null && t.progress !== undefined ? ' %' : ''} | ${oneLine(t.responsible).replace(/\|/g, '/') || '—'} |`);
     }
   }
-  l.push('', '## 🔗 Vinculado');
-  if (links.emails.length === 0 && links.requests.length === 0) l.push('', '_Nada vinculado._');
+  l.push('', '## 🔗 Vinculado', '');
+  if (links.emails.length === 0 && links.requests.length === 0) l.push('_Nada vinculado._');
   for (const r of links.requests) l.push(`- Solicitud #${r.idRequest}: ${oneLine(r.subject)} (${oneLine(r.estado) || 'estado desconocido'})`);
   for (const e of links.emails) l.push(`- Correo: ${oneLine(e.subject) || '(sin asunto)'} — ${oneLine(e.senderName) || '—'}`);
-  l.push('', '## 💬 Conversaciones');
+  l.push('', '## 💬 Conversaciones', '');
   const convs = Object.entries(conversations).sort((a, b) => String(b[1]?.ultima ?? '').localeCompare(String(a[1]?.ultima ?? '')));
-  if (convs.length === 0) l.push('', '_Sin conversaciones._');
+  if (convs.length === 0) l.push('_Sin conversaciones._');
   for (const [id, c] of convs) l.push(`- «${oneLine(c?.titulo) || 'Conversación'}» (#${id}) · última actividad ${oneLine(c?.ultima) || '—'}`);
   return l.join('\n');
 }
@@ -305,7 +311,7 @@ export function buildIndex(dir, agent) {
     '',
     '| Proyecto | Id | Empresa | Última actualización |',
     '|---|---|---|---|',
-    ...rows.map((r) => `| [[${r.file}\\|${oneLine(r.name).replace(/\|/g, '/')}]] | ${r.id} | ${oneLine(r.company)} | ${String(r.updated).slice(0, 16).replace('T', ' ')} |`),
+    ...rows.map((r) => `| [[${r.file}\\|${oneLine(r.name).replace(/\|/g, '/')}]] | ${r.id} | ${oneLine(r.company)} | ${bogotaTime(r.updated)} |`),
     '',
   ].join('\n');
 }
@@ -369,7 +375,7 @@ export function updateProjectNote({ dir, rutas, contexto, agent, idConversation,
     }
 
     const iso = now.toISOString();
-    const when = new Intl.DateTimeFormat('sv-SE', { timeZone: 'America/Bogota', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }).format(now);
+    const when = bogotaTime(now);
     const conversations = { ...prev.conversations, [idConversation]: { titulo: oneLine(contexto.conversation?.title) || 'Conversación', ultima: when } };
     const authors = [...new Set(lote.map((m) => m?.author?.name?.trim() || m?.author?.email).filter(Boolean))].join(', ');
     const request = lote.map((m) => m?.body ?? '').join(' / ');
