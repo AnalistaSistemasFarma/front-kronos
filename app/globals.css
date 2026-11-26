@@ -2993,6 +2993,29 @@ body.chat-escritorio-abierto {
   overflow: hidden;
 }
 
+/* Expandir / restaurar el chat: zoom tipo macOS (transición de vista sobre la ventana del
+   chat). El nombre se pone SOLO durante la animación para no interferir con el fundido de
+   claro/oscuro, que usa la misma API. */
+html.chat-ventana-animando .chat-escritorio {
+  view-transition-name: chat-ventana;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  ::view-transition-group(chat-ventana) {
+    animation-duration: 340ms;
+    animation-timing-function: cubic-bezier(0.2, 0.8, 0.2, 1);
+  }
+
+  ::view-transition-old(chat-ventana),
+  ::view-transition-new(chat-ventana) {
+    animation-duration: 340ms;
+    /* La ventana se estira como un todo (sin deformar el texto a mitad de camino). */
+    height: 100%;
+    object-fit: cover;
+    object-position: top left;
+  }
+}
+
 .chat-escritorio__lateral {
   flex: 0 0 340px;
   width: 340px;

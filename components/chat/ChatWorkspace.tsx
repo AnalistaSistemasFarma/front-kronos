@@ -1,9 +1,10 @@
 'use client';
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { flushSync } from 'react-dom';
 import Link from 'next/link';
 import dynamic from 'next/dynamic';
-import { useSearchParams } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { useSession } from 'next-auth/react';
 import { useMediaQuery } from '@mantine/hooks';
 import {
@@ -47,6 +48,13 @@ import {
 import AgentAvatar from './AgentAvatar';
 import { EsqueletoPantallaChat } from './ChatSkeletons';
 import ChatThread from './ChatThread';
+import {
+  GENIE_CLOSE_EASING,
+  GENIE_CLOSE_MS,
+  findChatLauncher,
+  genieCloseFrames,
+  prefersReducedMotion,
+} from './genie';
 import { ChatNudgeButton, ChatNudgeMenu } from './ChatNudgeControls';
 import ChatSoundMenu from './ChatSoundMenu';
 
@@ -72,7 +80,12 @@ import {
   CHAT_CREATE_PARAM,
   CHAT_RAIL_CREATE_EVENT,
   CHAT_RAIL_OPEN_EVENT,
+  agentKey,
   chatCreateOptions,
+  consumirRutaAntesDeChat,
+  conversationKey,
+  guardarRutaAntesDeChat,
+  mirarRutaAntesDeChat,
   isChatCreateKind,
   sortConversationsByActivity,
   type ChatCreateDetail,
@@ -387,11 +400,26 @@ export default function ChatWorkspace({
 }) {
   const overview = useChatOverview({ primeraCargaInmediata: true });
   const searchParams = useSearchParams();
+  const router = useRouter();
   const { data: session } = useSession();
 
   // Quién soy. En un grupo es lo que distingue MIS mensajes de los de las otras
   // personas; sin esto, todo se pintaría alineado a la izquierda como ajeno.
   const miId = session?.user?.id;
+
+  // `?from=/process/...`: de dónde amplió el chat. Se guarda y se limpia la URL
+  // para que al pulsar ← vuelva ahí y no a la lista de carpetas.
+  useEffect(() => {
+    const from = searchParams.get('from');
+    if (!from) return;
+    guardarRutaAntesDeChat(from);
+    if (typeof window === 'undefined') return;
+    const u = new URL(window.location.href);
+    if (!u.searchParams.has('from')) return;
+    u.searchParams.delete('from');
+    const limpia = `${u.pathname}${u.search}${u.hash}`;
+    window.history.replaceState(null, '', limpia);
+  }, [searchParams]);
 
   const [search, setSearch] = useState('');
   // Resultados del BUSCADOR DE MENSAJES. La misma caja hace dos cosas: filtra
@@ -505,6 +533,8 @@ export default function ChatWorkspace({
   }
 
   const [expandido, setExpandido] = useState(false);
+  // La animación de cerrar la conversación está en curso (evita dos cierres con doble clic).
+  const cerrandoConversacion = useRef(false);
   useEffect(() => {
     try {
       setExpandido(localStorage.getItem(CHAT_EXPANDIDO_KEY) === '1');
@@ -514,13 +544,24 @@ export default function ChatWorkspace({
     }
   }, []);
   const alternarExpandido = () => {
-    setExpandido((previo) => {
-      const siguiente = !previo;
-      try {
-        localStorage.setItem(CHAT_EXPANDIDO_KEY, siguiente ? '1' : '0');
-      } catch {}
-      return siguiente;
-    });
+    const cambiar = () =>
+      setExpandido((previo) => {
+        const siguiente = !previo;
+        try {
+          localStorage.setItem(CHAT_EXPANDIDO_KEY, siguiente ? '1' : '0');
+        } catch {}
+        return siguiente;
+      });
+    // Zoom tipo macOS: la ventana del chat crece hasta la pantalla completa (o vuelve a su
+    // tamaño) con una transición de vista. Sin soporte o con menos movimiento, cambia de una.
+    if (typeof document.startViewTransition !== 'function' || prefersReducedMotion()) {
+      cambiar();
+      return;
+    }
+    const html = document.documentElement;
+    html.classList.add('chat-ventana-animando');
+    const transicion = document.startViewTransition(() => flushSync(cambiar));
+    void transicion.finished.finally(() => html.classList.remove('chat-ventana-animando'));
   };
 
   // Mientras dura ese modo la PÁGINA no se desplaza: el marco queda clavado a
@@ -1200,9 +1241,61 @@ export default function ChatWorkspace({
     ) : null;
 
   const cerrarConversacion = () => {
-    setSeleccion(null);
-    setSoloConversacion(false);
-    verEnLaUrl('/process/chat');
+    // Si amplió el chat desde Solicitudes (u otra pantalla), vuelve YA —sin pasar
+    // por la lista de carpetas (si no, se veía un instante /process/chat).
+    const volver = consumirRutaAntesDeChat();
+    if (volver) {
+      router.push(volver);
+      return;
+    }
+    const cambiar = () => {
+      setSeleccion(null);
+      setSoloConversacion(false);
+      verEnLaUrl('/process/chat');
+    };
+    // En escritorio la conversación se "absorbe" (genio, como la ventanita flotante) hacia su
+    // fila de la lista de la página (o de la barra de chats si la lista no se ve), y después
+    // se cierra. Sin soporte o con menos movimiento, se cierra de una.
+    const panel = modoEscritorio
+      ? document.querySelector<HTMLElement>('.chat-escritorio__principal')
+      : null;
+    if (!panel || typeof panel.animate !== 'function' || prefersReducedMotion()) {
+      cambiar();
+      return;
+    }
+    if (cerrandoConversacion.current) return;
+    cerrandoConversacion.current = true;
+    const filaDeLista = document
+      .querySelector<HTMLElement>('.chat-escritorio__lateral .chat-agent-card--selected')
+      ?.getBoundingClientRect();
+    const claveAbierta = selectedAgent
+      ? agentKey(selectedAgent.idAgent)
+      : selectedGroup
+        ? conversationKey(selectedGroup.id)
+        : selectedPersona
+          ? conversationKey(selectedPersona.id)
+          : null;
+    // Si la fila de la lista no se ve (mide 0), se usa el ícono de la barra de chats.
+    const fila =
+      filaDeLista && filaDeLista.width > 0
+        ? filaDeLista
+        : (findChatLauncher(claveAbierta)?.getBoundingClientRect() ?? null);
+    const animacion = panel.animate(genieCloseFrames(panel.getBoundingClientRect(), fila), {
+      duration: GENIE_CLOSE_MS,
+      easing: GENIE_CLOSE_EASING,
+      fill: 'forwards',
+    });
+    const terminar = () => {
+      cerrandoConversacion.current = false;
+      // Primero se cierra (sincrónico) y luego se suelta la animación: así no se alcanza a
+      // ver un cuadro de la conversación de vuelta en su lugar.
+      flushSync(cambiar);
+      animacion.cancel();
+    };
+    animacion.onfinish = terminar;
+    animacion.oncancel = () => {
+      cerrandoConversacion.current = false;
+    };
   };
 
   // Se define una sola vez y se monta en los dos armazones (escritorio y
@@ -1386,13 +1479,16 @@ export default function ChatWorkspace({
       )}
     </>
   );
+  // Si amplió el chat desde Solicitudes (u otra pantalla), este botón vuelve ahí;
+  // si entró por el menú de chats, vuelve a la lista de carpetas.
+  const etiquetaVolver = mirarRutaAntesDeChat() ? 'Volver a donde estaba' : 'Volver a las carpetas';
   const botonVolver = (
-      <Tooltip label='Volver a las carpetas' withArrow>
+    <Tooltip label={etiquetaVolver} withArrow>
       <ActionIcon
         variant='subtle'
         color='gray'
         onClick={cerrarConversacion}
-        aria-label='Cerrar la conversación'
+        aria-label={etiquetaVolver}
       >
         <IconArrowLeft size={18} />
       </ActionIcon>
