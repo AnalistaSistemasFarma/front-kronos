@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef } from 'react';
+import { createKeyboardDetector } from '@/lib/chat/keyboard-open';
 
 /*
  * GESTO DEL USUARIO EN CURSO (2026-09-23, "hago scroll un poco hacia arriba y
@@ -54,6 +55,7 @@ export function useAltoVisible(alCambiar?: () => void) {
     const raiz = document.documentElement;
     let ultimoAlto = -1;
     let ultimoOffset = -1;
+    const tecladoAbierto = createKeyboardDetector();
 
     const escribir = () => {
       // `Math.round` a propósito: los decimales del visual viewport hacen
@@ -65,6 +67,17 @@ export function useAltoVisible(alCambiar?: () => void) {
       ultimoOffset = offset;
       raiz.style.setProperty('--alto-visible', `${alto}px`);
       raiz.style.setProperty('--desplazamiento-visible', `${offset}px`);
+      // Keyboard open (the visual viewport lost more than 150 px against a
+      // baseline that iOS does not shrink, see lib/chat/keyboard-open.ts): the
+      // composer drops the home-indicator inset (see globals.css).
+      const abierto = tecladoAbierto({
+        height: alto,
+        scale: vv.scale,
+        layoutWidth: raiz.clientWidth || window.innerWidth || 0,
+        layoutHeight: raiz.clientHeight,
+        windowHeight: window.innerHeight,
+      });
+      if (abierto !== null) raiz.classList?.toggle('teclado-abierto', abierto);
       if (!usuarioInteractuando()) avisar.current?.();
     };
 
@@ -184,6 +197,7 @@ export function useAltoVisible(alCambiar?: () => void) {
     if (tactil) window.addEventListener('focusin', alEnfocar);
 
     return () => {
+      raiz.classList?.remove('teclado-abierto');
       if (pendiente) window.cancelAnimationFrame(pendiente);
       reanclas.forEach((t) => window.clearTimeout(t));
       vv.removeEventListener('resize', tactil ? alRedimensionar : actualizar);

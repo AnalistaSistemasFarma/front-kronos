@@ -17,6 +17,12 @@
  *   CORREO_<K>_CLIENT_SECRET   su secreto (solo en el .env del servidor).
  *   CORREO_<K>_DOMINIOS        dominios de correo de ese inquilino (coma). Un usuario cuyo correo no
  *                              sea de un inquilino habilitado ve «Correo disponible próximamente».
+ *   CORREO_<K>_ENVIO           true (defecto) | false: per-tenant send capability (e.g. OLP, whose app has
+ *                              no Mail.Send, runs read-only). ANDed with CORREO_ENVIO_HABILITADO.
+ *   CORREO_<K>_ETIQUETAR       true (defecto) | false: per-tenant mailbox write (category, read/unread).
+ *                              ANDed with CORREO_ETIQUETAR_HABILITADO.
+ *   CORREO_<K>_ELIMINAR        true (defecto) | false: per-tenant move-to-trash. ANDed with
+ *                              CORREO_ELIMINAR_HABILITADO and the write capability.
  *   CORREO_ENVIO_HABILITADO    true (defecto): responder desde SynerLink (Mail.Send).
  *   CORREO_ETIQUETAR_HABILITADO true (defecto): categoría «SynerLink #N» en Outlook (Mail.ReadWrite).
  *                              Es el interruptor general de ESCRITURA en el buzón: con false tampoco se
@@ -39,6 +45,10 @@ export interface Inquilino {
   clientId: string;
   clientSecret: string;
   dominios: string[];
+  /** Per-tenant capabilities (CORREO_<K>_ENVIO / _ETIQUETAR / _ELIMINAR, default true). */
+  envio: boolean;
+  etiquetar: boolean;
+  eliminar: boolean;
 }
 
 export interface CorreoConfig {
@@ -81,6 +91,9 @@ export function readCorreoConfig(env: Env = process.env): CorreoConfig {
       clientId: String(env[`CORREO_${K}_CLIENT_ID`] ?? '').trim(),
       clientSecret: String(env[`CORREO_${K}_CLIENT_SECRET`] ?? '').trim(),
       dominios: lista(env[`CORREO_${K}_DOMINIOS`]).map((d) => d.replace(/^@/, '')),
+      envio: bool(env[`CORREO_${K}_ENVIO`], true),
+      etiquetar: bool(env[`CORREO_${K}_ETIQUETAR`], true),
+      eliminar: bool(env[`CORREO_${K}_ELIMINAR`], true),
     });
   }
   return {
@@ -115,4 +128,21 @@ export function inquilinoDeCorreo(cfg: CorreoConfig, email: string): Inquilino |
   const dominio = String(email ?? '').trim().toLowerCase().split('@')[1] ?? '';
   if (!dominio) return null;
   return cfg.inquilinos.find((i) => i.dominios.includes(dominio) && faltantesInquilino(i).length === 0) ?? null;
+}
+
+/** Effective mailbox capabilities for a session email: global flags ANDed with its tenant's flags. */
+export interface CorreoCapacidades {
+  envio: boolean;
+  etiquetar: boolean;
+  eliminar: boolean;
+  /** Send is on globally but the session's tenant turns it off (read-only tenant). */
+  envioRestringidoInquilino: boolean;
+}
+
+export function capacidadesCorreo(cfg: CorreoConfig, email: string): CorreoCapacidades {
+  const tenant = cfg.modo === 'off' ? null : inquilinoDeCorreo(cfg, email);
+  const envio = cfg.envioHabilitado && (tenant?.envio ?? true);
+  const etiquetar = cfg.etiquetarHabilitado && (tenant?.etiquetar ?? true);
+  const eliminar = etiquetar && cfg.eliminarHabilitado && (tenant?.eliminar ?? true);
+  return { envio, etiquetar, eliminar, envioRestringidoInquilino: cfg.envioHabilitado && !envio };
 }

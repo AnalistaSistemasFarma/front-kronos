@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { CAPTURAS, REMOTO, SECRET, capturar, caja, guardarVideo, hilo, sesion, simularChat } from './chat-simulado';
+import { CAPTURAS, REMOTO, SECRET, abrirExpresiones, capturar, caja, guardarVideo, hilo, sesion, simularChat } from './chat-simulado';
 
 /**
  * Chat · stickers ANIMADOS y panel Emoji | Stickers | GIF (2026-10-20).
@@ -31,7 +31,7 @@ test.describe('Chat · stickers animados · escritorio', () => {
     await sesion(context, baseURL!);
   });
 
-  test('botón al lado del clip: Emoji | Stickers | GIF, paquetes, emoji en el texto y sticker animado en el hilo', async ({ page }, info) => {
+  test('menú «+»: Emoji | Stickers | GIF, paquetes, emoji en el texto y sticker animado en el hilo', async ({ page }, info) => {
     const estado = await simularChat(page, { gif: true });
     await page.goto('/process/chat?agent=horus');
     await expect(hilo(page).getByText('quedó en SharePoint')).toBeVisible();
@@ -43,21 +43,9 @@ test.describe('Chat · stickers animados · escritorio', () => {
     // El contrato con los agentes no cambia: el texto descriptivo no se pinta.
     await expect(hilo(page).getByText('[Sticker: ¡Listo!]')).toHaveCount(0);
 
-    // Ni el clip ni el «+» traen la opción de stickers (desde el 2026-10-21 el
-    // clip adjunta directo, como en Teams).
-    await page.getByRole('button', { name: 'Más opciones' }).click();
-    await expect(page.getByRole('menuitem', { name: /Stickers/ })).toHaveCount(0);
-    await page.keyboard.press('Escape');
-
-    // Botón propio, al lado del clip (misma fila, a su izquierda).
-    const boton = page.getByRole('button', { name: 'Emojis, stickers y GIF' });
-    const clip = page.getByRole('button', { name: 'Adjuntar archivos' });
-    const [b, c] = [(await boton.boundingBox())!, (await clip.boundingBox())!];
-    expect(Math.abs(b.y - c.y)).toBeLessThan(4);
-    expect(b.x).toBeLessThan(c.x);
-    expect(c.x - (b.x + b.width)).toBeLessThan(12);
-
-    await boton.click();
+    // Since the Gemini-style pill (2026-11-24) the panel opens from the «+»
+    // menu, on the left of the pill.
+    await abrirExpresiones(page);
     const panel = page.getByTestId('chat-expresiones');
     await expect(panel.getByRole('tab', { name: 'Emoji' })).toBeVisible();
     await expect(panel.getByRole('tab', { name: 'Stickers' })).toHaveAttribute('aria-selected', 'true');
@@ -98,7 +86,7 @@ test.describe('Chat · stickers animados · escritorio', () => {
   test('sin llave de GIF no aparece la pestaña GIF', async ({ page }) => {
     await simularChat(page, { gif: false });
     await page.goto('/process/chat?agent=horus');
-    await page.getByRole('button', { name: 'Emojis, stickers y GIF' }).click();
+    await abrirExpresiones(page);
     const panel = page.getByTestId('chat-expresiones');
     await expect(panel.getByRole('tab', { name: 'Stickers' })).toBeVisible();
     await expect(panel.getByRole('tab', { name: 'GIF' })).toHaveCount(0);
@@ -149,7 +137,7 @@ test.describe('Chat · stickers animados · celular', () => {
 
     await caja(page).tap();
     await expect(caja(page)).toBeFocused();
-    await page.getByRole('button', { name: 'Emojis, stickers y GIF' }).tap();
+    await abrirExpresiones(page, { tocar: true });
 
     const hoja = page.locator('.chat-expresiones-hoja');
     await expect(hoja).toBeVisible();

@@ -1,7 +1,11 @@
 import { randomUUID } from 'node:crypto';
 import { prisma } from '../prisma';
 
-const expiry = () => new Date(Date.now() + 45_000);
+// Rolling control expiry, refreshed by each browser heartbeat (every 15 s).
+// 90 s (was 45 s, 2026-11-25) tolerates heartbeats delayed while the tab is in
+// the background; the OpenClaw bridge drops calls once they expire here.
+export const VOICE_CALL_EXPIRY_MS = 90_000;
+const expiry = () => new Date(Date.now() + VOICE_CALL_EXPIRY_MS);
 const select = { id: true, id_agent: true, id_conversation: true, id_user: true, offer_sdp: true, answer_sdp: true, error: true, claimed: true, expires_at: true } as const;
 
 export async function createVoiceCall(agent: number, conversation: number, user: string, offer: string) {

@@ -117,3 +117,18 @@ describe('Script de arranque: la fuente guardada se aplica antes de pintar', () 
     expect(r.props.has('--font-sans')).toBe(false);
   });
 });
+
+describe('Google Sans Flex (Gemini look)', () => {
+  it('is in the catalog as a self-hosted web font with system fallback', () => {
+    const gemini = FONTS.find((f) => f.key === 'gemini');
+    expect(gemini?.label).toBe('Google Sans Flex (estilo Gemini)');
+    expect(gemini?.webFont).toBe(true);
+    expect(resolveFontStack('gemini').startsWith('var(--font-google-sans-flex')).toBe(true);
+    expect(resolveFontStack('gemini')).toContain('sans-serif');
+    expect(isValidFontKey('gemini')).toBe(true);
+  });
+
+  it('does not change the default font of anybody', () => {
+    expect(DEFAULT_FONT_KEY).toBe('sistema');
+  });
+});

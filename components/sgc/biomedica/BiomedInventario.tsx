@@ -9,7 +9,7 @@ import {
   Button,
   Card,
   Checkbox,
-  FileInput,
+  FileButton,
   Group,
   Loader,
   Modal,
@@ -30,6 +30,8 @@ import {
   IconBox,
   IconCheck,
   IconCopy,
+  IconDownload,
+  IconEye,
   IconCurrencyDollar,
   IconFileSpreadsheet,
   IconHistory,
@@ -86,8 +88,8 @@ function query(f: Filtro) {
   return p.toString();
 }
 
-export default function BiomedInventario({ idCompany }: { idCompany: number }) {
-  const [vista, setVista] = useState<'equipos' | 'cobros' | 'valores' | 'cargue'>('equipos');
+export default function BiomedInventario({ idCompany, empresa = '' }: { idCompany: number; empresa?: string }) {
+  const [vista, setVista] = useState<'equipos' | 'cobros' | 'valores'>('equipos');
   const [version, setVersion] = useState(0);
   const cambio = () => setVersion((v) => v + 1);
   return (
@@ -99,22 +101,20 @@ export default function BiomedInventario({ idCompany }: { idCompany: number }) {
           { value: 'equipos', label: 'Equipos' },
           { value: 'cobros', label: 'Cobros (faltantes y dañados)' },
           { value: 'valores', label: 'Valores unitarios' },
-          { value: 'cargue', label: 'Cargue masivo' },
         ]}
         w='fit-content'
         data-testid='biomed-inv-vista'
       />
-      {vista === 'equipos' && <Equipos idCompany={idCompany} version={version} onCambio={cambio} />}
+      {vista === 'equipos' && <Equipos idCompany={idCompany} empresa={empresa} version={version} onCambio={cambio} />}
       {vista === 'cobros' && <Cobros idCompany={idCompany} version={version} />}
       {vista === 'valores' && <Valores idCompany={idCompany} onCambio={cambio} />}
-      {vista === 'cargue' && <Cargue idCompany={idCompany} onCambio={cambio} />}
     </Stack>
   );
 }
 
 // ── Equipos ───────────────────────────────────────────────────────────────
 
-function Equipos({ idCompany, version, onCambio }: { idCompany: number; version: number; onCambio: () => void }) {
+function Equipos({ idCompany, empresa, version, onCambio }: { idCompany: number; empresa: string; version: number; onCambio: () => void }) {
   const [f, setF] = useState<Filtro>({ q: '', estado: null, cliente: null, ciudad: null, codigo: null });
   const [page, setPage] = useState(1);
   const pageSize = 100;
@@ -125,6 +125,7 @@ function Equipos({ idCompany, version, onCambio }: { idCompany: number; version:
   const [accion, setAccion] = useState<AccionMovimiento | null>(null);
   const [editar, setEditar] = useState<EquipoDto | 'nuevo' | null>(null);
   const [copiar, setCopiar] = useState<EquipoDto | null>(null);
+  const [masivo, setMasivo] = useState(false);
   const [historial, setHistorial] = useState<number | null>(null);
   const [sap, setSap] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -218,6 +219,9 @@ function Equipos({ idCompany, version, onCambio }: { idCompany: number; version:
         <SgcSelect label='Código interno' searchable clearable data={r?.codigos ?? []} value={f.codigo} onChange={(v) => setF({ ...f, codigo: v })} w={170} />
         <Button variant='light' leftSection={<IconPlus size={16} />} onClick={() => setEditar('nuevo')} data-testid='biomed-inv-nuevo'>
           Nuevo equipo
+        </Button>
+        <Button variant='light' leftSection={<IconFileSpreadsheet size={16} />} onClick={() => setMasivo(true)} data-testid='biomed-inv-masivo'>
+          Cargue masivo (Excel)
         </Button>
       </Group>
 
@@ -352,6 +356,7 @@ function Equipos({ idCompany, version, onCambio }: { idCompany: number; version:
 
       {accion && <MovimientoModal idCompany={idCompany} accion={accion} ids={[...sel.keys()]} resumen={r} onClose={() => setAccion(null)} onDone={(n) => { setAccion(null); terminado(`${n.toLocaleString('es-CO')} equipo(s): ${ACCION[accion].boton.toLowerCase()}.`); }} />}
       {editar && <EquipoModal idCompany={idCompany} equipo={editar === 'nuevo' ? null : editar} resumen={r} onClose={() => setEditar(null)} onDone={(msg) => { setEditar(null); terminado(msg); }} />}
+      {masivo && <CargueModal idCompany={idCompany} empresa={empresa} resumen={r} onClose={() => setMasivo(false)} onDone={(msg) => { setMasivo(false); terminado(msg); }} />}
       {copiar && <EquipoModal idCompany={idCompany} equipo={null} base={copiar} resumen={r} onClose={() => setCopiar(null)} onDone={(msg) => { setCopiar(null); terminado(msg); }} />}
       {historial !== null && <HistorialModal idCompany={idCompany} idEquipo={historial} onClose={() => setHistorial(null)} />}
       {sap && <ArticuloSapModal idCompany={idCompany} ids={[...sel.keys()]} onClose={() => setSap(false)} onDone={(n) => { setSap(false); terminado(`Artículo de SAP actualizado en ${n.toLocaleString('es-CO')} equipo(s).`); }} />}
@@ -892,19 +897,38 @@ type Simulacion = {
   muestraErrores: { fila: number; serie: string | null; motivo: string }[];
 };
 
-function Cargue({ idCompany, onCambio }: { idCompany: number; onCambio: () => void }) {
+function descargar(buf: ArrayBuffer, nombre: string) {
+  const url = URL.createObjectURL(new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = nombre;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+/**
+ * «Cargue masivo (Excel)»: el modal de cargue masivo de SynerLink (Registros sanitarios, listado maestro del
+ * SGC): «Descargar plantilla», «Subir archivo», «Simular» y «Cargar», con el reporte por filas.
+ */
+function CargueModal({ idCompany, empresa, resumen, onClose, onDone }: { idCompany: number; empresa: string; resumen: ResumenInventario | null; onClose: () => void; onDone: (msg: string) => void }) {
   const [file, setFile] = useState<File | null>(null);
   const [sim, setSim] = useState<Simulacion | null>(null);
   const [justificacion, setJustificacion] = useState('');
   const [busy, setBusy] = useState<'simular' | 'aplicar' | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [ok, setOk] = useState<string | null>(null);
+  const plantilla = async () => {
+    try {
+      const { construirPlantillaInventario, PLANTILLA_INVENTARIO_NOMBRE } = await import('../../../lib/biomedica/inventarioPlantilla');
+      descargar(await construirPlantillaInventario(empresa, resumen?.plantillas ?? {}), PLANTILLA_INVENTARIO_NOMBRE);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  };
 
   const enviar = async (modo: 'simular' | 'aplicar') => {
     if (!file) return;
     setBusy(modo);
     setError(null);
-    setOk(null);
     try {
       const form = new FormData();
       form.append('company', String(idCompany));
@@ -915,13 +939,7 @@ function Cargue({ idCompany, onCambio }: { idCompany: number; onCambio: () => vo
       const body = (await res.json().catch(() => ({}))) as Record<string, unknown>;
       if (!res.ok) throw new Error(String(body.error || `Error ${res.status}`));
       if (modo === 'simular') setSim(body as unknown as Simulacion);
-      else {
-        setOk(`Inventario actualizado: ${Number(body.creados).toLocaleString('es-CO')} equipo(s) nuevo(s) y ${Number(body.actualizados).toLocaleString('es-CO')} actualizado(s).`);
-        setSim(null);
-        setFile(null);
-        setJustificacion('');
-        onCambio();
-      }
+      else onDone(`Cargue masivo: ${Number(body.creados).toLocaleString('es-CO')} equipo(s) nuevo(s) y ${Number(body.actualizados).toLocaleString('es-CO')} actualizado(s).`);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -946,37 +964,38 @@ function Cargue({ idCompany, onCambio }: { idCompany: number; onCambio: () => vo
   );
 
   return (
+    <Modal opened onClose={onClose} title={<Text fw={700}>Cargue masivo del inventario (Excel)</Text>} size='90rem' closeOnClickOutside={false} data-testid='biomed-inv-cargue'>
     <Stack gap='sm'>
       <Text size='sm' c='dimmed'>
-        Cargue el inventario en Excel con el formato OLP-GCC-04-FR-017 (código interno, equipo, marca, modelo, serie, clasificación de riesgo, registro sanitario, cliente, sede, zona y ciudad). Primero se SIMULA: no se escribe nada hasta que usted aplique. La serie identifica cada equipo; lo que está en «Bodega» queda en bodega y lo demás, distribuido. Un faltante o dañado no lo cambia un archivo.
+        Descargue la plantilla (formato OLP-GCC-04-FR-017), llénela con uno o varios equipos y súbala. Basta la serie, el modelo y la ubicación: si el modelo ya está en el inventario, el equipo, el código, la marca y la clasificación se completan solos. Primero se SIMULA: no se escribe nada hasta «Cargar». Si una serie ya existe, la fila actualiza ese equipo; lo que está en «Bodega» queda en bodega y lo demás, distribuido. Un faltante o dañado no lo cambia un archivo.
       </Text>
       {error && (
         <Alert color='red' icon={<IconAlertTriangle size={18} />} withCloseButton onClose={() => setError(null)} data-testid='biomed-inv-cargue-error'>
           {error}
         </Alert>
       )}
-      {ok && (
-        <Alert color='green' icon={<IconCheck size={18} />} withCloseButton onClose={() => setOk(null)}>
-          {ok}
-        </Alert>
-      )}
-      <Group align='flex-end'>
-        <FileInput
-          label='Archivo (.xlsx)'
-          accept='.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-          leftSection={<IconFileSpreadsheet size={16} />}
-          value={file}
+      <Group>
+        <Button variant='light' leftSection={<IconDownload size={16} />} onClick={() => void plantilla()} data-testid='biomed-inv-plantilla'>
+          Descargar plantilla
+        </Button>
+        <FileButton
           onChange={(x) => {
             setFile(x);
             setSim(null);
           }}
-          w={360}
-          clearable
-          data-testid='biomed-inv-archivo'
-        />
-        <Button leftSection={<IconSearch size={16} />} disabled={!file} loading={busy === 'simular'} onClick={() => void enviar('simular')} data-testid='biomed-inv-simular'>
-          Simular
-        </Button>
+          accept='.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        >
+          {(props) => (
+            <Button {...props} variant='default' leftSection={<IconUpload size={16} />} data-testid='biomed-inv-archivo'>
+              Subir archivo
+            </Button>
+          )}
+        </FileButton>
+        {file && (
+          <Text size='sm'>
+            Archivo: <b>{file.name}</b>
+          </Text>
+        )}
       </Group>
 
       {sim && (
@@ -1083,28 +1102,32 @@ function Cargue({ idCompany, onCambio }: { idCompany: number; onCambio: () => vo
             </>
           )}
           {sim.errores === 0 && sim.nuevos + sim.cambios > 0 && (
-            <Card withBorder radius='md' p='md'>
-              <Stack gap='xs'>
-                <Textarea
-                  label={sim.cambios > 0 ? 'Justificación (obligatoria: el archivo cambia equipos que ya están)' : 'Observación (opcional)'}
-                  required={sim.cambios > 0}
-                  autosize
-                  minRows={2}
-                  maxLength={1000}
-                  value={justificacion}
-                  onChange={(e) => setJustificacion(e.currentTarget.value)}
-                />
-                <Group justify='flex-end'>
-                  <Button color='green' leftSection={<IconUpload size={16} />} disabled={!puedeAplicar} loading={busy === 'aplicar'} onClick={() => void enviar('aplicar')} data-testid='biomed-inv-aplicar'>
-                    Aplicar cargue ({(sim.nuevos + sim.cambios).toLocaleString('es-CO')})
-                  </Button>
-                </Group>
-              </Stack>
-            </Card>
+            <Textarea
+              label={sim.cambios > 0 ? 'Justificación (obligatoria: el archivo cambia equipos que ya están)' : 'Observación (opcional)'}
+              required={sim.cambios > 0}
+              autosize
+              minRows={2}
+              maxLength={1000}
+              value={justificacion}
+              onChange={(e) => setJustificacion(e.currentTarget.value)}
+            />
           )}
           {sim.errores === 0 && sim.nuevos + sim.cambios === 0 && <Alert color='gray'>El archivo no trae nada nuevo ni cambios.</Alert>}
         </>
       )}
+
+      <Group justify='flex-end' mt='sm'>
+        <Button variant='default' onClick={onClose} disabled={busy !== null}>
+          Cerrar
+        </Button>
+        <Button variant='light' leftSection={<IconEye size={16} />} disabled={!file} loading={busy === 'simular'} onClick={() => void enviar('simular')} data-testid='biomed-inv-simular'>
+          Simular
+        </Button>
+        <Button disabled={!puedeAplicar} loading={busy === 'aplicar'} onClick={() => void enviar('aplicar')} data-testid='biomed-inv-aplicar'>
+          Cargar {sim && sim.nuevos + sim.cambios > 0 ? `(${(sim.nuevos + sim.cambios).toLocaleString('es-CO')})` : ''}
+        </Button>
+      </Group>
     </Stack>
+    </Modal>
   );
 }

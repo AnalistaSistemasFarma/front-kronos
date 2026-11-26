@@ -151,6 +151,24 @@ describe('Correo · acuse al crear desde la simulación', () => {
     expect(db.reservarAcuse).not.toHaveBeenCalled();
   });
 
+  it('read-only tenant (CORREO_GSS_ENVIO=false): creates the request, skips the reply and says why', async () => {
+    const d = deps({}, {
+      CORREO_MODO: 'mock',
+      CORREO_INQUILINOS: 'gss',
+      CORREO_GSS_TENANT_ID: '3409fd29-f351-4a98-8ef4-d98c8874a836',
+      CORREO_GSS_CLIENT_ID: '28c47cc5-342a-4781-909e-d234db1bb993',
+      CORREO_GSS_CLIENT_SECRET: 'x',
+      CORREO_GSS_DOMINIOS: 'gsslatam.com',
+      CORREO_GSS_ENVIO: 'false',
+    });
+    const r = await crearDesdeFila(d, yo, { ...fila, acuse: ACUSE }, null);
+    expect(r).toMatchObject({ ok: true, idRequest: 500, acuse: { estado: 'DESHABILITADO' } });
+    expect(r.acuse?.mensaje).toMatch(/solo lectura/);
+    expect(d.crearSolicitud).toHaveBeenCalled();
+    expect(enviadosSimulados(yo.email)).toHaveLength(0);
+    expect(db.reservarAcuse).not.toHaveBeenCalled();
+  });
+
   it('idempotente: si la clave ya está reservada, no envía otra vez', async () => {
     db.reservarAcuse.mockResolvedValue(false);
     const r = await crearDesdeFila(deps(), yo, { ...fila, acuse: ACUSE }, null);

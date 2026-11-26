@@ -18,8 +18,13 @@ it('coalesces viewport events and skips identical geometry; removes listeners on
     addEventListener: (name: string, fn: () => void) => listeners.set(name, fn),
     removeEventListener: (name: string) => listeners.delete(name),
   };
-  vi.stubGlobal('document', { documentElement: { style: { setProperty, removeProperty } } });
-  vi.stubGlobal('window', { visualViewport: vv,
+  const classes = new Set<string>();
+  const classList = {
+    toggle: (c: string, on: boolean) => (on ? classes.add(c) : classes.delete(c)),
+    remove: (c: string) => classes.delete(c),
+  };
+  vi.stubGlobal('document', { documentElement: { style: { setProperty, removeProperty }, classList } });
+  vi.stubGlobal('window', { visualViewport: vv, innerHeight: 720,
     requestAnimationFrame: (fn: () => void) => { frames.push(fn); return frames.length; },
     cancelAnimationFrame: vi.fn(),
   });
@@ -37,9 +42,50 @@ it('coalesces viewport events and skips identical geometry; removes listeners on
   frames.shift()!();
   expect(notify).toHaveBeenCalledTimes(2);
   expect(setProperty).toHaveBeenLastCalledWith('--desplazamiento-visible', '12px');
+  // 320 px less than the window: the keyboard is open.
+  expect(classes.has('teclado-abierto')).toBe(true);
   cleanup?.();
+  expect(classes.has('teclado-abierto')).toBe(false);
   expect(listeners.size).toBe(0);
   expect(removeProperty).toHaveBeenCalledTimes(2);
+});
+
+it('marks the keyboard open on iPhone, where innerHeight shrinks with it', () => {
+  const listeners = new Map<string, () => void>();
+  const classes = new Set<string>();
+  const classList = {
+    toggle: (c: string, on: boolean) => (on ? classes.add(c) : classes.delete(c)),
+    remove: (c: string) => classes.delete(c),
+    contains: (c: string) => classes.has(c),
+  };
+  const vv = {
+    height: 844, offsetTop: 0, scale: 1,
+    addEventListener: (name: string, fn: () => void) => listeners.set(name, fn),
+    removeEventListener: (name: string) => listeners.delete(name),
+  };
+  const frames: Array<() => void> = [];
+  const win = { visualViewport: vv, innerHeight: 844, innerWidth: 390,
+    requestAnimationFrame: (fn: () => void) => { frames.push(fn); return frames.length; },
+    cancelAnimationFrame: vi.fn(),
+  };
+  vi.stubGlobal('document', { documentElement: {
+    style: { setProperty: vi.fn(), removeProperty: vi.fn() }, classList, clientWidth: 390, clientHeight: 844,
+  } });
+  vi.stubGlobal('window', win);
+  useAltoVisible();
+  const cleanup = hooks.effects[0]();
+  expect(classes.has('teclado-abierto')).toBe(false);
+  vv.height = 470;
+  win.innerHeight = 470;
+  listeners.get('resize')!();
+  frames.shift()!();
+  expect(classes.has('teclado-abierto')).toBe(true);
+  vv.height = 844;
+  win.innerHeight = 844;
+  listeners.get('resize')!();
+  frames.shift()!();
+  expect(classes.has('teclado-abierto')).toBe(false);
+  cleanup?.();
 });
 
 it('leaves CSS fallback intact without VisualViewport', () => {
