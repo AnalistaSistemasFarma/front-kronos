@@ -534,7 +534,7 @@ export default function DraftBoard({ requestId, fileId }: { requestId: number; f
             }
         : phase === 'correccion'
           ? {
-              text: 'La preparadora está corrigiendo. Le llegará un aviso cuando envíe la versión nueva para que la valide.',
+              text: 'La preparadora está corrigiendo. Cuando suba la versión corregida, el documento queda validado: no tendrá que validarlo otra vez.',
             }
           : null
       : permissions.canSubmitInternal
@@ -565,7 +565,7 @@ export default function DraftBoard({ requestId, fileId }: { requestId: number; f
                   },
                 }
               : {
-                  text: `Le toca corregir. Paso 1 de 2: descargue el Word con los comentarios, corríjalo y súbalo abajo (puede subir varias veces; nadie recibe aviso todavía). ${corrections
+                  text: `Le toca corregir: descargue el Word con los comentarios, corríjalo y súbalo abajo. Al subirlo, el documento queda validado (nadie tiene que validarlo otra vez). ${corrections
                     .map((a) => a.name || a.email)
                     .join(', ')} ${corrections.length === 1 ? 'pidió' : 'pidieron'} cambios.`,
                 }
@@ -993,7 +993,9 @@ export default function DraftBoard({ requestId, fileId }: { requestId: number; f
                     // Cada validador tiene su propio estado; pedir corrección no detiene a los demás.
                     const badge =
                       a.decision === 'APROBADO'
-                        ? { color: 'teal', label: `Aprobó ${a.approvedVersion ?? draft.versionLabel}` }
+                        ? a.autoApprovedIn
+                          ? { color: 'teal', label: `Validado con la ${a.autoApprovedIn}` }
+                          : { color: 'teal', label: `Aprobó ${a.approvedVersion ?? draft.versionLabel}` }
                         : a.decision === 'DEVUELTO'
                           ? { color: 'red', label: `Pidió corrección · ${a.correctionVersion ?? draft.versionLabel}` }
                           : a.correctedIn && a.correctedIn === draft.versionLabel
@@ -1123,7 +1125,9 @@ export default function DraftBoard({ requestId, fileId }: { requestId: number; f
                       ? 'Sin comentarios ni cambios pendientes: es la que se convierte a PDF.'
                       : permissions.canResendInternal
                         ? `Ya subió la ${draft.versionLabel}. Marque "Ya la corregí" o responda cada marca y envíela: los validadores reciben un solo aviso.`
-                        : 'Al subir, Kronos compara con la versión anterior y marca solas las correcciones aplicadas. Los validadores no reciben aviso hasta que usted envíe la corrección.'}
+                        : draft.status === 'VALIDADO_INTERNO'
+                          ? 'Ya está validado: la versión que suba conserva la validación (nadie vuelve a revisar).'
+                          : 'Al subir, Kronos compara con la versión anterior y marca solas las correcciones aplicadas. Si estaba en corrección, el documento queda validado sin volver a revisar.'}
                   </Text>
                 </Stack>
               </Paper>
@@ -1372,8 +1376,8 @@ export default function DraftBoard({ requestId, fileId }: { requestId: number; f
                 ))}
               </Stack>
               <Text size='xs' c='dimmed'>
-                Subir no les avisa todavía: puede subir varias veces. Después marque lo corregido en cada marca y use
-                &quot;Enviar corrección a los validadores&quot;.
+                Al subir la versión corregida, el documento queda validado: cuenta como el visto bueno de quienes
+                pidieron la corrección y nadie tiene que validarlo otra vez.
               </Text>
             </Paper>
           ) : null}

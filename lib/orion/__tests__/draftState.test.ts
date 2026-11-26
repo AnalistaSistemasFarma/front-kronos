@@ -7,7 +7,6 @@ import {
   applyDraftInternalDecision,
   applyDraftMarkAsCorrection,
   applyDraftNewVersion,
-  applyDraftResendInternal,
   applyDraftReviewerInvite,
   applyDraftSendClient,
   applyDraftSelfApproval,
@@ -200,18 +199,34 @@ describe('preparación Word: validación interna', () => {
     expect(dos.internalReview?.status).toBe('APROBADO');
   });
 
-  it('no se aprueba una versión ya reemplazada; al enviar la corrección todos validan otra vez', () => {
+  it('sin doble validación: subir la corrección deja el Word validado y Ana conserva su aprobación', () => {
     const aprobado = applyDraftInternalDecision(enValidacion(), { actor: ana, decision: 'approve', baseVersion: 'v0.1' });
     const respondieron = applyDraftInternalDecision(aprobado, { actor: beto, decision: 'return', comment: 'Fecha' });
     const v2 = applyDraftNewVersion(respondieron, { actor: elaborador, version: version('b') });
-    const enviada = applyDraftResendInternal(v2, { actor: elaborador });
-    expect(enviada.versionLabel).toBe('v0.2');
-    expect(() => applyDraftInternalDecision(enviada, { actor: beto, decision: 'approve', baseVersion: 'v0.1' })).toThrow(
-      /se subió la v0\.2/
-    );
-    const anaV2 = enviada.internalReview?.approvals.find((a) => a.email === 'ana@x.com');
-    expect(anaV2).toMatchObject({ decision: 'PENDIENTE', approvedVersion: 'v0.1' });
-    expect(pendingDraftValidators(enviada)).toHaveLength(2);
+    expect(v2.versionLabel).toBe('v0.2');
+    expect(v2.status).toBe('VALIDADO_INTERNO');
+    expect(v2.internalReview).toMatchObject({ status: 'APROBADO', versionLabel: 'v0.2' });
+    expect(v2.internalReview?.approvals.map((a) => [a.email, a.decision, a.approvedVersion, a.autoApprovedIn ?? null])).toEqual([
+      ['ana@x.com', 'APROBADO', 'v0.1', null],
+      ['beto@x.com', 'APROBADO', 'v0.2', 'v0.2'],
+    ]);
+    // Lo que pidió Beto queda como historial ("Había pedido").
+    expect(v2.internalReview?.approvals.find((a) => a.email === 'beto@x.com')?.comment).toBe('Fecha');
+    expect(pendingDraftValidators(v2)).toHaveLength(0);
+    // Nadie decide otra vez y el PDF hereda la validación de la versión corregida.
+    expect(() => applyDraftInternalDecision(v2, { actor: beto, decision: 'approve' })).toThrow(/Ya aprobó/);
+    expect(pdfReviewFromDraft(v2)).toMatchObject({ status: 'APROBADO', sourceVersionLabel: 'v0.2' });
+  });
+
+  it('ya validado, una versión nueva arrastra la validación', () => {
+    let s = applyDraftInternalDecision(enValidacion(), { actor: ana, decision: 'approve' });
+    s = applyDraftInternalDecision(s, { actor: beto, decision: 'approve' });
+    expect(resolveDraftPermissions({ state: s, actorEmail: 'ela@x.com', isElaborator: true }).canUpload).toBe(true);
+    const v2 = applyDraftNewVersion(s, { actor: elaborador, version: version('c'), baseVersion: 'v0.1' });
+    expect(v2.status).toBe('VALIDADO_INTERNO');
+    expect(v2.internalReview?.versionLabel).toBe('v0.2');
+    expect(pendingDraftValidators(v2)).toHaveLength(0);
+    expect(pdfReviewFromDraft(v2)?.approvals.map((a) => a.email)).toEqual(['ana@x.com', 'beto@x.com']);
   });
 
   it('pedir corrección exige comentario y solo cambia el estado de ese validador', () => {
@@ -233,37 +248,29 @@ describe('preparación Word: validación interna', () => {
     expect(() => applyDraftInternalDecision(betoAprueba, { actor: ana, decision: 'approve' })).toThrow(/Ya pidió corrección/);
   });
 
-  it('orden de la corrección: primero sube, luego marca lo corregido y envía; todos validan otra vez', () => {
+  it('la corrección se sube cuando todos respondieron; al subirla queda validado (sin reenviar)', () => {
     let s = applyDraftInternalDecision(enValidacion(), { actor: ana, decision: 'return', comment: 'Cambiar fecha' });
+    // Beto aún revisa: no se sube todavía.
+    expect(() => applyDraftNewVersion(s, { actor: elaborador, version: version('e') })).toThrow(/Espere a que todos/);
     s = applyDraftInternalDecision(s, { actor: beto, decision: 'approve' });
     expect(draftReviewPhase(s)).toBe('correccion');
 
-    // Antes de subir: puede subir, pero todavía no marca "Ya la corregí" ni envía.
     const antes = resolveDraftPermissions({ state: s, actorEmail: 'ela@x.com', isElaborator: true });
     expect(antes).toMatchObject({ canUpload: true, canMarkFixed: false, canResendInternal: false });
-    expect(() => applyDraftResendInternal(s, { actor: elaborador })).toThrow(/Primero suba la versión corregida/);
 
-    // Sube (puede subir varias): los validadores no se enteran todavía.
     const v2 = applyDraftNewVersion(s, { actor: elaborador, version: version('f') });
-    const v3 = applyDraftNewVersion(v2, { actor: elaborador, version: version('g'), baseVersion: 'v0.2' });
-    expect(v3.internalReview?.versionLabel).toBe('v0.1');
-    expect(draftCorrectionRequests(v3).map((a) => a.email)).toEqual(['ana@x.com']);
-    expect(pendingDraftValidators(v3)).toEqual([]);
-    const despues = resolveDraftPermissions({ state: v3, actorEmail: 'ela@x.com', isElaborator: true });
-    expect(despues).toMatchObject({ canMarkFixed: true, canResendInternal: true });
-
-    // Envía: todos vuelven a validar la versión nueva; Ana la ve como "corregido en v0.3".
-    const enviada = applyDraftResendInternal(v3, { actor: elaborador, baseVersion: 'v0.3' });
-    expect(draftReviewPhase(enviada)).toBe('revision');
-    expect(enviada.internalReview?.versionLabel).toBe('v0.3');
-    expect(enviada.internalReview?.round).toBe(2);
-    expect(enviada.internalReview?.approvals.map((a) => [a.email, a.decision, a.correctedIn ?? null])).toEqual([
-      ['ana@x.com', 'PENDIENTE', 'v0.3'],
-      ['beto@x.com', 'PENDIENTE', null],
+    expect(v2.status).toBe('VALIDADO_INTERNO');
+    expect(draftReviewPhase(v2)).toBeNull();
+    expect(v2.internalReview?.approvals.map((a) => [a.email, a.decision, a.correctedIn ?? null])).toEqual([
+      ['ana@x.com', 'APROBADO', 'v0.2'],
+      ['beto@x.com', 'APROBADO', null],
     ]);
-    let fin = applyDraftInternalDecision(enviada, { actor: ana, decision: 'approve' });
-    fin = applyDraftInternalDecision(fin, { actor: beto, decision: 'approve' });
-    expect(fin.status).toBe('VALIDADO_INTERNO');
+    const despues = resolveDraftPermissions({ state: v2, actorEmail: 'ela@x.com', isElaborator: true });
+    expect(despues).toMatchObject({ canMarkFixed: false, canResendInternal: false, canSendClient: true, canConvertPdf: true });
+    // Otra subida después sigue validada.
+    const v3 = applyDraftNewVersion(v2, { actor: elaborador, version: version('g'), baseVersion: 'v0.2' });
+    expect(v3.status).toBe('VALIDADO_INTERNO');
+    expect(v3.internalReview?.versionLabel).toBe('v0.3');
   });
 
   it('si todos aprueban no hay fase de corrección ni hace falta subir otra versión', () => {
@@ -412,7 +419,8 @@ describe('preparación Word: revisión del cliente', () => {
     ).toThrow(/validado internamente/);
     const perms = resolveDraftPermissions({ state: validado(), actorEmail: 'ela@x.com', isElaborator: true });
     expect(perms.canSendClient).toBe(true);
-    expect(perms.canUpload).toBe(false);
+    // Validado: puede subir otra versión y conserva la validación.
+    expect(perms.canUpload).toBe(true);
   });
 
   it('en orden: solo el primero tiene enlace; en paralelo todos', () => {
@@ -455,7 +463,7 @@ describe('preparación Word: revisión del cliente', () => {
     expect(applyDraftClientDecision(r.state, { email: 'otro@x.com', decision: 'ACEPTADO' }).changed).toBe(false);
   });
 
-  it('tras el rechazo se corrige, se revalida y se reenvía como ronda nueva', () => {
+  it('tras el rechazo se corrige y, como ya estaba validado, se reenvía sin volver a validar', () => {
     const rechazado = applyDraftClientDecision(enviado('sequential'), {
       email: 'cli1@cliente.com',
       decision: 'RECHAZADO',
@@ -465,9 +473,20 @@ describe('preparación Word: revisión del cliente', () => {
       actor: elaborador,
       version: version('z'),
     });
-    let s = applyDraftSubmitInternal(corregido, { actor: elaborador, validators });
-    s = applyDraftInternalDecision(s, { actor: ana, decision: 'approve' });
-    s = applyDraftInternalDecision(s, { actor: beto, decision: 'approve' });
+    const s = applyDraftSubmitInternal(corregido, { actor: elaborador, validators });
+    // Ana y Beto ya lo habían validado: su validación se arrastra.
+    expect(s.status).toBe('VALIDADO_INTERNO');
+    expect(s.internalReview?.approvals.map((a) => [a.email, a.decision, a.autoApprovedIn])).toEqual([
+      ['ana@x.com', 'APROBADO', 'v0.2'],
+      ['beto@x.com', 'APROBADO', 'v0.2'],
+    ]);
+    // Un validador nuevo sí revisa; los anteriores conservan su validación.
+    const conNuevo = applyDraftSubmitInternal(corregido, {
+      actor: elaborador,
+      validators: [...validators, { userId: 'u-caro', email: 'caro@x.com', name: 'Caro', order: 3 }],
+    });
+    expect(conNuevo.status).toBe('EN_VALIDACION_INTERNA');
+    expect(pendingDraftValidators(conNuevo).map((a) => a.email)).toEqual(['caro@x.com']);
     const ronda2 = applyDraftSendClient(s, {
       actor: elaborador,
       reviewers: clientes,
