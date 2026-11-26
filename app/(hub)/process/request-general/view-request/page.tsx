@@ -1,6 +1,7 @@
 'use client';
 
 import { Suspense, useEffect, useState, useRef, useMemo, useCallback } from 'react';
+import TaskReminderButton from '../../../../../components/request-general/TaskReminderButton';
 import ViewOnlyAttachmentButton from '../../../../../components/request-general/attachments/ViewOnlyAttachmentButton';
 import PurchaseRequestDetail from '../../purchases/PurchaseRequestDetail';
 import SalesOfferDetail from '../../sales/SalesOfferDetail';
@@ -3717,6 +3718,7 @@ function ViewRequestPage() {
                                   Bloqueada
                                 </Badge>
                               )}
+                              {!isResolved && !isCancelled && !isLocked && task.id ? <TaskReminderButton taskId={Number(task.id)} /> : null}
                             </Group>
                             <Group gap={6} align="center" mb={8} wrap="nowrap">
                               <Text size="sm" c="dimmed" style={{ whiteSpace: 'nowrap' }}>
