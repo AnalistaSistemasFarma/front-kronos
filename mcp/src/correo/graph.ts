@@ -20,11 +20,15 @@ export interface InquilinoCorreo {
   clientId: string;
   clientSecret: string;
   dominios: string[];
+  /** Per-tenant send capability (CORREO_<K>_ENVIO, default true). */
+  envio?: boolean;
 }
 
 export interface CorreoMcpConfig {
   modo: CorreoModo;
   inquilinos: InquilinoCorreo[];
+  /** Global send flag (CORREO_ENVIO_HABILITADO, default true). */
+  envioHabilitado?: boolean;
 }
 
 const GUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -47,10 +51,27 @@ export function readCorreoMcpConfig(env: NodeJS.ProcessEnv = process.env): Corre
       clientId: String(env[`CORREO_${K}_CLIENT_ID`] ?? '').trim(),
       clientSecret: String(env[`CORREO_${K}_CLIENT_SECRET`] ?? '').trim(),
       dominios: lista(env[`CORREO_${K}_DOMINIOS`]).map((d) => d.replace(/^@/, '')),
+      envio: flag(env[`CORREO_${K}_ENVIO`], true),
     };
     if (GUID_RE.test(i.tenantId) && GUID_RE.test(i.clientId) && i.clientSecret && i.dominios.length) inquilinos.push(i);
   }
-  return { modo, inquilinos };
+  return { modo, inquilinos, envioHabilitado: flag(env.CORREO_ENVIO_HABILITADO, true) };
+}
+
+function flag(v: string | undefined, def: boolean): boolean {
+  const s = String(v ?? '').trim().toLowerCase();
+  return s === '' ? def : s === 'true';
+}
+
+/**
+ * Can mail be sent from SynerLink for this mailbox? Same rule as capacidadesCorreo in the front:
+ * global CORREO_ENVIO_HABILITADO AND the tenant's CORREO_<K>_ENVIO. A read-only tenant (e.g. OLP,
+ * whose app has no Mail.Send) gets false, so the agent must not propose replies there.
+ */
+export function envioPermitido(mailbox: string, cfg: CorreoMcpConfig = readCorreoMcpConfig()): boolean {
+  if (cfg.envioHabilitado === false) return false;
+  if (cfg.modo === 'off') return true;
+  return inquilinoDe(cfg, mailbox)?.envio !== false;
 }
 
 export function inquilinoDe(cfg: CorreoMcpConfig, correo: string): InquilinoCorreo | null {

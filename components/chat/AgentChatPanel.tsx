@@ -26,6 +26,7 @@ import {
   type ChatStatusDto,
 } from '../../lib/chat/client';
 import { agentKey, conversationKey, guardarRutaAntesDeChat } from '../../lib/chat/rail';
+import { Z_INDEX } from '../../lib/ui/zIndex';
 
 /**
  * Panel flotante del chat (esquina inferior derecha).
@@ -327,7 +328,8 @@ export default function AgentChatPanel({
       position={
         aPantallaCompleta ? { top: 0, right: 0, bottom: 0, left: 0 } : { bottom: 24, right: 24 }
       }
-      zIndex={401}
+      // Below every modal: previews and dialogs must cover the panel (lib/ui/zIndex.ts).
+      zIndex={Z_INDEX.agentChatPanel}
     >
       {montado && ventana ? (
             <Paper

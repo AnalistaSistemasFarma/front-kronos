@@ -660,6 +660,38 @@ export async function simularCargue(db: BiomedDb, access: BiomedAccess, filas: F
   puedeUsar(access);
   const existentes = await db.biomedEquipo.findMany({ where: { id_company: access.idCompany } });
   const porSerie = new Map(existentes.map((e) => [e.serie.toLowerCase(), e]));
+  // Lo que se repite por modelo (lo más usado): en el Excel basta la serie, el modelo y la ubicación.
+  const conteo = new Map<string, { n: number; d: Pick<DatosEquipo, 'equipo' | 'codigo_interno' | 'marca' | 'clasificacion_riesgo' | 'registro_sanitario'> }>();
+  for (const e of existentes) {
+    if (!e.modelo) continue;
+    const d = { equipo: e.equipo, codigo_interno: e.codigo_interno, marca: e.marca, clasificacion_riesgo: e.clasificacion_riesgo, registro_sanitario: e.registro_sanitario };
+    const k = `${e.modelo.toLowerCase()}\u0000${JSON.stringify(d)}`;
+    conteo.set(k, { n: (conteo.get(k)?.n ?? 0) + 1, d });
+  }
+  const plantilla = new Map<string, { n: number; d: Pick<DatosEquipo, 'equipo' | 'codigo_interno' | 'marca' | 'clasificacion_riesgo' | 'registro_sanitario'> }>();
+  for (const [k, v] of conteo) {
+    const modelo = k.split('\u0000')[0]!;
+    if ((plantilla.get(modelo)?.n ?? 0) < v.n) plantilla.set(modelo, v);
+  }
+  errores = [...errores];
+  filas = filas.flatMap((f) => {
+    const p = f.datos.modelo ? plantilla.get(f.datos.modelo.toLowerCase())?.d : undefined;
+    const datos = p
+      ? {
+          ...f.datos,
+          equipo: f.datos.equipo ?? p.equipo,
+          codigo_interno: f.datos.codigo_interno ?? p.codigo_interno,
+          marca: f.datos.marca ?? p.marca,
+          clasificacion_riesgo: f.datos.clasificacion_riesgo ?? p.clasificacion_riesgo,
+          registro_sanitario: f.datos.registro_sanitario ?? p.registro_sanitario,
+        }
+      : f.datos;
+    if (!datos.equipo) {
+      errores.push({ fila: f.fila, serie: datos.serie, motivo: `Sin equipo: el modelo ${datos.modelo} aún no está en el inventario, escriba el equipo.` });
+      return [];
+    }
+    return [{ ...f, datos }];
+  });
   const nuevos: FilaCargue[] = [];
   const cambios: { fila: number; id: number; serie: string; campos: { campo: CampoEquipo; antes: string | null; despues: string | null }[]; estado: { antes: string; despues: string } | null }[] = [];
   let iguales = 0;

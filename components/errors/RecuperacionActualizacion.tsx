@@ -3,6 +3,7 @@
 import { usePathname } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
 import { isChunkLoadError, recargarUnaVez, RECUPERACION_ACTIVA } from '../../lib/chunk-recovery';
+import { isVoiceCallActive } from '../../lib/chat/voice-call-browser';
 
 const BUILD_CLIENTE = process.env.APP_BUILD_ID ?? '';
 const INTERVALO_MS = 5 * 60_000;
@@ -27,10 +28,11 @@ export default function RecuperacionActualizacion() {
       const destino = ev.target as HTMLScriptElement | HTMLLinkElement | null;
       const src = destino && 'src' in destino ? destino.src : destino && 'href' in destino ? destino.href : '';
       const recursoNext = typeof src === 'string' && src.includes('/_next/static/');
-      if (recursoNext || isChunkLoadError(err)) recargarUnaVez();
+      // Never reload during a voice call: it would hang up (2026-11-25).
+      if ((recursoNext || isChunkLoadError(err)) && !isVoiceCallActive()) recargarUnaVez();
     };
     const alRechazo = (ev: PromiseRejectionEvent) => {
-      if (isChunkLoadError(ev.reason)) recargarUnaVez();
+      if (isChunkLoadError(ev.reason) && !isVoiceCallActive()) recargarUnaVez();
     };
     window.addEventListener('error', alError, true);
     window.addEventListener('unhandledrejection', alRechazo);
@@ -75,7 +77,9 @@ export default function RecuperacionActualizacion() {
   useEffect(() => {
     if (pathname === rutaInicial.current) return;
     rutaInicial.current = pathname;
-    if (hayVersionNueva) window.location.reload();
+    // During a voice call the reload waits for a later route change (the
+    // call must survive navigation; a full reload would hang up).
+    if (hayVersionNueva && !isVoiceCallActive()) window.location.reload();
   }, [pathname, hayVersionNueva]);
 
   if (!hayVersionNueva) return null;

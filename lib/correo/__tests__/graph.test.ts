@@ -268,7 +268,7 @@ describe('Correo · GraphMailProvider (siempre el buzón de la sesión)', () => 
 });
 
 describe('Correo · token de aplicación (solo en memoria del servidor)', () => {
-  const inq = { clave: 'gss', tenantId: '3409fd29-f351-4a98-8ef4-d98c8874a836', clientId: '28c47cc5-342a-4781-909e-d234db1bb993', clientSecret: 'secreto', dominios: ['gsslatam.com'] };
+  const inq = { clave: 'gss', tenantId: '3409fd29-f351-4a98-8ef4-d98c8874a836', clientId: '28c47cc5-342a-4781-909e-d234db1bb993', clientSecret: 'secreto', dominios: ['gsslatam.com'], envio: true, etiquetar: true, eliminar: true };
 
   it('client credentials; se reutiliza hasta 5 minutos antes de vencer', async () => {
     limpiarTokensApp();

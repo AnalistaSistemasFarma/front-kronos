@@ -49,6 +49,11 @@ export function generateMetadata(): Metadata {
 
 export const viewport: Viewport = {
   themeColor: '#0078D4',
+  // Without `cover`, iOS reports env(safe-area-inset-*) as 0 even though the
+  // installed app draws down to the home indicator: the chat composer ended up
+  // under it, cut by the screen corner (Nicolás, msg 39057). The bottom bars
+  // that care already pad with env(safe-area-inset-bottom).
+  viewportFit: 'cover',
 };
 
 export default async function RootLayout({
