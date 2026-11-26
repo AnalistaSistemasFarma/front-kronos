@@ -156,6 +156,7 @@ export async function listOrdenes(db: OtDb, idCompany: number, idUser: string, n
       lote: true,
       turno: true,
       area: true,
+      areaRef: { select: { nombre: true } },
       sap_op_docnum: true,
       estado: true,
       abierta_en: true,
@@ -177,7 +178,8 @@ export async function listOrdenes(db: OtDb, idCompany: number, idUser: string, n
     itemCode: r.item_code,
     lote: r.lote,
     turno: r.turno,
-    area: r.area,
+    // Nombre ACTUAL del área (2026-11-26: «agrafado» → «grafado»); la copia de la bitácora no se edita.
+    area: r.areaRef?.nombre ?? r.area,
     sapOpDocNum: r.sap_op_docnum,
     estado: r.estado,
     abiertaEn: r.abierta_en.toISOString(),
@@ -466,6 +468,8 @@ export interface OrdenDetalle {
   lote: string;
   turno: string;
   area: string | null;
+  /** Nombre ACTUAL del área en el catálogo (2026-11-26: «agrafado» → «grafado»); `area` es la copia del día en que se abrió. */
+  areaCatalogo: string | null;
   sapOp: Record<string, unknown> | null;
   sapOpDocNum: number | null;
   estado: string;
@@ -555,6 +559,7 @@ export async function getOrdenDetalle(db: OtDb, idOrden: number, access: OtCompa
       operadores: { select: { operador: { select: { id_operador: true, nombre: true, activo: true } } } },
       registros: { orderBy: [{ registrado_en: 'asc' }, { id_registro: 'asc' }] },
       firmas: { orderBy: { id_firma: 'asc' } },
+      areaRef: { select: { nombre: true } },
     },
   });
   if (!o) return null;
@@ -597,6 +602,7 @@ export async function getOrdenDetalle(db: OtDb, idOrden: number, access: OtCompa
     lote: o.lote,
     turno: o.turno,
     area: o.area,
+    areaCatalogo: o.areaRef?.nombre ?? null,
     sapOp: parseSnapshot(o.sap_op_snapshot),
     sapOpDocNum: o.sap_op_docnum,
     estado: o.estado,

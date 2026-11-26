@@ -246,7 +246,7 @@ export default function OtPlanta({ company, idOrden }: { company: OtCompanyAcces
         </Text>
         <Text size='sm' c='dimmed'>
           Inicio <b>{fmtHora(o.abiertaEn)}</b> · Final <b>{o.cerradaEn ? fmtHora(o.cerradaEn) : '—'}</b>
-          {o.area ? ` · ${o.area}` : ''}
+          {(o.areaCatalogo ?? o.area) ? ` · ${o.areaCatalogo ?? o.area}` : ''}
         </Text>
         {abierta && <OtRelojServidor ahoraServidor={detalle.data?.ahoraServidor} />}
       </Card>

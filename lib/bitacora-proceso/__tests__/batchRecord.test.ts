@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import ExcelJS from 'exceljs';
 import {
   ajustarPaginaUnaDeAncho,
+  filaFirmaSupervisor,
   filasFirmaJefe,
   assertMismoLote,
   elegirOpBatchRecord,
@@ -26,7 +27,7 @@ function errorOf(fn: () => unknown) {
 
 function orden(consecutivo: number, abiertaEn: string, extra: Partial<OrdenDetalle> = {}): OrdenDetalle {
   return {
-    id: consecutivo, idCompany: 1, consecutivo, producto: 'MEROPENEM 500 mg', itemCode: 'PPMP0503', lote: '2421626', turno: 'MANANA', area: 'Envase y grafado',
+    id: consecutivo, idCompany: 1, consecutivo, producto: 'MEROPENEM 500 mg', itemCode: 'PPMP0503', lote: '2421626', turno: 'MANANA', area: 'Envase y grafado', areaCatalogo: null,
     sapOp: { AbsoluteEntry: 14332, DocumentNumber: 14118 }, sapOpDocNum: 14118, estado: 'CERRADA', abiertaEn, abiertaPor: 'Sandra Supervisora',
     cerradaEn: '2026-11-03T19:00:00.000Z', cerradaPor: 'Sandra Supervisora', observacionCierre: null, operarios: [],
     operadores: [{ id: 7, nombre: 'Pepito Pérez', activo: true }], inspector: null, jefe: { id: 'j', name: 'Natalia Velandia' },
@@ -101,6 +102,24 @@ describe('Bitácora de Proceso · Excel del batch record (2026-11-24)', () => {
     // Dos jefes distintos: no se adivina el nombre.
     const otro = orden(3, '2026-11-04T11:00:00.000Z', { jefe: { id: 'x', name: 'Otra Persona' } });
     expect(filasFirmaJefe([orden(1, '2026-11-03T11:00:00.000Z'), otro], e)[1].celdas[0].texto).toBe('Nombre: ');
+  });
+
+  it('firma del supervisor en cada turno (2026-11-26): quien cerró; si sigue abierta, quien abrió', () => {
+    const e = { seccion: 1, linea: 2, encabezadoTabla: 3, celda: 4, pie: 5 };
+    expect(filaFirmaSupervisor(orden(1, '2026-11-03T11:00:00.000Z'), e).celdas.map((c) => c.texto)).toEqual(['Supervisor que cerró: Sandra Supervisora', 'Firma:', 'Fecha:']);
+    const abierta = orden(2, '2026-11-03T19:00:00.000Z', { estado: 'ABIERTA', cierre: null, abiertaPor: 'Pilar Ramirez' });
+    expect(filaFirmaSupervisor(abierta, e).celdas[0].texto).toBe('Supervisor que abrió: Pilar Ramirez');
+    const jefe = orden(3, '2026-11-04T11:00:00.000Z', { cierre: { nombre: 'Natalia Velandia', como: 'JEFE_PROD', en: '2026-11-04T19:00:00.000Z', metodo: 'sesion_propia', cuentaComoVistoJefe: true } });
+    expect(filaFirmaSupervisor(jefe, e).celdas[0].texto).toBe('Cerró (jefe de producción): Natalia Velandia');
+  });
+
+  it('el título del área usa el nombre ACTUAL del catálogo (agrafado → grafado)', async () => {
+    const enc = { producto: 'X', concentracion: '', lote: 'L', op: '1', loteMp: '' };
+    const buf = await buildBatchRecordXlsx(enc, [orden(1, '2026-11-03T11:00:00.000Z', { area: 'Envase y agrafado', areaCatalogo: 'Envase y grafado' })]);
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(buf as unknown as ArrayBuffer);
+    expect(wb.worksheets[0].getCell('C9').value).toBe('BITACORA DE AREA ENVASE Y GRAFADO');
+    expect(String(wb.worksheets[0].getCell('A10').value)).toContain('Área Envase y grafado');
   });
 
   it('todas las bitácoras del archivo son del mismo lote', () => {

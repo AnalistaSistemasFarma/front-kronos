@@ -122,7 +122,7 @@ export default function OtInforme({ company, idOrden }: { company: OtCompanyAcce
             <Campo label='Código del artículo' value={o.itemCode} />
             <Campo label='Lote' value={o.lote} />
             <Campo label='Turno' value={turnoLabel(o.turno)} />
-            <Campo label='Área' value={o.area} />
+            <Campo label='Área' value={o.areaCatalogo ?? o.area} />
             <Campo label='Orden de producción SAP' value={o.sapOpDocNum ? String(o.sapOpDocNum) : 'Sin OP'} />
             {op && <Campo label='Vencimiento del lote (SAP)' value={fmtFecha(opTxt('U_FecVen_lote'))} />}
             {op && <Campo label='Bodega (SAP)' value={opTxt('Warehouse')} />}
