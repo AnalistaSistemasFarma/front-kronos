@@ -38,6 +38,10 @@ export default defineConfig({
       'app/api/chat/compartir/**/*.test.ts',
       // `app/api/biomedica/**`: Ingeniería biomédica (permiso del módulo, PDF en línea, control de vigencia).
       'app/api/biomedica/**/*.test.ts',
+      // `app/api/integrations/orion/**`: búsqueda de socios de firma (solo empresas del usuario, 403).
+      'app/api/integrations/orion/**/*.test.ts',
+      // `app/api/help-desk/dashboard/**`: Dashboard Helpdesk (subprocess access, aggregates only).
+      'app/api/help-desk/dashboard/**/*.test.ts',
       'components/sgc/**/*.test.ts',
       // Medidor del consumo de Anthropic en Proyectos (render del marcado, 2026-10-22).
       'components/proyectos/**/*.test.ts',
@@ -106,6 +110,8 @@ export default defineConfig({
         'app/api/correo/**/route.ts',
         // Visores de adjuntos del chat (2026-10-22): reglas puras y la ruta de la vista.
         'lib/chat/visor.ts',
+        // Voice call in the background (2026-11-25): app-level session rules.
+        'lib/chat/voice-call-session.ts',
         'app/api/chat/attachments/[[]id]/vista/route.ts',
         // Ventas (2026-10-30): máquina de estados y motor de reglas de la oferta de venta.
         'lib/sales/states.ts',

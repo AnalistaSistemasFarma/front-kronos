@@ -29,6 +29,7 @@ import { prisma } from '../prisma';
 import { projectModuleCompanies, type ProjectUser } from '../chat/projects';
 import { toPlainPreview } from '../chat/client';
 import type { EstadoAgenteProyectoDto } from './estado-agente';
+import { mutedProjectIds } from './mute';
 
 /** Conversaciones (las más recientes) que se revisan por consulta. Acota el costo. */
 export const MAX_CONVERSACIONES_REVISADAS = 300;
@@ -108,8 +109,15 @@ async function contar(user: ProjectUser): Promise<{ convs: ConversacionVisible[]
   const empresas = await projectModuleCompanies(user.id);
   if (empresas.length === 0) return null;
 
+  // «Silenciar notificaciones» (2026-11-23): a muted project does not count in the header icon
+  // (its unread messages still show inside the project).
+  const silenciados = [...(await mutedProjectIds(user.id))];
   const convs = await prisma.chatConversation.findMany({
-    where: { ...whereConversacionesVisibles(user.id, empresas.map((e) => e.idCompany)), last_message_at: { not: null } },
+    where: {
+      ...whereConversacionesVisibles(user.id, empresas.map((e) => e.idCompany)),
+      last_message_at: { not: null },
+      ...(silenciados.length > 0 ? { id_project: { notIn: silenciados } } : {}),
+    },
     orderBy: { last_message_at: 'desc' },
     take: MAX_CONVERSACIONES_REVISADAS,
     select: {

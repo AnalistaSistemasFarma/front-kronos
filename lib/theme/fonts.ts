@@ -57,6 +57,16 @@ export const FONTS: FontOption[] = [
     webFont: true,
   },
   {
+    // Gemini look (2026-11-24): Google Sans Flex, OFL 1.1 on Google Fonts.
+    // When selected, the chat also gets slightly larger, airier message text
+    // (`html[data-font='gemini']` rules in app/globals.css).
+    key: 'gemini',
+    label: 'Google Sans Flex (estilo Gemini)',
+    hint: 'La letra de la app de Gemini, con el texto del chat un poco más grande. Se descarga una sola vez (unos 50 KB) solo si la escoge.',
+    stack: `var(--font-google-sans-flex, "Google Sans Flex"), ${SYSTEM_STACK}`,
+    webFont: true,
+  },
+  {
     key: 'dispositivo',
     // `sans-serif` a secas es el alias que el sistema operativo mapea a su
     // propia fuente. Es la única opción que puede tomar la del equipo, aunque

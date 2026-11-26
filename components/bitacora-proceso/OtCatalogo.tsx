@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { Alert, Badge, Button, Card, Group, Loader, NumberInput, Stack, Switch, Tabs, Text, TextInput, Title } from '@mantine/core';
-import { IconAlertTriangle, IconArrowDown, IconArrowUp, IconCheck, IconKey, IconListCheck, IconMapPin, IconPlus, IconUserCheck, IconUsers } from '@tabler/icons-react';
+import { IconAlertTriangle, IconArrowDown, IconArrowUp, IconCheck, IconKey, IconListCheck, IconMapPin, IconPlus, IconPrinter, IconUserCheck, IconUsers } from '@tabler/icons-react';
 import toast from 'react-hot-toast';
 import { OT_ICONOS, OT_LIMITS } from '../../lib/bitacora-proceso/constants';
 import SgcSelect from '../sgc/SgcSelect';
@@ -11,6 +11,7 @@ import type { OtCompanyAccess } from '../../lib/bitacora-proceso/rules';
 import { otSend, useOtFetch } from './otClient';
 import { OtAreas, OtOperadores, OtResponsables } from './OtMaestros';
 import { OtPinsEmpresa } from './OtImportarYPin';
+import { OtImpresionConfig } from './OtMargenBatch';
 
 /**
  * Catálogo de la bitácora (pantalla 4, solo Gestión), en pestañas:
@@ -22,6 +23,7 @@ import { OtPinsEmpresa } from './OtImportarYPin';
  *     empresa; los selectores de la bitácora listan solo a estas personas.
  *   - Áreas (A5): áreas predefinidas de la empresa.
  *   - PIN (B3, 2026-10-15): estado del PIN de bitácora por persona y restablecimiento.
+ *   - Impresión (#8316, 2026-11-23): margen superior para el encabezado del lote batch.
  */
 interface Actividad {
   id_actividad: number;
@@ -54,6 +56,9 @@ export default function OtCatalogo({ company }: { company: OtCompanyAccess }) {
         <Tabs.Tab value='pin' leftSection={<IconKey size={18} />} data-testid='ot-tab-pin'>
           PIN
         </Tabs.Tab>
+        <Tabs.Tab value='impresion' leftSection={<IconPrinter size={18} />} data-testid='ot-tab-impresion'>
+          Impresión
+        </Tabs.Tab>
       </Tabs.List>
       <Tabs.Panel value='actividades'>
         <CatalogoActividades company={company} />
@@ -69,6 +74,9 @@ export default function OtCatalogo({ company }: { company: OtCompanyAccess }) {
       </Tabs.Panel>
       <Tabs.Panel value='pin'>
         <OtPinsEmpresa company={company} />
+      </Tabs.Panel>
+      <Tabs.Panel value='impresion'>
+        <OtImpresionConfig company={company} />
       </Tabs.Panel>
     </Tabs>
   );

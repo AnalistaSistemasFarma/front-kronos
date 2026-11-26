@@ -7,6 +7,7 @@ import {
   chatCreateHref,
   chatCreateOptions,
   compareByActivity,
+  esRutaFueraDeChat,
   formatUnread,
   isChatCreateKind,
   isChatRailKey,
@@ -333,5 +334,32 @@ describe('botón "Nuevo" de la barra', () => {
 
   it('la URL de creación apunta a la página del chat', () => {
     expect(chatCreateHref('grupo')).toBe('/process/chat?nuevo=grupo');
+  });
+});
+
+describe('esRutaFueraDeChat (volver al cerrar el chat, ?from=)', () => {
+  it('acepta rutas internas fuera del chat', () => {
+    expect(esRutaFueraDeChat('/process/request-general/view-request?id=5')).toBe(true);
+    expect(esRutaFueraDeChat('/dashboard')).toBe(true);
+  });
+
+  it('rechaza el propio chat', () => {
+    expect(esRutaFueraDeChat('/process/chat')).toBe(false);
+    expect(esRutaFueraDeChat('/process/chat?c=3')).toBe(false);
+  });
+
+  it('rechaza lo que el navegador lee como otro sitio (redirección abierta)', () => {
+    for (const url of [
+      'https://otrositio.com',
+      '//otrositio.com',
+      '/\\otrositio.com',
+      '/\t/otrositio.com',
+      '/\n/otrositio.com',
+      'javascript:alert(1)',
+      'otrositio.com',
+      '',
+    ]) {
+      expect(esRutaFueraDeChat(url)).toBe(false);
+    }
   });
 });

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { authenticateAgent } from '../../../../../../../lib/chat/agent-auth';
 import { jsonNoStore, NO_STORE, serverError, unauthorized } from '../../../../../../../lib/chat/http';
 import { buildContentDisposition } from '../../../../../../../lib/chat/attachments';
-import { whereProyectoDelAgente } from '../../../../../../../lib/chat/projects';
+import { filtroProyectosDelPuente } from '../../../../../../../lib/chat/projects';
 import { cargarConfigProyectos } from '../../../../../../../lib/proyectos/config-agentes';
 import { contenidoParaAgente } from '../../../../../../../lib/proyectos/matrices';
 
@@ -26,10 +26,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     if (!config.habilitadoEnAlguna(agent.code)) return noEncontrado();
 
     const { ref } = await params;
-    const c = await contenidoParaAgente(ref, {
-      ...whereProyectoDelAgente(agent.idAgent),
-      ...config.filtroEmpresas(agent.code),
-    });
+    const c = await contenidoParaAgente(ref, await filtroProyectosDelPuente(agent.idAgent, agent.code, config));
     if (!c) return noEncontrado();
     const headers = new Headers(NO_STORE);
     headers.set('Content-Type', c.tipo);

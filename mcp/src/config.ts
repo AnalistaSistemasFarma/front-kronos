@@ -92,6 +92,12 @@ const apiKeySchema = z.object({
       message: `La key del agente "${entry.agent}" define "usuarios": exige allowedTools (llave restringida) y agentCode.`,
     });
   }
+  if (entry.allowedTools?.includes('chat_enviar_mensaje_usuario') && !entry.agentCode) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: `La key del agente "${entry.agent}" permite chat_enviar_mensaje_usuario pero no define agentCode.`,
+    });
+  }
   if (entry.allowedTools?.includes('kronos_request_ia_access') && !entry.agentCode) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,

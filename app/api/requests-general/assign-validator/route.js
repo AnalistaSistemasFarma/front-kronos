@@ -1,4 +1,5 @@
 import sql from 'mssql';
+import { logFlowChange, requireFlowEditor } from '../../../../lib/workflow/flowAccess';
 import sqlConfig from '../../../../dbconfig.js';
 import { NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
@@ -74,6 +75,10 @@ export async function POST(req) {
 
     const body = await req.json();
     const { validators, id_process_category } = body;
+
+    // 2026-11-24: flow configuration — only who administers flows (and, if restricted, its editors).
+    const guard = await requireFlowEditor(id_process_category);
+    if (guard instanceof Response) return guard;
     const processId = Number(id_process_category);
 
     if (!Array.isArray(validators) || !Number.isInteger(processId) || processId <= 0) {
@@ -109,6 +114,7 @@ export async function POST(req) {
       }
 
       await transaction.commit();
+      await logFlowChange(Number(id_process_category), guard.email, 'validadores', `${Array.isArray(validators) ? validators.length : 0} validadores`);
 
       return NextResponse.json(
         { message: 'Validadores asignados correctamente', count: ordered.length },

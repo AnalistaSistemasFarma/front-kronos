@@ -1,7 +1,7 @@
 import 'server-only';
 import { prisma } from '../prisma';
 import { sapGet, sapLogin, sapLogout } from '../sap/serviceLayer';
-import { buildSapOpFilter, OtError, type SapOpSnapshot } from './rules';
+import { buildSapOpFilter, escapeOData, OtError, type SapOpSnapshot } from './rules';
 
 /**
  * Selector OPCIONAL de la orden de producción de SAP (R11) — SOLO LECTURA (R12).
@@ -47,5 +47,53 @@ export async function buscarOps(idCompany: number, q: string): Promise<SapOpSnap
     return (data.value ?? []).map(toSnapshot).filter((x): x is SapOpSnapshot => x !== null);
   } finally {
     await sapLogout(session).catch(() => undefined);
+  }
+}
+
+/**
+ * Datos de la OP para el encabezado del batch record (2026-11-24), SOLO LECTURA: descripción del
+ * producto (de ahí se sugiere la concentración) y observaciones (ahí Farmalógica anota los lotes
+ * de materia prima dispensados). Si SAP no responde, el Excel se genera igual con lo que la
+ * persona escriba: devuelve null en vez de fallar.
+ */
+export async function leerOpBatchRecord(idCompany: number, absEntry: number): Promise<{ ProductDescription: string | null; Remarks: string | null } | null> {
+  const creds = await credencialesSap(idCompany);
+  if (!creds) return null;
+  try {
+    const session = await sapLogin(creds);
+    try {
+      const row = await sapGet<Record<string, unknown>>(session, `ProductionOrders(${Math.trunc(absEntry)})?$select=ProductDescription,Remarks`);
+      const s = (v: unknown) => (typeof v === 'string' && v.trim() ? v.trim() : null);
+      return { ProductDescription: s(row.ProductDescription), Remarks: s(row.Remarks) };
+    } finally {
+      await sapLogout(session).catch(() => undefined);
+    }
+  } catch (error) {
+    console.error('[bitacora-proceso/sap] batch record OP', error);
+    return null;
+  }
+}
+
+/**
+ * OP de SAP por LOTE (U_Cod_Lote), SOLO LECTURA, para el encabezado del batch record cuando ninguna
+ * bitácora del lote tiene la OP (2026-11-25). Devuelve null si SAP no responde (no frena el Excel).
+ */
+export async function buscarOpsPorLote(idCompany: number, lote: string): Promise<Array<{ AbsoluteEntry: number; DocumentNumber: number; ItemNo: string | null }> | null> {
+  const creds = await credencialesSap(idCompany);
+  if (!creds || !lote.trim()) return null;
+  try {
+    const session = await sapLogin(creds);
+    try {
+      const filtro = encodeURIComponent(`U_Cod_Lote eq '${escapeOData(lote.trim().slice(0, 50))}'`);
+      const data = await sapGet<{ value?: Record<string, unknown>[] }>(session, `ProductionOrders?$filter=${filtro}&$select=AbsoluteEntry,DocumentNumber,ItemNo&$top=10`);
+      return (data.value ?? [])
+        .map((r) => ({ AbsoluteEntry: Number(r.AbsoluteEntry), DocumentNumber: Number(r.DocumentNumber), ItemNo: typeof r.ItemNo === 'string' ? r.ItemNo : null }))
+        .filter((r) => Number.isInteger(r.AbsoluteEntry) && Number.isInteger(r.DocumentNumber));
+    } finally {
+      await sapLogout(session).catch(() => undefined);
+    }
+  } catch (error) {
+    console.error('[bitacora-proceso/sap] OP por lote', error);
+    return null;
   }
 }

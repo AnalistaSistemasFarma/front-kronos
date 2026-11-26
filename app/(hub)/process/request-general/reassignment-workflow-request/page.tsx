@@ -72,6 +72,7 @@ import {
 } from '../../../../../components/request-general/list/RequestListUi';
 import IosSearchField from '../../../../../components/ui/IosSearchField';
 import ReassignmentHistory from '../../../../../components/request-general/ReassignmentHistory';
+import { Z_INDEX } from '../../../../../lib/ui/zIndex';
 import {
   EMPTY_FILTERS,
   KINDS,
@@ -1189,7 +1190,7 @@ function ReassignmentBoard() {
                   left: 12,
                   right: 12,
                   bottom: 'calc(12px + env(safe-area-inset-bottom))',
-                  zIndex: 200,
+                  zIndex: Z_INDEX.pageFloating,
                 }
               : { position: 'sticky', bottom: 16, zIndex: 20, marginTop: 16 }
           }

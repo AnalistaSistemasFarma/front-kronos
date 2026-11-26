@@ -13,9 +13,11 @@ import {
 import { jsonNoStore, serverError, unauthorized } from '../../../../../lib/chat/http';
 import type { ChatAgentIdentity } from '../../../../../lib/chat/agent-auth';
 import { cargarConfigProyectos } from '../../../../../lib/proyectos/config-agentes';
-import { whereProyectoDelAgente } from '../../../../../lib/chat/projects';
+import { filtroProyectosDelPuente } from '../../../../../lib/chat/projects';
 import { mensajesConEntregaPendiente } from '../../../../../lib/chat/entregas-pendientes';
 import { EVENT_TYPE_TURNO, tickMesas, turnoParaAgente } from '../../../../../lib/proyectos/mesas';
+import { ANALYSIS_AUTHOR_NAME, analysisTurnForAgent } from '../../../../../lib/meetings/projects/analysis';
+import { withInitiatedContext } from '../../../../../lib/chat/agent-initiated';
 
 // El long-poll obliga a que la ruta sea dinámica: nada de esto se cachea.
 export const dynamic = 'force-dynamic';
@@ -186,11 +188,15 @@ export async function GET(request: NextRequest) {
       ]);
     }
 
+    // Agent-initiated messages (2026-11-24): the person's reply carries what the agent had written on
+    // its own in that direct conversation, because the session serving it may not have written it.
+    const delivered = pending.length > 0 ? await withInitiatedContext(pending) : pending;
+
     return jsonNoStore({
       agent: { idAgent: agent.idAgent, code: agent.code, displayName: agent.displayName },
       acknowledged: ack,
       waitedMs: Date.now() - startedAt,
-      messages: pending.map((m) => ({
+      messages: delivered.map((m) => ({
         id: m.id,
         idConversation: m.id_conversation,
         role: m.role,
@@ -269,7 +275,8 @@ async function bandejaDeProyectos(opciones: {
   if (!config.habilitadoEnAlguna(agent.code)) {
     return jsonNoStore({ error: 'Proyectos no habilitados para este agente.' }, { status: 404 });
   }
-  const empresas = config.filtroEmpresas(agent.code);
+  // Empresas habilitadas, o proyectos de otra empresa donde lo designaron (2026-11-25).
+  const delPuente = await filtroProyectosDelPuente(agent.idAgent, agent.code, config);
 
   // MESAS DE DISCUSIÓN (2026-11-04): motor perezoso. Cualquier puente que
   // pregunte por su bandeja empuja las mesas que tengan ronda o turno vencido
@@ -296,8 +303,8 @@ async function bandejaDeProyectos(opciones: {
           kind: 'project',
           archived: false,
           id_agent: agent.idAgent,
-          // …y solo de empresas donde el agente está habilitado para Proyectos.
-          project: { ...whereProyectoDelAgente(agent.idAgent), ...empresas },
+          // …y solo de empresas donde el agente está habilitado para Proyectos (o de otra empresa, ver filtroProyectosDelPuente).
+          project: delPuente,
         },
       },
       orderBy: { id: 'asc' },
@@ -323,11 +330,14 @@ async function bandejaDeProyectos(opciones: {
           // (2026-11-12, con frenos anti-bucle en POST /api/chat/agent/messages),
           // o el AVISO DE TURNO de una mesa de discusión (mensaje de sistema con
           // su fila de entrega).
-          OR: [{ role: 'user' }, { role: 'agent' }, { role: 'system', event_type: EVENT_TYPE_TURNO }],
+          // Meeting analysis request (2026-11-24): a SYSTEM message without event_type that has a
+          // delivery row for this agent (lib/meetings/projects/analysis.ts). Other system notices never
+          // get delivery rows, so they never match.
+          OR: [{ role: 'user' }, { role: 'agent' }, { role: 'system', event_type: EVENT_TYPE_TURNO }, { role: 'system', event_type: null }],
           conversation: {
             kind: 'project',
             archived: false,
-            project: { ...whereProyectoDelAgente(agent.idAgent), ...empresas },
+            project: delPuente,
           },
         },
         orderBy: { id: 'asc' },
@@ -381,6 +391,19 @@ async function bandejaDeProyectos(opciones: {
     if (t) turnos.set(m.id, t);
   }
 
+  // Meeting analysis (2026-11-24): the agent receives the notice + instructions + the transcript, read
+  // live (never stored in the thread). See lib/meetings/projects/analysis.ts.
+  const analisis = new Map<number, string>();
+  for (const m of pending) {
+    if (m.role !== 'system' || m.event_type !== null) continue;
+    try {
+      const t = await analysisTurnForAgent(m, agent.idAgent);
+      if (t) analisis.set(m.id, t.body);
+    } catch (error) {
+      console.error('[meetings] analysis turn for the agent', m.id, error);
+    }
+  }
+
   return jsonNoStore({
     agent: { idAgent: agent.idAgent, code: agent.code, displayName: agent.displayName },
     scope: 'projects',
@@ -390,7 +413,7 @@ async function bandejaDeProyectos(opciones: {
       id: m.id,
       idConversation: m.id_conversation,
       role: m.role,
-      body: turnos.get(m.id)?.body ?? m.body,
+      body: analisis.get(m.id) ?? turnos.get(m.id)?.body ?? m.body,
       createdAt: m.created_at.toISOString(),
       author: m.userAuthor
         ? { kind: 'user' as const, id: m.userAuthor.id, name: m.userAuthor.name, email: m.userAuthor.email }
@@ -407,6 +430,9 @@ async function bandejaDeProyectos(opciones: {
           : m.event_type === EVENT_TYPE_TURNO
           ? // Sin correo: un aviso de turno NUNCA activa permisos de una persona.
             { kind: 'system' as const, id: null, name: 'Mesa de discusión', email: null }
+          : analisis.has(m.id)
+          ? // No e-mail either: an analysis request never activates a person's permissions.
+            { kind: 'system' as const, id: null, name: ANALYSIS_AUTHOR_NAME, email: null }
           : null,
       conversation: {
         id: m.conversation.id,

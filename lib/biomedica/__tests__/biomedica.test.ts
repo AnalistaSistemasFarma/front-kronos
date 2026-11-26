@@ -70,6 +70,8 @@ function fakeDb(opts: { docStatus?: string; currentVersion?: number; versionStat
       }),
     },
     biomedEvento: { create: vi.fn(async ({ data }: { data: { accion: string } }) => st.eventos.push(data)) },
+    // Fase 3: el serial se busca en el inventario para ligar el formato a la hoja de vida del equipo.
+    biomedEquipo: { findFirst: vi.fn(async () => null) },
     sgcCompanyConfig: { findUnique: vi.fn(async () => ({ storage_root: 'SGC/OLP' })) },
   };
   return db;

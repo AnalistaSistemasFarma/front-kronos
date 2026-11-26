@@ -92,6 +92,14 @@ describe('Redactar · envío (servicio)', () => {
     expect(db.auditar).not.toHaveBeenCalled();
   });
 
+  it('read-only tenant (CORREO_GSS_ENVIO=false) → 403 «solo lectura» without calling Microsoft', async () => {
+    const { f, llamadas } = graphFalso(() => ({ status: 202 }));
+    const d = deps({ ...graphEnv, CORREO_GSS_ENVIO: 'false' }, { fetchFn: f });
+    await expect(enviarNuevo(d, yo, base)).rejects.toMatchObject({ status: 403, message: expect.stringMatching(/solo lectura/) });
+    expect(llamadas).toHaveLength(0);
+    expect(db.auditar).not.toHaveBeenCalled();
+  });
+
   it('valida destinatarios, asunto y contenido antes de llamar a Microsoft', async () => {
     const { f, llamadas } = graphFalso(() => ({ status: 202 }));
     const d = deps(graphEnv, { fetchFn: f });

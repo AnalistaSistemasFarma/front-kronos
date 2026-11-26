@@ -148,7 +148,7 @@ test.describe('Bitácora de Proceso · sin sesión', () => {
 test.describe('Bitácora de Proceso · con sesión, base y SAP simulados', () => {
   test.skip(!SECRET || REMOTO, 'Requiere NEXTAUTH_SECRET del servidor local (CI) para firmar la sesión de prueba.');
 
-  test('abrir: OP PLANIFICADA por número (auto-llena producto y lote), inspector y jefe distintos', async ({ page, context, baseURL }) => {
+  test('abrir: OP PLANIFICADA por número (auto-llena producto y lote) y jefe; sin inspector (2026-11-24)', async ({ page, context, baseURL }) => {
     await sesion(context, baseURL!, 'u-sup', 'sup@farmalogica.com');
     const estado: Estado = { orden: detalle({ estado: 'ABIERTA', dados: {}, sesion: 'u-sup' }), enviados: [] };
     await simular(page, estado);
@@ -160,20 +160,21 @@ test.describe('Bitácora de Proceso · con sesión, base y SAP simulados', () =>
     await expect(page.getByTestId('ot-op-elegida')).toContainText('Planificada');
     await expect(page.getByTestId('ot-producto')).toHaveValue(OP_PLANIFICADA.ProductDescription);
     await expect(page.getByTestId('ot-lote')).toHaveValue('1455326');
+    await page.getByTestId('ot-planta-1').click();
     await page.getByTestId('ot-turno').getByText('Mañana').click();
     await page.getByTestId('ot-operarios').getByText('Pepito Pérez').click();
-    await page.getByTestId('ot-inspector').getByText('Iván Inspector').click();
-    // El inspector elegido ya no aparece en la lista del jefe (son personas distintas).
-    await expect(page.getByTestId('ot-jefe').getByText('Iván Inspector')).toHaveCount(0);
+    // 2026-11-24: el inspector salió del flujo: ya no se elige al abrir.
+    await expect(page.getByTestId('ot-inspector')).toHaveCount(0);
     await page.getByTestId('ot-jefe').getByText('Julia Jefe').click();
     await captura(page, '01-nueva-bitacora');
     await page.getByTestId('ot-abrir').click();
+    expect(Object.keys(estado.enviados.find((e) => e.ruta === '/')?.body ?? {})).not.toContain('inspector');
     await expect.poll(() => estado.enviados.find((e) => e.ruta === '/')?.body).toMatchObject({
-      inspector: 'u-ins', jefeProduccion: 'u-jefe', lote: '1455326', itemCode: 'PTCF015501', operadores: [7], sapOp: { DocumentNumber: 14022, ProductionOrderStatus: 'boposPlanned' },
+      planta: 1, jefeProduccion: 'u-jefe', lote: '1455326', itemCode: 'PTCF015501', operadores: [7], sapOp: { DocumentNumber: 14022, ProductionOrderStatus: 'boposPlanned' },
     });
   });
 
-  test('selectores: inspector y jefe listan SOLO a los asignados a ese rol (no a todos los usuarios de la empresa)', async ({ page, context, baseURL }) => {
+  test('selector: el jefe lista SOLO a los asignados a ese rol (no a todos los usuarios de la empresa)', async ({ page, context, baseURL }) => {
     await sesion(context, baseURL!, 'u-sup', 'sup@farmalogica.com');
     const estado: Estado = { orden: detalle({ estado: 'ABIERTA', dados: {}, sesion: 'u-sup' }), enviados: [] };
     await simular(page, estado);
@@ -181,35 +182,32 @@ test.describe('Bitácora de Proceso · con sesión, base y SAP simulados', () =>
     page.on('request', (req) => { if (req.url().includes('/api/bitacora-proceso/')) pedidas.push(new URL(req.url()).pathname + new URL(req.url()).search); });
     await page.goto('/process/bitacora-proceso?empresa=1');
     await page.getByTestId('ot-nueva').click();
-    const insp = page.getByTestId('ot-inspector');
     const jefe = page.getByTestId('ot-jefe');
-    await expect(insp.getByText('Iván Inspector')).toBeVisible();
-    await expect(insp.getByRole('radio')).toHaveCount(1);
-    await expect(jefe.getByRole('radio')).toHaveCount(1);
-    for (const nombre of ['Otro Usuario', 'Sandra Supervisora', 'Julia Jefe']) await expect(insp.getByText(nombre)).toHaveCount(0);
     await expect(jefe.getByText('Julia Jefe')).toBeVisible();
+    await expect(jefe.getByRole('radio')).toHaveCount(1);
     for (const nombre of ['Otro Usuario', 'Sandra Supervisora', 'Iván Inspector']) await expect(jefe.getByText(nombre)).toHaveCount(0);
-    expect(pedidas.some((p) => p.includes('/responsables?') && p.includes('rol=INSPECTOR'))).toBe(true);
+    expect(pedidas.some((p) => p.includes('/responsables?') && p.includes('rol=INSPECTOR'))).toBe(false);
     expect(pedidas.some((p) => p.includes('/responsables?') && p.includes('rol=JEFE_PROD'))).toBe(true);
     expect(pedidas.some((p) => p.startsWith('/api/bitacora-proceso/usuarios'))).toBe(false);
   });
 
-  test('catálogo → Responsables: lista por rol y asigna un inspector', async ({ page, context, baseURL }) => {
+  test('catálogo → Responsables: lista supervisor y jefe (sin inspector) y asigna un jefe', async ({ page, context, baseURL }) => {
     await sesion(context, baseURL!, 'u-sup', 'sup@farmalogica.com');
     const estado: Estado = { orden: detalle({ estado: 'ABIERTA', dados: {}, sesion: 'u-sup' }), enviados: [] };
     await simular(page, estado);
     await page.goto('/process/bitacora-proceso/gestion?empresa=1');
     await page.getByTestId('ot-tab-responsables').click();
     await expect(page.getByTestId('ot-responsables-SUPERVISOR')).toContainText('Sandra Supervisora');
-    await expect(page.getByTestId('ot-responsables-INSPECTOR')).toContainText('Iván Inspector');
+    await expect(page.getByTestId('ot-responsables-INSPECTOR')).toHaveCount(0);
     await expect(page.getByTestId('ot-responsables-JEFE_PROD')).toContainText('Julia Jefe');
     // Supervisor: quien no tiene Gestión no se puede elegir.
     await expect(page.getByTestId('ot-responsable-candidatos')).toContainText('Sin permiso de Gestión');
-    await page.getByTestId('ot-responsable-rol').getByText('Inspector').click();
+    await expect(page.getByTestId('ot-responsable-rol').getByText('Inspector')).toHaveCount(0);
+    await page.getByTestId('ot-responsable-rol').getByText('Jefe de producción').click();
     await page.getByTestId('ot-responsable-candidatos').getByText('Otro Usuario').click();
     await page.getByTestId('ot-responsable-asignar').click();
-    await expect(page.getByTestId('ot-responsables-aviso')).toContainText('asignado como inspector');
-    expect(estado.enviados.at(-1)).toMatchObject({ ruta: '/responsables', body: { company: 1, id_user: 'u-otro', rol: 'INSPECTOR' } });
+    await expect(page.getByTestId('ot-responsables-aviso')).toContainText('asignado como jefe de producción');
+    expect(estado.enviados.at(-1)).toMatchObject({ ruta: '/responsables', body: { company: 1, id_user: 'u-otro', rol: 'JEFE_PROD' } });
   });
 
   test('tablet: visto bueno del operario y cierre del supervisor con PIN (cuenta compartida); PIN malo se rechaza', async ({ page, context, baseURL }) => {

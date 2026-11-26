@@ -39,5 +39,21 @@ export const googleSans = localFont({
   adjustFontFallback: 'Arial',
 });
 
+/**
+ * Google Sans Flex (2026-11-24, Nicolás asked for the Gemini app look). It is
+ * the font Gemini uses, published by Google on Google Fonts under SIL OFL 1.1
+ * (see ./fuentes/google-sans-flex/OFL.txt). Self-hosted latin subset from the
+ * Google Fonts CSS API with the weight axis 400–700 (~50 KB); the other axes
+ * stay at their defaults. Same loading rules as Google Sans: only downloaded
+ * when somebody picks it. Italics are synthesized by the browser.
+ */
+export const googleSansFlex = localFont({
+  src: [{ path: './fuentes/google-sans-flex/GoogleSansFlex-latin.woff2', weight: '400 700', style: 'normal' }],
+  variable: '--font-google-sans-flex',
+  display: 'swap',
+  preload: false,
+  adjustFontFallback: 'Arial',
+});
+
 /** Clases que definen las variables de las fuentes web; van en <html> */
-export const FONT_FACE_VARIABLES = googleSans.variable;
+export const FONT_FACE_VARIABLES = `${googleSans.variable} ${googleSansFlex.variable}`;

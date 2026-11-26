@@ -96,3 +96,115 @@ describe('montar con agente', () => {
     expect(parsePdfOrder(agentReplyJson(body)).numeroOrdenCompra).toBe('OC-7');
   });
 });
+
+import { assembleAgentReply, extractAgentJson, isJsonAttachment, rawLineCount } from './pdfOrder';
+
+/** Same cut as the SynerLink channel reply tool (synerlink-channel/server.ts `chunk`, 40,000 characters). */
+function channelChunk(text: string, limit: number): string[] {
+  if (text.length <= limit) return [text];
+  const out: string[] = [];
+  let rest = text;
+  while (rest.length > limit) {
+    const para = rest.lastIndexOf('\n\n', limit);
+    const line = rest.lastIndexOf('\n', limit);
+    const space = rest.lastIndexOf(' ', limit);
+    const cut = para > limit / 2 ? para : line > limit / 2 ? line : space > 0 ? space : limit;
+    out.push(rest.slice(0, cut));
+    rest = rest.slice(cut).replace(/^\n+/, '');
+  }
+  if (rest) out.push(rest);
+  return out;
+}
+
+/** A big purchase order like FE-4390 (358 lines, ≈ 44 KB of JSON), one line object per text line. */
+function bigOrderReply(lines: number, oneLine = false): string {
+  const items = Array.from({ length: lines }, (_, i) =>
+    JSON.stringify({ codigo: String(10000 + i), descripcion: `PRODUCTO DE PRUEBA ${i + 1} 20MG/1ML AMP CAJA X 100`, cantidad: 100 + i, precioUnitario: 1234.56 + i }));
+  const json = `{"numeroOrdenCompra":"OC1","nitCliente":"900149596-3","fechaEntrega":"","lineas":[${oneLine ? '' : '\n'}${items.join(oneLine ? ', ' : ',\n')}${oneLine ? '' : '\n'}]}`;
+  return '```json\n' + json + '\n```';
+}
+
+describe('respuesta del agente partida en varios mensajes (OC grande)', () => {
+  it('une las 2 partes cortadas por el canal y lee las 358 líneas', () => {
+    const parts = channelChunk(bigOrderReply(358), 40_000);
+    expect(parts).toHaveLength(2);
+    expect(parts[0].startsWith('```json')).toBe(true);
+    expect(parts[1].trimEnd().endsWith('```')).toBe(true);
+    // The first part alone is not enough.
+    expect(assembleAgentReply([parts[0]])).toEqual({ status: 'incomplete', parts: 1 });
+    const a = assembleAgentReply(parts);
+    expect(a.status).toBe('ok');
+    if (a.status !== 'ok') return;
+    expect(a.parts).toBe(2);
+    const r = parsePdfOrder(a.json);
+    expect(r.numeroOrdenCompra).toBe('OC1');
+    expect(r.nitCliente).toBe('900149596-3');
+    expect(r.lineas).toHaveLength(358);
+    expect(rawLineCount(a.json)).toBe(358);
+    expect(r.lineas[0]).toMatchObject({ row: 1, ItemCode: '10000', Quantity: 100, UnitPrice: 1234.56 });
+    expect(r.lineas[357]).toMatchObject({ row: 358, ItemCode: '10357', Quantity: 457 });
+  });
+  it('tres partes y corte en un espacio dentro de una descripción', () => {
+    const parts = channelChunk(bigOrderReply(900, true), 40_000);
+    expect(parts.length).toBeGreaterThanOrEqual(3);
+    const a = assembleAgentReply(parts);
+    expect(a.status).toBe('ok');
+    if (a.status === 'ok') expect(parsePdfOrder(a.json).lineas).toHaveLength(900);
+  });
+  it('ignora la charla previa y un comentario posterior al JSON', () => {
+    const parts = channelChunk(bigOrderReply(358), 40_000);
+    const a = assembleAgentReply(['Con gusto, ya la leo.', ...parts, 'Quedo atento.']);
+    expect(a).toMatchObject({ status: 'ok', parts: 2 });
+  });
+  it('respuesta pequeña en un solo mensaje: igual que antes', () => {
+    const body = 'Listo:\n```json\n{"numeroOrdenCompra":"OC-7","nitCliente":"900123456-7","fechaEntrega":"","lineas":[{"codigo":"1","descripcion":"X","cantidad":2,"precioUnitario":10}]}\n```';
+    const a = assembleAgentReply([body]);
+    expect(a).toMatchObject({ status: 'ok', parts: 1 });
+    if (a.status === 'ok') expect(parsePdfOrder(a.json).lineas).toHaveLength(1);
+    expect(assembleAgentReply(['{"numeroOrdenCompra":"OC-8","lineas":[]}'])).toMatchObject({ status: 'ok' });
+  });
+  it('sin JSON todavía: sigue esperando', () => {
+    expect(assembleAgentReply([])).toEqual({ status: 'none' });
+    expect(assembleAgentReply(['Estoy leyendo el PDF, un momento.'])).toEqual({ status: 'none' });
+  });
+  it('bloque sin cerrar: toma lo que hay dentro', () => {
+    expect(extractAgentJson('```json\n{"a":1}')).toBe('{"a":1}');
+    expect(extractAgentJson('texto {"a":{"b":2}} fin')).toBe('{"a":{"b":2}}');
+  });
+  it('reconoce el JSON adjunto como archivo', () => {
+    expect(isJsonAttachment({ fileName: 'oferta.json', contentType: null })).toBe(true);
+    expect(isJsonAttachment({ fileName: 'x.bin', contentType: 'application/json; charset=utf-8' })).toBe(true);
+    expect(isJsonAttachment({ fileName: 'FE-4390.pdf', contentType: 'application/pdf' })).toBe(false);
+  });
+});
+
+import { coverage } from './pdfOrder';
+describe('empresas de servicios (Kelab, Meditrack)', () => {
+  const kelab = [
+    { ItemCode: 'AFGV001', ItemName: 'SERVICIO DE ANALISIS GRAVADO' },
+    { ItemCode: 'AFE001S', ItemName: 'SERVICIO DE ANALISIS EXCLUIDO' },
+    { ItemCode: 'SDES001', ItemName: 'SERVICIO DESARROLLO' },
+  ];
+  const desc = 'SERVICIO DE ANALISIS PRODUCTO TERMINADO VALORACIÓN, MEROPENEM 1G LOTE: 2151026';
+  it('sin modo servicios la descripción larga no empareja', () => {
+    expect(bestCandidate(desc, kelab)).toBeNull();
+  });
+  it('con modo servicios empareja por cobertura del nombre y queda «a revisar» si hay empate', () => {
+    expect(coverage(desc, kelab[0].ItemName)).toBeCloseTo(2 / 3);
+    const b = bestCandidate(desc, kelab, { servicios: true });
+    expect(['AFGV001', 'AFE001S']).toContain(b?.ItemCode);
+    expect(b?.seguro).toBe(false);
+  });
+});
+
+describe('Kelab: lo que ya se le vende al cliente desempata', () => {
+  it('con empate gravado/excluido, gana el que el cliente compra (AFE001S)', () => {
+    const c = [
+      { ItemCode: 'AFGV001', ItemName: 'SERVICIO DE ANALISIS GRAVADO' },
+      { ItemCode: 'AFE001S', ItemName: 'SERVICIO DE ANALISIS EXCLUIDO' },
+    ];
+    const b = bestCandidate('SERVICIO DE ANALISIS PRODUCTO TERMINADO VALORACIÓN, MEROPENEM 1G LOTE: 2151026', c, { servicios: true, preferidos: new Map([['AFE001S', 12]]) });
+    expect(b?.ItemCode).toBe('AFE001S');
+    expect(b?.seguro).toBe(true);
+  });
+});
