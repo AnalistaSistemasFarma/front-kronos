@@ -735,3 +735,21 @@ export function parseNotaRegistro(body: Record<string, unknown> | null): { texto
   if (texto.length > OT_NOTA_MAX) throw new OtError(`La nota admite máximo ${OT_NOTA_MAX} caracteres.`, 400);
   return { texto };
 }
+
+/** PATCH { planta }: asignar o corregir la planta de una bitácora ABIERTA (2026-11-26). */
+export function parseCambioPlanta(body: Record<string, unknown> | null): { planta: OtPlanta } {
+  if (!body) throw new OtError('Se esperaba un JSON con la planta.', 400);
+  const planta = Number(body.planta);
+  if (!isOtPlanta(planta)) throw new OtError('Seleccione la planta (Planta 1 o Planta 2).', 400);
+  return { planta };
+}
+
+/**
+ * ¿Puede asignar o corregir la planta? Solo con la bitácora ABIERTA, y quien tiene Gestión
+ * (supervisor), el jefe de producción designado o quien la abrió.
+ */
+export function assertPuedeCambiarPlanta(o: { estado: string; abiertaPor: string; jefe: string | null }, idUser: string, access: OtCompanyAccess): void {
+  if (o.estado !== 'ABIERTA') throw new OtError('La bitácora ya está cerrada: la planta no se puede cambiar.', 409);
+  if (access.canManage || idUser === o.jefe || idUser === o.abiertaPor) return;
+  throw new OtError('Solo el supervisor (permiso de Gestión), el jefe de producción de la bitácora o quien la abrió pueden asignar la planta.', 403);
+}

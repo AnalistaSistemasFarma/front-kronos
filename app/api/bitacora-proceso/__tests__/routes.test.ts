@@ -9,7 +9,7 @@ const m = vi.hoisted(() => {
     'crearRegistro', 'confirmarVistoBueno', 'prepararConfirmante', 'listActividades', 'crearActividad', 'cambiarActividad', 'listUsuariosEmpresa', 'buscarOps',
     'datosAviso', 'createAndSendNotifications', 'listOperadores', 'crearOperador', 'cambiarOperador', 'agregarOperadores', 'listAreas', 'crearArea', 'cambiarArea',
     'listSupervisoresEmpresa', 'listResponsables', 'listResponsablesEmpresa', 'listCandidatosResponsable', 'asignarResponsable', 'cambiarResponsable', 'importarOperadores', 'estadoPin', 'configurarPin', 'listPinsEmpresa', 'restablecerPin', 'verificarPassword',
-    'empresasComoJefe', 'puedeAbrirComoJefe', 'getOtConfig', 'setOtMargenSuperior',
+    'empresasComoJefe', 'puedeAbrirComoJefe', 'getOtConfig', 'setOtMargenSuperior', 'cambiarPlanta',
   ] as const;
   return Object.fromEntries(names.map((n) => [n, vi.fn()])) as Record<(typeof names)[number], ReturnType<typeof vi.fn>>;
 });
@@ -27,7 +27,7 @@ vi.mock('../../../../lib/bitacora-proceso/db', () => ({
   listResponsables: m.listResponsables, listResponsablesEmpresa: m.listResponsablesEmpresa, listCandidatosResponsable: m.listCandidatosResponsable,
   asignarResponsable: m.asignarResponsable, cambiarResponsable: m.cambiarResponsable,
   empresasComoJefe: m.empresasComoJefe, puedeAbrirComoJefe: m.puedeAbrirComoJefe,
-  getOtConfig: m.getOtConfig, setOtMargenSuperior: m.setOtMargenSuperior,
+  getOtConfig: m.getOtConfig, setOtMargenSuperior: m.setOtMargenSuperior, cambiarPlanta: m.cambiarPlanta,
 }));
 // El notificador compartido (campana + push): se simula para ver QUÉ se avisa y a QUIÉN.
 vi.mock('../../../../lib/notifications.js', () => ({ createAndSendNotifications: m.createAndSendNotifications }));
@@ -38,6 +38,7 @@ vi.mock('../../../../lib/auth/verifyPassword', () => ({ synerlinkPasswordVerifie
 import { OtError } from '../../../../lib/bitacora-proceso/rules';
 import { SapError } from '../../../../lib/sap/serviceLayer';
 import * as lista from '../route';
+import * as plantaRuta from '../[id]/planta/route';
 import * as detalle from '../[id]/route';
 import * as registros from '../[id]/registros/route';
 import * as confirmar from '../[id]/confirmar/route';
@@ -92,7 +93,7 @@ describe('Bitácora de Proceso · rutas', () => {
   });
 
   it('no existen rutas de edición ni de borrado de órdenes ni registros', () => {
-    for (const mod of [lista, detalle, registros, confirmar, operadoresOrden, importar, pinRestablecer]) {
+    for (const mod of [lista, detalle, registros, confirmar, operadoresOrden, importar, pinRestablecer, plantaRuta]) {
       expect(mod).not.toHaveProperty('PUT');
       expect(mod).not.toHaveProperty('DELETE');
       expect(mod).not.toHaveProperty('PATCH');
@@ -339,6 +340,20 @@ describe('Bitácora de Proceso · rutas', () => {
     const { ahoraServidor } = (await ok.json()) as { ahoraServidor: string };
     expect(Math.abs(Date.parse(ahoraServidor) - Date.now())).toBeLessThan(5_000);
     expect((await detalle.GET(get('?company=1'), params('0'))).status).toBe(400);
+  });
+
+  it('POST planta (2026-11-26): valida 1|2 y pasa empresa, bitácora y actor a la capa de datos', async () => {
+    asUser([supervisor]);
+    m.cambiarPlanta.mockResolvedValue({ planta: 2, anterior: null });
+    const ok = await plantaRuta.POST(send('POST', { planta: 2 }, '?company=1'), params('7'));
+    expect(ok.status).toBe(200);
+    expect(await ok.json()).toEqual({ planta: { planta: 2, anterior: null } });
+    expect(m.cambiarPlanta.mock.calls[0][1]).toBe(7);
+    expect(m.cambiarPlanta.mock.calls[0][2]).toMatchObject({ idCompany: 1 });
+    expect(m.cambiarPlanta.mock.calls[0][3]).toBe(2);
+    expect((await plantaRuta.POST(send('POST', { planta: 3 }, '?company=1'), params('7'))).status).toBe(400);
+    m.cambiarPlanta.mockRejectedValue(new OtError('La bitácora ya está cerrada: la planta no se puede cambiar.', 409));
+    expect((await plantaRuta.POST(send('POST', { planta: 1 }, '?company=1'), params('7'))).status).toBe(409);
   });
 
   it('AVISOS: al abrir, al inspector y al jefe; tras cada visto bueno, a quien le toca el siguiente', async () => {

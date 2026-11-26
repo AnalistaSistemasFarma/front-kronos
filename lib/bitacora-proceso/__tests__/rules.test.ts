@@ -38,6 +38,8 @@ import {
   parseNuevaArea,
   parseNuevaOrden,
   parseNotaRegistro,
+  parseCambioPlanta,
+  assertPuedeCambiarPlanta,
   parseNuevoOperador,
   parseNuevoRegistro,
   resolveOtAccess,
@@ -154,6 +156,19 @@ describe('Bitácora de Proceso · validación', () => {
     expect(parseNuevaOrden({ ...base, planta: '2' }).planta).toBe(2);
     expect(errorOf(() => parseNuevaOrden({ ...base, planta: undefined })).message).toMatch(/planta/);
     expect(errorOf(() => parseNuevaOrden({ ...base, planta: 3 })).status).toBe(400);
+  });
+
+  it('asignar o corregir la planta (2026-11-26): solo abierta; Gestión, jefe designado o quien abrió', () => {
+    expect(parseCambioPlanta({ planta: '1' })).toEqual({ planta: 1 });
+    expect(errorOf(() => parseCambioPlanta({ planta: 0 })).status).toBe(400);
+    const op = { idCompany: 1, companyName: 'F', canOperate: true, canManage: false };
+    const sup = { ...op, canManage: true };
+    const o = { estado: 'ABIERTA', abiertaPor: 'a', jefe: 'j' };
+    expect(() => assertPuedeCambiarPlanta(o, 'x', sup)).not.toThrow();
+    expect(() => assertPuedeCambiarPlanta(o, 'j', op)).not.toThrow();
+    expect(() => assertPuedeCambiarPlanta(o, 'a', op)).not.toThrow();
+    expect(errorOf(() => assertPuedeCambiarPlanta(o, 'x', op)).status).toBe(403);
+    expect(errorOf(() => assertPuedeCambiarPlanta({ ...o, estado: 'CERRADA' }, 'x', sup)).status).toBe(409);
   });
 
   it('nota de corrección: texto de 3 a 500 caracteres, sin saltos ni caracteres de control', () => {

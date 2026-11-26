@@ -626,6 +626,8 @@ jobs:
           # Planta, tipo de personal y notas de corrección (2026-11-26): dos veces (idempotente).
           npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261126150000_bitacora_proceso_planta_tipo_notas/migration.sql
           npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261126150000_bitacora_proceso_planta_tipo_notas/migration.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261126170000_bitacora_proceso_planta_asignada/migration.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261126170000_bitacora_proceso_planta_asignada/migration.sql
           npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-11-23-bitacora-margen-batch-PRUEBAS.sql
           npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-11-23-bitacora-margen-batch-PRUEBAS.sql
           npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-11-23-bitacora-margen-batch-reversa.sql
