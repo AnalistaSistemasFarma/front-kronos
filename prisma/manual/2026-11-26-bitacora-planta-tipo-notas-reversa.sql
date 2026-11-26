@@ -14,5 +14,7 @@ IF OBJECT_ID(N'dbo.ot_registro_nota', N'U') IS NOT NULL DROP TABLE [dbo].[ot_reg
 IF OBJECT_ID(N'dbo.CK_ot_operador_tipo', N'C') IS NOT NULL ALTER TABLE [dbo].[ot_operador] DROP CONSTRAINT [CK_ot_operador_tipo];
 IF OBJECT_ID(N'dbo.ot_operador_tipo_df', N'D') IS NOT NULL ALTER TABLE [dbo].[ot_operador] DROP CONSTRAINT [ot_operador_tipo_df];
 IF COL_LENGTH(N'dbo.ot_operador', N'tipo') IS NOT NULL ALTER TABLE [dbo].[ot_operador] DROP COLUMN [tipo];
+IF COL_LENGTH(N'dbo.ot_orden_trabajo', N'planta_asignada_en') IS NOT NULL ALTER TABLE [dbo].[ot_orden_trabajo] DROP COLUMN [planta_asignada_en];
+IF COL_LENGTH(N'dbo.ot_orden_trabajo', N'planta_asignada_por') IS NOT NULL ALTER TABLE [dbo].[ot_orden_trabajo] DROP COLUMN [planta_asignada_por];
 IF OBJECT_ID(N'dbo.CK_ot_orden_trabajo_planta', N'C') IS NOT NULL ALTER TABLE [dbo].[ot_orden_trabajo] DROP CONSTRAINT [CK_ot_orden_trabajo_planta];
 IF COL_LENGTH(N'dbo.ot_orden_trabajo', N'planta') IS NOT NULL ALTER TABLE [dbo].[ot_orden_trabajo] DROP COLUMN [planta];

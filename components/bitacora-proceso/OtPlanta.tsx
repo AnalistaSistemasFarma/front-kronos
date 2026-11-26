@@ -48,6 +48,7 @@ import {
   OT_NOTA_MIN,
   OT_PLANTA_COLOR,
   OT_PLANTA_LABEL,
+  OT_PLANTAS,
   OT_TIPO_PERSONAL_COLOR,
   OT_TIPO_PERSONAL_LABEL,
   OT_TIPO_PERSONAL_PLURAL,
@@ -122,6 +123,9 @@ export default function OtPlanta({ company, idOrden }: { company: OtCompanyAcces
   const [notaPara, setNotaPara] = useState<{ id: string; actividad: string; hora: string } | null>(null);
   const [notaTexto, setNotaTexto] = useState('');
   const [notaBusy, setNotaBusy] = useState(false);
+  // Planta (2026-11-26): asignarla a las bitácoras vivas sin planta, o corregirla mientras está abierta.
+  const [cambiandoPlanta, setCambiandoPlanta] = useState(false);
+  const [plantaBusy, setPlantaBusy] = useState(false);
   /** Actividad de texto libre que espera su texto (modal). */
   const [textoPara, setTextoPara] = useState<Actividad | null>(null);
   const [texto, setTexto] = useState('');
@@ -279,6 +283,60 @@ export default function OtPlanta({ company, idOrden }: { company: OtCompanyAcces
           {(o.areaCatalogo ?? o.area) ? ` · ${o.areaCatalogo ?? o.area}` : ''}
         </Text>
         {abierta && <OtRelojServidor ahoraServidor={detalle.data?.ahoraServidor} />}
+        {abierta && o.puedeCambiarPlanta && (!isOtPlanta(o.planta) || cambiandoPlanta) && (
+          <Alert
+            mt='xs'
+            color={isOtPlanta(o.planta) ? 'gray' : 'yellow'}
+            icon={<IconAlertTriangle size={18} />}
+            title={isOtPlanta(o.planta) ? 'Corregir la planta' : 'Esta bitácora no tiene planta'}
+            data-testid='ot-asignar-planta'
+          >
+            <Text size='sm' mb='xs'>
+              {isOtPlanta(o.planta) ? 'Elija la planta correcta. Queda registrado quién la cambió y cuándo.' : 'Se abrió antes de que existiera la planta. Asígnela para que se vea con su color.'}
+            </Text>
+            <Group gap='sm'>
+              {OT_PLANTAS.map((p) => (
+                <Button
+                  key={p}
+                  color={OT_PLANTA_COLOR[p]}
+                  variant={o.planta === p ? 'filled' : 'light'}
+                  loading={plantaBusy}
+                  onClick={async () => {
+                    setPlantaBusy(true);
+                    try {
+                      await otSend(`/api/bitacora-proceso/${o.id}/planta?company=${company.idCompany}`, 'POST', { planta: p });
+                      toast.success(`Bitácora asignada a ${OT_PLANTA_LABEL[p]}.`);
+                      setCambiandoPlanta(false);
+                      await detalle.reload(true);
+                    } catch (e) {
+                      toast.error(e instanceof Error ? e.message : String(e));
+                    } finally {
+                      setPlantaBusy(false);
+                    }
+                  }}
+                  data-testid={`ot-asignar-planta-${p}`}
+                >
+                  {OT_PLANTA_LABEL[p]}
+                </Button>
+              ))}
+              {isOtPlanta(o.planta) && (
+                <Button variant='subtle' color='gray' onClick={() => setCambiandoPlanta(false)} disabled={plantaBusy}>
+                  Cancelar
+                </Button>
+              )}
+            </Group>
+          </Alert>
+        )}
+        {abierta && o.puedeCambiarPlanta && isOtPlanta(o.planta) && !cambiandoPlanta && (
+          <Group gap={6} mt={4}>
+            <Button size='compact-xs' variant='subtle' color='gray' onClick={() => setCambiandoPlanta(true)} data-testid='ot-cambiar-planta'>
+              Cambiar planta
+            </Button>
+            {o.plantaAsignada && (
+              <Text size='xs' c='dimmed'>Asignada por {o.plantaAsignada.por} · {fmtFechaHora(o.plantaAsignada.en)}</Text>
+            )}
+          </Group>
+        )}
       </Card>
 
       {aviso && (

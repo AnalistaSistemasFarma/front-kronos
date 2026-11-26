@@ -3,7 +3,8 @@
   BASE: KRONOSDB_PRUEBAS. Correr ANTES de desplegar el código en pruebas (verificar-esquema).
   QUÉ HACE: el DDL de prisma/migrations/20261126150000_bitacora_proceso_planta_tipo_notas, nada más:
     ot_orden_trabajo.planta (TINYINT NULL, 1|2), ot_operador.tipo (DEFAULT 'OPERARIO') y la tabla
-    ot_registro_nota (solo inserción). Aditivo e IDEMPOTENTE: el código anterior sigue funcionando.
+    ot_registro_nota (solo inserción), y ot_orden_trabajo.planta_asignada_por/_en
+    (migración 20261126170000). Aditivo e IDEMPOTENTE: el código anterior sigue funcionando.
     Después marca como INSPECTOR a los 6 inspectores de calidad de Farmalógica (si ya están en el maestro).
   🔒 BLOQUEOS: ALTER TABLE pide Sch-M un instante. Correr fuera de turno pico.
   REVERSA: prisma/manual/2026-11-26-bitacora-planta-tipo-notas-reversa.sql
@@ -59,11 +60,21 @@ END');
 
 GO
 
+-- 20261126170000_bitacora_proceso_planta_asignada (quién asignó o corrigió la planta de una bitácora abierta)
+SET XACT_ABORT ON;
+IF COL_LENGTH(N'dbo.ot_orden_trabajo', N'planta_asignada_por') IS NULL
+  ALTER TABLE [dbo].[ot_orden_trabajo] ADD [planta_asignada_por] NVARCHAR(50) NULL;
+IF COL_LENGTH(N'dbo.ot_orden_trabajo', N'planta_asignada_en') IS NULL
+  ALTER TABLE [dbo].[ot_orden_trabajo] ADD [planta_asignada_en] DATETIME2 NULL;
+
+GO
+
 SET NOCOUNT ON;
 IF COL_LENGTH(N'dbo.ot_operador', N'tipo') IS NOT NULL
   EXEC (N'UPDATE dbo.ot_operador SET tipo = N''INSPECTOR'' WHERE id_company = 1 AND tipo = N''OPERARIO'' AND nombre IN (N''DEL SOL DILAN'', N''VELA PAULA'', N''ALVAREZ JUDY'', N''ORTIZ DIANA'', N''MERCADO KELLIS'', N''MATEUS JEIDY'')');
 SELECT DB_NAME() AS base, 'después' AS momento,
        COL_LENGTH(N'dbo.ot_orden_trabajo', N'planta') AS planta,
        COL_LENGTH(N'dbo.ot_operador', N'tipo') AS tipo,
+       COL_LENGTH(N'dbo.ot_orden_trabajo', N'planta_asignada_por') AS planta_asignada_por,
        CASE WHEN OBJECT_ID(N'dbo.ot_registro_nota', N'U') IS NULL THEN 0 ELSE 1 END AS tabla_notas,
        CASE WHEN OBJECT_ID(N'dbo.TR_ot_registro_nota_inmutable', N'TR') IS NULL THEN 0 ELSE 1 END AS trigger_notas;

@@ -4875,6 +4875,9 @@ model OtOrdenTrabajo {
   id_area            Int?
   // Planta 1 o 2 (2026-11-26), elegida al abrir; NULL en las bitácoras anteriores. CHECK (1, 2).
   planta             Int?      @db.TinyInt
+  // Quién y cuándo asignó o corrigió la planta con la bitácora ABIERTA (2026-11-26); NULL si se eligió al abrir.
+  planta_asignada_por String?  @db.NVarChar(50)
+  planta_asignada_en  DateTime? @db.DateTime2
 
   company    Company           @relation(fields: [id_company], references: [id_company], onDelete: NoAction, onUpdate: NoAction)
   areaRef    OtArea?           @relation(fields: [id_area], references: [id_area], onDelete: NoAction, onUpdate: NoAction)

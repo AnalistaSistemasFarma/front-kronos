@@ -25,6 +25,7 @@ import {
   assertActividadRegistrable,
   assertOperadorDeLaOrden,
   assertPuedeSerResponsable,
+  assertPuedeCambiarPlanta,
   assertPuedeRegistrar,
   motivoSinRol,
   OtError,
@@ -489,6 +490,10 @@ export interface OrdenDetalle {
   operadores: Array<{ id: number; nombre: string; activo: boolean; tipo: string }>;
   /** Planta 1 o 2 (2026-11-26); null en las anteriores. */
   planta: number | null;
+  /** Asignada o corregida con la bitácora abierta (2026-11-26): quién y cuándo. */
+  plantaAsignada: { por: string; en: string } | null;
+  /** La sesión puede asignar o corregir la planta (abierta; Gestión, jefe designado o quien abrió). */
+  puedeCambiarPlanta: boolean;
   /** Inspector (B1, 2026-10-15). Las bitácoras del #617 no lo tienen. */
   inspector: { id: string; name: string } | null;
   /** Jefe de producción (B1; columna id_jefe_produccion). */
@@ -585,6 +590,7 @@ export async function getOrdenDetalle(db: OtDb, idOrden: number, access: OtCompa
   if (!o) return null;
   const ids = [
     o.abierta_por,
+    o.planta_asignada_por ?? '',
     o.cerrada_por ?? '',
     o.id_inspector ?? '',
     o.id_jefe_produccion ?? '',
@@ -643,6 +649,8 @@ export async function getOrdenDetalle(db: OtDb, idOrden: number, access: OtCompa
       .map((id) => ({ id, name: nombres.get(id)?.name ?? id, email: nombres.get(id)?.email ?? '' }))
       .sort((a, b) => a.name.localeCompare(b.name, 'es')),
     planta: o.planta,
+    plantaAsignada: o.planta_asignada_por && o.planta_asignada_en ? { por: nombre(o.planta_asignada_por) ?? o.planta_asignada_por, en: o.planta_asignada_en.toISOString() } : null,
+    puedeCambiarPlanta: o.estado === 'ABIERTA' && (access.canManage || idUser === o.abierta_por || idUser === o.id_jefe_produccion),
     operadores: o.operadores
       .map((x) => ({ id: x.operador.id_operador, nombre: x.operador.nombre, activo: x.operador.activo, tipo: x.operador.tipo }))
       .sort((a, b) => a.nombre.localeCompare(b.nombre, 'es')),
@@ -695,6 +703,27 @@ export async function listOrdenesDelLote(db: OtDb, idCompany: number, lote: stri
     sapOpDocNum: f.sap_op_docnum,
     sapOpAbsEntry: f.sap_op_absentry,
   }));
+}
+
+/**
+ * ASIGNAR O CORREGIR LA PLANTA de una bitácora ABIERTA (2026-11-26): en producción hay bitácoras
+ * vivas abiertas antes de que existiera la planta. Queda quién y cuándo (hora del servidor).
+ */
+export async function cambiarPlanta(db: OtDb, idOrden: number, access: OtCompanyAccess, planta: number, actor: OtActor): Promise<{ planta: number; anterior: number | null }> {
+  return db.$transaction(async (tx) => {
+    const rows = await tx.$queryRaw<Array<{ estado: string; abierta_por: string; id_jefe_produccion: string | null; planta: number | null }>>`
+      SELECT estado, abierta_por, id_jefe_produccion, planta FROM [dbo].[ot_orden_trabajo] WITH (UPDLOCK, ROWLOCK)
+      WHERE id_orden_trabajo = ${idOrden} AND id_company = ${access.idCompany}`;
+    if (rows.length === 0) throw new OtError('Bitácora no encontrada.', 404);
+    const o = rows[0];
+    assertPuedeCambiarPlanta({ estado: o.estado, abiertaPor: o.abierta_por, jefe: o.id_jefe_produccion }, actor.idUser, access);
+    const n = await tx.$executeRaw`
+      UPDATE [dbo].[ot_orden_trabajo]
+      SET planta = ${planta}, planta_asignada_por = ${actor.idUser}, planta_asignada_en = SYSUTCDATETIME()
+      WHERE id_orden_trabajo = ${idOrden} AND id_company = ${access.idCompany} AND estado = N'ABIERTA'`;
+    if (n === 0) throw new OtError('La bitácora ya está cerrada: la planta no se puede cambiar.', 409);
+    return { planta, anterior: o.planta === null ? null : Number(o.planta) };
+  });
 }
 
 /**
