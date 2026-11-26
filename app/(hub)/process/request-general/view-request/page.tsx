@@ -1,6 +1,7 @@
 'use client';
 
 import { Suspense, useEffect, useState, useRef, useMemo, useCallback } from 'react';
+import ViewOnlyAttachmentButton from '../../../../../components/request-general/attachments/ViewOnlyAttachmentButton';
 import PurchaseRequestDetail from '../../purchases/PurchaseRequestDetail';
 import SalesOfferDetail from '../../sales/SalesOfferDetail';
 import { useSearchParams, useRouter } from 'next/navigation';
@@ -354,6 +355,8 @@ function ViewRequestPage() {
   } | null>(null);
   const [attachedFiles, setAttachedFiles] = useState<UploadedFile[]>([]);
   const [folderContents, setFolderContents] = useState<FolderFile[]>([]);
+  // «Ver sin descargar» (2026-11-24): adjuntos de un flujo restringido, solo en el visor seguro.
+  const [viewOnlyAttachments, setViewOnlyAttachments] = useState(false);
   const [canDeleteAttachments, setCanDeleteAttachments] = useState(false);
   const [showResolution, setShowResolution] = useState(false);
   const [resolutionData, setResolutionData] = useState({
@@ -1166,7 +1169,9 @@ function ViewRequestPage() {
       const data = (await response.json().catch(() => ({}))) as {
         error?: string;
         files?: FolderFile[];
+        viewOnly?: boolean;
       };
+      setViewOnlyAttachments(Boolean(data.viewOnly));
       if (!response.ok) {
         throw new Error(data.error || `Error listando adjuntos (HTTP ${response.status})`);
       }
@@ -2950,7 +2955,7 @@ function ViewRequestPage() {
                 </Text>
               ) : null}
             </Title>
-            {attachmentRows.length > 0 && (
+            {attachmentRows.length > 0 && !viewOnlyAttachments && (
               <Button
                 size='xs'
                 variant='light'
@@ -3209,7 +3214,11 @@ function ViewRequestPage() {
                               }}
                             >
                               <Group gap={6} wrap='nowrap'>
-                                {file.webUrl ? (
+                                {viewOnlyAttachments ? (
+                                  <ViewOnlyAttachmentButton fileName={file.name} src={buildSynerLinkAttachmentFileUrl({ requestId: request.id, fileId })} />
+                                ) : (
+                                <>
+{file.webUrl ? (
                                   <ViewOnlineButton
                                     fileName={file.name}
                                     href={file.webUrl}
@@ -3234,6 +3243,8 @@ function ViewRequestPage() {
                                 >
                                   Abrir
                                 </UnstyledButton>
+                                </>
+                                )}
                                 {canDeleteAttachments ? (
                                   <Tooltip label='Eliminar adjunto'>
                                     <ActionIcon
@@ -3273,7 +3284,11 @@ function ViewRequestPage() {
                             </Table.Td>
                             <Table.Td data-label='Abrir'>
                               <Group gap={6} wrap='nowrap'>
-                              {file.webUrl ? (
+                              {viewOnlyAttachments ? (
+                                <ViewOnlyAttachmentButton fileName={file.name} src={buildSynerLinkAttachmentFileUrl({ requestId: request.id, fileId })} />
+                              ) : (
+                              <>
+{file.webUrl ? (
                                 <ViewOnlineButton
                                   fileName={file.name}
                                   href={file.webUrl}
@@ -3299,6 +3314,8 @@ function ViewRequestPage() {
                               >
                                 Abrir
                               </UnstyledButton>
+                              </>
+                              )}
                               {canDeleteAttachments ? (
                                 <ActionIcon
                                   variant='subtle'
