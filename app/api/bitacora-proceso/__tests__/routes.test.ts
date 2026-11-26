@@ -67,7 +67,7 @@ const H = { 'x-forwarded-for': '10.0.0.9', 'user-agent': 'vitest' };
 const get = (q: string) => new Request(`http://x/api${q}`, { headers: H });
 const send = (method: string, body: unknown, q = '') => new Request(`http://x/api${q}`, { method, body: JSON.stringify(body), headers: { ...H, 'content-type': 'application/json' } });
 const params = (id: string) => ({ params: Promise.resolve({ id }) });
-const nueva = { company: FARMA, producto: 'Cefazolina', lote: 'L1', turno: 'TARDE', operadores: [7], idArea: 3, inspector: 'u2', jefeProduccion: 'u3' };
+const nueva = { company: FARMA, producto: 'Cefazolina', lote: 'L1', turno: 'TARDE', operadores: [7], idArea: 3, inspector: 'u2', jefeProduccion: 'u3', planta: 1 };
 const confirma = { rol: 'SUPERVISOR', persona: 'u-sup', confirmo: true, pin: '4821' };
 
 const avisoBase = { idOrden: 9, idCompany: FARMA, consecutivo: 1, producto: 'Cefazolina', lote: 'L1', inspectorEmail: 'inspector@farmalogica.com', jefeEmail: 'jefe@farmalogica.com', actorNombre: 'Supervisor', actorEmail: 'op@farmalogica.com' };
@@ -301,7 +301,8 @@ describe('Bitácora de Proceso · rutas', () => {
     const res = await lista.POST(send('POST', nueva));
     expect(res.status).toBe(201);
     expect(await res.json()).toEqual({ orden: { id: 9, consecutivo: 1 } });
-    expect(m.crearOrden.mock.calls[0][1]).toMatchObject({ sapOp: null, turno: 'TARDE', inspector: null, jefeProduccion: 'u3', operadores: [7], idArea: 3 });
+    expect(m.crearOrden.mock.calls[0][1]).toMatchObject({ sapOp: null, turno: 'TARDE', inspector: null, jefeProduccion: 'u3', operadores: [7], idArea: 3, planta: 1 });
+    expect((await lista.POST(send('POST', { ...nueva, planta: null }))).status).toBe(400);
     expect((await lista.POST(send('POST', { ...nueva, jefeProduccion: '' }))).status).toBe(400);
     expect(m.crearOrden.mock.calls[0][2]).toEqual({ idUser: 'u1', email: 'op@farmalogica.com', ip: '10.0.0.9' });
     expect(m.crearOrden.mock.calls[0][3]).toBe('GESTION');
