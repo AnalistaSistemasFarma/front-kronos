@@ -15,6 +15,7 @@ import {
   Modal,
   ScrollArea,
   SegmentedControl,
+  SimpleGrid,
   Stack,
   Text,
   TextInput,
@@ -22,7 +23,24 @@ import {
 } from '@mantine/core';
 import { useDebouncedValue, useMediaQuery } from '@mantine/hooks';
 import { IconAlertTriangle, IconSearch, IconX } from '@tabler/icons-react';
-import { OT_LIMITS, OT_TURNO_HORARIO, OT_TURNO_LABEL, OT_TURNO_NOMBRE, OT_TURNOS, type OtTurno } from '../../lib/bitacora-proceso/constants';
+import {
+  isOtTipoPersonal,
+  OT_LIMITS,
+  OT_PLANTA_COLOR,
+  OT_PLANTA_LABEL,
+  OT_PLANTAS,
+  OT_TIPO_PERSONAL_COLOR,
+  OT_TIPO_PERSONAL_LABEL,
+  OT_TIPO_PERSONAL_PLURAL,
+  OT_TIPOS_PERSONAL,
+  OT_TURNO_HORARIO,
+  OT_TURNO_LABEL,
+  OT_TURNO_NOMBRE,
+  OT_TURNOS,
+  type OtPlanta,
+  type OtTipoPersonal,
+  type OtTurno,
+} from '../../lib/bitacora-proceso/constants';
 import { OT_SAP_OP_ESTADO_LABEL, opPorNumero, type SapOpSnapshot } from '../../lib/bitacora-proceso/rules';
 import { fmtFecha, otSend, useOtFetch } from './otClient';
 
@@ -49,7 +67,11 @@ interface OperadorMaestro {
   id_operador: number;
   nombre: string;
   documento: string | null;
+  /** OPERARIO | MANTENIMIENTO | INSPECTOR (2026-11-26). */
+  tipo?: string;
 }
+
+const tipoDe = (u: OperadorMaestro): OtTipoPersonal => (isOtTipoPersonal(u.tipo) ? u.tipo : 'OPERARIO');
 
 interface AreaCatalogo {
   id_area: number;
@@ -87,6 +109,8 @@ export default function NuevaOrdenModal({
   const [idArea, setIdArea] = useState<string | null>(null);
   const [operarios, setOperarios] = useState<string[]>([]);
   const [filtroOp, setFiltroOp] = useState('');
+  const [tipoFiltro, setTipoFiltro] = useState<OtTipoPersonal | 'TODOS'>('TODOS');
+  const [planta, setPlanta] = useState<OtPlanta | null>(null);
   const [jefe, setJefe] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -101,6 +125,8 @@ export default function NuevaOrdenModal({
     setItemCode(null);
     setLote('');
     setTurno('');
+    setPlanta(null);
+    setTipoFiltro('TODOS');
     setIdArea(null);
     setOperarios([]);
     setFiltroOp('');
@@ -159,15 +185,17 @@ export default function NuevaOrdenModal({
   const lista = useMemo(() => {
     const all = maestro.data?.operadores ?? [];
     const f = filtroOp.trim().toLowerCase();
-    const filtrados = f ? all.filter((u) => u.nombre.toLowerCase().includes(f) || (u.documento ?? '').toLowerCase().includes(f)) : all;
+    const porTipo = tipoFiltro === 'TODOS' ? all : all.filter((u) => tipoDe(u) === tipoFiltro);
+    const filtrados = f ? porTipo.filter((u) => u.nombre.toLowerCase().includes(f) || (u.documento ?? '').toLowerCase().includes(f)) : porTipo;
     // Los ya elegidos siempre arriba, para verlos sin buscar.
     const elegido = (u: OperadorMaestro) => operarios.includes(String(u.id_operador));
     return [...filtrados.filter(elegido), ...filtrados.filter((u) => !elegido(u))];
-  }, [maestro.data, filtroOp, operarios]);
+  }, [maestro.data, filtroOp, operarios, tipoFiltro]);
 
   const faltantes = [
     !producto.trim() && 'producto',
     !lote.trim() && 'lote',
+    !planta && 'planta',
     !turno && 'turno',
     areas.length > 0 && !idArea && 'área',
     operarios.length === 0 && 'al menos un operario',
@@ -188,6 +216,7 @@ export default function NuevaOrdenModal({
         itemCode,
         lote,
         turno,
+        planta,
         idArea: idArea ? Number(idArea) : null,
         operadores: operarios.map(Number),
         jefeProduccion: jefe,
@@ -303,6 +332,28 @@ export default function NuevaOrdenModal({
         />
         <Box>
           <Text fw={500} size='md' mb={4}>
+            Planta <Text span c='red'>*</Text>
+          </Text>
+          <Text size='xs' c='dimmed' mb={6}>Con color, para no registrar en la bitácora de la otra planta.</Text>
+          <SimpleGrid cols={2} spacing='sm' data-testid='ot-planta'>
+            {OT_PLANTAS.map((p) => (
+              <Button
+                key={p}
+                size='lg'
+                h={56}
+                color={OT_PLANTA_COLOR[p]}
+                variant={planta === p ? 'filled' : 'light'}
+                onClick={() => setPlanta(p)}
+                data-testid={`ot-planta-${p}`}
+                aria-pressed={planta === p}
+              >
+                {OT_PLANTA_LABEL[p]}
+              </Button>
+            ))}
+          </SimpleGrid>
+        </Box>
+        <Box>
+          <Text fw={500} size='md' mb={4}>
             Turno <Text span c='red'>*</Text>
           </Text>
           <SegmentedControl
@@ -351,13 +402,22 @@ export default function NuevaOrdenModal({
         <Box>
           <Group justify='space-between' mb={4}>
             <Text fw={500} size='md'>
-              Operarios <Text span c='red'>*</Text>
+              Personal del turno <Text span c='red'>*</Text>
             </Text>
             <Badge variant='light' size='lg'>{operarios.length === 1 ? '1 seleccionado' : `${operarios.length} seleccionados`}</Badge>
           </Group>
           <Text size='xs' c='dimmed' mb={6}>
-            Los operarios no tienen usuario: en la tablet cada uno toca su nombre y la actividad. Se administran en el catálogo (Operarios).
+            Operarios, mantenimiento e inspectores de calidad. No tienen usuario: en la tablet cada uno toca su nombre y la actividad. Se administran en el catálogo (Operarios).
           </Text>
+          <SegmentedControl
+            fullWidth
+            size='sm'
+            mb={6}
+            value={tipoFiltro}
+            onChange={(v) => setTipoFiltro(v as OtTipoPersonal | 'TODOS')}
+            data={[{ value: 'TODOS', label: 'Todos' }, ...OT_TIPOS_PERSONAL.map((t) => ({ value: t, label: OT_TIPO_PERSONAL_PLURAL[t] }))]}
+            data-testid='ot-operarios-tipo'
+          />
           <TextInput
             size='md'
             placeholder='Buscar operario'
@@ -384,7 +444,14 @@ export default function NuevaOrdenModal({
                       <Group wrap='nowrap' gap='sm' mih={40}>
                         <Checkbox.Indicator size='md' />
                         <div style={{ minWidth: 0 }}>
-                          <Text fw={500} truncate>{u.nombre}</Text>
+                          <Group gap={6} wrap='nowrap'>
+                            <Text fw={500} truncate>{u.nombre}</Text>
+                            {tipoDe(u) !== 'OPERARIO' && (
+                              <Badge size='sm' variant='light' color={OT_TIPO_PERSONAL_COLOR[tipoDe(u)]} style={{ flexShrink: 0 }}>
+                                {OT_TIPO_PERSONAL_LABEL[tipoDe(u)]}
+                              </Badge>
+                            )}
+                          </Group>
                           {u.documento && <Text size='xs' c='dimmed' truncate>Doc. {u.documento}</Text>}
                         </div>
                       </Group>

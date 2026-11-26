@@ -623,6 +623,9 @@ jobs:
           # Bitácora · margen superior para el encabezado batch (#8316, 2026-11-23): migración y PRUEBAS dos veces, reversa dos veces, otra vez PRUEBAS (idempotencia ida y vuelta), tabla + CHECK y PROD que se niega.
           npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261123180000_bitacora_proceso_margen_batch/migration.sql
           npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261123180000_bitacora_proceso_margen_batch/migration.sql
+          # Planta, tipo de personal y notas de corrección (2026-11-26): dos veces (idempotente).
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261126150000_bitacora_proceso_planta_tipo_notas/migration.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261126150000_bitacora_proceso_planta_tipo_notas/migration.sql
           npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-11-23-bitacora-margen-batch-PRUEBAS.sql
           npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-11-23-bitacora-margen-batch-PRUEBAS.sql
           npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-11-23-bitacora-margen-batch-reversa.sql
