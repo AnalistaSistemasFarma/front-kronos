@@ -7755,3 +7755,189 @@ summary {
     overscroll-behavior-y: none;
   }
 }
+
+/* ── Voice notes (2026-11-26) ──
+   Recorder: takes the place of the pill with the same shape (discard | timer +
+   live waveform | send). Player: inside the bubble, colors from currentColor so
+   it works on the accent bubble, the agent-thread bubble and dark mode. */
+.chat-composer .chat-composer__pill.chat-composer__pill--grabando {
+  grid-template-columns: 40px minmax(0, 1fr) 40px;
+  grid-template-areas: 'plus text send';
+  align-items: center;
+}
+
+.chat-nota-voz-grabando {
+  grid-area: text;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  min-height: 40px;
+  padding: 0 10px 0 12px;
+}
+
+.chat-nota-voz-grabando__punto {
+  flex: 0 0 10px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background-color: #e03131;
+}
+
+.chat-nota-voz-grabando__tiempo {
+  flex: 0 0 auto;
+  font-variant-numeric: tabular-nums;
+}
+
+.chat-nota-voz-grabando__aviso {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.chat-nota-voz-onda {
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+  height: 28px;
+  overflow: hidden;
+}
+
+.chat-nota-voz-onda > span {
+  flex: 1 1 0;
+  max-width: 4px;
+  min-width: 2px;
+  height: 100%;
+  border-radius: 2px;
+  background-color: var(--app-accent, #2563eb);
+  transform-origin: center;
+  transition: transform 90ms linear;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .chat-nota-voz-grabando__punto {
+    animation: chat-nota-voz-pulso 1.2s ease-in-out infinite;
+  }
+}
+
+@keyframes chat-nota-voz-pulso {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.25; }
+}
+
+.chat-nota-voz {
+  width: min(320px, 68vw);
+  max-width: 100%;
+}
+
+.chat-nota-voz__fila {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.chat-nota-voz .chat-nota-voz__play {
+  flex: 0 0 36px;
+  background-color: var(--app-accent, #2563eb);
+  color: #ffffff;
+}
+
+.chat-bubble--user .chat-nota-voz .chat-nota-voz__play {
+  background-color: #ffffff;
+  color: var(--app-accent, #2563eb);
+}
+
+.chat-thread--agente .chat-bubble--user .chat-nota-voz .chat-nota-voz__play {
+  background-color: var(--app-accent, #2563eb);
+  color: #ffffff;
+}
+
+.chat-nota-voz__centro {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.chat-nota-voz__barra {
+  -webkit-appearance: none;
+  appearance: none;
+  display: block;
+  width: 100%;
+  height: 4px;
+  margin: 8px 0 6px;
+  border-radius: 2px;
+  background: linear-gradient(
+    to right,
+    currentColor 0 var(--progreso, 0%),
+    color-mix(in srgb, currentColor 28%, transparent) var(--progreso, 0%) 100%
+  );
+  cursor: pointer;
+}
+
+.chat-nota-voz__barra:disabled {
+  cursor: default;
+}
+
+.chat-nota-voz__barra::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background-color: currentColor;
+  border: 0;
+}
+
+.chat-nota-voz__barra::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background-color: currentColor;
+  border: 0;
+}
+
+.chat-nota-voz__tiempos {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  line-height: 14px;
+  opacity: 0.8;
+  font-variant-numeric: tabular-nums;
+}
+
+.chat-nota-voz__tiempos svg {
+  vertical-align: -2px;
+}
+
+.chat-nota-voz__velocidad {
+  flex: 0 0 auto;
+  min-width: 36px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  text-align: center;
+  color: inherit;
+  background-color: color-mix(in srgb, currentColor 14%, transparent);
+}
+
+.chat-nota-voz__toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: inherit;
+  opacity: 0.85;
+}
+
+.chat-nota-voz__texto {
+  margin-top: 4px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.chat-nota-voz .mantine-ActionIcon-root[data-variant='subtle'] {
+  color: inherit;
+}

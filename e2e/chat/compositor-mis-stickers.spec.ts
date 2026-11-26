@@ -48,10 +48,12 @@ for (const oscuro of [false, true]) {
       await capturar(page, `escritorio-${modo}-1-compositor`);
 
       // Left to right on one row: «+», box, send. Nothing else on the pill.
+      // While empty the send slot is the voice note mic (2026-11-26).
       const mas = (await pill.getByRole('button', { name: 'Más opciones' }).boundingBox())!;
       const textarea = (await caja(page).boundingBox())!;
       const enviar = pill.getByRole('button', { name: 'Enviar mensaje' });
-      const env = (await enviar.boundingBox())!;
+      const microfono = pill.getByRole('button', { name: 'Grabar una nota de voz' });
+      const env = (await microfono.boundingBox())!;
       const cap = (await pill.boundingBox())!;
       expect(mas.x).toBeLessThan(textarea.x);
       expect(textarea.x + textarea.width).toBeLessThanOrEqual(env.x + 1);
@@ -62,8 +64,9 @@ for (const oscuro of [false, true]) {
       // Single line by default (72 px, like Gemini) and fully rounded.
       expect(Math.round(cap.height)).toBe(72);
       expect(parseFloat(await pill.evaluate((el) => getComputedStyle(el).borderTopLeftRadius))).toBeGreaterThanOrEqual(24);
-      // Disabled look while empty.
-      await expect(enviar).toBeDisabled();
+      // Mic instead of send while empty.
+      await expect(microfono).toBeVisible();
+      await expect(enviar).toHaveCount(0);
 
       // Grows with the text up to 6 lines, then scrolls.
       await caja(page).fill(Array.from({ length: 12 }, (_, i) => `renglón ${i + 1}`).join('\n'));
