@@ -37,6 +37,7 @@ import {
   parseNuevaActividad,
   parseNuevaArea,
   parseNuevaOrden,
+  parseNotaRegistro,
   parseNuevoOperador,
   parseNuevoRegistro,
   resolveOtAccess,
@@ -126,7 +127,7 @@ describe('Bitácora de Proceso · permisos', () => {
 });
 
 describe('Bitácora de Proceso · validación', () => {
-  const base = { company: FARMA, producto: ' Cefazolina 1 g ', lote: '1565426', turno: 'manana', operadores: [7, 7, '8'], idArea: 3, inspector: ' u9 ', jefeProduccion: ' u8 ' };
+  const base = { company: FARMA, producto: ' Cefazolina 1 g ', lote: '1565426', turno: 'manana', operadores: [7, 7, '8'], idArea: 3, inspector: ' u9 ', jefeProduccion: ' u8 ', planta: 1 };
 
   it('abre sin OP de SAP (opcional), normaliza turno, operarios (sin usuario) y área del catálogo', () => {
     const input = parseNuevaOrden(base);
@@ -147,6 +148,19 @@ describe('Bitácora de Proceso · validación', () => {
     expect(errorOf(() => parseNuevaOrden({ ...base, jefeProduccion: 'x'.repeat(51) })).message).toMatch(/Jefe de producción no válido/);
     // El jefe ya no se toma del campo del inspector (el #617 los fusionaba).
     expect(errorOf(() => parseNuevaOrden({ ...base, jefeProduccion: undefined })).status).toBe(400);
+  });
+
+  it('la planta es obligatoria al abrir: 1 o 2 (2026-11-26)', () => {
+    expect(parseNuevaOrden({ ...base, planta: '2' }).planta).toBe(2);
+    expect(errorOf(() => parseNuevaOrden({ ...base, planta: undefined })).message).toMatch(/planta/);
+    expect(errorOf(() => parseNuevaOrden({ ...base, planta: 3 })).status).toBe(400);
+  });
+
+  it('nota de corrección: texto de 3 a 500 caracteres, sin saltos ni caracteres de control', () => {
+    expect(parseNotaRegistro({ texto: '  me   equivoqué\nde actividad ' })).toEqual({ texto: 'me equivoqué de actividad' });
+    expect(errorOf(() => parseNotaRegistro({ texto: 'ok' })).status).toBe(400);
+    expect(errorOf(() => parseNotaRegistro({ texto: 'x'.repeat(501) })).status).toBe(400);
+    expect(errorOf(() => parseNotaRegistro(null)).status).toBe(400);
   });
 
   it('exige producto, lote, turno válido y al menos un operario', () => {
@@ -194,7 +208,11 @@ describe('Bitácora de Proceso · validación', () => {
   });
 
   it('A1: maestro de operarios (nombre obligatorio, documento opcional, solo cambia nombre/documento/activo)', () => {
-    expect(parseNuevoOperador({ company: FARMA, nombre: '  Pepito   Pérez ', documento: ' 123 ' })).toEqual({ idCompany: FARMA, nombre: 'Pepito Pérez', documento: '123' });
+    expect(parseNuevoOperador({ company: FARMA, nombre: '  Pepito   Pérez ', documento: ' 123 ' })).toEqual({ idCompany: FARMA, nombre: 'Pepito Pérez', documento: '123', tipo: 'OPERARIO' });
+    // 2026-11-26: tipo de personal (operario, mantenimiento, inspector de calidad).
+    expect(parseNuevoOperador({ company: FARMA, nombre: 'Judy', tipo: 'INSPECTOR' }).tipo).toBe('INSPECTOR');
+    expect(errorOf(() => parseNuevoOperador({ company: FARMA, nombre: 'Judy', tipo: 'JEFE' })).status).toBe(400);
+    expect(parseCambioOperador({ company: FARMA, id_operador: 7, tipo: 'MANTENIMIENTO' })).toEqual({ idCompany: FARMA, idOperador: 7, tipo: 'MANTENIMIENTO' });
     expect(parseNuevoOperador({ company: FARMA, nombre: 'Ana' }).documento).toBeNull();
     expect(errorOf(() => parseNuevoOperador({ company: FARMA, nombre: ' ' })).message).toMatch(/nombre/);
     expect(errorOf(() => parseNuevoOperador({ nombre: 'Ana' })).message).toMatch(/empresa/);

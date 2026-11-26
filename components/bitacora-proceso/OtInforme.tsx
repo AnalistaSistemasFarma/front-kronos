@@ -5,7 +5,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Alert, Anchor, Box, Breadcrumbs, Button, Card, Divider, Group, Loader, SimpleGrid, Stack, Table, Text, Title } from '@mantine/core';
 import { useMediaQuery } from '@mantine/hooks';
 import { IconAlertTriangle, IconArrowLeft, IconChevronRight, IconPrinter, IconSquare, IconSquareCheck } from '@tabler/icons-react';
-import { OT_BASE_URL, OT_INSPECTOR_LABEL, OT_JEFE_PRODUCCION_LABEL, OT_METODO_LABEL, OT_NOTA_CIERRE_JEFE, OT_ROL_APERTURA_CIERRE, OT_ROL_LABEL, OT_SIGNIFICADO_CIERRE_JEFE, otNombreCompleto } from '../../lib/bitacora-proceso/constants';
+import { isOtPlanta, OT_BASE_URL, OT_INSPECTOR_LABEL, OT_PLANTA_LABEL, OT_JEFE_PRODUCCION_LABEL, OT_METODO_LABEL, OT_NOTA_CIERRE_JEFE, OT_ROL_APERTURA_CIERRE, OT_ROL_LABEL, OT_SIGNIFICADO_CIERRE_JEFE, otNombreCompleto } from '../../lib/bitacora-proceso/constants';
 import type { OrdenDetalle } from '../../lib/bitacora-proceso/db';
 import type { OtCompanyAccess } from '../../lib/bitacora-proceso/rules';
 import { buildInformePrintCss, mmACm, parseMargenSuperiorCm } from '../../lib/bitacora-proceso/impresion';
@@ -123,6 +123,7 @@ export default function OtInforme({ company, idOrden }: { company: OtCompanyAcce
             <Campo label='Lote' value={o.lote} />
             <Campo label='Turno' value={turnoLabel(o.turno)} />
             <Campo label='Área' value={o.areaCatalogo ?? o.area} />
+            {isOtPlanta(o.planta) && <Campo label='Planta' value={OT_PLANTA_LABEL[o.planta]} />}
             <Campo label='Orden de producción SAP' value={o.sapOpDocNum ? String(o.sapOpDocNum) : 'Sin OP'} />
             {op && <Campo label='Vencimiento del lote (SAP)' value={fmtFecha(opTxt('U_FecVen_lote'))} />}
             {op && <Campo label='Bodega (SAP)' value={opTxt('Warehouse')} />}
@@ -181,6 +182,11 @@ export default function OtInforme({ company, idOrden }: { company: OtCompanyAcce
                       <Table.Td>{r.usuario}</Table.Td>
                       <Table.Td style={{ overflowWrap: 'anywhere', whiteSpace: 'pre-wrap' }}>
                         {r.textoLibre ? <><b>Texto libre:</b> {r.observacion}</> : (r.observacion ?? '')}
+                        {(r.notas ?? []).map((n) => (
+                          <div key={n.id} data-testid='ot-informe-nota'>
+                            <b>Nota {fmtFechaHoraSeg(n.creadaEn)}</b> ({n.usuario}): {n.texto}
+                          </div>
+                        ))}
                       </Table.Td>
                     </Table.Tr>
                   ))}
@@ -200,6 +206,11 @@ export default function OtInforme({ company, idOrden }: { company: OtCompanyAcce
                           {r.textoLibre ? <><b>Texto libre:</b> {r.observacion}</> : r.observacion}
                         </Text>
                       )}
+                      {(r.notas ?? []).map((n) => (
+                        <Text key={n.id} size='sm' c='orange.9' style={{ overflowWrap: 'anywhere' }}>
+                          <b>Nota {fmtFechaHoraSeg(n.creadaEn)}</b> ({n.usuario}): {n.texto}
+                        </Text>
+                      ))}
                     </Card>
                   ))}
                 </Stack>

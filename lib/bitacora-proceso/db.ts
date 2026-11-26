@@ -118,6 +118,8 @@ export interface OrdenResumen {
   lote: string;
   turno: string;
   area: string | null;
+  /** Planta 1 o 2 (2026-11-26); null en las anteriores. */
+  planta: number | null;
   sapOpDocNum: number | null;
   estado: string;
   abiertaEn: string;
@@ -156,6 +158,7 @@ export async function listOrdenes(db: OtDb, idCompany: number, idUser: string, n
       lote: true,
       turno: true,
       area: true,
+      planta: true,
       areaRef: { select: { nombre: true } },
       sap_op_docnum: true,
       estado: true,
@@ -180,6 +183,7 @@ export async function listOrdenes(db: OtDb, idCompany: number, idUser: string, n
     turno: r.turno,
     // Nombre ACTUAL del área (2026-11-26: «agrafado» → «grafado»); la copia de la bitácora no se edita.
     area: r.areaRef?.nombre ?? r.area,
+    planta: r.planta,
     sapOpDocNum: r.sap_op_docnum,
     estado: r.estado,
     abiertaEn: r.abierta_en.toISOString(),
@@ -449,6 +453,7 @@ export async function crearOrden(
         abierta_por: actor.idUser,
         id_inspector: input.inspector,
         id_jefe_produccion: input.jefeProduccion,
+        planta: input.planta,
       },
       select: { id_orden_trabajo: true, consecutivo: true },
     });
@@ -480,15 +485,27 @@ export interface OrdenDetalle {
   observacionCierre: string | null;
   /** Auxiliares CON usuario (solo bitácoras anteriores al 2026-10-14). */
   operarios: Array<{ id: string; name: string; email: string }>;
-  /** Operarios SIN usuario programados (A1). */
-  operadores: Array<{ id: number; nombre: string; activo: boolean }>;
+  /** Operarios SIN usuario programados (A1). `tipo`: OPERARIO | MANTENIMIENTO | INSPECTOR (2026-11-26). */
+  operadores: Array<{ id: number; nombre: string; activo: boolean; tipo: string }>;
+  /** Planta 1 o 2 (2026-11-26); null en las anteriores. */
+  planta: number | null;
   /** Inspector (B1, 2026-10-15). Las bitácoras del #617 no lo tienen. */
   inspector: { id: string; name: string } | null;
   /** Jefe de producción (B1; columna id_jefe_produccion). */
   jefe: { id: string; name: string } | null;
   /** `operador` = operario elegido en la tablet; `usuario` = usuario de la sesión que registró. */
   /** `textoLibre`: el registro es de una actividad de texto libre y `observacion` es el texto escrito. */
-  registros: Array<{ id: string; actividad: string; operador: string | null; usuario: string; registradoEn: string; observacion: string | null; textoLibre: boolean }>;
+  registros: Array<{
+    id: string;
+    actividad: string;
+    operador: string | null;
+    usuario: string;
+    registradoEn: string;
+    observacion: string | null;
+    textoLibre: boolean;
+    /** Notas de corrección (2026-11-26), en orden; el registro no cambia. */
+    notas: Array<{ id: number; texto: string; usuario: string; creadaEn: string }>;
+  }>;
   /** Vistos buenos dados (rol VISIBLE: las filas viejas «Verificó» salen como JEFE_PROD). */
   firmas: FirmaVista[];
   /** Los cuatro vistos buenos en orden, con su estado (B2). */
@@ -556,14 +573,25 @@ export async function getOrdenDetalle(db: OtDb, idOrden: number, access: OtCompa
     where: { id_orden_trabajo: idOrden, id_company: access.idCompany },
     include: {
       operarios: { select: { id_user: true } },
-      operadores: { select: { operador: { select: { id_operador: true, nombre: true, activo: true } } } },
-      registros: { orderBy: [{ registrado_en: 'asc' }, { id_registro: 'asc' }] },
+      operadores: { select: { operador: { select: { id_operador: true, nombre: true, activo: true, tipo: true } } } },
+      registros: {
+        orderBy: [{ registrado_en: 'asc' }, { id_registro: 'asc' }],
+        include: { notas: { orderBy: { creada_en: 'asc' }, select: { id_nota: true, texto: true, id_user: true, creada_en: true } } },
+      },
       firmas: { orderBy: { id_firma: 'asc' } },
       areaRef: { select: { nombre: true } },
     },
   });
   if (!o) return null;
-  const ids = [o.abierta_por, o.cerrada_por ?? '', o.id_inspector ?? '', o.id_jefe_produccion ?? '', ...o.operarios.map((x) => x.id_user), ...o.registros.map((r) => r.id_user)];
+  const ids = [
+    o.abierta_por,
+    o.cerrada_por ?? '',
+    o.id_inspector ?? '',
+    o.id_jefe_produccion ?? '',
+    ...o.operarios.map((x) => x.id_user),
+    ...o.registros.map((r) => r.id_user),
+    ...o.registros.flatMap((r) => r.notas.map((n) => n.id_user)),
+  ];
   const nombres = await nombresDeUsuarios(db, ids);
   const nombre = (id: string | null) => (id ? (nombres.get(id)?.name ?? id) : null);
   const persona = (id: string | null) => (id ? { id, name: nombres.get(id)?.name ?? id } : null);
@@ -614,8 +642,9 @@ export async function getOrdenDetalle(db: OtDb, idOrden: number, access: OtCompa
     operarios: operarioIds
       .map((id) => ({ id, name: nombres.get(id)?.name ?? id, email: nombres.get(id)?.email ?? '' }))
       .sort((a, b) => a.name.localeCompare(b.name, 'es')),
+    planta: o.planta,
     operadores: o.operadores
-      .map((x) => ({ id: x.operador.id_operador, nombre: x.operador.nombre, activo: x.operador.activo }))
+      .map((x) => ({ id: x.operador.id_operador, nombre: x.operador.nombre, activo: x.operador.activo, tipo: x.operador.tipo }))
       .sort((a, b) => a.nombre.localeCompare(b.nombre, 'es')),
     inspector: persona(o.id_inspector),
     jefe: persona(o.id_jefe_produccion),
@@ -627,6 +656,7 @@ export async function getOrdenDetalle(db: OtDb, idOrden: number, access: OtCompa
       registradoEn: r.registrado_en.toISOString(),
       observacion: r.observacion,
       textoLibre: r.es_texto_libre,
+      notas: r.notas.map((n) => ({ id: n.id_nota, texto: n.texto, usuario: nombre(n.id_user) ?? n.id_user, creadaEn: n.creada_en.toISOString() })),
     })),
     firmas,
     vistos,
@@ -665,6 +695,44 @@ export async function listOrdenesDelLote(db: OtDb, idCompany: number, lote: stri
     sapOpDocNum: f.sap_op_docnum,
     sapOpAbsEntry: f.sap_op_absentry,
   }));
+}
+
+/**
+ * NOTA DE CORRECCIÓN sobre un registro (2026-11-26). Mientras la bitácora está ABIERTA, quien puede
+ * registrar en ella puede anotar «me equivoqué de actividad»: el registro no se edita ni se borra; la
+ * nota queda con la hora del servidor y el usuario de la sesión (trigger: tampoco se edita ni se borra).
+ */
+export async function crearNotaRegistro(
+  db: OtDb,
+  idOrden: number,
+  idRegistro: bigint,
+  access: OtCompanyAccess,
+  texto: string,
+  actor: OtActor
+): Promise<{ id: number; creadaEn: string }> {
+  return db.$transaction(async (tx) => {
+    const locked = await tx.$queryRaw<Array<{ estado: string; id_inspector: string | null; id_jefe_produccion: string | null }>>`
+      SELECT estado, id_inspector, id_jefe_produccion FROM [dbo].[ot_orden_trabajo] WITH (UPDLOCK, ROWLOCK)
+      WHERE id_orden_trabajo = ${idOrden} AND id_company = ${access.idCompany}`;
+    if (locked.length === 0) throw new OtError('Bitácora no encontrada.', 404);
+    const [operarios, programados, registro] = await Promise.all([
+      tx.otOrdenOperario.findMany({ where: { id_orden_trabajo: idOrden }, select: { id_user: true } }),
+      tx.otOrdenOperador.findMany({ where: { id_orden_trabajo: idOrden }, select: { id_operador: true } }),
+      tx.otRegistro.findFirst({ where: { id_registro: idRegistro, id_orden_trabajo: idOrden }, select: { id_registro: true } }),
+    ]);
+    if (!registro) throw new OtError('El registro no existe en esta bitácora.', 404);
+    if (locked[0].estado !== 'ABIERTA') throw new OtError('La bitácora ya está cerrada: no admite notas.', 409);
+    assertPuedeRegistrar(
+      { estado: locked[0].estado, operarios: operarios.map((x) => x.id_user), inspector: locked[0].id_inspector, jefe: locked[0].id_jefe_produccion, operadores: programados.map((x) => x.id_operador) },
+      actor.idUser,
+      access
+    );
+    const n = await tx.otRegistroNota.create({
+      data: { id_registro: idRegistro, id_orden_trabajo: idOrden, texto, id_user: actor.idUser, ip: actor.ip ?? null },
+      select: { id_nota: true, creada_en: true },
+    });
+    return { id: n.id_nota, creadaEn: n.creada_en.toISOString() };
+  });
 }
 
 /**
@@ -1064,7 +1132,7 @@ export async function cambiarActividad(db: OtDb, input: CambioActividadInput) {
 // Maestro de operarios sin usuario (A1)
 // ---------------------------------------------------------------------------
 
-const OPERADOR_SELECT = { id_operador: true, nombre: true, documento: true, activo: true } as const;
+const OPERADOR_SELECT = { id_operador: true, nombre: true, documento: true, tipo: true, activo: true } as const;
 
 export async function listOperadores(db: OtDb, idCompany: number, soloActivos: boolean) {
   return db.otOperador.findMany({
@@ -1085,7 +1153,7 @@ async function assertNombreOperadorLibre(db: OtDb, idCompany: number, nombre: st
 export async function crearOperador(db: OtDb, input: NuevoOperadorInput, actor: OtActor) {
   await assertNombreOperadorLibre(db, input.idCompany, input.nombre);
   return db.otOperador.create({
-    data: { id_company: input.idCompany, nombre: input.nombre, documento: input.documento, activo: true, created_by: actor.idUser },
+    data: { id_company: input.idCompany, nombre: input.nombre, documento: input.documento, tipo: input.tipo ?? 'OPERARIO', activo: true, created_by: actor.idUser },
     select: OPERADOR_SELECT,
   });
 }
@@ -1098,6 +1166,7 @@ export async function cambiarOperador(db: OtDb, input: CambioOperadorInput, acto
       ...(input.nombre !== undefined ? { nombre: input.nombre } : {}),
       ...(input.documento !== undefined ? { documento: input.documento } : {}),
       ...(input.activo !== undefined ? { activo: input.activo } : {}),
+      ...(input.tipo !== undefined ? { tipo: input.tipo } : {}),
       updated_by: actor.idUser,
       updated_at: new Date(),
     },

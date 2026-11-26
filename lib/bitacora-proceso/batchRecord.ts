@@ -1,5 +1,17 @@
 import JSZip from 'jszip';
-import { OT_LIMITS, OT_METODO_LABEL, OT_ROL_LABEL, OT_SIGNIFICADO_CIERRE_JEFE, OT_TURNO_LABEL, type OtTurno } from './constants';
+import {
+  isOtPlanta,
+  isOtTipoPersonal,
+  OT_LIMITS,
+  OT_METODO_LABEL,
+  OT_PLANTA_LABEL,
+  OT_ROL_LABEL,
+  OT_SIGNIFICADO_CIERRE_JEFE,
+  OT_TIPO_PERSONAL_PLURAL,
+  OT_TIPOS_PERSONAL,
+  OT_TURNO_LABEL,
+  type OtTurno,
+} from './constants';
 import type { OrdenDetalle } from './db';
 import { OtError } from './rules';
 import { BATCH_RECORD_PLANTILLA_BASE64 } from './batchRecordPlantilla';
@@ -315,12 +327,16 @@ export function filasBitacora(ordenes: OrdenDetalle[], e: EstilosBitacora, gener
     filas.push({ alto: Math.max(minimo, Math.ceil(texto.length / porLinea) * 16), celdas: [{ desde: 1, hasta: 10, texto, estilo }] });
   for (const o of ordenes) {
     const turno = OT_TURNO_LABEL[o.turno as OtTurno] ?? o.turno;
-    ancho(`Bitácora ${codigo(o.consecutivo)}${o.sapOpDocNum ? ` · OP ${o.sapOpDocNum}` : ''} · Turno ${turno} · Inicio ${fmtFechaHora(o.abiertaEn)} · Final ${o.cerradaEn ? fmtFechaHora(o.cerradaEn) : 'abierta'}${(o.areaCatalogo ?? o.area) ? ` · Área ${o.areaCatalogo ?? o.area}` : ''}`, e.seccion, 110, 20);
+    ancho(`Bitácora ${codigo(o.consecutivo)}${isOtPlanta(o.planta) ? ` · ${OT_PLANTA_LABEL[o.planta].toUpperCase()}` : ''}${o.sapOpDocNum ? ` · OP ${o.sapOpDocNum}` : ''} · Turno ${turno} · Inicio ${fmtFechaHora(o.abiertaEn)} · Final ${o.cerradaEn ? fmtFechaHora(o.cerradaEn) : 'abierta'}${(o.areaCatalogo ?? o.area) ? ` · Área ${o.areaCatalogo ?? o.area}` : ''}`, e.seccion, 110, 20);
     const cerro = o.cierre ? `${o.cierre.nombre}${o.cierre.como === 'JEFE_PROD' ? ' (jefe de producción)' : ''}` : 'pendiente';
     // La cuenta que registró (casi siempre la de la tablet) va una vez aquí, no en cada fila.
     const cuentas = [...new Set(o.registros.map((x) => x.usuario))];
     ancho(`Abrió: ${o.abiertaPor} · Cerró: ${cerro} · Jefe de producción: ${o.jefe?.name ?? '—'}${cuentas.length ? ` · Registró en SynerLink: ${cuentas.join(', ')}` : ''}`, e.linea);
-    if (o.operadores.length) ancho(`Operarios: ${o.operadores.map((x) => x.nombre).join(', ')}`, e.linea);
+    // Personal del turno agrupado por tipo (2026-11-26): operarios, mantenimiento e inspectores de calidad.
+    for (const t of OT_TIPOS_PERSONAL) {
+      const del = o.operadores.filter((x) => (isOtTipoPersonal(x.tipo) ? x.tipo : 'OPERARIO') === t);
+      if (del.length) ancho(`${OT_TIPO_PERSONAL_PLURAL[t]}: ${del.map((x) => x.nombre).join(', ')}`, e.linea);
+    }
     if (o.observacionCierre) ancho(`Observación de cierre: ${o.observacionCierre}`, e.linea);
     filas.push({
       alto: 18,
@@ -335,9 +351,13 @@ export function filasBitacora(ordenes: OrdenDetalle[], e: EstilosBitacora, gener
     if (o.registros.length === 0) ancho('Sin registros.', e.linea);
     for (const reg of o.registros) {
       const quien = reg.operador ?? reg.usuario;
-      const obs = reg.observacion ? (reg.textoLibre ? `Texto libre: ${reg.observacion}` : reg.observacion) : '';
+      const base = reg.observacion ? (reg.textoLibre ? `Texto libre: ${reg.observacion}` : reg.observacion) : '';
+      // Notas de corrección (2026-11-26): el registro no cambia; la nota va debajo, con hora y quién.
+      const notas = (reg.notas ?? []).map((n) => `Nota ${fmtHora(n.creadaEn).slice(0, 5)} (${n.usuario}): ${n.texto}`);
+      const obs = [base, ...notas].filter(Boolean).join('\n');
       // Alto según el texto más largo (observación ≈ 30 caracteres por línea; actividad ≈ 48; operario ≈ 34).
-      const lineas = Math.max(1, Math.ceil(obs.length / 30), Math.ceil(reg.actividad.length / 48), Math.ceil(quien.length / 34));
+      const lineasObs = obs.split('\n').reduce((acc, t) => acc + Math.max(1, Math.ceil(t.length / 30)), 0);
+      const lineas = Math.max(1, obs ? lineasObs : 1, Math.ceil(reg.actividad.length / 48), Math.ceil(quien.length / 34));
       filas.push({
         alto: Math.max(17, lineas * 16),
         celdas: [
