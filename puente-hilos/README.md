@@ -393,3 +393,11 @@ Regla de Nicolás Rivera (2026-11-26, proyecto 39): «aplica para todos los usua
 - El agente actualiza el Estado escribiendo `./trabajo/nota-proyecto.md` (versión completa: Objetivo, Estado actual, Decisiones, Pendientes, Entregables). La versión vigente le llega en `./contexto/nota-proyecto.md`. El puente lo lee y lo borra, igual que las propuestas del cronograma.
 - Seguridad: nada que parezca un secreto se escribe (patrones de `memoria.mjs`); escritura atómica; no sigue enlaces simbólicos; nunca frena ni cambia la respuesta (si falla, queda en el log).
 - Vale para los dos runners (Claude Code y openclaw). En openclaw hay que fijar `HILOS_VAULT_PROYECTOS_DIR` (su workspace o vault).
+- **Engram** (2026-11-26, «también en engram»): después de la nota, el mismo resumen (Estado, últimos turnos y la ruta de la nota) se guarda en el engram del agente con el tema fijo `synerlink/proyecto-<id>`: cada turno ACTUALIZA una sola memoria por proyecto. Usa la base propia del agente (`HILOS_VAULT_ENGRAM_BIN`, `_DATA_DIR`, `_PROYECTO`, o los `HILOS_CONECTORES_AGENTE_ENGRAM_*`; si no, el proyecto de engram del repo git del vault). Con openclaw, `HILOS_VAULT_ENGRAM_DATA_DIR` es obligatorio (varios agentes comparten usuario). `HILOS_VAULT_ENGRAM=no` lo apaga.
+
+## Menciones: @persona y ASD-STE100 entre asistentes (2026-11-26)
+
+Pedido de Nicolás Rivera (2026-11-26, proyecto 39).
+
+- **@persona** (`lib/proyectos/menciones-personas.ts` en la app): en un hilo de proyecto se menciona a un MIEMBRO por el usuario de su correo (`@nicolas.rivera`). Si el mensaje de una persona menciona SOLO personas, ningún asistente lo atiende (queda en el historial) y las mencionadas reciben aviso push y en la campana, aunque hayan silenciado el proyecto. Si también menciona a un asistente, rigen las reglas de siempre. Un asistente también puede mencionar a una persona: esa persona recibe el aviso de mención en lugar del aviso normal. El contexto trae `conversation.people` (`name`, `handle`) y el encabezado del turno se lo explica al agente.
+- **Entre asistentes**: citarse con @ es la forma normal de trabajar, y ese mensaje va SIEMPRE en ASD-STE100 (`REGLAS_ASD_STE100` en `src/hilos.mjs`: una idea por oración, oraciones cortas, voz activa, imperativo numerado, un término por cosa, datos exactos, advertencias primero). Los frenos anti-bucle de SynerLink no cambian.

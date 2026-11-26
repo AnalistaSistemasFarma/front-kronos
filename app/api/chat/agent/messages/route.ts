@@ -34,6 +34,8 @@ import { alPublicarAgenteEnMesa } from '../../../../../lib/proyectos/mesas';
 import { onAgentPublishedAnalysis } from '../../../../../lib/meetings/projects/analysis';
 import { projectMutedUserIds, projectPushRecipients } from '../../../../../lib/proyectos/mute';
 import { mencionablesParaAgente } from '../../../../../lib/chat/projects';
+import { notifyProjectMention } from '../../../../../lib/chat/notifyProjectMention';
+import { personasMencionadas } from '../../../../../lib/proyectos/menciones-personas';
 import type { AgenteMencionable } from '../../../../../lib/chat/groups';
 import {
   AVISO_BUCLE_ASISTENTES,
@@ -386,14 +388,37 @@ export async function POST(request: NextRequest) {
       const [miembros, silenciados] = await Promise.all([
         prisma.chatProjectMember.findMany({
           where: { id_project: conversation.idProject },
-          select: { id_user: true, user: { select: { email: true, isActive: true } } },
+          select: { id_user: true, user: { select: { name: true, email: true, isActive: true } } },
         }),
         projectMutedUserIds(conversation.idProject),
       ]);
+      // @persona (2026-11-26): the members the agent mentioned get the mention notice (even if
+      // they muted the project); the rest, the usual push.
+      const mencionadas = body.includes('@')
+        ? personasMencionadas(
+            body,
+            miembros
+              .filter((m) => m.user.isActive && (m.user.email ?? '').trim().length > 0)
+              .map((m) => ({ idUser: m.id_user, name: m.user.name?.trim() || (m.user.email ?? ''), email: (m.user.email ?? '').trim() })),
+            { agentes: candidatosProyecto }
+          )
+        : [];
+      if (mencionadas.length > 0) {
+        void notifyProjectMention({
+          idProject: conversation.idProject,
+          idConversation: conversation.id,
+          projectName: conversation.projectName,
+          authorName: agent.displayName,
+          emails: mencionadas.map((p) => p.email),
+          body,
+          icon: agent.avatarUrl,
+        });
+      }
+      const yaAvisadas = new Set(mencionadas.map((p) => p.email.toLowerCase()));
       void notifyAgentReply({
         idConversation: conversation.id,
         idUser: null,
-        groupEmails: projectPushRecipients(miembros, silenciados),
+        groupEmails: projectPushRecipients(miembros, silenciados).filter((e) => !yaAvisadas.has(e.toLowerCase())),
         groupTitle: conversation.projectName,
         url: `/process/proyectos/${conversation.idProject}?conversacion=${conversation.id}`,
         agentCode: agent.code,

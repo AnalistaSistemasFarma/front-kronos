@@ -1615,7 +1615,7 @@ export default function ChatThread({
                 ? `Escríbale a ${person?.name ?? 'esta persona'}…`
                 : enProyecto
                   ? project?.mencionables && project.mencionables.length > 0
-                    ? `Escríbale a ${agent?.displayName ?? 'el asistente'}… (con @ consulta a otro asistente del proyecto)`
+                    ? `Escríbale a ${agent?.displayName ?? 'el asistente'}… (con @ menciona a otro asistente o a una persona del proyecto)`
                     : `Escríbale a ${agent?.displayName ?? 'el asistente'} en ${project?.name ?? 'el proyecto'}…`
                   : `Escríbale a ${agent?.displayName ?? 'el asistente'}…`
           }

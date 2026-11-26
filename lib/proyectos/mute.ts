@@ -11,9 +11,9 @@
  *     as `muted`);
  *   - the project does not count in the header «Proyectos» icon.
  * What it does NOT do: messages are still written and still show as unread
- * inside the project, so nothing is lost. There is no exception for
- * mentions: in projects people are not notified by @mention today (only
- * agents are), so «muted» means fully quiet, like a muted chat in Teams.
+ * inside the project, so nothing is lost. Exception (2026-11-26): a direct
+ * @mention of the person (lib/proyectos/menciones-personas.ts) is notified
+ * even when muted, like a muted chat in Teams.
  *
  * Storage: one row in chat_project_mute per (project, person). No row = on.
  *

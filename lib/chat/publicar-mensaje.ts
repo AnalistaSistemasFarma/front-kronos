@@ -2,7 +2,8 @@ import { prisma } from '../prisma';
 import { messageInclude } from './conversations';
 import { calcularEntregas } from './groups';
 import { mencionablesDelHilo } from './projects';
-import { entregasHiloProyecto } from '../proyectos/hilos-rules';
+import { entregasConPersonas, type PersonaMencionable } from '../proyectos/menciones-personas';
+import { notifyProjectMention, personasDelProyecto } from './notifyProjectMention';
 import { notifyPeopleMessage } from './notifyPeople';
 import type { ConversationGuard } from './http';
 import type { UploadedChatAttachment } from './attachmentStorage';
@@ -53,14 +54,21 @@ export async function publicarMensajeDePersona(
   // agente recibe el mensaje por SU puente (fila de entrega, como en un
   // grupo). Si mencionó solo a otros, el principal no lo atiende: el mensaje
   // nace entregado para él (lo verá en el historial de su próximo turno).
+  //
+  // @PERSONA (2026-11-26, lib/proyectos/menciones-personas.ts): también puede
+  // mencionar a otro MIEMBRO del proyecto (@usuario del correo). Si menciona
+  // solo personas, ningún agente lo atiende y las mencionadas reciben aviso.
   let principalAtiende = true;
+  let personasAvisar: PersonaMencionable[] = [];
   if (guard.kind === 'project' && body.includes('@')) {
-    const { principal, mencionables } = await mencionablesDelHilo(guard.user, guard.idProject, guard.projectRole, guard.idAgent);
-    if (principal && mencionables.length > 0) {
-      const r = entregasHiloProyecto({ body, mencionables, principal });
-      entregas.idAgents = r.invitados;
-      principalAtiende = r.principalAtiende;
-    }
+    const [{ principal, mencionables }, personas] = await Promise.all([
+      mencionablesDelHilo(guard.user, guard.idProject, guard.projectRole, guard.idAgent),
+      personasDelProyecto(guard.idProject),
+    ]);
+    const r = entregasConPersonas({ body, principal, mencionables, personas, idAutor: guard.user.id });
+    entregas.idAgents = r.invitados;
+    principalAtiende = r.principalAtiende;
+    personasAvisar = r.personas;
   }
 
   // MESA DE DISCUSIÓN (2026-11-04): lo que escribe una persona en una mesa NO
@@ -123,6 +131,25 @@ export async function publicarMensajeDePersona(
       idMessage: message.id,
       createdAt: message.created_at,
     });
+  }
+
+  // @persona en un proyecto: aviso a las mencionadas. Por detrás: no se espera.
+  if (guard.kind === 'project' && personasAvisar.length > 0) {
+    const idProject = guard.idProject;
+    void (async () => {
+      const [proyecto, autor] = await Promise.all([
+        prisma.chatProject.findUnique({ where: { id_project: idProject }, select: { name: true } }).catch(() => null),
+        prisma.user.findUnique({ where: { id: guard.user.id }, select: { name: true } }).catch(() => null),
+      ]);
+      await notifyProjectMention({
+        idProject,
+        idConversation: guard.conversationId,
+        projectName: proyecto?.name ?? null,
+        authorName: autor?.name?.trim() || guard.user.email,
+        emails: personasAvisar.map((p) => p.email),
+        body,
+      });
+    })();
   }
 
   // En un PROYECTO el mensaje va al agente principal (salvo que solo se haya
