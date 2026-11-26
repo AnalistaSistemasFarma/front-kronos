@@ -1254,7 +1254,7 @@ export default function ChatWorkspace({
       verEnLaUrl('/process/chat');
     };
     // En escritorio la conversación se "absorbe" (genio, como la ventanita flotante) hacia su
-    // fila de la barra de chats (o de la lista de la página, en pantalla completa), y después
+    // fila de la lista de la página (o de la barra de chats si la lista no se ve), y después
     // se cierra. Sin soporte o con menos movimiento, se cierra de una.
     const panel = modoEscritorio
       ? document.querySelector<HTMLElement>('.chat-escritorio__principal')
@@ -1275,7 +1275,7 @@ export default function ChatWorkspace({
         : selectedPersona
           ? conversationKey(selectedPersona.id)
           : null;
-    // La lista de la página se esconde cuando está la barra: ahí la fila mide 0.
+    // Si la fila de la lista no se ve (mide 0), se usa el ícono de la barra de chats.
     const fila =
       filaDeLista && filaDeLista.width > 0
         ? filaDeLista

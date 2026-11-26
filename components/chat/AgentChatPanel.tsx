@@ -128,49 +128,44 @@ export default function AgentChatPanel({
   const aPantallaCompleta = Boolean(enPantallaPequena) && montado;
 
   // ── Animaciones (genio al abrir/cerrar, zoom al maximizar) ──
-  const paperRef = useRef<HTMLDivElement>(null);
+  const paperRef = useRef<HTMLDivElement | null>(null);
   const animacionRef = useRef<Animation | null>(null);
   const abiertoPrevio = useRef(false);
   // Al maximizar, la ventana ya creció hasta cubrir la pantalla: se cierra sin genio.
   const maximizandoRef = useRef(false);
-
+  // Apertura pedida cuando la ventana todavía no estaba en el DOM (ver `asignarPaper`).
+  const aperturaPendiente = useRef(false);
+  // Lo último pintado, para animar desde el ref de la ventana (fuera del efecto).
+  const ultimoRef = useRef({ aPantallaCompleta, clave: ventana?.clave ?? null });
   useLayoutEffect(() => {
-    if (abierto === abiertoPrevio.current) return;
-    abiertoPrevio.current = abierto;
-    const el = paperRef.current;
-    animacionRef.current?.cancel();
-    animacionRef.current = null;
+    ultimoRef.current = { aPantallaCompleta, clave: ventana?.clave ?? null };
+  });
 
-    const sinAnimacion =
-      !el || typeof el.animate !== 'function' || prefersReducedMotion() || (!abierto && maximizandoRef.current);
-    if (sinAnimacion) {
-      maximizandoRef.current = false;
-      if (!abierto) setMontado(false);
-      return;
-    }
-
+  /** Genio (o deslizamiento en el celular) al abrir o cerrar la ventana `el`. */
+  const animar = (el: HTMLDivElement, abriendo: boolean) => {
+    const { aPantallaCompleta: completa, clave } = ultimoRef.current;
     const rect = el.getBoundingClientRect();
-    const icono = ventana ? findChatLauncher(ventana.clave)?.getBoundingClientRect() ?? null : null;
-    const cuadros = aPantallaCompleta
+    const icono = clave ? findChatLauncher(clave)?.getBoundingClientRect() ?? null : null;
+    const cuadros = completa
       ? // Celular: sube desde abajo / baja al cerrar (no hay barra de íconos a la vista).
-        abierto
+        abriendo
         ? [{ transform: 'translateY(100%)' }, { transform: 'translateY(0)' }]
         : [{ transform: 'translateY(0)' }, { transform: 'translateY(100%)' }]
-      : abierto
+      : abriendo
         ? genieOpenFrames(rect, icono)
         : genieCloseFrames(rect, icono);
     const animacion = el.animate(cuadros, {
-      duration: abierto ? GENIE_OPEN_MS : GENIE_CLOSE_MS,
-      easing: abierto ? GENIE_OPEN_EASING : GENIE_CLOSE_EASING,
+      duration: abriendo ? GENIE_OPEN_MS : GENIE_CLOSE_MS,
+      easing: abriendo ? GENIE_OPEN_EASING : GENIE_CLOSE_EASING,
       // Al abrir, `backwards` mantiene el primer cuadro (dentro del ícono) mientras espera;
       // al cerrar se queda en el último cuadro (invisible) hasta desmontarse.
-      fill: abierto ? 'backwards' : 'forwards',
+      fill: abriendo ? 'backwards' : 'forwards',
     });
     animacionRef.current = animacion;
-    if (abierto) {
+    if (abriendo) {
       // Al abrir, el primer pintado del hilo (mensajes, markdown, avatares) bloquea el hilo
-      // principal y el navegador se saltaba la animación entera (sobre todo la primera vez).
-      // Se queda en pausa dentro del ícono y arranca dos cuadros después, ya pintado.
+      // principal y el navegador se saltaba la animación entera. Se queda en pausa dentro del
+      // ícono y arranca dos cuadros después, ya pintado.
       animacion.pause();
       requestAnimationFrame(() =>
         requestAnimationFrame(() => {
@@ -181,9 +176,50 @@ export default function AgentChatPanel({
     animacion.onfinish = () => {
       if (animacionRef.current !== animacion) return;
       animacionRef.current = null;
-      if (!abierto) setMontado(false);
+      if (!abriendo) setMontado(false);
     };
-    // aPantallaCompleta/ventana se leen del render actual; solo importa el cambio de `abierto`.
+  };
+
+  /**
+   * La PRIMERA vez que se abre, el `Affix` de Mantine pinta la ventana en un portal que se crea
+   * un instante después (en un efecto): cuando corre el efecto de abajo, la ventana aún no está
+   * en el DOM y la animación se saltaba. Por eso solo se veía de la segunda vez en adelante.
+   * Este ref se llama justo cuando la ventana entra al DOM (antes de pintarse): ahí arranca la
+   * apertura que quedó pendiente, sin que se alcance a ver la ventana grande un instante.
+   */
+  const asignarPaper = (node: HTMLDivElement | null) => {
+    paperRef.current = node;
+    if (node && aperturaPendiente.current) {
+      aperturaPendiente.current = false;
+      if (typeof node.animate === 'function') animar(node, true);
+    }
+  };
+
+  useLayoutEffect(() => {
+    if (abierto === abiertoPrevio.current) return;
+    abiertoPrevio.current = abierto;
+    const el = paperRef.current;
+    animacionRef.current?.cancel();
+    animacionRef.current = null;
+    aperturaPendiente.current = false;
+
+    const sinAnimacion =
+      typeof window === 'undefined' ||
+      typeof Element.prototype.animate !== 'function' ||
+      prefersReducedMotion() ||
+      (!abierto && maximizandoRef.current);
+    if (sinAnimacion || (!el && !abierto)) {
+      maximizandoRef.current = false;
+      if (!abierto) setMontado(false);
+      return;
+    }
+    if (!el) {
+      // Abriendo y la ventana aún no está en el DOM (primera vez): la anima `asignarPaper`.
+      aperturaPendiente.current = true;
+      return;
+    }
+    animar(el, abierto);
+    // Solo importa el cambio de `abierto`; lo demás se lee de `ultimoRef`.
   }, [abierto]);
 
   useEffect(() => () => animacionRef.current?.cancel(), []);
@@ -295,7 +331,7 @@ export default function AgentChatPanel({
     >
       {montado && ventana ? (
             <Paper
-              ref={paperRef}
+              ref={asignarPaper}
               style={{
                 // dvh y no vh en los dos casos: con el teclado del móvil
                 // abierto, `vh` sigue midiendo la pantalla completa y el

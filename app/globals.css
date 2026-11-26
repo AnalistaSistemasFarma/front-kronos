@@ -1515,14 +1515,6 @@ body.chat-inmersivo.con-chat-rail .chat-escritorio {
   left: 0;
 }
 
-/* En la página de chats (escritorio) la barra de chats ya lista las conversaciones a la
-   izquierda: la lista propia de la página salía al lado con los mismos chats, como un menú
-   doble (reporte de Juan, 2026-11-26). Con la barra puesta se esconde esa lista; en pantalla
-   completa (modo inmersivo) la barra se va y la lista vuelve, para no quedar sin menú. */
-body.chat-escritorio-abierto.con-chat-rail:not(.chat-inmersivo) .chat-escritorio__lateral {
-  display: none;
-}
-
 .chat-rail__cabecera {
   display: flex;
   align-items: center;
