@@ -4,6 +4,7 @@ import { authOptions } from '../../../auth/[...nextauth]/route';
 import { prisma } from '../../../../../lib/prisma';
 import { sql, getPool } from '../../../../../lib/mssqlPool';
 import { fireAndForgetNotification, notifyActivityAssigned } from '../../../../../lib/notificationEvents';
+import { TEMPLATE_ITEM, findTemplateRulesToCreate } from '../../../../../lib/requests-general/reassignmentDelegation';
 
 const TAG = '[reassignment-workflow-request/reassign]';
 const MODULE_URL = '/process/request-general/reassignment-workflow-request';
@@ -48,7 +49,7 @@ function parseReturnDate(value) {
 const listLine = (label, items) =>
   items.length ? `${label} (${items.length}): ${items.join('; ')}` : `${label}: ninguna`;
 
-function buildLogReason({ reason, fromName, toName, actorName, dateToReturn, workflows, requests, tasks }) {
+function buildLogReason({ reason, fromName, toName, actorName, dateToReturn, workflows, requests, tasks, templates = [] }) {
   return [
     `Motivo: ${reason}`,
     `Reasignación de ${fromName || 'sin asignar'} a ${toName}, realizada por ${actorName}.`,
@@ -56,8 +57,22 @@ function buildLogReason({ reason, fromName, toName, actorName, dateToReturn, wor
     listLine('Flujos', workflows.map((w) => `#${w.id} ${w.process ?? ''}`.trim())),
     listLine('Solicitudes', requests.map((r) => `#${r.id} ${r.subject ?? ''}`.trim())),
     listLine('Tareas', tasks.map((t) => `#${t.id} ${t.task ?? ''} (solicitud #${t.id_request_general})`)),
+    listLine(
+      'Tareas futuras redirigidas',
+      [...new Map(templates.map((t) => [t.id_task, `${t.task ?? `#${t.id_task}`} — ${t.process ?? ''}`.trim()])).values()]
+    ),
   ].join('\n');
 }
+
+async function templateRulesFor(transaction, fromUserId, filter) {
+  if (!fromUserId) return [];
+  return findTemplateRulesToCreate(() => new sql.Request(transaction), bindIds, { fromUserId, ...filter });
+}
+
+const uniqueRules = (rules) => [...new Map(rules.map((r) => [`${r.id_task}|${r.original_user}`, r])).values()];
+
+const templateDetails = (rules, toUserId) =>
+  uniqueRules(rules).map((r) => ({ type: TEMPLATE_ITEM, id: r.id_task, before: r.original_user, after: String(toUserId) }));
 
 async function insertLog(transaction, { reason, actorId, userRemoved, userNew, dateToReturn }) {
   const res = await new sql.Request(transaction)
@@ -71,6 +86,29 @@ async function insertLog(transaction, { reason, actorId, userRemoved, userNew, d
       SELECT CAST(SCOPE_IDENTITY() AS int) AS id;
     `);
   return res.recordset?.[0]?.id ?? null;
+}
+
+const userList = (ids) => [...new Set(ids.filter((v) => v != null && v !== '').map(String))].sort().join(',');
+
+const DETAIL_CHUNK = 300; // 4 parámetros por fila: 1200 por consulta (límite de SQL Server: 2100)
+
+async function insertDetails(transaction, logId, items) {
+  const rows = items.filter((i) => i.type === TEMPLATE_ITEM || i.before !== i.after);
+  for (let start = 0; start < rows.length; start += DETAIL_CHUNK) {
+    const chunk = rows.slice(start, start + DETAIL_CHUNK);
+    const request = new sql.Request(transaction).input('log', sql.Int, logId);
+    const values = chunk.map((item, i) => {
+      request.input(`t${i}`, sql.VarChar(20), item.type);
+      request.input(`i${i}`, sql.Int, item.id);
+      request.input(`b${i}`, sql.NVarChar(sql.MAX), item.before || null);
+      request.input(`a${i}`, sql.NVarChar(sql.MAX), item.after);
+      return `(@log, @t${i}, @i${i}, @b${i}, @a${i})`;
+    });
+    await request.query(`
+      INSERT INTO workflow_task_reassignment_detail (id_reassignment, item_type, id_item, users_before, users_after)
+      VALUES ${values.join(', ')}
+    `);
+  }
 }
 
 export async function POST(req) {
@@ -170,51 +208,63 @@ export async function POST(req) {
       return await reassignPerson({ pool, source, target, actorId, actorName, reason, dryRun, dateToReturn });
     }
 
+    const flowIds = new Set(workflowIds);
+    if (requestIds.length) {
+      const rReq = pool.request();
+      const found = (
+        await rReq.query(`
+          SELECT pcrg.id_request_general AS id_request, pcrg.id_process_category AS id
+          FROM process_category_request_general pcrg
+          WHERE pcrg.id_request_general IN (${bindIds(rReq, 'r', requestIds)})
+        `)
+      ).recordset;
+      const foundRequests = new Set(found.map((r) => Number(r.id_request)));
+      if (requestIds.some((id) => !foundRequests.has(id))) {
+        return fail('Algunas solicitudes ya no existen. Actualiza el tablero e intenta de nuevo.', 404);
+      }
+      for (const r of found) flowIds.add(Number(r.id));
+    }
+
     const processes = new Map();
-    if (workflowIds.length || requestIds.length) {
+    if (flowIds.size) {
       const pReq = pool.request();
       const dl = bindIds(pReq, 'd', departmentIds);
-      const sources = [];
-      if (workflowIds.length) {
-        sources.push(`
-          SELECT pc.id, NULL AS id_request, NULL AS subject
+      const rows = (
+        await pReq.query(`
+          SELECT pc.id, pc.process,
+            CASE WHEN EXISTS (
+              SELECT 1
+              FROM user_process_category_request_general upf
+              INNER JOIN department_user duf ON duf.id_user = upf.id_user
+              WHERE upf.id_process_category = pc.id AND duf.id_department IN (${dl})
+            ) THEN 1 ELSE 0 END AS in_scope
           FROM process_category pc
-          WHERE pc.id IN (${bindIds(pReq, 'w', workflowIds)})`);
-      }
-      if (requestIds.length) {
-        sources.push(`
-          SELECT pcrg.id_process_category AS id, pcrg.id_request_general AS id_request, rg.subject_request AS subject
-          FROM process_category_request_general pcrg
-          LEFT JOIN requests_general rg ON rg.id = pcrg.id_request_general
-          WHERE pcrg.id_request_general IN (${bindIds(pReq, 'r', requestIds)})`);
-      }
-      const rows = await pReq.query(`
-        SELECT src.id, src.id_request, src.subject, pc.process,
-          CASE WHEN EXISTS (
-            SELECT 1
-            FROM user_process_category_request_general upf
-            INNER JOIN department_user duf ON duf.id_user = upf.id_user
-            WHERE upf.id_process_category = pc.id AND duf.id_department IN (${dl})
-          ) THEN 1 ELSE 0 END AS in_scope
-        FROM (${sources.join(' UNION ALL ')}) src
-        INNER JOIN process_category pc ON pc.id = src.id
-      `);
+          WHERE pc.id IN (${bindIds(pReq, 'w', [...flowIds])})
+        `)
+      ).recordset;
 
-      if (rows.recordset.some((r) => !r.in_scope)) {
+      if (rows.some((r) => !r.in_scope)) {
         return fail('Algunos flujos o solicitudes no pertenecen a tu departamento; no se cambió nada.', 403);
       }
-      const foundWorkflows = new Set(rows.recordset.filter((r) => r.id_request == null).map((r) => Number(r.id)));
-      const foundRequests = new Set(rows.recordset.filter((r) => r.id_request != null).map((r) => Number(r.id_request)));
-      if (workflowIds.some((id) => !foundWorkflows.has(id)) || requestIds.some((id) => !foundRequests.has(id))) {
-        return fail('Algunos flujos o solicitudes ya no existen. Actualiza el tablero e intenta de nuevo.', 404);
+      if (rows.length !== flowIds.size) {
+        return fail('Algunos flujos ya no existen. Actualiza el tablero e intenta de nuevo.', 404);
+      }
+      for (const r of rows) {
+        processes.set(Number(r.id), { id: Number(r.id), process: r.process, leaders: [], requests: [] });
       }
 
-      for (const r of rows.recordset) {
-        const id = Number(r.id);
-        const entry = processes.get(id) ?? { id, process: r.process, leaders: [], selected: false, requests: [] };
-        if (r.id_request == null) entry.selected = true;
-        else entry.requests.push({ id: Number(r.id_request), subject: r.subject });
-        processes.set(id, entry);
+      // Todas las solicitudes abiertas de esos flujos (van al registro y reciben la nota).
+      const oReq = pool.request();
+      const openRequests = await oReq.query(`
+        SELECT pcrg.id_process_category, rg.id, rg.subject_request AS subject
+        FROM requests_general rg
+        INNER JOIN process_category_request_general pcrg ON pcrg.id_request_general = rg.id
+        WHERE rg.status_req IN (${OPEN_LIST})
+          AND pcrg.id_process_category IN (${bindIds(oReq, 'p', [...processes.keys()])})
+        ORDER BY rg.id
+      `);
+      for (const r of openRequests.recordset) {
+        processes.get(Number(r.id_process_category))?.requests.push({ id: Number(r.id), subject: r.subject });
       }
 
       const lReq = pool.request();
@@ -235,7 +285,7 @@ export async function POST(req) {
       const dl = bindIds(tReq, 'd', departmentIds);
       tasks = (
         await tReq.query(`
-          SELECT trg.id, trg.id_assigned, trg.id_status, trg.id_request_general, tpc.task,
+          SELECT trg.id, trg.id_task AS id_template, trg.id_assigned, trg.id_status, trg.id_request_general, tpc.task,
                  rg.subject_request, pcrg.id_process_category, ua.name AS assigned_name,
                  CASE WHEN EXISTS (
                    SELECT 1 FROM department_user du
@@ -263,7 +313,14 @@ export async function POST(req) {
     const groups = new Map();
     const groupOf = (id, name) => {
       const key = id ?? '';
-      const g = groups.get(key) ?? { id: id ?? null, name: name ?? null, workflows: [], requests: [], tasks: [] };
+      const g = groups.get(key) ?? {
+        id: id ?? null,
+        name: name ?? null,
+        workflows: [],
+        requests: [],
+        tasks: [],
+        flows: [],
+      };
       groups.set(key, g);
       return g;
     };
@@ -272,8 +329,9 @@ export async function POST(req) {
       const owners = removed.length ? removed : [{ id: null, name: null }];
       for (const owner of owners) {
         const g = groupOf(owner.id, owner.name);
-        if (p.selected) g.workflows.push(p);
+        g.workflows.push(p);
         g.requests.push(...p.requests);
+        g.flows.push(p);
       }
     }
     for (const t of tasks) {
@@ -300,14 +358,29 @@ export async function POST(req) {
         .input('pc', sql.Int, p.id)
         .input('by', sql.NVarChar(255), actorId)
         .query(`INSERT INTO notes (note, id_process_category, created_by, creation_date) VALUES (@note, @pc, @by, GETDATE())`);
-      for (const r of p.requests) {
+      if (p.requests.length) {
         await new sql.Request(transaction)
           .input('note', sql.NVarChar(sql.MAX), note)
-          .input('req', sql.Int, r.id)
           .input('pc', sql.Int, p.id)
           .input('by', sql.NVarChar(255), actorId)
-          .query(`INSERT INTO notes (note, id_request, created_by, creation_date, id_process_category) VALUES (@note, @req, @by, GETDATE(), @pc)`);
+          .query(`
+            INSERT INTO notes (note, id_request, created_by, creation_date, id_process_category)
+            SELECT @note, rg.id, @by, GETDATE(), @pc
+            FROM requests_general rg
+            INNER JOIN process_category_request_general pcrg ON pcrg.id_request_general = rg.id
+            WHERE pcrg.id_process_category = @pc AND rg.status_req IN (${OPEN_LIST})
+          `);
       }
+    }
+
+    const rulesByGroup = new Map();
+    for (const [key, g] of groups) {
+      rulesByGroup.set(key, [
+        ...(await templateRulesFor(transaction, g.id, { processIds: g.flows.map((p) => p.id) })),
+        ...(await templateRulesFor(transaction, g.id, {
+          templateIds: [...new Set(g.tasks.map((t) => Number(t.id_template)))],
+        })),
+      ]);
     }
 
     for (const t of tasks) {
@@ -332,25 +405,43 @@ export async function POST(req) {
     }
 
     const logIds = [];
-    for (const g of groups.values()) {
-      logIds.push(
-        await insertLog(transaction, {
-          reason: buildLogReason({
-            reason,
-            fromName: g.name,
-            toName: target.name,
-            actorName,
-            dateToReturn,
-            workflows: g.workflows,
-            requests: g.requests,
-            tasks: g.tasks,
-          }),
-          actorId,
-          userRemoved: g.id,
-          userNew: toUserId,
+    let templateCount = 0;
+    for (const [key, g] of groups) {
+      const rules = uniqueRules(rulesByGroup.get(key) ?? []);
+      templateCount += rules.length;
+      const logId = await insertLog(transaction, {
+        reason: buildLogReason({
+          reason,
+          fromName: g.name,
+          toName: target.name,
+          actorName,
           dateToReturn,
-        })
-      );
+          workflows: g.workflows,
+          requests: g.requests,
+          tasks: g.tasks,
+          templates: rules,
+        }),
+        actorId,
+        userRemoved: g.id,
+        userNew: toUserId,
+        dateToReturn,
+      });
+      logIds.push(logId);
+      await insertDetails(transaction, logId, [
+        ...g.flows.map((p) => ({
+          type: 'workflow',
+          id: p.id,
+          before: userList(p.leaders.map((l) => l.id)),
+          after: userList([toUserId]),
+        })),
+        ...g.tasks.map((t) => ({
+          type: 'task',
+          id: t.id,
+          before: userList([t.id_assigned]),
+          after: userList([toUserId]),
+        })),
+        ...templateDetails(rules, toUserId),
+      ]);
     }
 
     await transaction.commit();
@@ -360,8 +451,9 @@ export async function POST(req) {
 
     const result = {
       workflows: processes.size,
-      requests: requestIds.length,
+      requests: [...processes.values()].reduce((n, p) => n + p.requests.length, 0),
       tasks: tasks.length,
+      templates: templateCount,
     };
     console.log(`${TAG} ${actorId} reasignó (seleccionados) a ${toUserId}:`, result, 'registros:', logIds);
     return NextResponse.json({ success: true, reassigned: result, logIds }, { status: 200 });
@@ -414,17 +506,21 @@ async function reassignPerson({ pool, source, target, actorId, actorName, reason
           WHERE trg.id_assigned = @from AND trg.id_status IN (${OPEN_LIST})) AS tasks
     `)
   ).recordset[0];
+  const previewRules = uniqueRules(
+    await findTemplateRulesToCreate(() => pool.request(), bindIds, { fromUserId: fromId, all: true })
+  );
   const summary = {
     workflows: Number(counts?.workflows ?? 0),
     requests: Number(counts?.requests ?? 0),
     tasks: Number(counts?.tasks ?? 0),
+    templates: new Set(previewRules.map((r) => r.id_task)).size,
   };
 
   if (dryRun) {
     return NextResponse.json({ success: true, dryRun: true, from: source.name, preview: summary }, { status: 200 });
   }
-  if (summary.workflows + summary.tasks === 0) {
-    return fail(`${source.name} no tiene flujos ni tareas abiertas para reasignar`, 409);
+  if (summary.workflows + summary.tasks + summary.templates === 0) {
+    return fail(`${source.name} no tiene flujos, tareas abiertas ni tareas futuras para reasignar`, 409);
   }
 
   const transaction = new sql.Transaction(pool);
@@ -470,6 +566,16 @@ async function reassignPerson({ pool, source, target, actorId, actorName, reason
         ORDER BY trg.id
       `)
     ).recordset;
+    const leaderRows = (
+      await q().query(`
+        SELECT upc.id_process_category, upc.id_user
+        FROM user_process_category_request_general upc WITH (UPDLOCK, HOLDLOCK)
+        WHERE upc.id_process_category IN (
+          SELECT id_process_category FROM user_process_category_request_general WHERE id_user = @from
+        )
+      `)
+    ).recordset;
+    const templateRules = uniqueRules(await templateRulesFor(transaction, fromId, { all: true }));
 
     await q().query(`
       INSERT INTO notes (note, id_process_category, created_by, creation_date)
@@ -527,6 +633,7 @@ async function reassignPerson({ pool, source, target, actorId, actorName, reason
         workflows: flowRows,
         requests: requestRows,
         tasks: toMove,
+        templates: templateRules,
       }),
       actorId,
       userRemoved: fromId,
@@ -534,11 +641,29 @@ async function reassignPerson({ pool, source, target, actorId, actorName, reason
       dateToReturn,
     });
 
+    const toId = String(target.id);
+    await insertDetails(transaction, logId, [
+      ...flowRows.map((f) => {
+        const before = leaderRows
+          .filter((l) => Number(l.id_process_category) === Number(f.id))
+          .map((l) => String(l.id_user));
+        const after = [...before.filter((id) => id !== fromId), toId];
+        return { type: 'workflow', id: Number(f.id), before: userList(before), after: userList(after) };
+      }),
+      ...toMove.map((t) => ({ type: 'task', id: Number(t.id), before: userList([fromId]), after: userList([toId]) })),
+      ...templateDetails(templateRules, toId),
+    ]);
+
     await transaction.commit();
 
     notifyTasks(toMove, String(target.id));
 
-    const result = { workflows: flowRows.length, requests: requestRows.length, tasks: toMove.length };
+    const result = {
+      workflows: flowRows.length,
+      requests: requestRows.length,
+      tasks: toMove.length,
+      templates: new Set(templateRules.map((r) => r.id_task)).size,
+    };
     console.log(
       `${TAG} ${actorId} reasignó todo de ${fromId} a ${target.id}:`,
       result,
