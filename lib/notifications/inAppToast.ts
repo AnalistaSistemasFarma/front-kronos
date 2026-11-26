@@ -12,6 +12,7 @@
  * No new realtime channel and no new LLM call: the sources are the chat pulse (long-poll), the
  * chat inbox and the bell's 30 s poll.
  */
+import { toPlainPreview } from '../chat/client';
 import { notificationKind } from './notificationKind';
 import { inferNotificationPath } from './resolveNotificationTarget';
 import { notificationReplyTarget, replyPlaceholder } from './replyTarget';
@@ -96,6 +97,16 @@ function clip(text: string | null | undefined, max = 160): string | null {
   const flat = (text ?? '').replace(/\s+/g, ' ').trim();
   if (!flat) return null;
   return flat.length <= max ? flat : `${flat.slice(0, max - 1).trimEnd()}…`;
+}
+
+/**
+ * Card text as PLAIN text (2026-11-26, msg 40593): agents answer in Markdown and the card showed
+ * `**PRs de Juan…**`, `1. **#1165** — …` raw. Strip the marks (bold, italics, code, headings, list
+ * markers, links → their text, tables) with the same cleaner as the chat inbox, then clip. The
+ * result is always rendered as text, never as HTML.
+ */
+export function plainPreview(text: string | null | undefined, max = 160): string | null {
+  return clip(toPlainPreview(text ?? ''), max);
 }
 
 /* ───────────────────────────── Expressive content (msg 38382) ───────────────────────────── */
@@ -198,7 +209,7 @@ export function toastFromInboxConversation(
   agentAvatar: (agent: InboxConversationInput['agent']) => string | null
 ): InAppToast | null {
   if (!c.lastMessage) return null;
-  const preview = clip(c.lastMessage.preview) ?? 'Envió un archivo';
+  const preview = plainPreview(c.lastMessage.preview) ?? 'Envió un archivo';
   const more = c.unreadCount > 1 ? ` (${c.unreadCount} nuevos)` : '';
 
   if (c.kind === 'people') {
@@ -281,7 +292,7 @@ export function toastFromProjectEvent(e: ProjectPulseInput): InAppToast | null {
     title: e.authorName || 'Alguien',
     label: 'Proyecto',
     context: project,
-    preview: clip(e.preview) ?? null,
+    preview: plainPreview(e.preview),
     company: e.companyName ?? null,
     avatar: {
       src: e.authorAvatarUrl ?? null,
@@ -356,10 +367,10 @@ export function toastFromBellNotification(n: BellNotificationInput): InAppToast 
     : (kind.label ?? (kind.kind === 'ticket' ? 'Mesa de ayuda' : kind.kind === 'actividad' ? 'Actividad' : 'Notificación'));
   return {
     key: `bell-${n.id}`,
-    title: clip(n.title, 90) ?? 'SynerLink',
+    title: plainPreview(n.title, 90) ?? 'SynerLink',
     label,
     context: null,
-    preview: clip(n.body, 200),
+    preview: plainPreview(n.body, 200),
     company: null,
     avatar: null,
     icon,
