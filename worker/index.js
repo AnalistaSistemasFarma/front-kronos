@@ -19,8 +19,6 @@
 //    (Estos dos archivos ya se bifurcaron una vez y quedaron con
 //    comportamientos distintos en `notificationclick`.)
 //
-// Espejo de public/sw.js con SW_VERSION = '2026-11-14.1' (menú Compartir de
-// Android, share_target; antes: vibración del
 // zumbido del chat entre personas tomada del payload).
 //
 // Nota: aquí NO van `install`/`activate` con skipWaiting/clients.claim porque
@@ -233,6 +231,8 @@ const CACHES_VIGENTES = [CACHE_FIJOS, CACHE_ACTIVOS];
 const MAX_FIJOS = 400;
 const MAX_ACTIVOS = 300;
 
+const ES_LOCAL = ['localhost', '127.0.0.1', '[::1]'].includes(self.location.hostname);
+
 function esFijo(url) {
   return url.pathname.startsWith('/_next/static/');
 }
@@ -284,7 +284,7 @@ self.addEventListener('activate', (event) => {
       .then((nombres) =>
         Promise.all(
           nombres
-            .filter((n) => n.startsWith('synerlink-') && !CACHES_VIGENTES.includes(n))
+            .filter((n) => n.startsWith('synerlink-') && (ES_LOCAL || !CACHES_VIGENTES.includes(n)))
             .map((n) => caches.delete(n))
         )
       )
@@ -294,7 +294,7 @@ self.addEventListener('activate', (event) => {
 
 self.addEventListener('fetch', (event) => {
   const req = event.request;
-  if (req.method !== 'GET') return;
+  if (req.method !== 'GET' || ES_LOCAL) return;
   // Rangos (video/audio) y peticiones con credenciales raras: a la red tal cual.
   if (req.headers.has('range')) return;
   const url = new URL(req.url);
