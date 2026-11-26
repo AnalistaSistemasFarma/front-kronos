@@ -1,4 +1,4 @@
-import { UNASSIGNED_ID } from './constants';
+import { isExcludedCompany, UNASSIGNED_ID } from './constants';
 
 /** One compact row per asset, as loaded by lib/it-dashboard/db.ts. */
 export interface ItAssetRow {
@@ -117,7 +117,11 @@ export function aggregateItDashboard(
   catalog: { companies: CatalogItem[]; types: CatalogItem[] },
   filters: ItDashboardFilters
 ): ItDashboardData {
-  const visible = filters.includeRetired ? rows : rows.filter((r) => statusKey(r.status) !== 'retired');
+  // Excluded companies (UNIDOSSIS, ONELATAMONCO, PRUEBAS) disappear from the panel and every count.
+  const allowed = rows.filter((r) => !isExcludedCompany(r.company));
+  const visible = filters.includeRetired
+    ? allowed
+    : allowed.filter((r) => statusKey(r.status) !== 'retired');
 
   // Left panel: every company of the catalogue, counted over all visible assets.
   const companyCounts = new Map<number, number>();
@@ -125,7 +129,9 @@ export function aggregateItDashboard(
     const id = r.companyId ?? UNASSIGNED_ID;
     companyCounts.set(id, (companyCounts.get(id) ?? 0) + 1);
   }
-  const companies: CountedItem[] = catalog.companies.map((c) => ({
+  const companies: CountedItem[] = catalog.companies
+    .filter((c) => !isExcludedCompany(c.name))
+    .map((c) => ({
     id: c.id,
     name: cleanLabel(c.name, `Empresa ${c.id}`),
     total: companyCounts.get(c.id) ?? 0,

@@ -117,6 +117,31 @@ describe('aggregateItDashboard', () => {
   });
 });
 
+describe('excluded companies', () => {
+  it('UNIDOSSIS, ONELATAMONCO and PRUEBAS leave the panel and every count', () => {
+    const withExcluded = {
+      companies: [
+        ...catalog.companies,
+        { id: 4, name: 'PRUEBAS' },
+        { id: 5, name: 'UNIDOSSIS' },
+        { id: 10, name: ' onelatamonco ' },
+      ],
+      types: catalog.types,
+    };
+    const extra: ItAssetRow[] = [
+      row({ id: 50, companyId: 5, company: 'UNIDOSSIS', cost: 999 }),
+      row({ id: 51, companyId: 4, company: 'PRUEBAS' }),
+    ];
+    const data = aggregateItDashboard([...rows, ...extra], withExcluded, {
+      companyId: null,
+      includeRetired: false,
+    });
+    expect(data.companies.some((c) => [4, 5, 10].includes(c.id))).toBe(false);
+    expect(data.allCompaniesTotal).toBe(5);
+    expect(data.kpis.totalCost).toBe(1000 + 2500.5 + 1000 + 1000);
+  });
+});
+
 describe('labels', () => {
   it('cleans and formats catalogue names', () => {
     expect(cleanLabel('  Hardware\r\n', 'x')).toBe('Hardware');

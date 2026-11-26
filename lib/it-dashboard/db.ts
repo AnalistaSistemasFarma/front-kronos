@@ -1,7 +1,7 @@
 import { Prisma } from '../../app/generated/prisma';
 import { prisma } from '../prisma';
 import type { CatalogItem, ItAssetRow } from './aggregate';
-import { IT_DASHBOARD_LIST_LIMIT, UNASSIGNED_ID } from './constants';
+import { EXCLUDED_COMPANY_NAMES, IT_DASHBOARD_LIST_LIMIT, UNASSIGNED_ID } from './constants';
 
 /**
  * Data of the Dashboard TI, read from the same tables as the Activos module
@@ -56,6 +56,20 @@ export interface ItAssetListItem {
   status: string | null;
   site: string | null;
   purchaseDate: Date | null;
+  /* Detail fields, shown in the asset preview window. */
+  processor: string | null;
+  ram: string | null;
+  storage: string | null;
+  os: string | null;
+  sim: string | null;
+  cost: number | null;
+  invoice: string | null;
+  renewal: number | null;
+  renewalDate: Date | null;
+  exitRecord: string | null;
+  active: number | null;
+  userEmail: string | null;
+  userRole: string | null;
 }
 
 export interface ItAssetListFilters {
@@ -66,7 +80,9 @@ export interface ItAssetListFilters {
 
 /** Drill-down: assets of one company and/or type, newest first. */
 export async function loadItAssetList(f: ItAssetListFilters): Promise<ItAssetListItem[]> {
-  const conditions: Prisma.Sql[] = [Prisma.sql`1 = 1`];
+  const conditions: Prisma.Sql[] = [
+    Prisma.sql`(c.company IS NULL OR UPPER(LTRIM(RTRIM(c.company))) NOT IN (${Prisma.join([...EXCLUDED_COMPANY_NAMES])}))`,
+  ];
   if (f.companyId != null) {
     conditions.push(
       f.companyId === UNASSIGNED_ID
@@ -97,7 +113,20 @@ export async function loadItAssetList(f: ItAssetListFilters): Promise<ItAssetLis
       c.company          AS company,
       sta.status_asset   AS status,
       a.site             AS site,
-      a.purchaseDate     AS purchaseDate
+      a.purchaseDate     AS purchaseDate,
+      a.processor        AS processor,
+      a.ram              AS ram,
+      a.storage          AS storage,
+      a.so               AS os,
+      a.sim              AS sim,
+      CAST(a.equipment_cost AS float) AS cost,
+      a.invoice          AS invoice,
+      a.renovation       AS renewal,
+      a.date_renovation  AS renewalDate,
+      a.out_minute       AS exitRecord,
+      a.active           AS active,
+      ua.email           AS userEmail,
+      ua.rol             AS userRole
     FROM assets a
     LEFT JOIN subtype_asset sa ON sa.id = a.id_subtype_asset
     LEFT JOIN type_asset ta ON ta.id = sa.id_type_asset
