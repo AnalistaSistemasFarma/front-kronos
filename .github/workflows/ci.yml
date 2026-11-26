@@ -1014,6 +1014,9 @@ jobs:
           SQL
           x /tmp/ot-verifica-reversa.sql
           x "$M"; x "$M"; x "$M2"; x "$M2"; x "$M3"; x "$M3"; x "$S"; x "$S"
+          # Planta, tipo y notas (2026-11-26): la reversa general quitó la tabla de notas; se vuelve a crear.
+          M5=prisma/migrations/20261126150000_bitacora_proceso_planta_tipo_notas/migration.sql
+          x "$M5"; x "$M5"
           cat > /tmp/ot-verifica.sql <<'SQL'
           IF (SELECT COUNT(*) FROM dbo.ot_actividad WHERE id_company = 1) <> 14 THROW 50021, N'La siembra de Farmalógica no dejó 14 actividades.', 1;
           IF EXISTS (SELECT 1 FROM dbo.ot_actividad WHERE id_company = 1 AND icono IS NULL) THROW 50024, N'Hay actividades sembradas sin ícono.', 1;
