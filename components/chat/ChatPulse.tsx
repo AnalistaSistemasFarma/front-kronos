@@ -1,9 +1,7 @@
 'use client';
 
 import { useEffect } from 'react';
-import { useRouter } from 'next/navigation';
 import { useSession } from 'next-auth/react';
-import toast from 'react-hot-toast';
 import {
   chatFetch,
   isAbortError,
@@ -20,7 +18,9 @@ import {
   prepararAudioZumbido,
   zumbidoFresco,
 } from '../../lib/chat/nudge-fx';
-import { avisarMensajeEntrante, mensajeFresco } from '../../lib/chat/message-sound';
+import { avisarMensajeEntrante, mensajeFresco, threadOnScreen } from '../../lib/chat/message-sound';
+import { toastFromNudge, toastFromProjectEvent } from '../../lib/notifications/inAppToast';
+import { showInAppToast, showInAppToastWithMedia } from '../../lib/notifications/inAppToastStore';
 import { avisarActividadProyectos } from '../../lib/proyectos/iconoHeader';
 import { avisarEstadoProyectos, type EstadoAgenteProyectoDto } from '../../lib/proyectos/estado-agente';
 
@@ -48,6 +48,11 @@ import { avisarEstadoProyectos, type EstadoAgenteProyectoDto } from '../../lib/p
  *                       app/api/chat/pulse) y se reparte con
  *                       EVENTO_ESTADO_PROYECTOS. No abre ninguna conexión nueva.
  *
+ *   - In-app notification cards (2026-11-24): project messages and nudges show a SynerLink card
+ *                       (lib/notifications/inAppToast.ts). With `ag=1` the pulse also reports
+ *                       agent replies and group messages (`type: 'agent'`): they only refresh the
+ *                       inbox now, and the inbox turns them into cards (useChatOverview).
+ *
  * Se PAUSA con la pestaña oculta (no se sostiene una conexión para nadie) y
  * retoma al volver con el mismo cursor, así que lo que llegó mientras tanto
  * se entrega al volver — los zumbidos viejos ya no hacen ruido (NUDGE_FRESH_MS).
@@ -63,7 +68,6 @@ type PulseDto = {
 
 export default function ChatPulse() {
   const { status } = useSession();
-  const router = useRouter();
   const autenticado = status === 'authenticated';
 
   useEffect(() => {
@@ -84,28 +88,8 @@ export default function ChatPulse() {
     let corriendo = false;
 
     const avisarZumbido = (evento: ChatPulseEvent) => {
-      const url = `/process/chat/persona/${evento.idConversation}`;
-      toast(
-        (t) => (
-          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-            <span>
-              📳 <b>{evento.authorName}</b> le envió un zumbido
-            </span>
-            <button
-              type='button'
-              onClick={() => {
-                toast.dismiss(t.id);
-                router.push(url);
-              }}
-              style={{ fontWeight: 600, textDecoration: 'underline', cursor: 'pointer' }}
-            >
-              Abrir
-            </button>
-          </span>
-        ),
-        // Un aviso por conversación: tres zumbidos seguidos no apilan tres.
-        { id: `zumbido-${evento.idConversation}`, duration: 8000 }
-      );
+      // Una tarjeta por conversación: tres zumbidos seguidos no apilan tres.
+      showInAppToast(toastFromNudge(evento));
       parpadearTitulo(`📳 ${evento.authorName} le envió un zumbido`);
       efectoZumbido();
     };
@@ -118,6 +102,14 @@ export default function ChatPulse() {
       // El antirrebote de message-sound deja sonar una sola vez por ráfaga.
       // A muted project (2026-11-23) refreshes silently: no sound.
       for (const e of eventos) if (!e.muted && mensajeFresco(e.createdAt)) avisarMensajeEntrante(e.idConversation);
+      // In-app card: the latest message per conversation, unless muted (#1095) or already on screen.
+      const latest = new Map<number, ChatPulseEvent>();
+      for (const e of eventos) latest.set(e.idConversation, e);
+      for (const e of latest.values()) {
+        if (e.muted || !mensajeFresco(e.createdAt) || threadOnScreen(e.idConversation)) continue;
+        // «Envió un archivo» = no text: sticker, GIF or image → shown in the card (msg 38382).
+        showInAppToastWithMedia(toastFromProjectEvent(e), e.idConversation);
+      }
     };
 
     const procesar = (todos: ChatPulseEvent[]) => {
@@ -160,7 +152,8 @@ export default function ChatPulse() {
           try {
             const st = cursorEstados !== null ? `&st=${encodeURIComponent(cursorEstados)}` : '';
             const rq = rcursor !== null ? `&rsince=${rcursor}` : '';
-            const res = await chatFetch(`/api/chat/pulse?since=${cursor}${st}${rq}`, {
+            // ag=1: agent replies and group messages too (in-app notification cards).
+            const res = await chatFetch(`/api/chat/pulse?since=${cursor}${st}${rq}&ag=1`, {
               signal: control.signal,
             });
             if (!vivo) return;
@@ -231,7 +224,7 @@ export default function ChatPulse() {
       if (reintento !== null) window.clearTimeout(reintento);
       document.removeEventListener('visibilitychange', alCambiarVisibilidad);
     };
-  }, [autenticado, router]);
+  }, [autenticado]);
 
   return null;
 }
