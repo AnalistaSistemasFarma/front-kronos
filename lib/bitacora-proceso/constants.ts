@@ -47,6 +47,33 @@ export const OT_TURNO_HORARIO: Record<OtTurno, string> = {
 export const OT_TURNO_NOMBRE: Record<OtTurno, string> = { MANANA: 'Mañana', TARDE: 'Tarde', NOCHE: 'Noche' };
 
 /** Etiqueta visible del turno con su horario: «Mañana (06–14)». */
+/**
+ * PLANTA (reunión con Farmalógica, 2026-11-26): «que los chicos no se equivoquen» de bitácora.
+ * Se elige al abrir y se muestra con TEXTO y COLOR en el listado, en planta, en el informe y en el
+ * Excel. Azul = Planta 1, verde claro = Planta 2 (colores de Mantine).
+ */
+export const OT_PLANTAS = [1, 2] as const;
+export type OtPlanta = (typeof OT_PLANTAS)[number];
+export function isOtPlanta(v: unknown): v is OtPlanta {
+  return v === 1 || v === 2;
+}
+export const OT_PLANTA_LABEL: Record<OtPlanta, string> = { 1: 'Planta 1', 2: 'Planta 2' };
+export const OT_PLANTA_COLOR: Record<OtPlanta, string> = { 1: 'blue', 2: 'teal' };
+
+/** TIPO de personal del turno (2026-11-26). Los inspectores de calidad participan pero no firman. */
+export const OT_TIPOS_PERSONAL = ['OPERARIO', 'MANTENIMIENTO', 'INSPECTOR'] as const;
+export type OtTipoPersonal = (typeof OT_TIPOS_PERSONAL)[number];
+export function isOtTipoPersonal(v: unknown): v is OtTipoPersonal {
+  return typeof v === 'string' && (OT_TIPOS_PERSONAL as readonly string[]).includes(v);
+}
+export const OT_TIPO_PERSONAL_LABEL: Record<OtTipoPersonal, string> = { OPERARIO: 'Operario', MANTENIMIENTO: 'Mantenimiento', INSPECTOR: 'Inspector de calidad' };
+export const OT_TIPO_PERSONAL_PLURAL: Record<OtTipoPersonal, string> = { OPERARIO: 'Operarios', MANTENIMIENTO: 'Mantenimiento', INSPECTOR: 'Inspectores de calidad' };
+export const OT_TIPO_PERSONAL_COLOR: Record<OtTipoPersonal, string> = { OPERARIO: 'gray', MANTENIMIENTO: 'orange', INSPECTOR: 'grape' };
+
+/** Nota de corrección sobre un registro (2026-11-26). */
+export const OT_NOTA_MIN = 3;
+export const OT_NOTA_MAX = 500;
+
 export const OT_TURNO_LABEL: Record<OtTurno, string> = {
   MANANA: `${OT_TURNO_NOMBRE.MANANA} (${OT_TURNO_HORARIO.MANANA})`,
   TARDE: `${OT_TURNO_NOMBRE.TARDE} (${OT_TURNO_HORARIO.TARDE})`,
@@ -209,6 +236,13 @@ export const OT_AREAS_FARMALOGICA: ReadonlyArray<string> = ['Envase y agrafado']
 export const OT_VISTOS_BUENOS = ['OPERARIO', 'SUPERVISOR', 'INSPECTOR', 'JEFE_PROD'] as const;
 export type OtFirmaRol = (typeof OT_VISTOS_BUENOS)[number];
 
+/**
+ * 2026-11-24 (reunión de mejoras con Farmalógica): el INSPECTOR sale del flujo. Quedan
+ * operario → supervisor (cierra) → jefe de producción. INSPECTOR sigue en OT_VISTOS_BUENOS
+ * y en la base solo para LEER las bitácoras viejas que ya tienen ese visto bueno.
+ */
+export const OT_INSPECTOR_EN_FLUJO = false;
+
 export function isOtFirmaRol(v: unknown): v is OtFirmaRol {
   return typeof v === 'string' && (OT_VISTOS_BUENOS as readonly string[]).includes(v);
 }
@@ -291,6 +325,11 @@ export const OT_PIN_MAX_FALLOS = 5;
 export const OT_RESPONSABLE_ROLES = ['SUPERVISOR', 'INSPECTOR', 'JEFE_PROD'] as const;
 export type OtResponsableRol = (typeof OT_RESPONSABLE_ROLES)[number];
 
+/** Roles que se pueden ASIGNAR hoy (2026-11-24: el inspector ya no se asigna; las filas viejas se leen). */
+export const OT_RESPONSABLE_ROLES_ASIGNABLES: ReadonlyArray<OtResponsableRol> = OT_RESPONSABLE_ROLES.filter(
+  (r) => OT_INSPECTOR_EN_FLUJO || r !== 'INSPECTOR'
+);
+
 export function isOtResponsableRol(v: unknown): v is OtResponsableRol {
   return typeof v === 'string' && (OT_RESPONSABLE_ROLES as readonly string[]).includes(v);
 }
@@ -298,6 +337,6 @@ export function isOtResponsableRol(v: unknown): v is OtResponsableRol {
 /** Qué hace cada responsable (texto de ayuda del catálogo). */
 export const OT_RESPONSABLE_AYUDA: Record<OtResponsableRol, string> = {
   SUPERVISOR: 'Abre y cierra la bitácora («Cerró»). Debe tener el permiso «Bitácora de Proceso: Gestión».',
-  INSPECTOR: 'Da su visto bueno después del cierre (del supervisor o del jefe de producción). No abre ni cierra.',
-  JEFE_PROD: 'Puede abrir y cerrar la bitácora de la que es jefe; si la cierra otra persona, da el último visto bueno, después del inspector.',
+  INSPECTOR: 'Ya no forma parte del flujo (2026-11-24). Solo se conserva en las bitácoras anteriores.',
+  JEFE_PROD: 'Puede abrir y cerrar la bitácora de la que es jefe; si la cierra el supervisor, da el último visto bueno.',
 };

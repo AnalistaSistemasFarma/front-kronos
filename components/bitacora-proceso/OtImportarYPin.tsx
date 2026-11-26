@@ -168,7 +168,7 @@ export function OtPinsEmpresa({ company }: { company: OtCompanyAccess }) {
         </Alert>
       )}
       <Text size='sm' c='dimmed'>
-        Cada supervisor, inspector y jefe de producción configura su propio PIN («Configurar PIN de bitácora», en la pantalla principal del módulo). Aquí solo se ve el estado y se restablece: nadie conoce ni fija el PIN de otra persona.
+        Cada supervisor y jefe de producción configura su propio PIN («Configurar PIN de bitácora», en la pantalla principal del módulo). Aquí solo se ve el estado y se restablece: nadie conoce ni fija el PIN de otra persona.
       </Text>
       <TextInput size='md' placeholder='Buscar persona' leftSection={<IconSearch size={18} />} value={filtro} onChange={(e) => setFiltro(e.currentTarget.value)} />
       {error && <Alert color='red'>{error}</Alert>}

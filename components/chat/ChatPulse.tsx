@@ -20,7 +20,7 @@ import {
 } from '../../lib/chat/nudge-fx';
 import { avisarMensajeEntrante, mensajeFresco, threadOnScreen } from '../../lib/chat/message-sound';
 import { toastFromNudge, toastFromProjectEvent } from '../../lib/notifications/inAppToast';
-import { showInAppToast } from '../../lib/notifications/inAppToastStore';
+import { showInAppToast, showInAppToastWithMedia } from '../../lib/notifications/inAppToastStore';
 import { avisarActividadProyectos } from '../../lib/proyectos/iconoHeader';
 import { avisarEstadoProyectos, type EstadoAgenteProyectoDto } from '../../lib/proyectos/estado-agente';
 
@@ -107,7 +107,8 @@ export default function ChatPulse() {
       for (const e of eventos) latest.set(e.idConversation, e);
       for (const e of latest.values()) {
         if (e.muted || !mensajeFresco(e.createdAt) || threadOnScreen(e.idConversation)) continue;
-        showInAppToast(toastFromProjectEvent(e));
+        // «Envió un archivo» = no text: sticker, GIF or image → shown in the card (msg 38382).
+        showInAppToastWithMedia(toastFromProjectEvent(e), e.idConversation);
       }
     };
 

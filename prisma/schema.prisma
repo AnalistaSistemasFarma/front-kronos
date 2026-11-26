@@ -2334,6 +2334,8 @@ model ChatMessage {
   reactions    ChatMessageReaction[]
   /// GIF o sticker (2026-10-20). Tabla APARTE: el mensaje no cambia.
   media        ChatMessageMedia?
+  /// Agent-initiated message (2026-11-24): audit + marker row. Separate table: the message itself does not change.
+  initiatedByAgent ChatAgentInitiatedMessage?
 
   @@index([id_conversation, id(sort: Desc)])
   @@index([id_conversation, created_at])
@@ -2447,6 +2449,42 @@ model ChatMessageReaction {
 /// `media_url` es la URL del PROVEEDOR (GIPHY) y nunca viaja al navegador: la
 /// imagen se sirve por /api/chat/gifs/proxy con URL firmada, para no exponer la
 /// IP ni la sesión de nadie ante el proveedor.
+/// AGENT-INITIATED MESSAGE (2026-11-24, approved by Nicolás Rivera, conv 1 msgs 38807–38809).
+/// One row per message that an agent posted ON ITS OWN in a person's direct conversation through the
+/// kronos-mcp tool chat_enviar_mensaje_usuario (mcp/src/tools/agentMessage.ts). It is at once:
+///  - the AUDIT (who asked: the MCP key; recipient; reason; when; message id),
+///  - the source of the daily limits (per agent and per recipient, rolling 24 h),
+///  - the MARKER the interface uses for the «Mensaje iniciado por el asistente» badge and that the
+///    agent inbox uses to hand the message to the agent session as context when the person replies
+///    (lib/chat/agent-initiated.ts),
+///  - the once-only guard of the push (push_sent_at, app/api/chat/agent/initiated-notify).
+/// Separate table (like chat_message_media): chat_message and its event_type CHECK do not change.
+/// DDL: prisma/migrations/20261124180000_chat_agent_initiated_message.
+model ChatAgentInitiatedMessage {
+  id_message           Int       @id
+  id_conversation      Int
+  id_agent             Int
+  /// Recipient (chat_conversation.id_user). No FK: the row is an audit record.
+  id_user              String    @db.NVarChar(1000)
+  /// Short reason given by the agent (audit).
+  reason               String    @db.NVarChar(300)
+  /// Who asked: "key:<name of the MCP key>". Never the key itself.
+  requested_by         String    @db.NVarChar(120)
+  /// The conversation did not exist and was created for this message.
+  conversation_created Boolean   @default(false)
+  /// Push sent (set once by the app endpoint; NULL = not sent yet).
+  push_sent_at         DateTime?
+  created_at           DateTime  @default(now())
+
+  message ChatMessage @relation(fields: [id_message], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([id_agent, created_at], map: "chat_agent_initiated_message_agent_idx")
+  @@index([id_user, created_at], map: "chat_agent_initiated_message_user_idx")
+  @@index([id_conversation, id_message], map: "chat_agent_initiated_message_conversation_idx")
+  @@map("chat_agent_initiated_message")
+  @@schema("dbo")
+}
+
 model ChatMessageMedia {
   id_message  Int      @id
   /// 'gif' | 'sticker'. CHECK en la base.
@@ -4835,6 +4873,11 @@ model OtOrdenTrabajo {
   observacion_cierre String?   @db.NVarChar(1000)
   // Área del catálogo (A5, 2026-10-14); `area` guarda la copia del nombre.
   id_area            Int?
+  // Planta 1 o 2 (2026-11-26), elegida al abrir; NULL en las bitácoras anteriores. CHECK (1, 2).
+  planta             Int?      @db.TinyInt
+  // Quién y cuándo asignó o corrigió la planta con la bitácora ABIERTA (2026-11-26); NULL si se eligió al abrir.
+  planta_asignada_por String?  @db.NVarChar(50)
+  planta_asignada_en  DateTime? @db.DateTime2
 
   company    Company           @relation(fields: [id_company], references: [id_company], onDelete: NoAction, onUpdate: NoAction)
   areaRef    OtArea?           @relation(fields: [id_area], references: [id_area], onDelete: NoAction, onUpdate: NoAction)
@@ -4844,6 +4887,7 @@ model OtOrdenTrabajo {
   operadores OtOrdenOperador[]
   registros  OtRegistro[]
   firmas     OtFirma[]
+  notas      OtRegistroNota[]
 
   @@unique([id_company, consecutivo], map: "UQ_ot_orden_trabajo_consecutivo")
   @@index([id_company, estado], map: "IX_ot_orden_trabajo_estado")
@@ -4884,9 +4928,30 @@ model OtRegistro {
   orden     OtOrdenTrabajo @relation(fields: [id_orden_trabajo], references: [id_orden_trabajo], onDelete: NoAction, onUpdate: NoAction)
   actividad OtActividad    @relation(fields: [id_actividad], references: [id_actividad], onDelete: NoAction, onUpdate: NoAction)
   operador  OtOperador?    @relation(fields: [id_operador], references: [id_operador], onDelete: NoAction, onUpdate: NoAction)
+  notas     OtRegistroNota[]
 
   @@index([id_orden_trabajo, registrado_en], map: "IX_ot_registro_orden")
   @@map("ot_registro")
+  @@schema("dbo")
+}
+
+/// Nota de corrección sobre un registro (2026-11-26: «toqué la actividad equivocada»). El registro no se
+/// edita ni se borra; la nota tampoco (trigger TR_ot_registro_nota_inmutable, solo UPDATE/DELETE).
+model OtRegistroNota {
+  id_nota          Int      @id @default(autoincrement())
+  id_registro      BigInt
+  id_orden_trabajo Int
+  texto            String   @db.NVarChar(500)
+  id_user          String   @db.NVarChar(50)
+  // Hora del SERVIDOR de base de datos: el cliente nunca la envía.
+  creada_en        DateTime @default(dbgenerated("sysutcdatetime()")) @db.DateTime2
+  ip               String?  @db.NVarChar(64)
+
+  registro OtRegistro     @relation(fields: [id_registro], references: [id_registro], onDelete: NoAction, onUpdate: NoAction, map: "ot_registro_nota_id_registro_fkey")
+  orden    OtOrdenTrabajo @relation(fields: [id_orden_trabajo], references: [id_orden_trabajo], onDelete: NoAction, onUpdate: NoAction, map: "ot_registro_nota_id_orden_trabajo_fkey")
+
+  @@index([id_orden_trabajo, creada_en], map: "IX_ot_registro_nota_orden")
+  @@map("ot_registro_nota")
   @@schema("dbo")
 }
 
@@ -4896,6 +4961,8 @@ model OtOperador {
   id_company  Int
   nombre      String    @db.NVarChar(120)
   documento   String?   @db.NVarChar(30)
+  // OPERARIO | MANTENIMIENTO | INSPECTOR (2026-11-26): personal del turno agrupado por tipo. CHECK en la base.
+  tipo        String    @default("OPERARIO") @db.NVarChar(20)
   activo      Boolean   @default(true)
   created_by  String    @db.NVarChar(50)
   created_at  DateTime  @default(dbgenerated("sysutcdatetime()")) @db.DateTime2

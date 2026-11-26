@@ -204,6 +204,8 @@ export interface ChatMessageDto {
   reactions?: ChatReactionDto[];
   /** GIF o sticker (2026-10-20). Sin el campo = mensaje normal. */
   media?: ChatMediaDto;
+  /** The agent sent it on its own, not as a reply (2026-11-24). */
+  agentInitiated?: boolean;
   /** Marca local: mensaje aún no confirmado por el servidor (envío optimista). */
   pending?: boolean;
   /** Marca local: el envío falló y el usuario puede reintentar. */
@@ -606,8 +608,10 @@ export function toPlainPreview(markdown: string): string {
     .replace(/^#{1,6}\s+/gm, '')
     .replace(/#{1,6}\s+/g, '')
     .replace(/\*{1,3}/g, '')
+    .replace(/__([^_\n]+)__/g, '$1')
     .replace(/~{1,2}/g, '')
     .replace(/^\s{0,8}[-*+]\s+/gm, '')
+    .replace(/^\s{0,8}\d{1,3}[.)]\s+/gm, '')
     .replace(/^\s{0,8}>\s?/gm, '')
     .replace(/\|/g, ' ')
     .replace(/-{3,}/g, ' ')

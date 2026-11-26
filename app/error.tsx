@@ -2,11 +2,11 @@
 
 import { useEffect, useState } from 'react';
 import PantallaActualizacion from '../components/errors/PantallaActualizacion';
-import { isChunkLoadError, recargarUnaVez } from '../lib/chunk-recovery';
+import { isChunkLoadError, recargarUnaVez, RECUPERACION_ACTIVA } from '../lib/chunk-recovery';
 
 // Límite de error de todas las rutas (dentro del layout raíz). Ver global-error.tsx.
 export default function RouteError({ error, reset }: { error: Error & { digest?: string }; reset: () => void }) {
-  const esActualizacion = isChunkLoadError(error);
+  const esActualizacion = RECUPERACION_ACTIVA && isChunkLoadError(error);
   const [recargando, setRecargando] = useState(false);
 
   useEffect(() => {

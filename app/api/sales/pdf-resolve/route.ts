@@ -3,9 +3,10 @@ import { NextRequest, NextResponse } from 'next/server';
 import { authOptions } from '../../auth/[...nextauth]/route';
 import { salesEndpointForUser } from '../../../../lib/sales/access';
 import { salesCompanyConfig } from '../../../../lib/sales/companyConfig';
-import { MAX_IMPORT_LINES, type ImportLine } from '../../../../lib/sales/linesImport';
+import { MAX_PDF_LINES, type ImportLine } from '../../../../lib/sales/linesImport';
 import { validateLines } from '../../../../lib/sales/linesValidate';
 import { bestCandidate, nitBase } from '../../../../lib/sales/pdfOrder';
+import { recentItems, RECENT_LINES, searchPath } from '../../../../lib/sales/search';
 import { sapGet, sapLogin, sapLogout, SapError } from '../../../../lib/sap/serviceLayer';
 
 /**
@@ -24,7 +25,10 @@ export async function POST(request: NextRequest) {
     if (!session?.user?.email) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     const body = await request.json().catch(() => ({}));
     const companyId = Number(body.companyId);
-    const input = (Array.isArray(body.lines) ? body.lines : []).slice(0, MAX_IMPORT_LINES) as ImportLine[];
+    const received = Array.isArray(body.lines) ? body.lines.length : 0;
+    const input = (Array.isArray(body.lines) ? body.lines : []).slice(0, MAX_PDF_LINES) as ImportLine[];
+    // Never drop lines silently: the user is told how many were left out.
+    const avisoTope = received > MAX_PDF_LINES ? [`La orden trae ${received} líneas; se montan las primeras ${MAX_PDF_LINES}. Agregue las demás a mano o en otra oferta.`] : [];
     if (!companyId || !input.length) return NextResponse.json({ error: 'Faltan datos de la orden de compra.' }, { status: 400 });
     const access = await salesEndpointForUser(session.user.email, companyId, 'write');
     if (!access?.endpoint) return NextResponse.json({ error: 'Sin permiso para crear ofertas en esta empresa.' }, { status: 403 });
@@ -59,25 +63,40 @@ export async function POST(request: NextRequest) {
         });
       }
 
-      // 2) Líneas.
+      // 2) Líneas. Empresas de servicios (descripción editable: Kelab, Meditrack): la OC trae descripciones libres
+      // y SAP tiene pocos artículos genéricos; se empareja por cobertura y la línea conserva la descripción del PDF.
+      const servicios = Boolean(conf?.descripcionEditable);
+      // Artículos que ya se le han facturado a este cliente: desempatan el emparejamiento por descripción.
+      const recientes = await sapGet<Record<string, unknown>>(sap, searchPath('recent_items', { cardCode: customer.CardCode }), { Prefer: `odata.maxpagesize=${RECENT_LINES}` })
+        .then((d) => recentItems(d, 60))
+        .catch(() => []);
+      const preferidos = new Map(recientes.map((r) => [r.ItemCode, r.Times]));
       const v = await validateLines(sap, {
-        cardCode: customer.CardCode, input, matchByDescription: true,
+        cardCode: customer.CardCode, input, matchByDescription: true, servicios,
         priceListDefault: conf?.priceListDefault ?? null, defaultWarehouse: conf?.defaultWarehouse ?? null,
       });
-      const avisos: string[] = v.errors.map((e) => e.error);
+      const avisos: string[] = [...avisoTope, ...v.errors.map((e) => e.error)];
       const lines: Record<string, unknown>[] = v.lines.map((l) => ({ ...l, aiNote: null as string | null }));
       const elegidos: (ImportLine & { aiNote: string })[] = [];
       for (const p of v.pending) {
-        const b = bestCandidate(p.input.ItemDescription, p.candidates);
+        // Los artículos que ya se le venden al cliente entran como candidatos aunque la búsqueda no los trajera.
+        const extra = recientes.filter((r) => !p.candidates.some((c) => c.ItemCode === r.ItemCode)).map((r) => ({ ItemCode: r.ItemCode, ItemName: r.ItemName }));
+        const b = bestCandidate(p.input.ItemDescription, servicios ? [...p.candidates, ...extra] : p.candidates, { servicios, preferidos });
         if (!b) {
           avisos.push(`«${p.input.ItemDescription}» (${p.input.Quantity}): no se encontró en SAP; agréguelo a mano.`);
           continue;
         }
-        elegidos.push({ ...p.input, ItemCode: b.ItemCode, aiNote: b.seguro ? `Emparejado por descripción con «${b.ItemName}»` : `Revisar: «${p.input.ItemDescription}» se emparejó con «${b.ItemName}» (hay otros parecidos)` });
+        const otros = p.candidates.filter((c) => c.ItemCode !== b.ItemCode).slice(0, 3).map((c) => c.ItemCode).join(', ');
+        elegidos.push({
+          ...p.input, ItemCode: b.ItemCode,
+          aiNote: b.seguro
+            ? `Emparejado por descripción con «${b.ItemName}»`
+            : `Revisar: se emparejó con «${b.ItemCode} ${b.ItemName}»${otros ? ` (otros posibles: ${otros})` : ''}`,
+        });
       }
       if (elegidos.length) {
         const v2 = await validateLines(sap, {
-          cardCode: customer.CardCode, input: elegidos, matchByDescription: false,
+          cardCode: customer.CardCode, input: elegidos, matchByDescription: false, descripcionEditable: servicios,
           priceListDefault: conf?.priceListDefault ?? null, defaultWarehouse: conf?.defaultWarehouse ?? null,
         });
         v2.lines.forEach((l) => lines.push({ ...l, aiNote: elegidos.find((e) => e.row === l.row)?.aiNote ?? null }));

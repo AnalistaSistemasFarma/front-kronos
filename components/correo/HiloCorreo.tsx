@@ -94,6 +94,8 @@ export interface HiloCorreoProps {
   onCambio: () => void;
   /** Responder desde SynerLink (Mail.Send) habilitado en el ambiente. */
   envioHabilitado?: boolean;
+  /** The user's company is read-only (CORREO_<K>_ENVIO=false): show why there is no Reply. */
+  soloLectura?: boolean;
   /** «Consultar a un agente» encendido en el ambiente (CORREO_AGENTE_HABILITADO; apagado por defecto). */
   agenteHabilitado?: boolean;
   /** Nombre de la persona (firma del texto «Informar en el hilo»). */
@@ -322,6 +324,7 @@ export default function HiloCorreo({
   onCrearSolicitud,
   onCambio,
   envioHabilitado = true,
+  soloLectura = false,
   agenteHabilitado = false,
   nombreOperador = '',
   correoOperador = '',
@@ -990,6 +993,12 @@ export default function HiloCorreo({
                     </Button>
                   )}
                 </Group>
+              )}
+
+              {ultimo && !envioHabilitado && soloLectura && (
+                <Text size='xs' c='dimmed' mt='xs' pl={{ base: 0, sm: 64 }} data-testid='correo-solo-lectura'>
+                  Su empresa tiene el Correo en modo solo lectura: puede leer, analizar y crear solicitudes, pero no responder desde SynerLink.
+                </Text>
               )}
 
               {ultimo && envioHabilitado && redactando && (

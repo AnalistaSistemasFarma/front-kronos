@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
   aggregateHelpdeskDashboard,
+  buildCaseDetail,
   buildMonthSeries,
+  matchesBucket,
+  parseCaseBucket,
+  parseDimensionFilter,
+  resolutionDays,
   cleanLabel,
   computeKpis,
   filterCases,
@@ -110,6 +115,108 @@ describe('buildMonthSeries', () => {
       { key: '2026-02', label: 'feb 2026', total: 0 },
     ]);
     expect(buildMonthSeries([], {}, NOW)).toEqual([]);
+  });
+});
+
+describe('KPI drill-down', () => {
+  it('parses only the known buckets', () => {
+    expect(parseCaseBucket('pending')).toBe('pending');
+    expect(parseCaseBucket('measured')).toBe('measured');
+    expect(parseCaseBucket('x')).toBeNull();
+    expect(parseCaseBucket(null)).toBeNull();
+  });
+
+  it('each bucket matches the same cases its KPI counts', () => {
+    const kpis = computeKpis(rows);
+    const count = (b: Parameters<typeof matchesBucket>[1]) => rows.filter((r) => matchesBucket(r, b)).length;
+    expect(count('all')).toBe(kpis.total);
+    expect(count('resolved')).toBe(kpis.resolved);
+    expect(count('pending')).toBe(kpis.pending);
+    expect(count('measured')).toBe(kpis.resolvedWithEndDate);
+  });
+
+  it('resolution days only for resolved cases with a valid end_date', () => {
+    expect(resolutionDays(rows[0])).toBe(2);
+    expect(resolutionDays(rows[1])).toBeNull();
+    expect(resolutionDays(row({ statusId: 1, endDate: '2026-02-01T00:00:00.000Z' }))).toBeNull();
+  });
+
+  it('returns the filtered cases newest first, cleaned and cut at the limit', () => {
+    const all = buildCaseDetail(rows, {}, 'all', 3);
+    expect(all.total).toBe(5);
+    expect(all.truncated).toBe(true);
+    expect(all.cases.map((c) => c.id)).toEqual([5, 4, 3]);
+
+    const pending = buildCaseDetail(rows, { year: 2026 }, 'pending');
+    expect(pending.truncated).toBe(false);
+    expect(pending.cases).toEqual([
+      {
+        id: 4,
+        subject: 'Sin asunto',
+        status: 'Abierto',
+        caseType: 'Incidente',
+        company: 'FARMALOGICA S.A.',
+        department: 'GERENCIA',
+        technician: 'Sin técnico asignado',
+        category: 'Sin categoría',
+        subcategory: 'Portátil',
+        activity: 'Revisión',
+        createdAt: '2026-03-01',
+        endDate: null,
+        resolutionDays: null,
+      },
+    ]);
+
+    const measured = buildCaseDetail(rows, {}, 'measured');
+    expect(measured.cases.map((c) => [c.id, c.resolutionDays])).toEqual([
+      [5, 1],
+      [1, 2],
+    ]);
+  });
+});
+
+describe('department drill-down', () => {
+  it('parses only known dimensions with a value', () => {
+    expect(parseDimensionFilter(new URLSearchParams('dimension=department&value=GERENCIA'))).toEqual({
+      dimension: 'department',
+      value: 'GERENCIA',
+    });
+    expect(parseDimensionFilter(new URLSearchParams('dimension=department&value='))).toBeNull();
+    expect(parseDimensionFilter(new URLSearchParams('dimension=toString&value=x'))).toBeNull();
+    expect(parseDimensionFilter(new URLSearchParams('dimension=company&value=x'))).toBeNull();
+    expect(parseDimensionFilter(new URLSearchParams('dimension=technician&value=Rafael%20Solarte'))).toEqual({
+      dimension: 'technician',
+      value: 'Rafael Solarte',
+    });
+  });
+
+  it('technician drill-down matches the count of each bar, including cases without technician', () => {
+    const counts = aggregateHelpdeskDashboard(rows, {}, NOW).byTechnician;
+    for (const { name, total } of counts) {
+      const detail = buildCaseDetail(rows, {}, 'all', 1000, { dimension: 'technician', value: name });
+      expect(detail.total).toBe(total);
+      expect(detail.cases.every((c) => c.technician === name)).toBe(true);
+    }
+    expect(
+      buildCaseDetail(rows, {}, 'all', 1000, { dimension: 'technician', value: 'Sin técnico asignado' }).cases.map((c) => c.id)
+    ).toEqual([4]);
+  });
+
+  it('returns only the cases of the department, matching the count of its row', () => {
+    const data = [
+      ...rows,
+      row({ id: 6, department: 'PRODUCCIÓN', createdAt: '2026-03-05T00:00:00.000Z' }),
+      row({ id: 7, department: null, createdAt: '2026-03-06T00:00:00.000Z' }),
+    ];
+    const counts = aggregateHelpdeskDashboard(data, {}, NOW).byDepartment;
+    for (const { name, total } of counts) {
+      const detail = buildCaseDetail(data, {}, 'all', 1000, { dimension: 'department', value: name });
+      expect(detail.total).toBe(total);
+      expect(detail.cases.every((c) => c.department === name)).toBe(true);
+    }
+    expect(
+      buildCaseDetail(data, {}, 'all', 1000, { dimension: 'department', value: 'Sin departamento' }).cases.map((c) => c.id)
+    ).toEqual([7]);
   });
 });
 

@@ -23,6 +23,7 @@ export const KNOWN_TOOLS: ReadonlySet<string> = new Set([
   ...TOOL_CAPABILITIES.readOnly,
   ...TOOL_CAPABILITIES.write,
   ...TOOL_CAPABILITIES.usuarios,
+  ...TOOL_CAPABILITIES.agentMessage,
 ]);
 
 /**

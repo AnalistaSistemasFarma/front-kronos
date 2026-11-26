@@ -3,6 +3,7 @@ import { invalidarHilo } from './cacheHilo';
 import { CORREO_DESHACER_VIGENCIA_MS, CORREO_MAX_ELIMINAR_SELECCION } from './constants';
 import * as data from './db';
 import type { AccesoCorreo } from './db';
+import { capacidadesCorreo } from './config';
 import { CorreoError } from './errors';
 import { assertGraphId } from './graph';
 import { proveedorDe, type CorreoDeps } from './service';
@@ -58,12 +59,12 @@ export interface ResultadoDeshacer {
 }
 
 /** Eliminar escribe en el buzón (Mail.ReadWrite): exige la escritura general y su propio interruptor. */
-export function eliminarHabilitado(d: CorreoDeps): boolean {
-  return d.cfg.etiquetarHabilitado && d.cfg.eliminarHabilitado;
+export function eliminarHabilitado(d: CorreoDeps, email: string): boolean {
+  return capacidadesCorreo(d.cfg, email).eliminar;
 }
 
-function exigirEliminar(d: CorreoDeps): void {
-  if (!eliminarHabilitado(d)) throw new CorreoError('Eliminar correos no está habilitado en este ambiente.', 403);
+function exigirEliminar(d: CorreoDeps, acceso: AccesoCorreo): void {
+  if (!eliminarHabilitado(d, acceso.email)) throw new CorreoError('Eliminar correos no está habilitado en este ambiente.', 403);
 }
 
 function buzon(acceso: AccesoCorreo): string {
@@ -148,7 +149,7 @@ export async function eliminarMensajes(
   opciones: { confirmarVinculados: boolean },
   ip: string | null
 ): Promise<ResultadoEliminar> {
-  exigirEliminar(d);
+  exigirEliminar(d, acceso);
   const ids = idsValidos(idsEntrada);
   llave(d); // Sin «Deshacer» no se elimina: se verifica ANTES de mover nada.
   const prov = await proveedorDe(d, acceso);
@@ -234,7 +235,7 @@ export async function eliminarMensajes(
  * de la sesión (si la persona ya los movió o vació la papelera, no se tocan y salen como fallidos).
  */
 export async function deshacerEliminar(d: CorreoDeps, acceso: AccesoCorreo, token: unknown, ip: string | null): Promise<ResultadoDeshacer> {
-  exigirEliminar(d);
+  exigirEliminar(d, acceso);
   const c = leerComprobante(d, acceso, token);
   const items = c.i
     .filter((x): x is [string, string] => Array.isArray(x) && typeof x[0] === 'string' && typeof x[1] === 'string')

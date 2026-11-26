@@ -13,10 +13,11 @@ import {
 import { jsonNoStore, serverError, unauthorized } from '../../../../../lib/chat/http';
 import type { ChatAgentIdentity } from '../../../../../lib/chat/agent-auth';
 import { cargarConfigProyectos } from '../../../../../lib/proyectos/config-agentes';
-import { whereProyectoDelAgente } from '../../../../../lib/chat/projects';
+import { filtroProyectosDelPuente } from '../../../../../lib/chat/projects';
 import { mensajesConEntregaPendiente } from '../../../../../lib/chat/entregas-pendientes';
 import { EVENT_TYPE_TURNO, tickMesas, turnoParaAgente } from '../../../../../lib/proyectos/mesas';
 import { ANALYSIS_AUTHOR_NAME, analysisTurnForAgent } from '../../../../../lib/meetings/projects/analysis';
+import { withInitiatedContext } from '../../../../../lib/chat/agent-initiated';
 
 // El long-poll obliga a que la ruta sea dinámica: nada de esto se cachea.
 export const dynamic = 'force-dynamic';
@@ -187,11 +188,15 @@ export async function GET(request: NextRequest) {
       ]);
     }
 
+    // Agent-initiated messages (2026-11-24): the person's reply carries what the agent had written on
+    // its own in that direct conversation, because the session serving it may not have written it.
+    const delivered = pending.length > 0 ? await withInitiatedContext(pending) : pending;
+
     return jsonNoStore({
       agent: { idAgent: agent.idAgent, code: agent.code, displayName: agent.displayName },
       acknowledged: ack,
       waitedMs: Date.now() - startedAt,
-      messages: pending.map((m) => ({
+      messages: delivered.map((m) => ({
         id: m.id,
         idConversation: m.id_conversation,
         role: m.role,
@@ -270,7 +275,8 @@ async function bandejaDeProyectos(opciones: {
   if (!config.habilitadoEnAlguna(agent.code)) {
     return jsonNoStore({ error: 'Proyectos no habilitados para este agente.' }, { status: 404 });
   }
-  const empresas = config.filtroEmpresas(agent.code);
+  // Empresas habilitadas, o proyectos de otra empresa donde lo designaron (2026-11-25).
+  const delPuente = await filtroProyectosDelPuente(agent.idAgent, agent.code, config);
 
   // MESAS DE DISCUSIÓN (2026-11-04): motor perezoso. Cualquier puente que
   // pregunte por su bandeja empuja las mesas que tengan ronda o turno vencido
@@ -297,8 +303,8 @@ async function bandejaDeProyectos(opciones: {
           kind: 'project',
           archived: false,
           id_agent: agent.idAgent,
-          // …y solo de empresas donde el agente está habilitado para Proyectos.
-          project: { ...whereProyectoDelAgente(agent.idAgent), ...empresas },
+          // …y solo de empresas donde el agente está habilitado para Proyectos (o de otra empresa, ver filtroProyectosDelPuente).
+          project: delPuente,
         },
       },
       orderBy: { id: 'asc' },
@@ -331,7 +337,7 @@ async function bandejaDeProyectos(opciones: {
           conversation: {
             kind: 'project',
             archived: false,
-            project: { ...whereProyectoDelAgente(agent.idAgent), ...empresas },
+            project: delPuente,
           },
         },
         orderBy: { id: 'asc' },

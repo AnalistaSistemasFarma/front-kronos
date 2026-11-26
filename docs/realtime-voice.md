@@ -34,9 +34,43 @@ mecanismo seguro de credenciales si no existe uno autorizado.
 La cola es efímera por proceso y requiere una instancia Next.js (configuración
 actual de testing). Tras reiniciar, las llamadas se cierran y el usuario vuelve
 a conectar. Una oferta se reclama una vez; si el puente cae, no se reejecuta.
-Heartbeat del navegador: 15 s; caducidad de control: 45 s; máximo de llamada:
-10 min; máximo 8 llamadas y una por usuario. El puente cierra sesiones si pierde
-acceso al servidor. No constituye un límite de facturación de OpenAI.
+Heartbeat del navegador: 15 s; caducidad de control: 90 s (45 s hasta el
+2026-11-25); máximo de llamada: 10 min; máximo 8 llamadas y una por usuario.
+El puente cierra sesiones si pierde acceso al servidor o si la llamada caduca
+aquí. No constituye un límite de facturación de OpenAI.
+
+## Llamada en segundo plano (2026-11-25)
+
+Pedido de Nicolás (msg 39354): «si cambio de pestaña se cuelga la llamada; eso
+debe quedar en segundo plano para yo ir trabajando».
+
+Causas encontradas:
+
+1. La llamada vivía dentro del botón del micrófono (`ChatVoice`) y colgaba al
+   desmontarse: ir a otra sección de SynerLink, cambiar de conversación o
+   cerrar el panel flotante del chat terminaba la llamada.
+2. Con SynerLink en una pestaña oculta, el navegador frena los temporizadores
+   de la página (Chrome llega a uno por minuto). El heartbeat de 15 s se
+   atrasaba más que la caducidad de 45 s y el puente cerraba la sesión.
+3. Con una versión nueva desplegada, el siguiente cambio de ruta recargaba la
+   página completa (`RecuperacionActualizacion`) y cortaba la llamada.
+4. Un solo heartbeat fallido o un estado WebRTC «disconnected» momentáneo
+   colgaban de inmediato.
+
+Cambios:
+
+- `lib/chat/voice-call-session.ts`: la llamada es de la aplicación, no de un
+  componente. Sobrevive a la navegación; solo termina al colgar, al llegar a
+  10 minutos, al cerrar la página o si la conexión se pierde de verdad.
+- `components/chat/VoiceCallBar.tsx`: barra flotante en todas las secciones con
+  estado, tiempo, silenciar, «Volver al chat» y colgar.
+- Heartbeat con temporizador de Worker (no lo frena la pestaña oculta), tres
+  fallos seguidos antes de colgar, 15 s de gracia para «disconnected» y
+  caducidad de 90 s en el servidor. Ocultar la pestaña nunca cuelga; al volver
+  se refresca la llamada y se reanuda el audio si el navegador lo pausó.
+- Mientras hay llamada no se recarga la página por versión nueva ni por chunks;
+  cerrar o recargar la página pide confirmación (`beforeunload`).
+- El puente (`scripts/openclaw-talk-bridge.mjs`) no cambia.
 
 ## Verificación
 

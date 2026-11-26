@@ -309,6 +309,18 @@ function selfApprovalNote(draft: OrionDraftState, actor: DraftActor): string {
     : ` ${actorDisplay(actor)} también valida: su aprobación quedó registrada al enviarlo.`;
 }
 
+/** Nota cuando la validación anterior del Word se arrastró al reenviarlo (sin doble validación). */
+function carriedApprovalNote(draft: OrionDraftState): string {
+  const carried = (draft.internalReview?.approvals ?? []).filter(
+    (a) => a.decision === 'APROBADO' && a.autoApprovedIn === draft.versionLabel
+  );
+  if (carried.length === 0) return '';
+  const names = carried.map((a) => a.name || a.email).join(', ');
+  return draft.status === 'VALIDADO_INTERNO'
+    ? ` Ya lo habían validado (${names}): quedó validado sin volver a revisarlo.`
+    : ` Conservan su validación anterior: ${names}.`;
+}
+
 /** Preparadora del documento (quien lo inició y quien lo envió a validación). */
 function draftPreparers(draft: OrionDraftState): Array<string | null | undefined> {
   return [draft.createdByEmail, draft.internalReview?.submittedBy];
@@ -613,12 +625,40 @@ export async function uploadOrionDraftVersion(
       .join(' '),
     params.actor
   );
-  // En corrección NO se avisa a los validadores: la preparadora puede subir varias versiones y
-  // los avisa una sola vez con "Enviar corrección a los validadores" (resendOrionDraftInternal).
+  // Sin doble validación: subir la corrección deja el Word validado. Quien pidió la corrección
+  // recibe un aviso informativo (no una tarea): su "lo valido" quedó con esta versión.
+  const validatedByCorrection =
+    fresh.draft.status === 'EN_VALIDACION_INTERNA' && draft.status === 'VALIDADO_INTERNO';
+  if (validatedByCorrection) {
+    const autoApproved = (draft.internalReview?.approvals ?? []).filter(
+      (a) => a.autoApprovedIn === draft.versionLabel
+    );
+    await note(
+      pool,
+      params.requestId,
+      `Con la versión corregida ${draft.versionLabel}, ${draft.fileName} quedó validado: ${autoApproved
+        .map((a) => a.name || a.email)
+        .join(', ')} no ${autoApproved.length === 1 ? 'necesita' : 'necesitan'} validar otra vez.`,
+      params.actor
+    );
+    notifyOthers(
+      params.actor,
+      autoApproved.map((a) => a.email),
+      {
+        title: `Corrección subida: ${draft.fileName}`,
+        body: `Solicitud #${params.requestId} · ${actorDisplay(params.actor)} subió la versión corregida ${draft.versionLabel}. Su corrección quedó atendida y el documento quedó validado: no tiene que validarlo otra vez.`,
+        requestId: params.requestId,
+        fileId: params.fileId,
+      }
+    );
+  }
   await publishDraftEvent(pool, params.requestId, params.fileId, 'version_added', {
     versionLabel: draft.versionLabel,
     detected,
   });
+  if (validatedByCorrection) {
+    await publishDraftEvent(pool, params.requestId, params.fileId, 'status_changed', { status: draft.status });
+  }
   return draft;
 }
 
@@ -718,7 +758,7 @@ export async function submitOrionDraftInternal(
     params.requestId,
     `${actorDisplay(params.actor)} envió ${draft.fileName} (versión ${draft.versionLabel}) a validación. Validadores, al mismo tiempo: ${validators
       .map((v) => v.name || v.email)
-      .join(', ')}.${selfApprovalNote(draft, params.actor)}`,
+      .join(', ')}.${selfApprovalNote(draft, params.actor)}${carriedApprovalNote(draft)}`,
     params.actor
   );
   await openDraftReviewTask(pool, params.requestId, draft);
@@ -889,7 +929,7 @@ export async function decideOrionDraftInternal(
   // Respondió el último y alguno pidió cambios: empieza el turno de la preparadora.
   const correctionTurn = draftReviewPhase(draft) === 'correccion';
   const turnText = correctionTurn
-    ? ' Ya respondieron todos: suba la versión corregida, marque lo corregido y envíela a los validadores.'
+    ? ' Ya respondieron todos: suba la versión corregida y el documento queda validado (no se vuelve a validar).'
     : '';
   await safeCloseReviewTasks(pool, {
     requestId: params.requestId,

@@ -2,7 +2,8 @@
 
 import { usePathname } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
-import { isChunkLoadError, recargarUnaVez } from '../../lib/chunk-recovery';
+import { isChunkLoadError, recargarUnaVez, RECUPERACION_ACTIVA } from '../../lib/chunk-recovery';
+import { isVoiceCallActive } from '../../lib/chat/voice-call-browser';
 
 const BUILD_CLIENTE = process.env.APP_BUILD_ID ?? '';
 const INTERVALO_MS = 5 * 60_000;
@@ -13,6 +14,7 @@ const INTERVALO_MS = 5 * 60_000;
  * 2) Consulta /api/health/version: si el servidor ya tiene otro build, muestra un
  *    aviso discreto y recarga la página completa en el próximo cambio de ruta,
  *    antes de que el usuario pida un chunk que ya no existe.
+ * Solo en producción (RECUPERACION_ACTIVA): en `next dev` no hace nada.
  */
 export default function RecuperacionActualizacion() {
   const pathname = usePathname();
@@ -20,15 +22,17 @@ export default function RecuperacionActualizacion() {
   const rutaInicial = useRef(pathname);
 
   useEffect(() => {
+    if (!RECUPERACION_ACTIVA) return;
     const alError = (ev: Event) => {
       const err = (ev as ErrorEvent).error ?? (ev as ErrorEvent).message;
       const destino = ev.target as HTMLScriptElement | HTMLLinkElement | null;
       const src = destino && 'src' in destino ? destino.src : destino && 'href' in destino ? destino.href : '';
       const recursoNext = typeof src === 'string' && src.includes('/_next/static/');
-      if (recursoNext || isChunkLoadError(err)) recargarUnaVez();
+      // Never reload during a voice call: it would hang up (2026-11-25).
+      if ((recursoNext || isChunkLoadError(err)) && !isVoiceCallActive()) recargarUnaVez();
     };
     const alRechazo = (ev: PromiseRejectionEvent) => {
-      if (isChunkLoadError(ev.reason)) recargarUnaVez();
+      if (isChunkLoadError(ev.reason) && !isVoiceCallActive()) recargarUnaVez();
     };
     window.addEventListener('error', alError, true);
     window.addEventListener('unhandledrejection', alRechazo);
@@ -39,7 +43,11 @@ export default function RecuperacionActualizacion() {
   }, []);
 
   useEffect(() => {
-    if (!BUILD_CLIENTE) return;
+    // Solo con un build real (producción / pruebas). En `npm run dev` el id se calcula con
+    // `Date.now()` en next.config cada vez que Next vuelve a leer la configuración (proceso
+    // principal, trabajadores, recargas), así que el del navegador y el de /api/health/version
+    // casi nunca coinciden: el aviso salía a cada rato y "Actualizar" no lo quitaba.
+    if (!RECUPERACION_ACTIVA || !BUILD_CLIENTE || process.env.NODE_ENV !== 'production') return;
     let vivo = true;
     const revisar = async () => {
       try {
@@ -69,7 +77,9 @@ export default function RecuperacionActualizacion() {
   useEffect(() => {
     if (pathname === rutaInicial.current) return;
     rutaInicial.current = pathname;
-    if (hayVersionNueva) window.location.reload();
+    // During a voice call the reload waits for a later route change (the
+    // call must survive navigation; a full reload would hang up).
+    if (hayVersionNueva && !isVoiceCallActive()) window.location.reload();
   }, [pathname, hayVersionNueva]);
 
   if (!hayVersionNueva) return null;

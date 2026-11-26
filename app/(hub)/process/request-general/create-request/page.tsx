@@ -1172,6 +1172,7 @@ function RequestBoard() {
       });
 
       setAttachedFiles([]);
+      setProcessSearch('');
       setFilesByDoc({});
       setRequiredFiles([]);
       setFormFields([]);
@@ -1854,6 +1855,7 @@ function RequestBoard() {
           opened={modalOpened}
           onClose={() => {
             setModalOpened(false);
+            setProcessSearch('');
             setFormErrors({});
             setAttachedFiles([]);
             setActivitySearch('');
@@ -2418,12 +2420,21 @@ function RequestBoard() {
                 variant='outline'
                 onClick={() => {
                   setModalOpened(false);
+                  setProcessSearch('');
                   setFormErrors({});
                   setAttachedFiles([]);
                   setActivitySearch('');
                   setSearchResults([]);
                   setShowActivitySearch(false);
                   setError(null);
+                  setFormData({
+                    company: '',
+                    subject: '',
+                    category: '',
+                    process: '',
+                    descripcion: '',
+                    url: '',
+                  });
                 }}
                 size='md'
               >

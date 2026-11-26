@@ -233,6 +233,7 @@ const PROCESADORES = toOptions([
   'INTEL I7 10MA',
   'INTEL I7 11VA',
   'INTEL I7 12VA',
+  'INTEL I7 13VA',
   'INTEL ULTRA I7',
   'INTEL ULTRA I7 2DA',
   'AMD RYZEN 3',
@@ -272,7 +273,7 @@ const ALMACENAMIENTO_OPTIONS = toOptions([
 const SITIOS = [
   { value: 'OFICINA PRINCIPAL FARMALOGICA', label: 'OFICINA PRINCIPAL FARMALOGICA' },
   { value: 'FARMALOGICA PLANTA', label: 'FARMALOGICA PLANTA' },
-  { value: 'CELTA', label: 'CELTA' },
+  { value: 'KELAB', label: 'KELAB' },
   { value: 'RYAN', label: 'OFICINA PRINCIPAL RYAN' },
   { value: 'GSS', label: 'OFICINA PRINCIPAL GSS' },
   { value: 'OLP', label: 'OFICINA PRINCIPAL OLP' },

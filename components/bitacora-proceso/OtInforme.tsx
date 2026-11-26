@@ -5,11 +5,12 @@ import { useEffect, useMemo, useState } from 'react';
 import { Alert, Anchor, Box, Breadcrumbs, Button, Card, Divider, Group, Loader, SimpleGrid, Stack, Table, Text, Title } from '@mantine/core';
 import { useMediaQuery } from '@mantine/hooks';
 import { IconAlertTriangle, IconArrowLeft, IconChevronRight, IconPrinter, IconSquare, IconSquareCheck } from '@tabler/icons-react';
-import { OT_BASE_URL, OT_INSPECTOR_LABEL, OT_JEFE_PRODUCCION_LABEL, OT_METODO_LABEL, OT_NOTA_CIERRE_JEFE, OT_ROL_APERTURA_CIERRE, OT_ROL_LABEL, OT_SIGNIFICADO_CIERRE_JEFE, otNombreCompleto } from '../../lib/bitacora-proceso/constants';
+import { isOtPlanta, OT_BASE_URL, OT_INSPECTOR_LABEL, OT_PLANTA_LABEL, OT_JEFE_PRODUCCION_LABEL, OT_METODO_LABEL, OT_NOTA_CIERRE_JEFE, OT_ROL_APERTURA_CIERRE, OT_ROL_LABEL, OT_SIGNIFICADO_CIERRE_JEFE, otNombreCompleto } from '../../lib/bitacora-proceso/constants';
 import type { OrdenDetalle } from '../../lib/bitacora-proceso/db';
 import type { OtCompanyAccess } from '../../lib/bitacora-proceso/rules';
 import { buildInformePrintCss, mmACm, parseMargenSuperiorCm } from '../../lib/bitacora-proceso/impresion';
 import { OtMargenBatchCampo, useOtMargenBatch } from './OtMargenBatch';
+import OtBatchRecordExcel from './OtBatchRecordExcel';
 import { codigoOt, fmtFecha, fmtFechaHora, fmtFechaHoraSeg, nombreArchivoInforme, otHref, turnoLabel, useOtFetch } from './otClient';
 
 /**
@@ -24,6 +25,8 @@ import { codigoOt, fmtFecha, fmtFechaHora, fmtFechaHoraSeg, nombreArchivoInforme
  *   - #8316 (2026-11-23): cada página deja arriba, en blanco, el espacio del encabezado del lote
  *     batch (margen configurable por empresa, 4 cm por defecto; se puede ajustar para una
  *     impresión). Las páginas se numeran en el pie. CSS en lib/bitacora-proceso/impresion.ts.
+ *   - 2026-11-24: «Excel batch record» descarga la bitácora (o todas las del lote) sobre la
+ *     plantilla del batch record de Farmalógica, con el encabezado del lote (OtBatchRecordExcel).
  * En el celular la cronología va en tarjetas (sin desplazamiento lateral).
  */
 
@@ -119,7 +122,8 @@ export default function OtInforme({ company, idOrden }: { company: OtCompanyAcce
             <Campo label='Código del artículo' value={o.itemCode} />
             <Campo label='Lote' value={o.lote} />
             <Campo label='Turno' value={turnoLabel(o.turno)} />
-            <Campo label='Área' value={o.area} />
+            <Campo label='Área' value={o.areaCatalogo ?? o.area} />
+            {isOtPlanta(o.planta) && <Campo label='Planta' value={OT_PLANTA_LABEL[o.planta]} />}
             <Campo label='Orden de producción SAP' value={o.sapOpDocNum ? String(o.sapOpDocNum) : 'Sin OP'} />
             {op && <Campo label='Vencimiento del lote (SAP)' value={fmtFecha(opTxt('U_FecVen_lote'))} />}
             {op && <Campo label='Bodega (SAP)' value={opTxt('Warehouse')} />}
@@ -127,7 +131,7 @@ export default function OtInforme({ company, idOrden }: { company: OtCompanyAcce
             <Campo label='Hora inicio' value={fmtFechaHoraSeg(o.abiertaEn)} />
             <Campo label='Hora final' value={o.cerradaEn ? fmtFechaHoraSeg(o.cerradaEn) : 'Pendiente (abierta)'} />
             <Campo label='Abrió' value={`${o.abiertaPor} — ${OT_ROL_APERTURA_CIERRE[o.abiertaComo]} — ${fmtFechaHoraSeg(o.abiertaEn)}`} />
-            <Campo label={OT_INSPECTOR_LABEL} value={o.inspector?.name ?? '—'} />
+            {o.inspector && <Campo label={OT_INSPECTOR_LABEL} value={o.inspector.name} />}
             <Campo label={OT_JEFE_PRODUCCION_LABEL} value={o.jefe?.name ?? '—'} />
             <Campo
               label='Cerró'
@@ -178,6 +182,11 @@ export default function OtInforme({ company, idOrden }: { company: OtCompanyAcce
                       <Table.Td>{r.usuario}</Table.Td>
                       <Table.Td style={{ overflowWrap: 'anywhere', whiteSpace: 'pre-wrap' }}>
                         {r.textoLibre ? <><b>Texto libre:</b> {r.observacion}</> : (r.observacion ?? '')}
+                        {(r.notas ?? []).map((n) => (
+                          <div key={n.id} data-testid='ot-informe-nota'>
+                            <b>Nota {fmtFechaHoraSeg(n.creadaEn)}</b> ({n.usuario}): {n.texto}
+                          </div>
+                        ))}
                       </Table.Td>
                     </Table.Tr>
                   ))}
@@ -197,6 +206,11 @@ export default function OtInforme({ company, idOrden }: { company: OtCompanyAcce
                           {r.textoLibre ? <><b>Texto libre:</b> {r.observacion}</> : r.observacion}
                         </Text>
                       )}
+                      {(r.notas ?? []).map((n) => (
+                        <Text key={n.id} size='sm' c='orange.9' style={{ overflowWrap: 'anywhere' }}>
+                          <b>Nota {fmtFechaHoraSeg(n.creadaEn)}</b> ({n.usuario}): {n.texto}
+                        </Text>
+                      ))}
                     </Card>
                   ))}
                 </Stack>
@@ -268,6 +282,7 @@ export default function OtInforme({ company, idOrden }: { company: OtCompanyAcce
           <Button variant='default' size={desktop ? 'lg' : 'md'} h={desktop ? undefined : 52} leftSection={<IconArrowLeft size={18} />} component={Link} href={otHref(`${OT_BASE_URL}/${o.id}`, company.idCompany)}>
             Volver
           </Button>
+          <OtBatchRecordExcel company={company} idOrden={o.id} />
           <Button size={desktop ? 'lg' : 'md'} h={desktop ? undefined : 52} leftSection={<IconPrinter size={18} />} onClick={() => {
               if (titulo) document.title = titulo;
               window.print();

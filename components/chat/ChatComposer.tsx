@@ -38,7 +38,7 @@ import {
   IconMoodSmile,
   IconPaperclip,
   IconPlus,
-  IconSend,
+  IconArrowUp,
   IconStrikethrough,
   IconTypography,
   IconX,
@@ -47,6 +47,7 @@ import AgentAvatar from './AgentAvatar';
 import ChatMarkdown from './ChatMarkdown';
 import ComposerLetterFx from './ComposerLetterFx';
 import { MAX_USER_MESSAGE_CHARS } from '../../lib/chat/constants';
+import { clipboardHtmlToMarkdown } from '../../lib/chat/paste-links';
 import {
   MAX_CHAT_ATTACHMENTS_PER_MESSAGE,
   formatBytes,
@@ -459,11 +460,28 @@ const ChatComposer = forwardRef<ChatComposerHandle, {
     (event: React.ClipboardEvent<HTMLTextAreaElement>) => {
       if (disabled) return;
       const pegados = Array.from(event.clipboardData?.files ?? []);
-      if (pegados.length === 0) return;
+      if (pegados.length > 0) {
+        event.preventDefault();
+        addFiles(pegados);
+        return;
+      }
+      // Links copied from Teams, GitHub or a browser carry their URL only in
+      // text/html; text/plain has just the title. Keep it as a Markdown link.
+      const markdown = clipboardHtmlToMarkdown(event.clipboardData?.getData('text/html'));
+      if (!markdown) return;
       event.preventDefault();
-      addFiles(pegados);
+      const el = event.currentTarget;
+      const start = el.selectionStart ?? value.length;
+      const end = el.selectionEnd ?? value.length;
+      const next = value.slice(0, start) + markdown + value.slice(end);
+      const cursor = start + markdown.length;
+      setValue(next);
+      requestAnimationFrame(() => {
+        el.focus();
+        el.setSelectionRange(cursor, cursor);
+      });
     },
-    [addFiles, disabled]
+    [addFiles, disabled, value]
   );
 
   /**
@@ -592,19 +610,11 @@ const ChatComposer = forwardRef<ChatComposerHandle, {
   );
 
   /*
-   * COMPOSITOR ESTILO TEAMS (2026-10-21). Nicolás mandó de referencia el
-   * compositor de Microsoft Teams: «no debe ser igual, pero al menos, con la
-   * nueva funcionalidad de los stickers, debe ser similar».
-   *   - ESCRITORIO: marco con la caja arriba y, abajo a la derecha, una fila
-   *     de íconos de línea — formato («A», que despliega arriba la barra de
-   *     formato), emoji/stickers/GIF, clip, voz si la hay, «+» con más
-   *     acciones y, separado, enviar. Una línea de acento abajo cuando el
-   *     compositor tiene el foco.
-   *   - CELULAR: la fila de antes (caja en cápsula y enviar al lado), con los
-   *     íconos AGRUPADOS dentro de la caja: emoji/stickers y «+», que trae
-   *     adjuntar, formato y vista previa.
-   * La barra de formato reutiliza `applyFormat` (Markdown con ayudas): solo
-   * lo que el Markdown del chat sabe pintar.
+   * Layout history: Teams-style frame (2026-10-21) replaced on 2026-11-24 by a
+   * Gemini-style floating pill (Nicolás, msg 39009) on every screen size:
+   * «+» with every secondary action on the left, the box in the middle, voice
+   * (if any) and a round send button on the right. The format bar still
+   * unfolds ABOVE the pill and reuses `applyFormat` (Markdown helpers).
    */
   const [formatoAbierto, setFormatoAbierto] = useState(false);
 
@@ -650,59 +660,6 @@ const ChatComposer = forwardRef<ChatComposerHandle, {
       revisarMencion(siguiente, cursor);
     });
   };
-
-  // «+»: más acciones. En el celular también agrupa adjuntar y formato.
-  const menuMas = (
-    <Menu
-      opened={menuAbierto}
-      onChange={setMenuAbierto}
-      position='top-end'
-      withArrow
-      shadow='md'
-      width={225}
-      trapFocus={!tecladoTactil}
-      returnFocus={!tecladoTactil}
-      menuItemTabIndex={0}
-    >
-      <Menu.Target>
-        <ActionIcon
-          variant='subtle'
-          color='gray'
-          size={34}
-          radius='xl'
-          disabled={disabled}
-          aria-label='Más opciones'
-          title='Más opciones'
-          onMouseDown={sinRobarFoco}
-        >
-          <IconPlus size={19} stroke={1.6} />
-        </ActionIcon>
-      </Menu.Target>
-      <Menu.Dropdown className='chat-surface'>
-        {enCelular && opcionAdjuntar}
-        {enCelular && (
-          <Menu.Item leftSection={<IconTypography size={14} />} onClick={() => setFormatoAbierto((f) => !f)}>
-            {formatoAbierto ? 'Ocultar formato' : 'Formato'}
-          </Menu.Item>
-        )}
-        {menciones.length > 0 && (
-          <Menu.Item leftSection={<IconAt size={14} />} onClick={insertarArroba}>
-            Mencionar a un asistente
-          </Menu.Item>
-        )}
-        <Menu.Item leftSection={<IconCode size={14} />} onClick={() => applyFormat('code')}>
-          Código
-        </Menu.Item>
-        <Menu.Item
-          leftSection={preview ? <IconEyeOff size={14} /> : <IconEye size={14} />}
-          onClick={() => setPreview((p) => !p)}
-          disabled={value.trim().length === 0}
-        >
-          {preview ? 'Volver a editar' : 'Vista previa'}
-        </Menu.Item>
-      </Menu.Dropdown>
-    </Menu>
-  );
 
   const botonFormato = (etiqueta: string, icono: React.ReactNode, kind: WrapKind, atajo?: string) => (
     <Tooltip label={atajo ? `${etiqueta} (${atajo})` : etiqueta} withArrow openDelay={400}>
@@ -806,61 +763,93 @@ const ChatComposer = forwardRef<ChatComposerHandle, {
     setMisStickersAbierto(true);
   }, [enCelular]);
 
-  const iconoExpresiones = (
+  // Opened from the «+» menu. On the phone the sheet replaces the keyboard.
+  const abrirExpresiones = useCallback(() => {
+    if (!expresiones) alternarExpresiones();
+  }, [expresiones, alternarExpresiones]);
+
+  // «+» (Gemini-style pill, 2026-11-24): the round button on the LEFT of the
+  // pill holds every secondary action — attach, emoji/stickers/GIF, format,
+  // mention, code and preview — on desktop and on the phone alike.
+  const menuMas = (
+    <Menu
+      opened={menuAbierto}
+      onChange={setMenuAbierto}
+      position='top-start'
+      withArrow
+      shadow='md'
+      width={240}
+      trapFocus={!tecladoTactil}
+      returnFocus={!tecladoTactil}
+      menuItemTabIndex={0}
+    >
+      <Menu.Target>
+        <ActionIcon
+          className='chat-composer__plus'
+          variant='subtle'
+          color='gray'
+          size={40}
+          radius='xl'
+          disabled={disabled}
+          aria-label='Más opciones'
+          title='Más opciones'
+          onMouseDown={sinRobarFoco}
+        >
+          <IconPlus size={36} stroke={1.75} />
+        </ActionIcon>
+      </Menu.Target>
+      <Menu.Dropdown className='chat-surface'>
+        {opcionAdjuntar}
+        {onEnviarMedia && (
+          <Menu.Item
+            leftSection={<IconMoodSmile size={14} />}
+            onClick={abrirExpresiones}
+            data-testid='chat-boton-expresiones'
+          >
+            Emojis, stickers y GIF
+          </Menu.Item>
+        )}
+        <Menu.Item leftSection={<IconTypography size={14} />} onClick={() => setFormatoAbierto((f) => !f)}>
+          {formatoAbierto ? 'Ocultar formato' : 'Formato'}
+        </Menu.Item>
+        {menciones.length > 0 && (
+          <Menu.Item leftSection={<IconAt size={14} />} onClick={insertarArroba}>
+            Mencionar a un asistente
+          </Menu.Item>
+        )}
+        <Menu.Item leftSection={<IconCode size={14} />} onClick={() => applyFormat('code')}>
+          Código
+        </Menu.Item>
+        <Menu.Item
+          leftSection={preview ? <IconEyeOff size={14} /> : <IconEye size={14} />}
+          onClick={() => setPreview((p) => !p)}
+          disabled={value.trim().length === 0}
+        >
+          {preview ? 'Volver a editar' : 'Vista previa'}
+        </Menu.Item>
+      </Menu.Dropdown>
+    </Menu>
+  );
+
+  // Phone only: while the sheet replaces the keyboard, the «+» turns into a
+  // keyboard button that brings the keyboard back (WhatsApp/Telegram).
+  const botonTeclado = (
     <ActionIcon
-      variant={expresiones ? 'light' : 'subtle'}
+      className='chat-composer__plus'
+      variant='light'
       color='gray'
-      size={34}
+      size={40}
       radius='xl'
-      disabled={disabled}
-      aria-label={panelAbiertoEnCelular ? 'Volver al teclado' : 'Emojis, stickers y GIF'}
-      title={panelAbiertoEnCelular ? 'Volver al teclado' : 'Emojis, stickers y GIF'}
-      aria-expanded={expresiones}
-      data-testid='chat-boton-expresiones'
-      onMouseDown={(event) => {
-        // En escritorio la caja conserva el foco (y el cursor) al abrir.
-        if (!enCelular && document.activeElement === textareaRef.current) event.preventDefault();
-      }}
+      aria-label='Volver al teclado'
+      title='Volver al teclado'
       onClick={alternarExpresiones}
     >
-      {panelAbiertoEnCelular ? <IconKeyboard size={19} /> : <IconMoodSmile size={19} />}
+      <IconKeyboard size={20} />
     </ActionIcon>
   );
 
-  const botonExpresiones = !onEnviarMedia ? null : enCelular ? (
-    iconoExpresiones
-  ) : (
-    <Popover
-      opened={expresiones}
-      onChange={setExpresiones}
-      position='top-end'
-      offset={10}
-      width={380}
-      shadow='md'
-      radius='md'
-      withArrow
-      trapFocus={false}
-      returnFocus={false}
-    >
-      <Popover.Target>{iconoExpresiones}</Popover.Target>
-      <Popover.Dropdown className='chat-surface chat-expresiones-globo' p='sm'>
-        {expresiones && (
-          <ChatExpresiones alto={320} onEmoji={insertarEmoji} onEnviar={enviarMedia} onMisStickers={abrirMisStickers} />
-        )}
-      </Popover.Dropdown>
-    </Popover>
-  );
-
-  // CELULAR: botones dentro de la caja (emoji/stickers si hay, «+» y voz si
-  // hay). En escritorio la caja no lleva nada adentro: los íconos van en la
-  // fila de abajo.
-  const botonesDentro = enCelular ? 1 + (onEnviarMedia ? 1 : 0) + (voiceConversationId ? 1 : 0) : 0;
-  const anchoDentro = enCelular ? 42 * botonesDentro : 12;
-
-  /* El recordatorio de Enter / Shift+Enter era un renglón entero; ahora vive
-     en el globo de este botón. En el celular es grande (46 px contra los 34
-     de los secundarios): es la acción principal y se toca con el pulgar. En
-     escritorio, como en Teams, es un ícono de línea separado del resto. */
+  /* Send: filled circle in the accent color, greyed out while there is nothing
+     to send. The Enter / Shift+Enter hint lives in its tooltip. */
   const botonEnviar = (
     <Tooltip
       label={
@@ -871,10 +860,10 @@ const ChatComposer = forwardRef<ChatComposerHandle, {
       withArrow
     >
       <ActionIcon
-        className={enCelular ? 'chat-composer__send' : 'chat-composer__send chat-composer__send--marco'}
-        size={enCelular ? 46 : 34}
+        className='chat-composer__send'
+        size={40}
         radius='xl'
-        variant={enCelular ? 'filled' : 'subtle'}
+        variant='filled'
         color='blue'
         loading={sending}
         disabled={!canSend}
@@ -885,17 +874,184 @@ const ChatComposer = forwardRef<ChatComposerHandle, {
         onClick={() => void submit()}
         aria-label='Enviar mensaje'
       >
-        <IconSend size={enCelular ? 20 : 19} stroke={enCelular ? 2 : 1.6} />
+        <IconArrowUp size={26} stroke={2.2} />
       </ActionIcon>
     </Tooltip>
   );
+
+  /*
+   * Expanded card (Nicolás, msg 39042, like Gemini): once the text no longer
+   * fits on the single-line pill, the pill turns into a card with the text on
+   * top across the whole width and «+» / voice / send on a row below. It goes
+   * back to the pill when the text fits again or is cleared.
+   *
+   * "Fits" is measured against the COLLAPSED text width whatever the current
+   * state is, so the card never flips back and forth at the edge (the text
+   * row is wider once expanded).
+   */
+  const pillRef = useRef<HTMLDivElement>(null);
+  const [expandida, setExpandida] = useState(false);
+  const measureCtxRef = useRef<CanvasRenderingContext2D | null>(null);
+  useLayoutEffect(() => {
+    const pillEl = pillRef.current;
+    if (!pillEl) return;
+    const decide = () => {
+      const text = valorRef.current;
+      if (!text) return setExpandida(false);
+      if (text.includes('\n')) return setExpandida(true);
+      const area = textareaRef.current;
+      if (!area) return; // preview: keep the current shape
+      if (!measureCtxRef.current) measureCtxRef.current = document.createElement('canvas').getContext('2d');
+      const ctx = measureCtxRef.current;
+      if (!ctx) return;
+      const ta = window.getComputedStyle(area);
+      ctx.font = `${ta.fontStyle} ${ta.fontWeight} ${ta.fontSize} ${ta.fontFamily}`;
+      const ps = window.getComputedStyle(pillEl);
+      const px = (v: string) => parseFloat(v) || 0;
+      const width = (sel: string) => (pillEl.querySelector(sel) as HTMLElement | null)?.offsetWidth ?? 0;
+      const micEl = pillEl.querySelector('.chat-composer__mic') as HTMLElement | null;
+      // Width of the COLLAPSED pill inside its border, whatever the state:
+      // the expanded card drops its side margins and is wider.
+      const collapsedInner =
+        (pillEl.parentElement?.clientWidth ?? pillEl.offsetWidth) -
+        2 * px(ps.getPropertyValue('--pill-collapsed-margin')) -
+        px(ps.borderLeftWidth) -
+        px(ps.borderRightWidth);
+      const available =
+        collapsedInner -
+        px(ps.paddingLeft) -
+        px(ps.paddingRight) -
+        width('.chat-composer__plus') -
+        width('.chat-composer__send') -
+        (micEl ? micEl.offsetWidth + px(window.getComputedStyle(micEl).marginRight) : 0) -
+        px(ps.getPropertyValue('--pill-text-pad-collapsed'));
+      // 2 px of slack for the caret at the end of the line.
+      setExpandida(ctx.measureText(text).width > available - 2);
+    };
+    decide();
+    const observer = new ResizeObserver(decide);
+    observer.observe(pillEl);
+    return () => observer.disconnect();
+  }, [value, preview]);
+
+  // The textarea autosize only re-measures on window resize; the expanded
+  // card changes the text width without one, so it is nudged here.
+  useLayoutEffect(() => {
+    const frame = requestAnimationFrame(() => window.dispatchEvent(new Event('resize')));
+    return () => cancelAnimationFrame(frame);
+  }, [expandida]);
+
+  /* Gemini-style floating pill (2026-11-24, Nicolás, msg 39009): «+» on the
+     left, the auto-growing box in the middle (one line, up to 6, then it
+     scrolls), and on the right the voice button (only where the conversation
+     has realtime voice) and the round send button. */
+  const pill = (
+    <div
+      ref={pillRef}
+      className={expandida ? 'chat-composer__pill chat-composer__pill--expandida' : 'chat-composer__pill'}
+      data-disabled={disabled || undefined}
+      data-testid='chat-composer-pill'
+      // The card's width animates (side margins); measure the text height
+      // again once it settles, or the autosize keeps the narrower height.
+      onTransitionEnd={(event) => {
+        if (event.target === event.currentTarget && event.propertyName.startsWith('margin')) {
+          window.dispatchEvent(new Event('resize'));
+        }
+      }}
+    >
+      {panelAbiertoEnCelular ? botonTeclado : menuMas}
+      {preview ? (
+        <Box className='chat-composer__preview chat-composer__texto' onDoubleClick={() => setPreview(false)}>
+          <ChatMarkdown content={value} />
+        </Box>
+      ) : (
+        <Box pos='relative' className='chat-composer__texto' style={{ display: 'flex', minWidth: 0 }}>
+          <Textarea
+            ref={textareaRef}
+            value={value}
+            onChange={(event) => {
+              setValue(event.currentTarget.value);
+              revisarMencion(event.currentTarget.value, event.currentTarget.selectionStart ?? 0);
+            }}
+            onKeyUp={(event) => {
+              // Mover el cursor con las flechas también cambia si estamos o no
+              // dentro de una mención.
+              if (event.key.startsWith('Arrow') || event.key === 'Home' || event.key === 'End') {
+                revisarMencion(event.currentTarget.value, event.currentTarget.selectionStart ?? 0);
+              }
+            }}
+            onBlur={() => setMencionAbierta(false)}
+            // En el celular, tocar la caja con el panel abierto vuelve al
+            // teclado (el panel lo estaba reemplazando).
+            onFocus={() => {
+              if (enCelular) setExpresiones(false);
+            }}
+            onKeyDown={onKeyDown}
+            onPaste={onPaste}
+            placeholder={placeholder}
+            /* Sin corrector del navegador (Nicolás, 2026-09-09). */
+            spellCheck={false}
+            autoCorrect='off'
+            autoCapitalize='off'
+            autosize
+            /* size='md' keeps the real <textarea> at 16 px: below that, Safari
+               on iPhone zooms in on focus (see `.chat-composer__input`). */
+            size='md'
+            radius={0}
+            /* Arranca en UN renglón y crece al escribir, hasta 6. */
+            minRows={1}
+            maxRows={6}
+            disabled={disabled}
+            autoFocus={autoFocus}
+            error={tooLong ? 'El mensaje es demasiado largo.' : undefined}
+            classNames={{
+              root: 'chat-composer__field',
+              input: 'chat-composer__input chat-composer__input--pill',
+            }}
+          />
+          {letterFxActive && <ComposerLetterFx textareaRef={textareaRef} value={value} />}
+        </Box>
+      )}
+      {voiceConversationId && (
+        <span className='chat-composer__mic'>
+          <ChatVoice key={voiceConversationId} conversationId={voiceConversationId} />
+        </span>
+      )}
+      {botonEnviar}
+    </div>
+  );
+
+  // Desktop: the Emoji | Stickers | GIF balloon opens above the pill.
+  const pillConExpresiones =
+    onEnviarMedia && !enCelular ? (
+      <Popover
+        opened={expresiones}
+        onChange={setExpresiones}
+        position='top-start'
+        offset={8}
+        width={380}
+        shadow='md'
+        radius='md'
+        trapFocus={false}
+        returnFocus={false}
+        withRoles={false}
+      >
+        <Popover.Target>{pill}</Popover.Target>
+        <Popover.Dropdown className='chat-surface chat-expresiones-globo' p='sm'>
+          {expresiones && (
+            <ChatExpresiones alto={320} onEmoji={insertarEmoji} onEnviar={enviarMedia} onMisStickers={abrirMisStickers} />
+          )}
+        </Popover.Dropdown>
+      </Popover>
+    ) : (
+      pill
+    );
 
   return (
     <Box
       className={[
         'chat-composer',
         letterFxActive ? 'chat-composer--letterfx-active' : '',
-        enCelular ? '' : 'chat-composer--marco',
       ]
         .filter(Boolean)
         .join(' ')}
@@ -1016,162 +1172,7 @@ const ChatComposer = forwardRef<ChatComposerHandle, {
 
       {barraFormato}
 
-      {/* `align='center'` y no `flex-end`: la caja (min-height 42 px) y el
-          botón de enviar (46 px) tienen alturas DISTINTAS a propósito (ver el
-          comentario del radio en `.chat-composer__input`), pero alineándolos
-          por abajo esos pocos píxeles de diferencia quedan todos arriba de la
-          caja y se ve corrida hacia abajo respecto al botón. Centrados, la
-          diferencia se reparte mitad arriba y mitad abajo y no se nota.
-          El `gap` sube de 2 a 8 px por lo mismo que reportó Nicolás
-          (2026-09-10): pegados así la fila se ve amontonada, no espaciada. */}
-      <Group gap={8} align='center' wrap='nowrap' className='chat-composer__row'>
-        {preview ? (
-          <Box
-            className='chat-composer__preview'
-            style={{ minHeight: 42, paddingRight: anchoDentro }}
-            onDoubleClick={() => setPreview(false)}
-          >
-            <ChatMarkdown content={value} />
-          </Box>
-        ) : null}
-        {!preview && (
-          <Box pos='relative' style={{ display: 'flex', flex: 1, minWidth: 0 }}>
-          <Textarea
-            ref={textareaRef}
-            value={value}
-            onChange={(event) => {
-              setValue(event.currentTarget.value);
-              revisarMencion(event.currentTarget.value, event.currentTarget.selectionStart ?? 0);
-            }}
-            onKeyUp={(event) => {
-              // Mover el cursor con las flechas también cambia si estamos o no
-              // dentro de una mención.
-              if (event.key.startsWith('Arrow') || event.key === 'Home' || event.key === 'End') {
-                revisarMencion(event.currentTarget.value, event.currentTarget.selectionStart ?? 0);
-              }
-            }}
-            onBlur={() => setMencionAbierta(false)}
-            // En el celular, tocar la caja con el panel abierto vuelve al
-            // teclado (el panel lo estaba reemplazando).
-            onFocus={() => {
-              if (enCelular) setExpresiones(false);
-            }}
-            onKeyDown={onKeyDown}
-            onPaste={onPaste}
-            placeholder={placeholder}
-            /* Sin corrector del navegador: nada de subrayado rojo ni
-               autocorrección/mayúsculas automáticas en la caja del chat
-               (Nicolás, 2026-09-09). spellCheck apaga el subrayado; autoCorrect
-               y autoCapitalize evitan que el móvil "arregle" lo que se escribe. */
-            spellCheck={false}
-            autoCorrect='off'
-            autoCapitalize='off'
-            autosize
-            /* size='md': Mantine no expone `size`, así que caía en su default
-               ("sm") y ponía `--input-fz: 0.875rem` (14px) en el wrapper. Esa
-               variable la hereda el `<textarea>` real y gana el empate de
-               especificidad contra `.chat-composer__input` en globals.css
-               (mismo peso, una sola clase, y `@mantine/core/styles.css` carga
-               DESPUÉS en app/layout.tsx) — por eso el input seguía quedando
-               en 14px pese al `font-size: 16px` del CSS, y Safari le seguía
-               haciendo zoom al enfocarlo. */
-            size='md'
-            radius={enCelular ? 23 : 0}
-            /* Arranca en UN renglón, como WhatsApp, y crece al escribir. */
-            minRows={1}
-            maxRows={6}
-            disabled={disabled}
-            autoFocus={autoFocus}
-            error={tooLong ? 'El mensaje es demasiado largo.' : undefined}
-            classNames={{
-              root: 'chat-composer__field',
-              input: enCelular ? 'chat-composer__input' : 'chat-composer__input chat-composer__input--marco',
-            }}
-            /* El clip (y, si la conversación admite voz, el ícono de llamada)
-               va DENTRO de la caja. `rightSectionPointerEvents='all'` no es
-               opcional: por defecto Mantine le pone `pointer-events: none` a
-               esa zona —está pensada para iconos decorativos— y el botón
-               quedaría pintado pero muerto al tacto. El ancho y el padding
-               crecen de 42 a 84 px cuando hay ícono de voz, para que no se
-               encimen los dos botones. */
-            rightSection={
-              enCelular ? (
-                <Group gap={0} wrap='nowrap'>
-                  {botonExpresiones}
-                  {menuMas}
-                  {voiceConversationId && (
-                    <ChatVoice key={voiceConversationId} conversationId={voiceConversationId} />
-                  )}
-                </Group>
-              ) : undefined
-            }
-            rightSectionWidth={enCelular ? anchoDentro : undefined}
-            rightSectionPointerEvents='all'
-            styles={{ input: { paddingRight: anchoDentro } }}
-          />
-          {letterFxActive && <ComposerLetterFx textareaRef={textareaRef} value={value} />}
-          </Box>
-        )}
-
-        {enCelular && botonEnviar}
-      </Group>
-
-      {/* ESCRITORIO: la fila de íconos de línea abajo a la derecha, como Teams. */}
-      {!enCelular && (
-        <div className='chat-composer__acciones'>
-          <Tooltip label={formatoAbierto ? 'Ocultar formato' : 'Formato'} withArrow openDelay={400}>
-            <ActionIcon
-              variant={formatoAbierto ? 'light' : 'subtle'}
-              color='gray'
-              size={34}
-              radius='xl'
-              disabled={disabled}
-              aria-label='Formato'
-              aria-pressed={formatoAbierto}
-              onMouseDown={sinRobarFoco}
-              onClick={() => setFormatoAbierto((f) => !f)}
-            >
-              <IconTypography size={19} stroke={1.6} />
-            </ActionIcon>
-          </Tooltip>
-          {botonExpresiones}
-          <Tooltip label='Adjuntar archivos' withArrow openDelay={400}>
-            {/* Etiqueta amarrada al input de archivos: el navegador abre el
-                selector de forma nativa (ver «Adjuntar archivos» del menú). */}
-            <ActionIcon
-              component='label'
-              htmlFor={fileInputId}
-              variant='subtle'
-              color='gray'
-              size={34}
-              radius='xl'
-              aria-label='Adjuntar archivos'
-              // Una <label> no es enfocable ni responde al teclado: se le da
-              // el papel de botón y Enter/Espacio abren el selector.
-              role='button'
-              tabIndex={0}
-              onKeyDown={(event: React.KeyboardEvent) => {
-                if (event.key === 'Enter' || event.key === ' ') {
-                  event.preventDefault();
-                  fileInputRef.current?.click();
-                }
-              }}
-              aria-disabled={disabled || files.length >= MAX_CHAT_ATTACHMENTS_PER_MESSAGE}
-              style={{
-                cursor: 'pointer',
-                pointerEvents: disabled || files.length >= MAX_CHAT_ATTACHMENTS_PER_MESSAGE ? 'none' : undefined,
-                opacity: disabled || files.length >= MAX_CHAT_ATTACHMENTS_PER_MESSAGE ? 0.5 : undefined,
-              }}
-            >
-              <IconPaperclip size={19} stroke={1.6} />
-            </ActionIcon>
-          </Tooltip>
-          {voiceConversationId && <ChatVoice key={voiceConversationId} conversationId={voiceConversationId} />}
-          {menuMas}
-          <span className='chat-composer__separador chat-composer__separador--alto' aria-hidden />
-          {botonEnviar}
-        </div>
-      )}
+      {pillConExpresiones}
 
       {/* Hoja del celular: ocupa el lugar del teclado, debajo de la caja. */}
       {panelAbiertoEnCelular && (

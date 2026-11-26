@@ -21,7 +21,7 @@
 // (queda impreso en la consola del navegador al activarse).
 // =============================================================================
 
-const SW_VERSION = '2026-11-14.1';
+const SW_VERSION = '2026-11-26.1';
 
 // Toma el control de inmediato en lugar de quedarse "esperando" a que se
 // cierren todas las pestañas con la versión anterior del service worker.
@@ -294,6 +294,8 @@ const CACHES_VIGENTES = [CACHE_FIJOS, CACHE_ACTIVOS];
 const MAX_FIJOS = 400;
 const MAX_ACTIVOS = 300;
 
+const ES_LOCAL = ['localhost', '127.0.0.1', '[::1]'].includes(self.location.hostname);
+
 function esFijo(url) {
   return url.pathname.startsWith('/_next/static/');
 }
@@ -345,7 +347,7 @@ self.addEventListener('activate', (event) => {
       .then((nombres) =>
         Promise.all(
           nombres
-            .filter((n) => n.startsWith('synerlink-') && !CACHES_VIGENTES.includes(n))
+            .filter((n) => n.startsWith('synerlink-') && (ES_LOCAL || !CACHES_VIGENTES.includes(n)))
             .map((n) => caches.delete(n))
         )
       )
@@ -355,7 +357,7 @@ self.addEventListener('activate', (event) => {
 
 self.addEventListener('fetch', (event) => {
   const req = event.request;
-  if (req.method !== 'GET') return;
+  if (req.method !== 'GET' || ES_LOCAL) return;
   // Rangos (video/audio) y peticiones con credenciales raras: a la red tal cual.
   if (req.headers.has('range')) return;
   const url = new URL(req.url);

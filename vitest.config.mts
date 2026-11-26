@@ -110,6 +110,8 @@ export default defineConfig({
         'app/api/correo/**/route.ts',
         // Visores de adjuntos del chat (2026-10-22): reglas puras y la ruta de la vista.
         'lib/chat/visor.ts',
+        // Voice call in the background (2026-11-25): app-level session rules.
+        'lib/chat/voice-call-session.ts',
         'app/api/chat/attachments/[[]id]/vista/route.ts',
         // Ventas (2026-10-30): máquina de estados y motor de reglas de la oferta de venta.
         'lib/sales/states.ts',

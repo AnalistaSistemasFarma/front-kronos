@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useSession } from 'next-auth/react';
 import {
   Alert,
@@ -13,6 +13,8 @@ import {
   Skeleton,
   Table,
   Text,
+  Tooltip,
+  UnstyledButton,
 } from '@mantine/core';
 import {
   IconAlertCircle,
@@ -32,9 +34,12 @@ import {
   buildVerticalBarChart,
 } from '../../../lib/charts/builders';
 import type {
+  CaseBucket,
+  CaseDimensionFilter,
   HelpdeskDashboardData,
   NamedCount,
 } from '../../../lib/help-desk/dashboard/aggregate';
+import HelpdeskCasesModal from './HelpdeskCasesModal';
 import { ActividadesSection, ChartCard, KpiStatCard } from '../../dashboard/actividades/ActividadesUi';
 import { ChartContainer } from '../../dashboard/ChartContainer';
 import DashboardPageShell from '../../dashboard/DashboardPageShell';
@@ -74,12 +79,15 @@ function CountTable({
   column,
   items,
   loading,
+  onSelect,
 }: {
   title: string;
   description: string;
   column: string;
   items: NamedCount[];
   loading: boolean;
+  /** When set, each row is clickable and opens the detail of its cases. */
+  onSelect?: (name: string) => void;
 }) {
   const total = items.reduce((sum, item) => sum + item.total, 0);
   return (
@@ -101,9 +109,26 @@ function CountTable({
             </Table.Thead>
             <Table.Tbody>
               {items.map((item) => (
-                <Table.Tr key={item.name}>
+                <Table.Tr
+                  key={item.name}
+                  onClick={onSelect ? () => onSelect(item.name) : undefined}
+                  onKeyDown={
+                    onSelect
+                      ? (e) => {
+                          if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault();
+                            onSelect(item.name);
+                          }
+                        }
+                      : undefined
+                  }
+                  tabIndex={onSelect ? 0 : undefined}
+                  role={onSelect ? 'button' : undefined}
+                  aria-label={onSelect ? `Ver los casos de ${item.name}` : undefined}
+                  style={onSelect ? { cursor: 'pointer' } : undefined}
+                >
                   <Table.Td>
-                    <Text size='sm' lineClamp={2}>
+                    <Text size='sm' lineClamp={2} c={onSelect ? 'blue' : undefined} td={onSelect ? 'underline' : undefined}>
                       {item.name}
                     </Text>
                   </Table.Td>
@@ -124,6 +149,36 @@ function CountTable({
   );
 }
 
+/** Makes a KPI card clickable: opens the detail of its cases. */
+function ClickableKpi({
+  onOpen,
+  disabled,
+  children,
+}: {
+  onOpen: () => void;
+  disabled: boolean;
+  children: ReactNode;
+}) {
+  return (
+    <Tooltip label='Ver el detalle de los casos' disabled={disabled} withArrow>
+      <UnstyledButton
+        onClick={onOpen}
+        disabled={disabled}
+        aria-label='Ver el detalle de los casos'
+        style={{
+          display: 'block',
+          width: '100%',
+          height: '100%',
+          borderRadius: 'var(--mantine-radius-md)',
+          cursor: disabled ? 'default' : 'pointer',
+        }}
+      >
+        {children}
+      </UnstyledButton>
+    </Tooltip>
+  );
+}
+
 export default function HelpdeskDashboardView() {
   const { status: sessionStatus } = useSession();
   const projectColors = useProjectColors();
@@ -137,18 +192,33 @@ export default function HelpdeskDashboardView() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [forbidden, setForbidden] = useState(false);
+  const [detailBucket, setDetailBucket] = useState<CaseBucket | null>(null);
+  const [detailDimension, setDetailDimension] = useState<CaseDimensionFilter | null>(null);
+
+  const openBucket = (bucket: CaseBucket) => {
+    setDetailDimension(null);
+    setDetailBucket(bucket);
+  };
+  const openDepartment = (value: string) => {
+    setDetailDimension({ dimension: 'department', value });
+    setDetailBucket('all');
+  };
+
+  const filterQuery = useMemo(() => {
+    const params = new URLSearchParams();
+    if (company !== ALL) params.set('company', company);
+    if (year !== ALL) {
+      params.set('year', year);
+      if (month !== ALL) params.set('month', month);
+    }
+    return params.toString();
+  }, [company, year, month]);
 
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const params = new URLSearchParams();
-      if (company !== ALL) params.set('company', company);
-      if (year !== ALL) {
-        params.set('year', year);
-        if (month !== ALL) params.set('month', month);
-      }
-      const res = await fetch(`/api/help-desk/dashboard?${params.toString()}`, { cache: 'no-store' });
+      const res = await fetch(`/api/help-desk/dashboard?${filterQuery}`, { cache: 'no-store' });
       const json = await res.json().catch(() => ({}));
       if (res.status === 403) {
         setForbidden(true);
@@ -161,7 +231,7 @@ export default function HelpdeskDashboardView() {
     } finally {
       setLoading(false);
     }
-  }, [company, year, month]);
+  }, [filterQuery]);
 
   useEffect(() => {
     if (sessionStatus === 'authenticated') void load();
@@ -220,6 +290,25 @@ export default function HelpdeskDashboardView() {
     [technicianItems, isMobile, chartViewport.isCompact]
   );
 
+  /** Pointer cursor over the technician bars: a click opens the cases of that technician. */
+  const technicianChartOptions = useMemo(
+    () => ({
+      ...technicianChart.options,
+      onHover: (event: { native?: Event | null }, elements: unknown[]) => {
+        const target = event.native?.target as HTMLElement | null | undefined;
+        if (target) target.style.cursor = elements.length > 0 ? 'pointer' : 'default';
+      },
+    }),
+    [technicianChart.options]
+  );
+
+  const openTechnician = (index: number | null) => {
+    const item = index == null ? undefined : technicianItems[index];
+    if (!item) return;
+    setDetailDimension({ dimension: 'technician', value: item.label });
+    setDetailBucket('all');
+  };
+
   const categoryChart = useMemo(
     () =>
       buildHorizontalMultiColorBarChart(categoryItems, isMobile, {
@@ -265,6 +354,12 @@ export default function HelpdeskDashboardView() {
       : month === ALL
         ? `Año ${year}`
         : `${MONTH_OPTIONS[Number(month) - 1].label} de ${year}`;
+
+  const companyLabel =
+    company === ALL
+      ? 'Todas las empresas'
+      : (data?.filterOptions.companies.find((c) => String(c.id) === company)?.name ?? 'Empresa seleccionada');
+  const kpiDisabled = loading || !kpis;
 
   return (
     <DashboardPageShell
@@ -334,8 +429,13 @@ export default function HelpdeskDashboardView() {
         </SimpleGrid>
       </Paper>
 
-      <ActividadesSection priority={1} title='Resumen' description='Casos del periodo y empresa seleccionados.'>
+      <ActividadesSection
+        priority={1}
+        title='Resumen'
+        description='Casos del periodo y empresa seleccionados. Haga clic en un indicador para ver el detalle de sus casos.'
+      >
         <SimpleGrid cols={{ base: 1, xs: 2, lg: 4 }} spacing={{ base: 'sm', sm: 'md' }}>
+          <ClickableKpi onOpen={() => openBucket('all')} disabled={kpiDisabled}>
           <KpiStatCard
             label='Casos en el periodo'
             value={kpis ? formatNumber(kpis.total) : '—'}
@@ -344,6 +444,8 @@ export default function HelpdeskDashboardView() {
             icon={IconTicket}
             loading={loading && !data}
           />
+          </ClickableKpi>
+          <ClickableKpi onOpen={() => openBucket('resolved')} disabled={kpiDisabled}>
           <KpiStatCard
             label='Resueltos'
             value={kpis ? formatNumber(kpis.resolved) : '—'}
@@ -353,6 +455,8 @@ export default function HelpdeskDashboardView() {
             icon={IconCheck}
             loading={loading && !data}
           />
+          </ClickableKpi>
+          <ClickableKpi onOpen={() => openBucket('pending')} disabled={kpiDisabled}>
           <KpiStatCard
             label='Pendientes'
             value={kpis ? formatNumber(kpis.pending) : '—'}
@@ -362,6 +466,8 @@ export default function HelpdeskDashboardView() {
             icon={IconHourglass}
             loading={loading && !data}
           />
+          </ClickableKpi>
+          <ClickableKpi onOpen={() => openBucket('measured')} disabled={kpiDisabled}>
           <KpiStatCard
             label='Tiempo medio de resolución'
             value={kpis ? formatDays(kpis.avgResolutionDays) : '—'}
@@ -374,8 +480,20 @@ export default function HelpdeskDashboardView() {
             icon={IconClockHour4}
             loading={loading && !data}
           />
+          </ClickableKpi>
         </SimpleGrid>
       </ActividadesSection>
+
+      <HelpdeskCasesModal
+        bucket={detailBucket}
+        dimension={detailDimension}
+        query={filterQuery}
+        periodLabel={`${companyLabel} · ${periodLabel}.`}
+        onClose={() => {
+          setDetailBucket(null);
+          setDetailDimension(null);
+        }}
+      />
 
       <ActividadesSection priority={5} title='Evolución y demanda' description='Casos por mes y por departamento.'>
         <SimpleGrid cols={{ base: 1, lg: 3 }} spacing='lg'>
@@ -400,10 +518,11 @@ export default function HelpdeskDashboardView() {
           </div>
           <CountTable
             title='Recuento por departamento'
-            description='Departamento que reporta el caso'
+            description='Departamento que reporta el caso · haga clic en uno para ver sus casos'
             column='Departamento'
             items={data?.byDepartment ?? []}
             loading={loading && !data}
+            onSelect={openDepartment}
           />
         </SimpleGrid>
       </ActividadesSection>
@@ -412,7 +531,7 @@ export default function HelpdeskDashboardView() {
         <SimpleGrid cols={{ base: 1, lg: 2 }} spacing='lg'>
           <ChartCard
             title='Recuento por técnico'
-            description={`Técnico asignado${(data?.byTechnician.length ?? 0) > MAX_BARS ? ` · los ${MAX_BARS} con más casos` : ''}`}
+            description={`Técnico asignado${(data?.byTechnician.length ?? 0) > MAX_BARS ? ` · los ${MAX_BARS} con más casos` : ''} · haga clic en una barra para ver sus casos`}
             height='auto'
           >
             {loading && !data ? (
@@ -421,8 +540,9 @@ export default function HelpdeskDashboardView() {
               <ChartContainer
                 type='bar'
                 data={technicianChart.data}
-                options={technicianChart.options}
+                options={technicianChartOptions}
                 height={barHeight(technicianItems.length)}
+                onChartClick={openTechnician}
               />
             ) : (
               <Text c='dimmed' ta='center' py='md' size='sm'>

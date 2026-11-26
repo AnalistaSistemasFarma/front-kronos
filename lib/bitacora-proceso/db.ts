@@ -25,6 +25,7 @@ import {
   assertActividadRegistrable,
   assertOperadorDeLaOrden,
   assertPuedeSerResponsable,
+  assertPuedeCambiarPlanta,
   assertPuedeRegistrar,
   motivoSinRol,
   OtError,
@@ -118,6 +119,8 @@ export interface OrdenResumen {
   lote: string;
   turno: string;
   area: string | null;
+  /** Planta 1 o 2 (2026-11-26); null en las anteriores. */
+  planta: number | null;
   sapOpDocNum: number | null;
   estado: string;
   abiertaEn: string;
@@ -156,6 +159,8 @@ export async function listOrdenes(db: OtDb, idCompany: number, idUser: string, n
       lote: true,
       turno: true,
       area: true,
+      planta: true,
+      areaRef: { select: { nombre: true } },
       sap_op_docnum: true,
       estado: true,
       abierta_en: true,
@@ -177,7 +182,9 @@ export async function listOrdenes(db: OtDb, idCompany: number, idUser: string, n
     itemCode: r.item_code,
     lote: r.lote,
     turno: r.turno,
-    area: r.area,
+    // Nombre ACTUAL del área (2026-11-26: «agrafado» → «grafado»); la copia de la bitácora no se edita.
+    area: r.areaRef?.nombre ?? r.area,
+    planta: r.planta,
     sapOpDocNum: r.sap_op_docnum,
     estado: r.estado,
     abiertaEn: r.abierta_en.toISOString(),
@@ -411,7 +418,7 @@ export async function crearOrden(
   }
   // Inspector y jefe: SOLO personas asignadas a ese rol en la empresa (2026-10-16).
   const [insp, jefe, ops, areas] = await Promise.all([
-    motivoSinRolPersona(db, input.idCompany, input.inspector, 'INSPECTOR'),
+    input.inspector ? motivoSinRolPersona(db, input.idCompany, input.inspector, 'INSPECTOR') : Promise.resolve(null),
     motivoSinRolPersona(db, input.idCompany, input.jefeProduccion, 'JEFE_PROD'),
     operadoresActivos(db, input.idCompany, input.operadores),
     db.otArea.findMany({ where: { id_company: input.idCompany, activo: true }, select: { id_area: true, nombre: true } }),
@@ -419,7 +426,7 @@ export async function crearOrden(
   if (ops.length !== input.operadores.length) {
     throw new OtError('Algún operario seleccionado no existe o está inactivo en el maestro de la empresa.', 400);
   }
-  assertActoresDistintos({ abre: actor.idUser, inspector: input.inspector, jefe: input.jefeProduccion });
+  if (input.inspector) assertActoresDistintos({ abre: actor.idUser, inspector: input.inspector, jefe: input.jefeProduccion });
   if (insp) throw new OtError(insp, 400);
   if (jefe) throw new OtError(jefe, 400);
   const area = resolverArea(areas, input.idArea);
@@ -447,6 +454,7 @@ export async function crearOrden(
         abierta_por: actor.idUser,
         id_inspector: input.inspector,
         id_jefe_produccion: input.jefeProduccion,
+        planta: input.planta,
       },
       select: { id_orden_trabajo: true, consecutivo: true },
     });
@@ -466,6 +474,8 @@ export interface OrdenDetalle {
   lote: string;
   turno: string;
   area: string | null;
+  /** Nombre ACTUAL del área en el catálogo (2026-11-26: «agrafado» → «grafado»); `area` es la copia del día en que se abrió. */
+  areaCatalogo: string | null;
   sapOp: Record<string, unknown> | null;
   sapOpDocNum: number | null;
   estado: string;
@@ -476,15 +486,31 @@ export interface OrdenDetalle {
   observacionCierre: string | null;
   /** Auxiliares CON usuario (solo bitácoras anteriores al 2026-10-14). */
   operarios: Array<{ id: string; name: string; email: string }>;
-  /** Operarios SIN usuario programados (A1). */
-  operadores: Array<{ id: number; nombre: string; activo: boolean }>;
+  /** Operarios SIN usuario programados (A1). `tipo`: OPERARIO | MANTENIMIENTO | INSPECTOR (2026-11-26). */
+  operadores: Array<{ id: number; nombre: string; activo: boolean; tipo: string }>;
+  /** Planta 1 o 2 (2026-11-26); null en las anteriores. */
+  planta: number | null;
+  /** Asignada o corregida con la bitácora abierta (2026-11-26): quién y cuándo. */
+  plantaAsignada: { por: string; en: string } | null;
+  /** La sesión puede asignar o corregir la planta (abierta; Gestión, jefe designado o quien abrió). */
+  puedeCambiarPlanta: boolean;
   /** Inspector (B1, 2026-10-15). Las bitácoras del #617 no lo tienen. */
   inspector: { id: string; name: string } | null;
   /** Jefe de producción (B1; columna id_jefe_produccion). */
   jefe: { id: string; name: string } | null;
   /** `operador` = operario elegido en la tablet; `usuario` = usuario de la sesión que registró. */
   /** `textoLibre`: el registro es de una actividad de texto libre y `observacion` es el texto escrito. */
-  registros: Array<{ id: string; actividad: string; operador: string | null; usuario: string; registradoEn: string; observacion: string | null; textoLibre: boolean }>;
+  registros: Array<{
+    id: string;
+    actividad: string;
+    operador: string | null;
+    usuario: string;
+    registradoEn: string;
+    observacion: string | null;
+    textoLibre: boolean;
+    /** Notas de corrección (2026-11-26), en orden; el registro no cambia. */
+    notas: Array<{ id: number; texto: string; usuario: string; creadaEn: string }>;
+  }>;
   /** Vistos buenos dados (rol VISIBLE: las filas viejas «Verificó» salen como JEFE_PROD). */
   firmas: FirmaVista[];
   /** Los cuatro vistos buenos en orden, con su estado (B2). */
@@ -552,13 +578,26 @@ export async function getOrdenDetalle(db: OtDb, idOrden: number, access: OtCompa
     where: { id_orden_trabajo: idOrden, id_company: access.idCompany },
     include: {
       operarios: { select: { id_user: true } },
-      operadores: { select: { operador: { select: { id_operador: true, nombre: true, activo: true } } } },
-      registros: { orderBy: [{ registrado_en: 'asc' }, { id_registro: 'asc' }] },
+      operadores: { select: { operador: { select: { id_operador: true, nombre: true, activo: true, tipo: true } } } },
+      registros: {
+        orderBy: [{ registrado_en: 'asc' }, { id_registro: 'asc' }],
+        include: { notas: { orderBy: { creada_en: 'asc' }, select: { id_nota: true, texto: true, id_user: true, creada_en: true } } },
+      },
       firmas: { orderBy: { id_firma: 'asc' } },
+      areaRef: { select: { nombre: true } },
     },
   });
   if (!o) return null;
-  const ids = [o.abierta_por, o.cerrada_por ?? '', o.id_inspector ?? '', o.id_jefe_produccion ?? '', ...o.operarios.map((x) => x.id_user), ...o.registros.map((r) => r.id_user)];
+  const ids = [
+    o.abierta_por,
+    o.planta_asignada_por ?? '',
+    o.cerrada_por ?? '',
+    o.id_inspector ?? '',
+    o.id_jefe_produccion ?? '',
+    ...o.operarios.map((x) => x.id_user),
+    ...o.registros.map((r) => r.id_user),
+    ...o.registros.flatMap((r) => r.notas.map((n) => n.id_user)),
+  ];
   const nombres = await nombresDeUsuarios(db, ids);
   const nombre = (id: string | null) => (id ? (nombres.get(id)?.name ?? id) : null);
   const persona = (id: string | null) => (id ? { id, name: nombres.get(id)?.name ?? id } : null);
@@ -569,7 +608,8 @@ export async function getOrdenDetalle(db: OtDb, idOrden: number, access: OtCompa
   const requeridos = vistosRequeridos(actores, o.firmas);
   const siguiente = siguienteVistoBueno(actores, o.firmas);
   const cerroElJefe = esCierreDelJefe(dados.SUPERVISOR);
-  const vistos: VistoBuenoVista[] = OT_VISTOS_BUENOS.map((rol) => {
+  // 2026-11-24: el inspector salió del flujo; su casilla solo se muestra si ya lo había dado (bitácoras viejas).
+  const vistos: VistoBuenoVista[] = OT_VISTOS_BUENOS.filter((rol) => rol !== 'INSPECTOR' || Boolean(dados.INSPECTOR)).map((rol) => {
     const f = dados[rol];
     const designado = rol === 'INSPECTOR' ? nombre(o.id_inspector) : rol === 'JEFE_PROD' ? nombre(o.id_jefe_produccion) : null;
     if (f) return { rol, estado: 'dado', designado, firma: firmaVista(f), nota: null };
@@ -596,6 +636,7 @@ export async function getOrdenDetalle(db: OtDb, idOrden: number, access: OtCompa
     lote: o.lote,
     turno: o.turno,
     area: o.area,
+    areaCatalogo: o.areaRef?.nombre ?? null,
     sapOp: parseSnapshot(o.sap_op_snapshot),
     sapOpDocNum: o.sap_op_docnum,
     estado: o.estado,
@@ -607,8 +648,11 @@ export async function getOrdenDetalle(db: OtDb, idOrden: number, access: OtCompa
     operarios: operarioIds
       .map((id) => ({ id, name: nombres.get(id)?.name ?? id, email: nombres.get(id)?.email ?? '' }))
       .sort((a, b) => a.name.localeCompare(b.name, 'es')),
+    planta: o.planta,
+    plantaAsignada: o.planta_asignada_por && o.planta_asignada_en ? { por: nombre(o.planta_asignada_por) ?? o.planta_asignada_por, en: o.planta_asignada_en.toISOString() } : null,
+    puedeCambiarPlanta: o.estado === 'ABIERTA' && (access.canManage || idUser === o.abierta_por || idUser === o.id_jefe_produccion),
     operadores: o.operadores
-      .map((x) => ({ id: x.operador.id_operador, nombre: x.operador.nombre, activo: x.operador.activo }))
+      .map((x) => ({ id: x.operador.id_operador, nombre: x.operador.nombre, activo: x.operador.activo, tipo: x.operador.tipo }))
       .sort((a, b) => a.nombre.localeCompare(b.nombre, 'es')),
     inspector: persona(o.id_inspector),
     jefe: persona(o.id_jefe_produccion),
@@ -620,6 +664,7 @@ export async function getOrdenDetalle(db: OtDb, idOrden: number, access: OtCompa
       registradoEn: r.registrado_en.toISOString(),
       observacion: r.observacion,
       textoLibre: r.es_texto_libre,
+      notas: r.notas.map((n) => ({ id: n.id_nota, texto: n.texto, usuario: nombre(n.id_user) ?? n.id_user, creadaEn: n.creada_en.toISOString() })),
     })),
     firmas,
     vistos,
@@ -634,6 +679,89 @@ export async function getOrdenDetalle(db: OtDb, idOrden: number, access: OtCompa
     puedeVerificar: o.estado === 'CERRADA' && siguiente !== null,
     puedeVistoOperario: o.estado === 'ABIERTA' && actores.operadores.length > 0 && !dados.OPERARIO,
   };
+}
+
+/**
+ * Bitácoras del MISMO lote en la empresa (batch record, 2026-11-24): un lote tiene una por turno
+ * y el Excel del batch record las junta. Orden de apertura; máximo 60.
+ */
+export async function listOrdenesDelLote(db: OtDb, idCompany: number, lote: string) {
+  const filas = await db.otOrdenTrabajo.findMany({
+    where: { id_company: idCompany, lote },
+    orderBy: [{ abierta_en: 'asc' }, { consecutivo: 'asc' }],
+    take: 60,
+    select: { id_orden_trabajo: true, consecutivo: true, turno: true, estado: true, abierta_en: true, cerrada_en: true, area: true, sap_op_docnum: true, sap_op_absentry: true },
+  });
+  return filas.map((f) => ({
+    id: f.id_orden_trabajo,
+    consecutivo: f.consecutivo,
+    turno: f.turno,
+    estado: f.estado,
+    abiertaEn: f.abierta_en.toISOString(),
+    cerradaEn: f.cerrada_en ? f.cerrada_en.toISOString() : null,
+    area: f.area,
+    sapOpDocNum: f.sap_op_docnum,
+    sapOpAbsEntry: f.sap_op_absentry,
+  }));
+}
+
+/**
+ * ASIGNAR O CORREGIR LA PLANTA de una bitácora ABIERTA (2026-11-26): en producción hay bitácoras
+ * vivas abiertas antes de que existiera la planta. Queda quién y cuándo (hora del servidor).
+ */
+export async function cambiarPlanta(db: OtDb, idOrden: number, access: OtCompanyAccess, planta: number, actor: OtActor): Promise<{ planta: number; anterior: number | null }> {
+  return db.$transaction(async (tx) => {
+    const rows = await tx.$queryRaw<Array<{ estado: string; abierta_por: string; id_jefe_produccion: string | null; planta: number | null }>>`
+      SELECT estado, abierta_por, id_jefe_produccion, planta FROM [dbo].[ot_orden_trabajo] WITH (UPDLOCK, ROWLOCK)
+      WHERE id_orden_trabajo = ${idOrden} AND id_company = ${access.idCompany}`;
+    if (rows.length === 0) throw new OtError('Bitácora no encontrada.', 404);
+    const o = rows[0];
+    assertPuedeCambiarPlanta({ estado: o.estado, abiertaPor: o.abierta_por, jefe: o.id_jefe_produccion }, actor.idUser, access);
+    const n = await tx.$executeRaw`
+      UPDATE [dbo].[ot_orden_trabajo]
+      SET planta = ${planta}, planta_asignada_por = ${actor.idUser}, planta_asignada_en = SYSUTCDATETIME()
+      WHERE id_orden_trabajo = ${idOrden} AND id_company = ${access.idCompany} AND estado = N'ABIERTA'`;
+    if (n === 0) throw new OtError('La bitácora ya está cerrada: la planta no se puede cambiar.', 409);
+    return { planta, anterior: o.planta === null ? null : Number(o.planta) };
+  });
+}
+
+/**
+ * NOTA DE CORRECCIÓN sobre un registro (2026-11-26). Mientras la bitácora está ABIERTA, quien puede
+ * registrar en ella puede anotar «me equivoqué de actividad»: el registro no se edita ni se borra; la
+ * nota queda con la hora del servidor y el usuario de la sesión (trigger: tampoco se edita ni se borra).
+ */
+export async function crearNotaRegistro(
+  db: OtDb,
+  idOrden: number,
+  idRegistro: bigint,
+  access: OtCompanyAccess,
+  texto: string,
+  actor: OtActor
+): Promise<{ id: number; creadaEn: string }> {
+  return db.$transaction(async (tx) => {
+    const locked = await tx.$queryRaw<Array<{ estado: string; id_inspector: string | null; id_jefe_produccion: string | null }>>`
+      SELECT estado, id_inspector, id_jefe_produccion FROM [dbo].[ot_orden_trabajo] WITH (UPDLOCK, ROWLOCK)
+      WHERE id_orden_trabajo = ${idOrden} AND id_company = ${access.idCompany}`;
+    if (locked.length === 0) throw new OtError('Bitácora no encontrada.', 404);
+    const [operarios, programados, registro] = await Promise.all([
+      tx.otOrdenOperario.findMany({ where: { id_orden_trabajo: idOrden }, select: { id_user: true } }),
+      tx.otOrdenOperador.findMany({ where: { id_orden_trabajo: idOrden }, select: { id_operador: true } }),
+      tx.otRegistro.findFirst({ where: { id_registro: idRegistro, id_orden_trabajo: idOrden }, select: { id_registro: true } }),
+    ]);
+    if (!registro) throw new OtError('El registro no existe en esta bitácora.', 404);
+    if (locked[0].estado !== 'ABIERTA') throw new OtError('La bitácora ya está cerrada: no admite notas.', 409);
+    assertPuedeRegistrar(
+      { estado: locked[0].estado, operarios: operarios.map((x) => x.id_user), inspector: locked[0].id_inspector, jefe: locked[0].id_jefe_produccion, operadores: programados.map((x) => x.id_operador) },
+      actor.idUser,
+      access
+    );
+    const n = await tx.otRegistroNota.create({
+      data: { id_registro: idRegistro, id_orden_trabajo: idOrden, texto, id_user: actor.idUser, ip: actor.ip ?? null },
+      select: { id_nota: true, creada_en: true },
+    });
+    return { id: n.id_nota, creadaEn: n.creada_en.toISOString() };
+  });
 }
 
 /**
@@ -1033,7 +1161,7 @@ export async function cambiarActividad(db: OtDb, input: CambioActividadInput) {
 // Maestro de operarios sin usuario (A1)
 // ---------------------------------------------------------------------------
 
-const OPERADOR_SELECT = { id_operador: true, nombre: true, documento: true, activo: true } as const;
+const OPERADOR_SELECT = { id_operador: true, nombre: true, documento: true, tipo: true, activo: true } as const;
 
 export async function listOperadores(db: OtDb, idCompany: number, soloActivos: boolean) {
   return db.otOperador.findMany({
@@ -1054,7 +1182,7 @@ async function assertNombreOperadorLibre(db: OtDb, idCompany: number, nombre: st
 export async function crearOperador(db: OtDb, input: NuevoOperadorInput, actor: OtActor) {
   await assertNombreOperadorLibre(db, input.idCompany, input.nombre);
   return db.otOperador.create({
-    data: { id_company: input.idCompany, nombre: input.nombre, documento: input.documento, activo: true, created_by: actor.idUser },
+    data: { id_company: input.idCompany, nombre: input.nombre, documento: input.documento, tipo: input.tipo ?? 'OPERARIO', activo: true, created_by: actor.idUser },
     select: OPERADOR_SELECT,
   });
 }
@@ -1067,6 +1195,7 @@ export async function cambiarOperador(db: OtDb, input: CambioOperadorInput, acto
       ...(input.nombre !== undefined ? { nombre: input.nombre } : {}),
       ...(input.documento !== undefined ? { documento: input.documento } : {}),
       ...(input.activo !== undefined ? { activo: input.activo } : {}),
+      ...(input.tipo !== undefined ? { tipo: input.tipo } : {}),
       updated_by: actor.idUser,
       updated_at: new Date(),
     },

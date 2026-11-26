@@ -16,7 +16,7 @@ import {
 } from '../../lib/chat/client';
 import { olvidarNoLeidos, revisarNoLeidos, threadOnScreen } from '../../lib/chat/message-sound';
 import { toastFromInboxConversation } from '../../lib/notifications/inAppToast';
-import { showInAppToast } from '../../lib/notifications/inAppToastStore';
+import { showInAppToastWithMedia } from '../../lib/notifications/inAppToastStore';
 import { bumpConversationActivity } from '../../lib/chat/rail';
 
 /**
@@ -88,7 +88,9 @@ function announceNewMessages(email: string, rose: ChatConversationDto[]): void {
     });
   for (const c of rose) {
     if (threadOnScreen(c.id)) continue;
-    showInAppToast(toastFromInboxConversation(c, currentUserId, avatar));
+    const toast = toastFromInboxConversation(c, currentUserId, avatar);
+    // No text: sticker, GIF or image → show it in the card (msg 38382).
+    showInAppToastWithMedia(toast, c.id);
   }
 }
 

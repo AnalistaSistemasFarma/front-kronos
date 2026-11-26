@@ -1,13 +1,16 @@
 /* In-app notification cards (lib/notifications/inAppToast.ts). Colors come from the app theme
    tokens (--app-*), so they follow light/dark mode and each person's palette. */
 
+/* Top-right corner, below the header (Nicolás, msg 38429: bottom-right collided with the floating
+   chat panel). Newest on top. */
 .region {
   position: fixed;
   top: calc(var(--app-header-height, 4rem) + 10px);
   right: 16px;
   width: 380px;
   max-width: calc(100vw - 32px);
-  z-index: 1000;
+  max-height: calc(100dvh - var(--app-header-height, 4rem) - 32px);
+  /* z-index comes from Z_INDEX.inAppToasts (lib/ui/zIndex.ts): above the chat panel, below modals. */
   display: flex;
   flex-direction: column;
   gap: 10px;
@@ -154,6 +157,17 @@
   background: color-mix(in srgb, var(--app-text, #1a1d21) 8%, transparent);
 }
 
+.replyRow {
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+}
+
+.replyInput {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
 .actions {
   display: flex;
   gap: 8px;
@@ -196,6 +210,88 @@
   animation-play-state: paused;
 }
 
+.mediaBox {
+  display: flex;
+}
+
+.media {
+  max-width: 100%;
+  max-height: 120px;
+  border-radius: 10px;
+  object-fit: contain;
+  background: color-mix(in srgb, var(--app-text, #1a1d21) 5%, transparent);
+}
+
+.emojiBig {
+  margin: 2px 0 0;
+  font-size: 40px;
+  line-height: 1.15;
+  animation: emoji-pop 520ms cubic-bezier(0.34, 1.56, 0.64, 1);
+  transform-origin: left center;
+}
+
+/* Emoji-only cards enter with a bounce instead of the plain slide. */
+.emojiCard {
+  animation: toast-bounce-in 420ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.confetti {
+  position: absolute;
+  left: 50%;
+  top: 45%;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+}
+
+.confettiPiece {
+  position: absolute;
+  width: 7px;
+  height: 10px;
+  border-radius: 2px;
+  opacity: 0;
+  animation: confetti-burst 1000ms ease-out forwards;
+}
+
+@keyframes confetti-burst {
+  0% {
+    opacity: 1;
+    transform: translate(0, 0) rotate(0deg) scale(0.6);
+  }
+  70% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translate(var(--dx), calc(var(--dy) + 24px)) rotate(var(--rot)) scale(1);
+  }
+}
+
+@keyframes emoji-pop {
+  0% {
+    transform: scale(0.3);
+    opacity: 0;
+  }
+  60% {
+    transform: scale(1.25);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+@keyframes toast-bounce-in {
+  0% {
+    opacity: 0;
+    transform: translateY(-24px) scale(0.9);
+  }
+  100% {
+    opacity: 1;
+    transform: none;
+  }
+}
+
 @keyframes toast-in {
   from {
     opacity: 0;
@@ -217,8 +313,15 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .card {
+  .card,
+  .emojiCard {
+    animation: toast-fade 160ms linear;
+  }
+  .emojiBig {
     animation: none;
+  }
+  .confetti {
+    display: none;
   }
   .progress {
     display: none;
@@ -233,5 +336,14 @@
     right: 8px;
     width: auto;
     max-width: none;
+  }
+}
+
+@keyframes toast-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
   }
 }

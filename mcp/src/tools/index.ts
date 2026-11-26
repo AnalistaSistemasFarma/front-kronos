@@ -27,6 +27,7 @@ import {
 } from '../workflow.js';
 import { registerIaAccessTool } from './iaAccess.js';
 import { USUARIOS_TOOLS, registerUsuariosTools } from './usuarios.js';
+import { AGENT_MESSAGE_TOOLS, registerAgentMessageTool } from './agentMessage.js';
 import { BITACORA_TOOLS, registerBitacoraTools } from './bitacoraProceso.js';
 import { CORREO_AGENTE_TOOLS, correoAgenteHabilitado, registerCorreoAgenteTools } from './correoAgente.js';
 import { PROYECTOS_TOOLS_LECTURA, PROYECTOS_TOOLS_PROPUESTA, registerProyectosTools } from './proyectos.js';
@@ -75,6 +76,27 @@ function requestResponsibleExists(userId: string): Prisma.Sql {
       ON upcrg.id_process_category = pcrg.id_process_category
     WHERE pcrg.id_request_general = rg.id AND upcrg.id_user = ${userId}
   )`;
+}
+
+/**
+ * Same as requestResponsibleExists, but identifies the responsible user by
+ * e-mail (trimmed, case-insensitive). The e-mail always travels as a parameter.
+ */
+function requestResponsibleEmailExists(email: string): Prisma.Sql {
+  return Prisma.sql`EXISTS (
+    SELECT 1
+    FROM process_category_request_general pcrg
+    INNER JOIN user_process_category_request_general upcrg
+      ON upcrg.id_process_category = pcrg.id_process_category
+    INNER JOIN [user] ru ON ru.id = upcrg.id_user
+    WHERE pcrg.id_request_general = rg.id
+      AND LOWER(LTRIM(RTRIM(ru.email))) = ${normalizeEmail(email)}
+  )`;
+}
+
+/** Normalizes an e-mail used as a filter value (trim + lower case). */
+function normalizeEmail(email: string): string {
+  return email.trim().toLowerCase();
 }
 
 /** Empaqueta un resultado como contenido MCP (texto JSON). */
@@ -418,6 +440,11 @@ export const TOOL_CAPABILITIES = {
    * llaves con el bloque `usuarios` en MCP_API_KEYS. No cuentan en totalTools.
    */
   usuarios: [...USUARIOS_TOOLS],
+  /**
+   * Agent-initiated chat message (2026-11-24, msgs 38807–38809): registered ONLY for keys that list
+   * it in allowedTools and carry agentCode (default off). Not counted in totalTools.
+   */
+  agentMessage: [...AGENT_MESSAGE_TOOLS],
   writeNote:
     'El servidor tiene rutas de escritura acotadas: categorización (caso: category_case; solicitud: process_category_request_general), creación de solicitudes (kronos_create_request: inserta requests_general + workflow + notificaciones), notas de bitácora (kronos_add_note) y resolución de actividades del workflow (kronos_resolve_task: cierra task_request_general con id_status=2 + date_resolution/end_date + id_executor_final, respetando el gate secuencial y avanzando el flujo), subida de adjuntos a OneDrive (kronos_upload_attachment: carpeta SAPSEND/TEC/SG/Request-<id> o SAPSEND/TEC/MA/Ticket-<id>, sin sobrescribir archivos existentes), eliminación de adjuntos (kronos_delete_attachment: solo key admin + usuario con doble llave de la app, justificación obligatoria, rechaza documentos con flujo de firma Orion y deja nota en la bitácora) y diligenciamiento del formulario dinámico (kronos_set_request_fields: UPSERT en request_form_value, sin campos de firma Orion ni solicitudes cerradas) y radicación de solicitudes de conectores IA a nombre de una persona (kronos_request_ia_access: la empresa se deduce del permiso de la persona sobre el agente de la key, nunca GSS; tope diario y sin duplicados), y PROPUESTAS sobre Proyectos (proyecto_proponer_*: solo insertan chat_project_proposal pendiente + aviso en el chat + auditoría; nada se ejecuta sin la confirmación de la persona en SynerLink). Todas parametrizadas, validadas por alcance de empresa y auditadas. El candado assertReadOnlySql sigue intacto para las tools de lectura.',
 } as const;
@@ -454,6 +481,9 @@ export function registerTools(rawServer: McpServer, ctx: ToolContext): void {
 
   // Administración de usuarios: SOLO llaves con el bloque `usuarios` (src/tools/usuarios.ts).
   registerUsuariosTools(server, { scope: ctx.scope, audit: ctx.audit });
+
+  // Agent-initiated message to a person (src/tools/agentMessage.ts): only keys that list it explicitly.
+  registerAgentMessageTool(server, { scope: ctx.scope, audit: ctx.audit });
 
   // «Consultar a un agente» desde el Correo: 2 lecturas del hilo compartido + 3 PROPUESTAS que la
   // persona confirma en el chat (src/tools/correoAgente.ts).
@@ -569,7 +599,7 @@ export function registerTools(rawServer: McpServer, ctx: ToolContext): void {
   // ---------------------------------------------------------------------------
   server.tool(
     'kronos_list_requests',
-    'Lista solicitudes generales (workflows). Filtra SIEMPRE por las empresas del alcance. Permite filtrar por responsable (encargado del proceso) con responsibleUserId (user.id). Paginada.',
+    'Lista solicitudes generales (workflows). Filtra SIEMPRE por las empresas del alcance. Permite filtrar por responsable (encargado del proceso) con responsibleUserId (user.id) o responsibleEmail, y por solicitante (quien radicó la solicitud) con requesterId (user.id) o requesterEmail. Los filtros se combinan entre sí (Y). Paginada.',
     {
       companyId: z
         .number()
@@ -582,6 +612,28 @@ export function registerTools(rawServer: McpServer, ctx: ToolContext): void {
         .optional()
         .describe(
           'Filtra solicitudes donde este usuario (user.id) es ENCARGADO/responsable del proceso asignado a la solicitud.'
+        ),
+      responsibleEmail: z
+        .string()
+        .trim()
+        .email()
+        .max(255)
+        .optional()
+        .describe(
+          'Igual que responsibleUserId, pero identificando al responsable por su correo (sin distinguir mayúsculas).'
+        ),
+      requesterId: z
+        .string()
+        .optional()
+        .describe('Filtra solicitudes RADICADAS por este usuario (user.id del solicitante).'),
+      requesterEmail: z
+        .string()
+        .trim()
+        .email()
+        .max(255)
+        .optional()
+        .describe(
+          'Filtra solicitudes RADICADAS por la persona con este correo (sin distinguir mayúsculas).'
         ),
       limit: z.number().int().optional(),
       offset: z.number().int().optional(),
@@ -598,6 +650,19 @@ export function registerTools(rawServer: McpServer, ctx: ToolContext): void {
         }
         if (args.responsibleUserId !== undefined) {
           where.push(requestResponsibleExists(args.responsibleUserId));
+        }
+        if (args.responsibleEmail !== undefined) {
+          where.push(requestResponsibleEmailExists(args.responsibleEmail));
+        }
+        if (args.requesterId !== undefined) {
+          where.push(Prisma.sql`rg.id_requester = ${args.requesterId}`);
+        }
+        if (args.requesterEmail !== undefined) {
+          where.push(Prisma.sql`EXISTS (
+            SELECT 1 FROM [user] rq
+            WHERE rq.id = rg.id_requester
+              AND LOWER(LTRIM(RTRIM(rq.email))) = ${normalizeEmail(args.requesterEmail)}
+          )`);
         }
         const whereSql = Prisma.join(where, ' AND ');
 
@@ -1723,7 +1788,7 @@ export function registerTools(rawServer: McpServer, ctx: ToolContext): void {
   // ---------------------------------------------------------------------------
   server.tool(
     'kronos_list_tickets',
-    'Lista tickets/casos de mesa de ayuda. Filtra SIEMPRE por las empresas del alcance. Permite filtrar por técnico/responsable asignado con technicianId y expone las columnas "technician"/"technician_id". Paginada.',
+    'Lista tickets/casos de mesa de ayuda. Filtra SIEMPRE por las empresas del alcance. Permite filtrar por técnico/responsable asignado con technicianId y por solicitante con requesterId (user.id) o requesterEmail; expone las columnas "technician"/"technician_id". Paginada.',
     {
       companyId: z.number().int().optional(),
       status: z.number().int().optional().describe('id_status_case'),
@@ -1732,6 +1797,21 @@ export function registerTools(rawServer: McpServer, ctx: ToolContext): void {
         .string()
         .optional()
         .describe('Filtra casos donde este usuario (user.id) es el TÉCNICO/responsable asignado.'),
+      requesterId: z
+        .string()
+        .optional()
+        .describe(
+          'Filtra casos cuyo solicitante registrado es este usuario (user.id). Casos antiguos donde el solicitante solo aparece en el asunto pueden no coincidir; en ese caso use kronos_search.'
+        ),
+      requesterEmail: z
+        .string()
+        .trim()
+        .email()
+        .max(255)
+        .optional()
+        .describe(
+          'Filtra casos por correo del solicitante: el correo de contacto del caso o el del usuario solicitante registrado (sin distinguir mayúsculas).'
+        ),
       limit: z.number().int().optional(),
       offset: z.number().int().optional(),
     },
@@ -1745,6 +1825,29 @@ export function registerTools(rawServer: McpServer, ctx: ToolContext): void {
         if (args.status !== undefined) where.push(Prisma.sql`c.id_status_case = ${args.status}`);
         if (args.priority !== undefined) where.push(Prisma.sql`c.priority = ${args.priority}`);
         if (args.technicianId !== undefined) where.push(Prisma.sql`ut.id = ${args.technicianId}`);
+        // [case].requester stores the requester's id_company_user (legacy rows may hold a user.id).
+        if (args.requesterId !== undefined) {
+          where.push(Prisma.sql`EXISTS (
+            SELECT 1 FROM [user] rq
+            LEFT JOIN company_user rqcu ON rqcu.id_user = rq.id
+            WHERE rq.id = ${args.requesterId}
+              AND (CAST(c.requester AS NVARCHAR(255)) = rq.id
+                   OR TRY_CAST(c.requester AS INT) = rqcu.id_company_user)
+          )`);
+        }
+        if (args.requesterEmail !== undefined) {
+          const email = normalizeEmail(args.requesterEmail);
+          where.push(Prisma.sql`(
+            LOWER(LTRIM(RTRIM(c.email))) = ${email}
+            OR EXISTS (
+              SELECT 1 FROM [user] rq
+              LEFT JOIN company_user rqcu ON rqcu.id_user = rq.id
+              WHERE LOWER(LTRIM(RTRIM(rq.email))) = ${email}
+                AND (CAST(c.requester AS NVARCHAR(255)) = rq.id
+                     OR TRY_CAST(c.requester AS INT) = rqcu.id_company_user)
+            )
+          )`);
+        }
         const whereSql = Prisma.join(where, ' AND ');
 
         const rows = await queryReadOnly<unknown>(Prisma.sql`

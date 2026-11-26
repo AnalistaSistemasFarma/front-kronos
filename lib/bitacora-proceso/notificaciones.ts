@@ -77,7 +77,7 @@ export function avisosApertura(a: AvisoBitacora): OtNotificacion[] {
       emails: jefe,
       payload: {
         title: OT_NOTIF_TITULOS.jefeAsignado,
-        body: `${a.actorNombre} abrió ${referencia(a)} y lo designó jefe de producción. Usted también puede cerrarla; si la cierra el supervisor, su visto bueno es el último, después del inspector.`,
+        body: `${a.actorNombre} abrió ${referencia(a)} y lo designó jefe de producción. Usted también puede cerrarla; si la cierra el supervisor, su visto bueno es el último.`,
         url,
         tag: `ot-${a.idOrden}-jefe`,
       },

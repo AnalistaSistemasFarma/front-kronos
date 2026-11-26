@@ -10,6 +10,7 @@ import { DB_KEY_ROLE, resolveScopeCombined, scopeFromDbEntry, toolRequiresAgentC
 import { USUARIOS_TOOL_NAMES, type ApiKeyEntry, type McpConfig } from '../src/config.js';
 import { createDbKeyStore, isDbKeyExpired, type DbApiKeyEntry } from '../src/dbKeys.js';
 import { createApp, KNOWN_TOOLS } from '../src/server.js';
+import { AGENT_MESSAGE_TOOLS } from '../src/tools/agentMessage.js';
 import { CORREO_AGENTE_TOOLS } from '../src/tools/correoAgente.js';
 import { IA_ACCESS_TOOL } from '../src/tools/iaAccess.js';
 import { PROYECTOS_TOOLS } from '../src/tools/proyectos.js';
@@ -92,7 +93,8 @@ describe('catálogo api_permission (semilla) frente a las herramientas del MCP',
     [...text.matchAll(/^\s*\(N'([a-z_]+)',.*, ([01]), (\d+)\),?\s*$/gm)].map((m) => ({ code: m[1] as string, active: m[2] === '1' }));
 
   it('la semilla (PRUEBAS y PROD) trae exactamente las herramientas registradas', () => {
-    const conocidas = [...KNOWN_TOOLS].sort();
+    // chat_enviar_mensaje_usuario (2026-11-24) is file-key only for now: not in the DB catalog.
+    const conocidas = [...KNOWN_TOOLS].filter((t) => !(AGENT_MESSAGE_TOOLS as readonly string[]).includes(t)).sort();
     expect(conocidas).toHaveLength(58);
     expect(filas(sqlDe('2026-11-09-permisos-api-PRUEBAS.sql')).map((f) => f.code).sort()).toEqual(conocidas);
     expect(filas(sqlDe('2026-11-09-permisos-api-PROD.sql')).map((f) => f.code).sort()).toEqual(conocidas);
@@ -104,7 +106,7 @@ describe('catálogo api_permission (semilla) frente a las herramientas del MCP',
   });
 
   it('toolRequiresAgentCode = ia_access + correo_* + proyectos', () => {
-    const esperadas = [IA_ACCESS_TOOL, ...CORREO_AGENTE_TOOLS, ...PROYECTOS_TOOLS].sort();
+    const esperadas = [IA_ACCESS_TOOL, ...AGENT_MESSAGE_TOOLS, ...CORREO_AGENTE_TOOLS, ...PROYECTOS_TOOLS].sort();
     expect([...KNOWN_TOOLS].filter(toolRequiresAgentCode).sort()).toEqual(esperadas);
   });
 

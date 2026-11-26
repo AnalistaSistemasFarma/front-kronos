@@ -4,7 +4,7 @@ import { useMemo, useState } from 'react';
 import { Alert, Badge, Button, Card, Group, Loader, NumberInput, Radio, ScrollArea, SegmentedControl, Stack, Switch, Text, TextInput, Title } from '@mantine/core';
 import { IconAlertTriangle, IconCheck, IconDeviceFloppy, IconPencil, IconPlus, IconSearch, IconX } from '@tabler/icons-react';
 import toast from 'react-hot-toast';
-import { OT_LIMITS, OT_RESPONSABLE_AYUDA, OT_RESPONSABLE_ROLES, OT_ROL_LABEL, type OtResponsableRol } from '../../lib/bitacora-proceso/constants';
+import { isOtTipoPersonal, OT_TIPO_PERSONAL_COLOR, OT_TIPO_PERSONAL_LABEL, OT_TIPOS_PERSONAL, OT_LIMITS, OT_RESPONSABLE_AYUDA, OT_RESPONSABLE_ROLES_ASIGNABLES, OT_ROL_LABEL, type OtResponsableRol } from '../../lib/bitacora-proceso/constants';
 import type { OtCompanyAccess } from '../../lib/bitacora-proceso/rules';
 import { otSend, useOtFetch } from './otClient';
 import { OtImportarOperadores } from './OtImportarYPin';
@@ -35,6 +35,8 @@ interface Operador {
   id_operador: number;
   nombre: string;
   documento: string | null;
+  /** OPERARIO | MANTENIMIENTO | INSPECTOR (2026-11-26). */
+  tipo?: string;
   activo: boolean;
 }
 
@@ -42,9 +44,10 @@ export function OtOperadores({ company }: { company: OtCompanyAccess }) {
   const { data, error, loading, reload } = useOtFetch<{ operadores: Operador[] }>(`/api/bitacora-proceso/operadores?company=${company.idCompany}&todas=1`);
   const [nombre, setNombre] = useState('');
   const [documento, setDocumento] = useState('');
+  const [tipo, setTipo] = useState<string>('OPERARIO');
   const [busy, setBusy] = useState<number | 'nuevo' | null>(null);
   const [aviso, setAviso] = useState<Aviso>(null);
-  const [editando, setEditando] = useState<{ id: number; nombre: string; documento: string } | null>(null);
+  const [editando, setEditando] = useState<{ id: number; nombre: string; documento: string; tipo: string } | null>(null);
   const lista = data?.operadores ?? [];
 
   const ok = async (text: string) => {
@@ -57,10 +60,11 @@ export function OtOperadores({ company }: { company: OtCompanyAccess }) {
     setBusy('nuevo');
     setAviso(null);
     try {
-      await otSend('/api/bitacora-proceso/operadores', 'POST', { company: company.idCompany, nombre, documento: documento || undefined });
+      await otSend('/api/bitacora-proceso/operadores', 'POST', { company: company.idCompany, nombre, documento: documento || undefined, tipo });
       await ok(`Operario «${nombre.trim()}» agregado.`);
       setNombre('');
       setDocumento('');
+      setTipo('OPERARIO');
     } catch (e) {
       setAviso({ ok: false, text: e instanceof Error ? e.message : String(e) });
     } finally {
@@ -92,6 +96,7 @@ export function OtOperadores({ company }: { company: OtCompanyAccess }) {
         <Stack gap='sm'>
           <TextInput size='md' label='Nombre completo' required maxLength={OT_LIMITS.operadorNombre} value={nombre} onChange={(e) => setNombre(e.currentTarget.value)} data-testid='ot-operador-nombre' />
           <TextInput size='md' label='Documento (opcional)' maxLength={OT_LIMITS.operadorDocumento} value={documento} onChange={(e) => setDocumento(e.currentTarget.value)} data-testid='ot-operador-documento' />
+          <SegmentedControl size='md' fullWidth value={tipo} onChange={setTipo} data={TIPOS_DATA} data-testid='ot-operador-tipo' />
           <Button size='lg' leftSection={<IconPlus size={20} />} onClick={agregar} loading={busy === 'nuevo'} disabled={!nombre.trim()} fullWidth data-testid='ot-operador-agregar'>
             Agregar operario
           </Button>
@@ -119,6 +124,7 @@ export function OtOperadores({ company }: { company: OtCompanyAccess }) {
                   <Stack gap='sm'>
                     <TextInput size='md' label='Nombre completo' maxLength={OT_LIMITS.operadorNombre} value={ed.nombre} onChange={(e) => setEditando({ ...ed, nombre: e.currentTarget.value })} />
                     <TextInput size='md' label='Documento (opcional)' maxLength={OT_LIMITS.operadorDocumento} value={ed.documento} onChange={(e) => setEditando({ ...ed, documento: e.currentTarget.value })} />
+                    <SegmentedControl size='md' fullWidth value={ed.tipo} onChange={(v) => setEditando({ ...ed, tipo: v })} data={TIPOS_DATA} />
                     <Group grow gap='sm'>
                       <Button variant='default' size='md' h={48} leftSection={<IconX size={18} />} onClick={() => setEditando(null)} disabled={busy !== null}>
                         Cancelar
@@ -129,7 +135,7 @@ export function OtOperadores({ company }: { company: OtCompanyAccess }) {
                         leftSection={<IconDeviceFloppy size={18} />}
                         loading={busy === o.id_operador}
                         disabled={!ed.nombre.trim()}
-                        onClick={() => cambiar(o.id_operador, { nombre: ed.nombre, documento: ed.documento }, `Operario «${ed.nombre.trim()}» actualizado.`)}
+                        onClick={() => cambiar(o.id_operador, { nombre: ed.nombre, documento: ed.documento, tipo: ed.tipo }, `Operario «${ed.nombre.trim()}» actualizado.`)}
                       >
                         Guardar
                       </Button>
@@ -142,10 +148,13 @@ export function OtOperadores({ company }: { company: OtCompanyAccess }) {
                       <Group gap={6} mt={4}>
                         <Badge variant='light' color={o.activo ? 'green' : 'gray'}>{o.activo ? 'Activo' : 'Inactivo'}</Badge>
                         {o.documento && <Badge variant='outline' color='gray'>Doc. {o.documento}</Badge>}
+                        {isOtTipoPersonal(o.tipo) && o.tipo !== 'OPERARIO' && (
+                          <Badge variant='light' color={OT_TIPO_PERSONAL_COLOR[o.tipo]}>{OT_TIPO_PERSONAL_LABEL[o.tipo]}</Badge>
+                        )}
                       </Group>
                     </div>
                     <Group gap='md' wrap='nowrap'>
-                      <Button variant='default' size='md' leftSection={<IconPencil size={18} />} disabled={busy !== null} onClick={() => setEditando({ id: o.id_operador, nombre: o.nombre, documento: o.documento ?? '' })}>
+                      <Button variant='default' size='md' leftSection={<IconPencil size={18} />} disabled={busy !== null} onClick={() => setEditando({ id: o.id_operador, nombre: o.nombre, documento: o.documento ?? '', tipo: isOtTipoPersonal(o.tipo) ? o.tipo : 'OPERARIO' })}>
                         Editar
                       </Button>
                       <Switch
@@ -278,7 +287,8 @@ interface Candidato {
   gestion: boolean;
 }
 
-const ROLES_DATA = OT_RESPONSABLE_ROLES.map((r) => ({ value: r, label: OT_ROL_LABEL[r] }));
+const TIPOS_DATA = OT_TIPOS_PERSONAL.map((t) => ({ value: t, label: OT_TIPO_PERSONAL_LABEL[t] }));
+const ROLES_DATA = OT_RESPONSABLE_ROLES_ASIGNABLES.map((r) => ({ value: r, label: OT_ROL_LABEL[r] }));
 
 /**
  * Responsables (2026-10-16): asignación por empresa de supervisor, inspector y jefe de
@@ -384,13 +394,13 @@ export function OtResponsables({ company }: { company: OtCompanyAccess }) {
         Responsables <Badge variant='light' ml={4}>{lista.filter((r) => r.activo).length} activos</Badge>
       </Title>
       <Text size='sm' c='dimmed'>
-        Al abrir y cerrar la bitácora solo se pueden elegir las personas asignadas aquí. En una misma bitácora el inspector es distinto de quien abre y del jefe de producción; el jefe puede abrir y cerrar su propia bitácora. No se borran: desactive a quien ya no cumple el rol.
+        Al abrir y cerrar la bitácora solo se pueden elegir las personas asignadas aquí. El jefe de producción puede abrir y cerrar su propia bitácora. No se borran: desactive a quien ya no cumple el rol.
       </Text>
       {loading && !data ? (
         <Loader />
       ) : (
         <Stack gap='sm' data-testid='ot-responsables-lista'>
-          {OT_RESPONSABLE_ROLES.map((r) => {
+          {OT_RESPONSABLE_ROLES_ASIGNABLES.map((r) => {
             const delRol = lista.filter((x) => x.rol === r);
             return (
               <Stack key={r} gap='xs' data-testid={`ot-responsables-${r}`}>

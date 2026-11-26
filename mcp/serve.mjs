@@ -64,6 +64,9 @@ loadDotEnv(join(__dirname, '.env'));
 // las CORREO_* se toman SOLO esas del .env del front (carpeta padre). Ninguna otra variable del front
 // entra al MCP, y las que ya estén definidas no se pisan.
 loadDotEnv(join(__dirname, '..', '.env'), 'CORREO_');
+// Agent-initiated messages (2026-11-24): the push secret is shared with the app, so it is read from
+// the front .env too (only CHAT_MCP_*), unless mcp/.env already defines it.
+loadDotEnv(join(__dirname, '..', '.env'), 'CHAT_MCP_');
 
 const { createApp } = await import('./dist/server.js');
 const { loadConfig } = await import('./dist/config.js');
