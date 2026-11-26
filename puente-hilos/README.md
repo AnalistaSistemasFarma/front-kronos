@@ -383,3 +383,13 @@ Con `HILOS_RUNNER=openclaw` la instancia atiende los proyectos de un agente de *
 - **Comandos:** `/ayuda` y `/clear`; los demás responden «no disponible» sin correr el modelo. «Sugerir equipo» devuelve un error claro.
 
 Variables: `HILOS_RUNNER`, `HILOS_OPENCLAW_BIN`, `HILOS_OPENCLAW_AGENTE`, `HILOS_OPENCLAW_PERFIL`, `HILOS_OPENCLAW_LOCAL`, `HILOS_OPENCLAW_SESION_PREFIJO`, `HILOS_OPENCLAW_OUTBOX`, `HILOS_OPENCLAW_AREA`, `HILOS_OPENCLAW_ACTIVIDAD` (ver `src/config.mjs → configOpenclaw`).
+
+## Nota del proyecto en el vault de Obsidian (2026-11-26)
+
+Regla de Nicolás Rivera (2026-11-26, proyecto 39): «aplica para todos los usuarios que usen proyectos: de aquí en adelante debe crear su proyecto bien ordenado en el Obsidian donde tiene su memoria o su vault». Código: `src/vault-proyectos.mjs`.
+
+- Después de cada turno con respuesta, el **puente** (no el modelo) actualiza UNA nota por proyecto en la carpeta `HILOS_VAULT_PROYECTOS_DIR` del vault del agente (por defecto `<HILOS_CONECTORES_AGENTE_PROYECTO>/proyectos/synerlink`; `no` la apaga; sin vault conocido, apagada) y el índice `Proyectos SynerLink.md`.
+- La nota se vuelve a encontrar por `synerlink_id` en el frontmatter (si renombran el proyecto, no se duplica). Secciones: **Estado** (la escribe el agente), **Ficha** (empresa, miembros, instrucciones, cronograma, vinculados, conversaciones), **Notas propias** (el puente nunca la toca) y **Bitácora** (una línea por turno, la más nueva arriba, máx. 300).
+- El agente actualiza el Estado escribiendo `./trabajo/nota-proyecto.md` (versión completa: Objetivo, Estado actual, Decisiones, Pendientes, Entregables). La versión vigente le llega en `./contexto/nota-proyecto.md`. El puente lo lee y lo borra, igual que las propuestas del cronograma.
+- Seguridad: nada que parezca un secreto se escribe (patrones de `memoria.mjs`); escritura atómica; no sigue enlaces simbólicos; nunca frena ni cambia la respuesta (si falla, queda en el log).
+- Vale para los dos runners (Claude Code y openclaw). En openclaw hay que fijar `HILOS_VAULT_PROYECTOS_DIR` (su workspace o vault).

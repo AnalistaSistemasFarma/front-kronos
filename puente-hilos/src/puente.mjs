@@ -57,6 +57,7 @@ import { crearClienteSynerLink } from './synerlink.mjs';
 import { crearMedidorCuota } from './cuota.mjs';
 import { carpetaAgenteOpenclaw, crearLectorCredencialOpenclaw } from './openclaw/credencial.mjs';
 import { crearArchivador, textoArchivarProyecto } from './archivar-proyecto.mjs';
+import { prepareVaultTurn, updateProjectNote, vaultHeaderText } from './vault-proyectos.mjs';
 import { prepararAdjuntos } from './adjuntos-salida.mjs';
 import { archivosDelTurno, archivosModificadosDesde, crearSupervisor, duracionLegible, errorSinReintento, PROMPT_CONTINUACION, PROMPT_REINTENTO_ERROR, textoAvisoProgreso, textoCorte, TEXTO_ERROR_FINAL, textoTiempoTurno } from './progreso.mjs';
 import { convertirHtmlAPdf, convertirMarcasPdf, recursosDePlugins, resolverChrome, textoPdf } from './pdf.mjs';
@@ -498,6 +499,8 @@ export function crearPuente({ cfg, synerlink, estado, correr = correrTurno, conv
         if (g.error) log(`conversación ${idConversation}: la guía del flujo de desarrollo no se cargó: ${g.error}`);
         bloqueGuia = g.bloque;
       }
+      // Project note in the agent's vault (vault-proyectos.mjs): current «Estado» to ./contexto.
+      const vault = prepareVaultTurn({ dir: cfg.vaultProyectos?.dir, rutas, contexto });
       escribirContexto({
         rutas,
         agente: agenteNombre,
@@ -518,7 +521,7 @@ export function crearPuente({ cfg, synerlink, estado, correr = correrTurno, conv
         bloquePdf: textoPdf({ disponible: Boolean(chromePdf), recursos }),
         bloqueTiempo: textoTiempoTurno({ topeMs: cfg.timeoutTurnoMs, avisoMs: cfg.avisoProgresoMs ?? 0 }),
         bloqueObjetivo: textoObjetivo(objetivo),
-        bloqueArchivar: archivador ? textoArchivarProyecto() : '',
+        bloqueArchivar: (archivador ? textoArchivarProyecto() : '') + (vault.ok ? vaultHeaderText({ file: vault.file }) : ''),
         // Con worktree (o con el índice de repos bajo demanda), las reglas del código ya dicen todo; sin él, el bloque de la política (lectura o «ninguno»).
         politicaTurno: codigo || indiceRepos ? { ...politicaTurno, bloque: '' } : politicaTurno,
       });
@@ -867,6 +870,12 @@ export function crearPuente({ cfg, synerlink, estado, correr = correrTurno, conv
         }
       } else {
         await synerlink.responder(idConversation, cuerpo);
+      }
+
+      // The project note in the agent's vault is updated after the reply; it never blocks it.
+      if (vault.ok && r.resultado?.ok) {
+        const nota = updateProjectNote({ dir: cfg.vaultProyectos.dir, rutas, contexto, agent: agenteNombre, idConversation, lote, reply: cuerpo, secret: codigo?.token ?? null });
+        if (!nota.ok || nota.reason) log(`conversación ${idConversation}: project note in the vault: ${nota.ok ? 'updated' : 'NOT updated'}${nota.reason ? ` (${nota.reason})` : ''}.`);
       }
 
       const fin = new Date();
