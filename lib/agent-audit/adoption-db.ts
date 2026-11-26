@@ -75,10 +75,11 @@ async function readKronos(): Promise<Omit<RawData, "snapshots" | "snapshotsAvail
       .request()
       .input("desde", sql.Date, HISTORY_START)
       .query(`
+        -- No STRING_AGG: KRONOSDB runs at compatibility level 130 (SQL Server 2016).
         SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
         SELECT u.id, u.createdAt, u.isActive, b.fecha AS deactivated_at,
-               (SELECT STRING_AGG(CAST(cu.id_company AS varchar(12)), ',') FROM dbo.company_user cu WHERE cu.id_user = u.id) AS companies,
-               (SELECT STRING_AGG(CAST(du.id_department AS varchar(12)), ',') FROM dbo.department_user du WHERE du.id_user = u.id) AS departments
+               STUFF((SELECT ',' + CAST(cu.id_company AS varchar(12)) FROM dbo.company_user cu WHERE cu.id_user = u.id FOR XML PATH('')), 1, 1, '') AS companies,
+               STUFF((SELECT ',' + CAST(du.id_department AS varchar(12)) FROM dbo.department_user du WHERE du.id_user = u.id FOR XML PATH('')), 1, 1, '') AS departments
         FROM dbo.[user] u
         LEFT JOIN (SELECT user_id, MAX(created_at) AS fecha FROM dbo.user_audit_log WHERE action = 'DEACTIVATE' GROUP BY user_id) b
           ON b.user_id = u.id
