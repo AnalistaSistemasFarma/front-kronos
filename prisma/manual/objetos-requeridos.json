@@ -1,5 +1,5 @@
 {
-  "_doc": "Objetos de KRONOSDB que el codigo usa por SQL directo y que NO estan en schema.prisma (verificar-esquema.ps1 no los ve). scripts/bluegreen/verificar-objetos-sql.cjs los comprueba en SOLO LECTURA antes del cambio de color: si falta alguno, el deploy se detiene y la version activa sigue atendiendo. Agregue aqui cada tabla o columna nueva que se cree con un SQL manual y que el codigo use sin Prisma. Pase completo 2026-11-09: + ventas-config-empresa, errores de IA y analisis de seguridad. 2026-11-18: + ANS de solicitudes (process_category.sla_*, request_sla_pause). 2026-11-24: + reglas por opción de flujos (consecutivo, ANS y responsable por opción). 2026-11-24: + acceso restringido de flujos (process_category.restricted_access/sgc_templates_only, process_category_editor, process_category_change_log). 2026-11-26: + task_process_category.linked_multiple.",
+  "_doc": "Objetos de KRONOSDB que el codigo usa por SQL directo y que NO estan en schema.prisma (verificar-esquema.ps1 no los ve). scripts/bluegreen/verificar-objetos-sql.cjs los comprueba en SOLO LECTURA antes del cambio de color: si falta alguno, el deploy se detiene y la version activa sigue atendiendo. Agregue aqui cada tabla o columna nueva que se cree con un SQL manual y que el codigo use sin Prisma. Pase completo 2026-11-09: + ventas-config-empresa, errores de IA y analisis de seguridad. 2026-11-18: + ANS de solicitudes (process_category.sla_*, request_sla_pause). 2026-11-24: + reglas por opción de flujos (consecutivo, ANS y responsable por opción). 2026-11-24: + acceso restringido de flujos (process_category.restricted_access/sgc_templates_only, process_category_editor, process_category_change_log). 2026-11-26: + task_process_category.linked_multiple. 2026-11-26: + fechas comprometidas y tareas diferidas (process_date_tracking, task_deferred, task_process_category.start_delay_days).",
   "columnas": [
     [
       "task_process_category",
@@ -80,6 +80,10 @@
     [
       "task_process_category",
       "linked_multiple"
+    ],
+    [
+      "task_process_category",
+      "start_delay_days"
     ]
   ],
   "tablas": [
@@ -103,6 +107,8 @@
     "task_option_assignee",
     "request_consecutive_counter",
     "process_category_editor",
-    "process_category_change_log"
+    "process_category_change_log",
+    "process_date_tracking",
+    "task_deferred"
   ]
 }

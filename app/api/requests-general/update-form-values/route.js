@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { checkCommittedDates } from '../../../../lib/workflow/followups';
 import { sql, withMssqlPool } from '../../../../lib/mssqlPool';
 import { fireConditionalTasksForRequest } from '../../../../lib/workflow/fireConditionalTasks.js';
 
@@ -106,6 +107,30 @@ export async function POST(req) {
       `);
       const conditionedFieldIds = new Set(condResult.recordset.map((r) => r.id_form_field));
 
+      // 2026-11-26: committed dates of an action plan — the committed date is not changed and only ONE extension.
+      const trackRequest = pool.request();
+      const trackParams = fieldIds.map((id, i) => {
+        trackRequest.input(`t${i}`, sql.Int, id);
+        return `@t${i}`;
+      });
+      const trackResult = await trackRequest.query(`
+        SELECT id_form_field, date_col, extension_col, status_col, done_value, warn_business_days, single_extension
+        FROM dbo.process_date_tracking WHERE id_form_field IN (${trackParams.join(', ')})
+      `);
+      for (const cfg of trackResult.recordset) {
+        const incoming = values.find((v) => parseInt(v.id_field, 10) === cfg.id_form_field);
+        if (!incoming) continue;
+        const prev = await pool
+          .request()
+          .input('r', sql.Int, Number(id_request))
+          .input('f', sql.Int, cfg.id_form_field)
+          .query('SELECT value_text FROM request_form_value WHERE id_request_general = @r AND id_form_field = @f');
+        const before = tableRowsOf(prev.recordset[0]?.value_text);
+        const after = tableRowsOf(incoming.value_text);
+        const problem = checkCommittedDates(before, after, { ...cfg, single_extension: Boolean(cfg.single_extension) }, bogotaToday());
+        if (problem) return NextResponse.json({ error: problem }, { status: 400 });
+      }
+
       const transaction = new sql.Transaction(pool);
       try {
         await transaction.begin();
@@ -167,4 +192,18 @@ export async function POST(req) {
       { status: 500 }
     );
   }
+}
+
+/** Rows of a table field value ({ rows: [...] } JSON); [] if empty or invalid. */
+function tableRowsOf(valueText) {
+  try {
+    const v = JSON.parse(String(valueText ?? ''));
+    return Array.isArray(v?.rows) ? v.rows : [];
+  } catch {
+    return [];
+  }
+}
+
+function bogotaToday() {
+  return new Date().toLocaleDateString('en-CA', { timeZone: 'America/Bogota' });
 }
