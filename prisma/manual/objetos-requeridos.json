@@ -1,5 +1,5 @@
 {
-  "_doc": "Objetos de KRONOSDB que el codigo usa por SQL directo y que NO estan en schema.prisma (verificar-esquema.ps1 no los ve). scripts/bluegreen/verificar-objetos-sql.cjs los comprueba en SOLO LECTURA antes del cambio de color: si falta alguno, el deploy se detiene y la version activa sigue atendiendo. Agregue aqui cada tabla o columna nueva que se cree con un SQL manual y que el codigo use sin Prisma. Pase completo 2026-11-09: + ventas-config-empresa, errores de IA y analisis de seguridad. 2026-11-18: + ANS de solicitudes (process_category.sla_*, request_sla_pause).",
+  "_doc": "Objetos de KRONOSDB que el codigo usa por SQL directo y que NO estan en schema.prisma (verificar-esquema.ps1 no los ve). scripts/bluegreen/verificar-objetos-sql.cjs los comprueba en SOLO LECTURA antes del cambio de color: si falta alguno, el deploy se detiene y la version activa sigue atendiendo. Agregue aqui cada tabla o columna nueva que se cree con un SQL manual y que el codigo use sin Prisma. Pase completo 2026-11-09: + ventas-config-empresa, errores de IA y analisis de seguridad. 2026-11-18: + ANS de solicitudes (process_category.sla_*, request_sla_pause). 2026-11-24: + acceso restringido de flujos (process_category.restricted_access/sgc_templates_only, process_category_editor, process_category_change_log).",
   "columnas": [
     [
       "task_process_category",
@@ -52,6 +52,14 @@
     [
       "process_category",
       "sla_updated_by"
+    ],
+    [
+      "process_category",
+      "restricted_access"
+    ],
+    [
+      "process_category",
+      "sgc_templates_only"
     ]
   ],
   "tablas": [
@@ -70,6 +78,8 @@
     "agent_security_finding",
     "task_doc_template",
     "request_generated_document",
-    "request_sla_pause"
+    "request_sla_pause",
+    "process_category_editor",
+    "process_category_change_log"
   ]
 }

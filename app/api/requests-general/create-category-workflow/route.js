@@ -1,4 +1,5 @@
 import sql from "mssql";
+import { requireFlowManager } from '../../../../lib/workflow/flowAccess';
 import sqlConfig from "../../../../dbconfig.js";
 
 export async function POST(req) {
@@ -10,6 +11,10 @@ export async function POST(req) {
       id_user,
       id_company
     } = body;
+
+    // 2026-11-24: designing flows requires the workflow-administration permission.
+    const guard = await requireFlowManager();
+    if (guard instanceof Response) return guard;
 
     if (!id_company || !id_user || !category) {
       return new Response(

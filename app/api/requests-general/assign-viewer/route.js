@@ -1,4 +1,5 @@
 import sql from "mssql";
+import { logFlowChange, requireFlowEditor } from '../../../../lib/workflow/flowAccess';
 import sqlConfig from "../../../../dbconfig.js";
 import { NextResponse } from "next/server";
 
@@ -45,6 +46,10 @@ export async function POST(req) {
     const body = await req.json();
 
     const { observers, id_process_category } = body;
+
+    // 2026-11-24: flow configuration — only who administers flows (and, if restricted, its editors).
+    const guard = await requireFlowEditor(id_process_category);
+    if (guard instanceof Response) return guard;
 
     if (!Array.isArray(observers) || observers.length === 0 || !id_process_category) {
       return new Response(
@@ -94,6 +99,7 @@ export async function POST(req) {
       }
 
       await transaction.commit();
+      await logFlowChange(Number(id_process_category), guard.email, 'observadores', `${Array.isArray(observers) ? observers.length : 0} observadores`);
 
       return new Response(
         JSON.stringify({
