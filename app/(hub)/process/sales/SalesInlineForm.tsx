@@ -2,7 +2,7 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import type ExcelJS from 'exceljs';
-import { ActionIcon, Alert, Button, Group, Loader, NumberInput, ScrollArea, SegmentedControl, Select, Stack, Table, Text, TextInput, Textarea } from '@mantine/core';
+import { ActionIcon, Alert, Button, Group, Loader, NumberInput, Pagination, ScrollArea, SegmentedControl, Select, Stack, Table, Text, TextInput, Textarea } from '@mantine/core';
 import { IconDownload, IconFileSpreadsheet, IconPlus, IconSend, IconTrash } from '@tabler/icons-react';
 import { LINE_HEADERS, MAX_IMPORT_LINES, rowsToLines } from '../../../../lib/sales/linesImport';
 import toast from 'react-hot-toast';
@@ -77,6 +77,10 @@ export default function SalesInlineForm({ companyId, onDone, editDocEntry, initi
   const [pickRemark, setPickRemark] = useState('');
   const [opts, setOpts] = useState<CompanyOptions>({ pedidoDirecto: false, descripcionEditable: false, exigeOc: true });
   const [importing, setImporting] = useState(false);
+  /** Página de líneas visible: con cientos de líneas (OC grandes) dibujar todas cuelga el navegador. */
+  const [linePage, setLinePage] = useState(1);
+  /** Bodega elegida para asignar masivamente. */
+  const [bulkWh, setBulkWh] = useState('');
   const [companyName, setCompanyName] = useState('');
   /** Avisos de la oferta montada desde el PDF (lo que no se pudo y lo que hay que revisar). */
   const [pdfAvisos, setPdfAvisos] = useState<string[] | null>(null);
@@ -250,7 +254,26 @@ export default function SalesInlineForm({ companyId, onDone, editDocEntry, initi
     }
   };
 
-  const total = lines.reduce((a, l) => a + Number(l.Quantity || 0) * Number(l.UnitPrice || 0), 0);
+  const lineTotal = (l: Line) => Number(l.Quantity || 0) * Number(l.UnitPrice || 0);
+  const total = lines.reduce((a, l) => a + lineTotal(l), 0);
+  const LINES_PER_PAGE = 50;
+  const linePages = Math.max(1, Math.ceil(lines.length / LINES_PER_PAGE));
+  const curPage = Math.min(linePage, linePages);
+  const pageStart = (curPage - 1) * LINES_PER_PAGE;
+  const money = (v: number) => `$ ${Math.round(v * 100) / 100 === Math.round(v) ? Math.round(v).toLocaleString('es-CO') : v.toLocaleString('es-CO', { maximumFractionDigits: 2 })}`;
+  /** Líneas con artículo y sin bodega (llegan así del PDF o del Excel cuando el artículo no tiene bodega por defecto). */
+  const sinBodega = lines.filter((l) => !empty(l.ItemCode) && empty(l.WarehouseCode)).length;
+  /** Asignar una bodega a varias líneas de una vez (Nicolás Rivera, 2026-11-24). */
+  const asignarBodega = (wh: string, soloVacias: boolean) => {
+    if (!wh.trim()) {
+      toast.error('Elija primero la bodega.');
+      return;
+    }
+    const aplica = (l: Line) => !empty(l.ItemCode) && !(soloVacias && !empty(l.WarehouseCode));
+    const n = lines.filter(aplica).length;
+    setLines((prev) => prev.map((l) => (aplica(l) ? { ...l, WarehouseCode: wh.trim() } : l)));
+    toast.success(`Bodega ${wh.trim()} asignada a ${n} línea(s).`);
+  };
 
   const submit = async () => {
     setTried(true);
@@ -335,6 +358,7 @@ export default function SalesInlineForm({ companyId, onDone, editDocEntry, initi
     }
     // Se suman a las filas que ya tenga la oferta (las vacías se descartan).
     setLines((prev) => [...prev.filter((l) => !empty(l.ItemCode)), ...(r.lines as Line[])]);
+    setLinePage(1);
     if (r.numeroOrdenCompra) setNumAtCard(r.numeroOrdenCompra);
     if (r.fechaEntrega && r.fechaEntrega >= today()) setDueDate(r.fechaEntrega);
     const revisar = (r.lines as Line[]).filter((l) => String(l.aiNote ?? '').startsWith('Revisar')).length;
@@ -439,9 +463,28 @@ export default function SalesInlineForm({ companyId, onDone, editDocEntry, initi
       </Group>
 
       <div>
-        <Text fw={600} size="sm" mb={4}>
-          Artículos
-        </Text>
+        <Group justify="space-between" align="flex-end" mb={6} wrap="wrap" gap="xs">
+          <Text fw={600} size="sm">
+            Artículos · {lines.filter((l) => !empty(l.ItemCode)).length} línea(s) · Total {money(total)}
+          </Text>
+          <Group gap="xs" align="flex-end" wrap="wrap">
+            <div style={{ width: 180 }}>
+              <SapLookupInput size="xs" companyId={companyId} endpoint="/api/sales/lookup" kind="warehouse" value={bulkWh}
+                onChange={(v) => setBulkWh(v)} onSelect={(o) => setBulkWh(o.value)} ariaLabel="Bodega para varias líneas" />
+            </div>
+            <Button size="xs" variant="light" disabled={!bulkWh.trim() || !sinBodega} onClick={() => asignarBodega(bulkWh, true)}>
+              Asignar a las líneas sin bodega{sinBodega ? ` (${sinBodega})` : ''}
+            </Button>
+            <Button size="xs" variant="subtle" disabled={!bulkWh.trim()} onClick={() => asignarBodega(bulkWh, false)}>
+              A todas
+            </Button>
+          </Group>
+        </Group>
+        {sinBodega > 0 && (
+          <Alert color="orange" variant="light" p="xs" mb={6}>
+            {sinBodega} línea(s) sin bodega. Elija la bodega arriba y use «Asignar a las líneas sin bodega».
+          </Alert>
+        )}
         <ScrollArea type="auto" offsetScrollbars>
           <Table withTableBorder withColumnBorders verticalSpacing={4} horizontalSpacing={6} style={{ minWidth: 1100 }}>
             <Table.Thead>
@@ -452,13 +495,16 @@ export default function SalesInlineForm({ companyId, onDone, editDocEntry, initi
                 <Table.Th style={{ minWidth: 110 }}>Cantidad <Text span c="red">*</Text></Table.Th>
                 <Table.Th style={{ minWidth: 140 }}>Precio de lista</Table.Th>
                 <Table.Th style={{ minWidth: 140 }}>Precio <Text span c="red">*</Text></Table.Th>
+                <Table.Th style={{ minWidth: 130, textAlign: 'right' }}>Total línea</Table.Th>
                 <Table.Th style={{ minWidth: 150 }}>Bodega <Text span c="red">*</Text></Table.Th>
                 <Table.Th style={{ minWidth: 130 }}>IVA</Table.Th>
                 <Table.Th style={{ width: 40 }} />
               </Table.Tr>
             </Table.Thead>
             <Table.Tbody>
-              {lines.map((l, i) => (
+              {lines.slice(pageStart, pageStart + LINES_PER_PAGE).map((l, j) => {
+                const i = pageStart + j;
+                return (
                 <Table.Tr key={i}>
                   <Table.Td>
                     <Text size="xs" fw={600}>{i + 1}</Text>
@@ -513,6 +559,9 @@ export default function SalesInlineForm({ companyId, onDone, editDocEntry, initi
                       <Text size="xs" c="orange">Distinto a la lista: puede requerir autorización de precio</Text>
                     )}
                   </Table.Td>
+                  <Table.Td style={{ verticalAlign: 'top', textAlign: 'right', whiteSpace: 'nowrap' }}>
+                    <Text size="sm" fw={500} pt={6}>{lineTotal(l) ? money(lineTotal(l)) : '—'}</Text>
+                  </Table.Td>
                   <Table.Td style={{ verticalAlign: 'top' }}>
                     <SapLookupInput size="xs" companyId={companyId} endpoint="/api/sales/lookup" kind="warehouse" value={String(l.WarehouseCode ?? '')}
                       onChange={(v) => setLine(i, { WarehouseCode: v })} onSelect={(o) => setLine(i, { WarehouseCode: o.value })}
@@ -529,13 +578,20 @@ export default function SalesInlineForm({ companyId, onDone, editDocEntry, initi
                     </ActionIcon>
                   </Table.Td>
                 </Table.Tr>
-              ))}
+                );
+              })}
             </Table.Tbody>
           </Table>
         </ScrollArea>
+        {linePages > 1 && (
+          <Group justify="center" mt="xs" gap="xs">
+            <Pagination size="sm" total={linePages} value={curPage} onChange={setLinePage} />
+            <Text size="xs" c="dimmed">Líneas {pageStart + 1}–{Math.min(pageStart + LINES_PER_PAGE, lines.length)} de {lines.length}</Text>
+          </Group>
+        )}
         <Group justify="space-between" mt="sm">
           <Group gap="xs">
-            <Button variant="light" leftSection={<IconPlus size={16} />} onClick={() => setLines((p) => [...p, {}])}>
+            <Button variant="light" leftSection={<IconPlus size={16} />} onClick={() => { setLines((p) => [...p, {}]); setLinePage(Math.ceil((lines.length + 1) / LINES_PER_PAGE)); }}>
               Agregar artículo
             </Button>
             <Button variant="subtle" leftSection={<IconFileSpreadsheet size={16} />} loading={importing} onClick={() => (cardCode ? fileRef.current?.click() : toast.error('Elija primero el cliente.'))}>
@@ -546,7 +602,7 @@ export default function SalesInlineForm({ companyId, onDone, editDocEntry, initi
             </Button>
             <input ref={fileRef} type="file" accept=".xlsx" hidden onChange={(e) => importExcel(e.currentTarget.files?.[0] ?? null)} />
           </Group>
-          <Text fw={600}>Total antes de impuestos: {total.toLocaleString('es-CO')}</Text>
+          <Text fw={700}>Total del documento (antes de impuestos): {money(total)}</Text>
         </Group>
       </div>
 

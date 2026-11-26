@@ -16,7 +16,9 @@ const CHUNK = 25;
 
 export async function validateLines(
   sap: SapSession,
-  a: { cardCode: string; input: ImportLine[]; matchByDescription: boolean; descripcionEditable?: boolean; priceListDefault?: number | null; defaultWarehouse?: string | null }
+  a: { cardCode: string; input: ImportLine[]; matchByDescription: boolean; descripcionEditable?: boolean; priceListDefault?: number | null; defaultWarehouse?: string | null;
+    /** Empresa de servicios (descripción editable): si la descripción no encuentra nada, los candidatos son todos sus artículos de venta. */
+    servicios?: boolean }
 ): Promise<{ lines: ValidatedLine[]; errors: { row: number; error: string }[]; pending: PendingLine[] }> {
   const { cardCode, input, matchByDescription } = a;
   const bpList = await customerPriceList(sap, cardCode);
@@ -42,17 +44,35 @@ export async function validateLines(
   const lines: Record<string, unknown>[] = [];
   const errors: { row: number; error: string }[] = [];
   const pending: PendingLine[] = [];
+  /** Candidatos por palabras de búsqueda: en una OC grande muchas líneas comparten las mismas (una consulta a SAP por grupo). */
+  const candidatesCache = new Map<string, { ItemCode: string; ItemName: string }[]>();
   for (const l of input) {
-    const it = l.ItemCode ? items.get(String(l.ItemCode)) : undefined;
+    const found = l.ItemCode ? items.get(String(l.ItemCode)) : undefined;
+    // Del PDF, un código que existe pero no es de venta (p. ej. el código de COMPRA del cliente, como SERV0000 de
+    // Farmalógica en Kelab) se trata como si no viniera: se busca el artículo por la descripción.
+    const noVendible = found && (found.Frozen === 'tYES' || found.SalesItem !== 'tYES');
+    const it = matchByDescription && noVendible && l.ItemDescription ? undefined : found;
     if (!it && matchByDescription && l.ItemDescription) {
       // Candidatos por descripción (todas las palabras útiles), solo artículos de venta activos.
       const terms = searchTerms(l.ItemDescription);
       let candidates: { ItemCode: string; ItemName: string }[] = [];
+      const cacheKey = terms.join('|');
+      const cached = candidatesCache.get(cacheKey);
+      if (cached) {
+        pending.push({ row: l.row, input: l, candidates: cached });
+        continue;
+      }
       if (terms.length) {
         const f = terms.map((t) => `contains(ItemName,${q(t)})`).join(' and ');
         const r = await sapGet<{ value?: { ItemCode: string; ItemName: string }[] }>(sap, `Items?$select=ItemCode,ItemName&$filter=${f} and Frozen eq 'tNO' and SalesItem eq 'tYES'&$top=12`, { Prefer: 'odata.maxpagesize=12' }).catch(() => ({ value: [] }));
         candidates = (r.value ?? []).map((x) => ({ ItemCode: String(x.ItemCode), ItemName: String(x.ItemName ?? '') }));
       }
+      if (!candidates.length && a.servicios) {
+        // Pocos artículos genéricos de servicio (Kelab, Meditrack): se ofrecen todos para emparejar por cobertura.
+        const r = await sapGet<{ value?: { ItemCode: string; ItemName: string }[] }>(sap, `Items?$select=ItemCode,ItemName&$filter=Frozen eq 'tNO' and SalesItem eq 'tYES'&$top=30`, { Prefer: 'odata.maxpagesize=30' }).catch(() => ({ value: [] }));
+        candidates = (r.value ?? []).map((x) => ({ ItemCode: String(x.ItemCode), ItemName: String(x.ItemName ?? '') }));
+      }
+      candidatesCache.set(cacheKey, candidates);
       pending.push({ row: l.row, input: l, candidates });
       continue;
     }

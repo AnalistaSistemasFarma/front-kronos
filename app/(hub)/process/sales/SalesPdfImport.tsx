@@ -2,9 +2,9 @@
 
 import { useEffect, useState } from 'react';
 import { Alert, Badge, Button, Checkbox, Group, Menu, Modal, Progress, ScrollArea, Stack, Table, Text, Tooltip } from '@mantine/core';
-import { IconAlertCircle, IconRobot, IconSparkles } from '@tabler/icons-react';
+import { IconAlertCircle, IconCircleCheck, IconLoader2, IconRobot, IconSparkles } from '@tabler/icons-react';
 import toast from 'react-hot-toast';
-import { agentOrderInstruction, agentReplyJson, chunkOrderText, mergePdfOrders, PDF_ORDER_SCHEMA, PDF_ORDER_SYSTEM_PROMPT, parsePdfOrder, pdfOrderChunkPrompt, tableHeaderRow, type PdfOrderResult } from '../../../../lib/sales/pdfOrder';
+import { agentOrderInstruction, assembleAgentReply, chunkOrderText, isJsonAttachment, rawLineCount, mergePdfOrders, PDF_ORDER_SCHEMA, PDF_ORDER_SYSTEM_PROMPT, parsePdfOrder, pdfOrderChunkPrompt, tableHeaderRow, type PdfOrderResult } from '../../../../lib/sales/pdfOrder';
 
 /**
  * «Montar oferta desde PDF»: lee la orden de compra del cliente con la IA NATIVA del navegador (Prompt API,
@@ -18,8 +18,13 @@ type Line = Record<string, unknown>;
 type Support = 'checking' | 'unsupported' | 'ready';
 type Phase = 'idle' | 'leyendo' | 'descargando' | 'analizando' | 'agente' | 'montando' | 'simulacion' | 'error';
 type ChatAgent = { idAgent: number; code: string; displayName: string; companies: { idCompany: number }[] };
-/** Espera máxima de la respuesta del agente. */
-const AGENT_TIMEOUT_MS = 6 * 60 * 1000;
+/** Espera máxima de la respuesta del agente: si está ocupado en otra conversación hace fila, así que no se falla pronto. */
+const AGENT_TIMEOUT_MS = 30 * 60 * 1000;
+/** Desde aquí, si el agente no está trabajando en la OC, se avisa que parece ocupado y que se puede cerrar la ventana. */
+const AGENT_BUSY_HINT_MS = 2 * 60 * 1000;
+/** A long answer arrives split in several chat messages: wait this long for the missing parts before giving up. */
+const AGENT_PARTS_GRACE_MS = 45 * 1000;
+type ReplyMessage = { id: number; role: string; body: string; attachments?: { fileName: string; contentType: string | null; downloadUrl: string }[] };
 const money = (v: unknown) => (v == null || v === '' ? '—' : `$ ${Number(v).toLocaleString('es-CO')}`);
 
 export interface PdfOffer {
@@ -92,12 +97,25 @@ export default function SalesPdfImport({ companyId, companyName, cardCode, onLoa
   const [error, setError] = useState('');
   /** Simulación: lo que se montaría, antes de agregarlo a la oferta (Nicolás Rivera, 2026-11-09). */
   const [sim, setSim] = useState<(Omit<PdfOffer, 'lines'> & { lines: (Line & { include: boolean })[] }) | null>(null);
+  /** Filas visibles de la simulación: se dibujan de a 100 (una OC de 360 líneas colgaba el navegador). */
+  const [simShown, setSimShown] = useState(100);
   /** Avance de la lectura por fragmentos (OC de varias hojas). */
   const [step, setStep] = useState<{ k: number; n: number } | null>(null);
-  /** Agentes del chat asignados al usuario en esta empresa («Montar con agente»). */
+  /** Agentes del chat asignados al usuario, de CUALQUIER empresa («Montar con agente»; Nicolás Rivera, 2026-11-24:
+   *  el agente solo lee el PDF, así que no tiene que ser de la empresa de la oferta). El chat valida el permiso. */
   const [agents, setAgents] = useState<ChatAgent[]>([]);
   const [agent, setAgent] = useState<ChatAgent | null>(null);
   const [conversationId, setConversationId] = useState<number | null>(null);
+  /** Estado en vivo del agente mientras lee la OC (el mismo indicador del chat: «Pensando…», «Leyendo el adjunto…»). */
+  const [live, setLive] = useState<{ sentAt: number; delivered: boolean; state: string | null; label: string | null; tasks: { desc: string }[] } | null>(null);
+  const [now, setNow] = useState(Date.now());
+  /** Ventana cerrada mientras el agente trabaja: la espera sigue y al responder se abre la simulación. */
+  const [minimized, setMinimized] = useState(false);
+  useEffect(() => {
+    if (!live) return;
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [live]);
 
   useEffect(() => {
     let cancelled = false;
@@ -105,7 +123,9 @@ export default function SalesPdfImport({ companyId, companyName, cardCode, onLoa
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => {
         if (cancelled || !d?.canUseChat) return;
-        setAgents(((d.agents ?? []) as ChatAgent[]).filter((a) => a.companies?.some((c) => String(c.idCompany) === String(companyId))));
+        // Primero los de la empresa de la oferta; después los demás.
+        const delaEmpresa = (a: ChatAgent) => a.companies?.some((c) => String(c.idCompany) === String(companyId));
+        setAgents([...((d.agents ?? []) as ChatAgent[])].sort((x, y) => Number(delaEmpresa(y)) - Number(delaEmpresa(x))));
       })
       .catch(() => undefined);
     return () => {
@@ -216,6 +236,7 @@ export default function SalesPdfImport({ companyId, companyName, cardCode, onLoa
       if (!res.ok) throw new Error(d.error || 'No se pudo montar la oferta con los datos del PDF');
       if (!d.customer) throw new Error((d.avisos ?? []).join(' ') || 'No se identificó el cliente del PDF.');
       if (!(d.lines ?? []).length) throw new Error(`Se identificó el cliente ${d.customer.CardName}, pero ninguna línea del PDF se encontró en SAP. ${(d.avisos ?? []).join(' ')}`);
+      setSimShown(100);
       setSim({
         customer: d.customer, lines: (d.lines as Line[]).map((l) => ({ ...l, include: true })), numeroOrdenCompra: r.numeroOrdenCompra,
         fechaEntrega: r.fechaEntrega, avisos: [...avisosPrevios, ...(d.avisos ?? [])], leidas: r.lineas.length,
@@ -246,25 +267,73 @@ export default function SalesPdfImport({ companyId, companyName, cardCode, onLoa
       const md = await m.json().catch(() => ({}));
       if (!m.ok || !md.message?.id) throw new Error(md.error || `No se pudo enviar la OC a ${a.displayName}.`);
       const sentId = Number(md.message.id);
-      // Espera la respuesta del agente (mensaje posterior al nuestro que no sea del usuario).
+      // Espera la respuesta del agente (mensaje posterior al nuestro que no sea del usuario) y, mientras tanto,
+      // muestra su estado en vivo (recibido, qué está haciendo, subtareas).
       const start = Date.now();
+      setLive({ sentAt: start, delivered: false, state: null, label: null, tasks: [] });
       let reply: string | null = null;
+      let incompleteSince: number | null = null;
+      let seenParts = 0;
+      const triedFiles = new Set<string>();
       while (Date.now() - start < AGENT_TIMEOUT_MS) {
-        await new Promise((res) => setTimeout(res, 5000));
-        const g = await fetch(`/api/chat/conversations/${convId}/messages?limit=10`, { cache: 'no-store' });
+        await new Promise((res) => setTimeout(res, 3000));
+        const [g, st] = await Promise.all([
+          fetch(`/api/chat/conversations/${convId}/messages?limit=30`, { cache: 'no-store' }),
+          fetch(`/api/chat/conversations/${convId}/status`, { cache: 'no-store' }).catch(() => null),
+        ]);
         const gd = await g.json().catch(() => ({}));
-        const found = ((gd.messages ?? []) as { id: number; role: string; body: string }[])
-          .filter((x) => x.id > sentId && x.role !== 'user' && /\{[\s\S]*\}/.test(x.body ?? ''))
-          .sort((x, y) => x.id - y.id)[0];
-        if (found) {
-          reply = found.body;
+        const sd = st && st.ok ? await st.json().catch(() => ({})) : {};
+        const mine = ((gd.messages ?? []) as { id: number; deliveredAt?: string | null }[]).find((x) => x.id === sentId);
+        setLive((prev) => prev && {
+          ...prev,
+          delivered: prev.delivered || Boolean(mine?.deliveredAt) || (sd.status?.state && sd.status.state !== 'idle'),
+          state: sd.status?.state ?? prev.state,
+          label: sd.status?.label ?? null,
+          tasks: Array.isArray(sd.status?.tasks) ? sd.status.tasks : [],
+        });
+        // Agent messages after the request, in order. A long answer comes split in several messages (the
+        // channel cuts at 40,000 characters), so they are joined until the JSON parses.
+        const after = ((gd.messages ?? []) as ReplyMessage[]).filter((x) => x.id > sentId && x.role === 'agent').sort((x, y) => x.id - y.id);
+        // The agent may also send the JSON as an attached .json file.
+        for (const f of after.flatMap((x) => x.attachments ?? []).filter(isJsonAttachment)) {
+          if (triedFiles.has(f.downloadUrl)) continue;
+          triedFiles.add(f.downloadUrl);
+          const fr = await fetch(f.downloadUrl, { cache: 'no-store' }).catch(() => null);
+          const text = fr && fr.ok ? await fr.text().catch(() => '') : '';
+          const fromFile = assembleAgentReply([text]);
+          if (fromFile.status === 'ok') {
+            reply = fromFile.json;
+            break;
+          }
+        }
+        if (reply) break;
+        const assembled = assembleAgentReply(after.map((x) => x.body ?? ''));
+        if (assembled.status === 'ok') {
+          reply = assembled.json;
           break;
+        }
+        if (assembled.status === 'incomplete') {
+          // Restart the grace period every time a new part arrives.
+          if (assembled.parts !== seenParts) {
+            seenParts = assembled.parts;
+            incompleteSince = Date.now();
+          }
+          const idle = !sd.status?.state || sd.status.state === 'idle';
+          if (incompleteSince && idle && Date.now() - incompleteSince > AGENT_PARTS_GRACE_MS) {
+            throw new Error(`${a.displayName} respondió en ${assembled.parts === 1 ? 'un mensaje' : `${assembled.parts} mensajes`}, pero el JSON llegó incompleto (no se pudo leer). Revise la respuesta en el chat e intente de nuevo o use el cargue desde Excel.`);
+          }
         }
       }
       if (!reply) throw new Error(`${a.displayName} no respondió en ${AGENT_TIMEOUT_MS / 60000} minutos. Cuando responda, verá su lectura en el chat; puede intentarlo de nuevo.`);
-      const r = parsePdfOrder(agentReplyJson(reply));
-      await resolveAndSimulate(r, []);
+      setLive(null);
+      setMinimized(false);
+      const r = parsePdfOrder(reply);
+      const leidas = rawLineCount(reply);
+      const descartadas = leidas - r.lineas.length;
+      const avisos = descartadas > 0 ? [`${a.displayName} leyó ${leidas} líneas; ${descartadas} se descartaron por no tener cantidad válida o descripción/código.`] : [];
+      await resolveAndSimulate(r, avisos);
     } catch (e) {
+      setLive(null);
       setError((e as Error).message);
       setPhase('error');
     }
@@ -295,6 +364,11 @@ export default function SalesPdfImport({ companyId, companyName, cardCode, onLoa
           Montar oferta desde PDF
         </Button>
       </Tooltip>
+      {phase === 'agente' && minimized && (
+        <Button variant="subtle" color="indigo" size="xs" leftSection={<IconLoader2 size={14} className="animate-spin" />} onClick={() => setMinimized(false)}>
+          {agent?.displayName} leyendo la OC…
+        </Button>
+      )}
       <input id={inputId} type="file" accept="application/pdf" hidden onChange={(e) => { analyze(e.currentTarget.files?.[0] ?? null); e.currentTarget.value = ''; }} />
       {agents.length > 0 && (
         <>
@@ -323,8 +397,41 @@ export default function SalesPdfImport({ companyId, companyName, cardCode, onLoa
         </>
       )}
 
-      <Modal opened={phase !== 'idle'} onClose={() => !working && setPhase('idle')} size={phase === 'simulacion' ? 'xl' : 'md'} title={<Group gap={6}><IconSparkles size={18} /><Text fw={700}>{agent && (phase === 'agente' || conversationId) ? `Oferta desde el PDF (con ${agent.displayName})` : 'Oferta desde el PDF (IA local)'}</Text></Group>}
-        closeOnClickOutside={!working} withCloseButton={!working} zIndex={1300}>
+      <Modal opened={phase !== 'idle' && !(phase === 'agente' && minimized)} onClose={() => (phase === 'agente' ? setMinimized(true) : !working && setPhase('idle'))} size={phase === 'simulacion' ? 'xl' : 'md'} title={<Group gap={6}><IconSparkles size={18} /><Text fw={700}>{agent && (phase === 'agente' || conversationId) ? `Oferta desde el PDF (con ${agent.displayName})` : 'Oferta desde el PDF (IA local)'}</Text></Group>}
+        closeOnClickOutside={!working || phase === 'agente'} withCloseButton={!working || phase === 'agente'} zIndex={1300}>
+        {phase === 'agente' && live && (
+          <Stack gap={6} mb="sm">
+            {(() => {
+              const seg = Math.floor((now - live.sentAt) / 1000);
+              const t = `${Math.floor(seg / 60)}:${String(seg % 60).padStart(2, '0')}`;
+              const paso = (ok: boolean, activo: boolean, texto: string) => (
+                <Group gap={6} wrap="nowrap">
+                  {ok ? <IconCircleCheck size={16} color="var(--mantine-color-teal-6)" /> : activo ? <IconLoader2 size={16} className="animate-spin" /> : <IconLoader2 size={16} opacity={0.3} />}
+                  <Text size="sm" c={ok || activo ? undefined : 'dimmed'}>{texto}</Text>
+                </Group>
+              );
+              const trabajando = live.state === 'thinking' || live.state === 'tool';
+              return (
+                <>
+                  {paso(true, false, `Orden de compra enviada a ${agent?.displayName ?? 'el agente'}`)}
+                  {paso(live.delivered, !live.delivered, live.delivered ? `${agent?.displayName ?? 'El agente'} la recibió` : 'Esperando a que el agente la reciba…')}
+                  {paso(false, live.delivered, trabajando ? `${live.label || (live.state === 'tool' ? 'Usando una herramienta…' : 'Pensando…')}` : live.delivered ? 'Leyendo la orden de compra…' : 'Leer la orden de compra')}
+                  {live.tasks.length > 0 && (
+                    <Stack gap={2} pl={24}>
+                      {live.tasks.slice(0, 4).map((tk, i) => <Text key={i} size="xs" c="dimmed">• {tk.desc}</Text>)}
+                    </Stack>
+                  )}
+                  <Text size="xs" c="dimmed">Tiempo: {t}</Text>
+                  {now - live.sentAt > AGENT_BUSY_HINT_MS && !(live.state === 'thinking' || live.state === 'tool') && (
+                    <Alert color="blue" variant="light" p="xs">
+                      {agent?.displayName ?? 'El agente'} parece ocupado en otra conversación: atiende la OC cuando termine. Puede cerrar esta ventana y seguir; cuando responda, se abre la simulación.
+                    </Alert>
+                  )}
+                </>
+              );
+            })()}
+          </Stack>
+        )}
         {working && (
           <Stack gap="xs">
             <Text size="sm" c="dimmed">
@@ -355,10 +462,11 @@ export default function SalesPdfImport({ companyId, companyName, cardCode, onLoa
                       onChange={(e) => { const c = e.currentTarget.checked; setSim({ ...sim, lines: sim.lines.map((l) => ({ ...l, include: c })) }); }} /></Table.Th>
                     <Table.Th title="Renglón de la OC">#</Table.Th><Table.Th>Artículo en SAP</Table.Th><Table.Th style={{ textAlign: 'right' }}>Cantidad</Table.Th>
                     <Table.Th style={{ textAlign: 'right' }}>Precio OC</Table.Th><Table.Th style={{ textAlign: 'right' }}>Precio lista</Table.Th>
+                    <Table.Th style={{ textAlign: 'right' }}>Total línea</Table.Th>
                   </Table.Tr>
                 </Table.Thead>
                 <Table.Tbody>
-                  {sim.lines.map((l, i) => (
+                  {sim.lines.slice(0, simShown).map((l, i) => (
                     <Table.Tr key={i}>
                       <Table.Td><Checkbox checked={l.include} onChange={(e) => { const c = e.currentTarget.checked; setSim({ ...sim, lines: sim.lines.map((x, j) => (j === i ? { ...x, include: c } : x)) }); }} /></Table.Td>
                       <Table.Td><Text size="xs" c="dimmed">{String(l.row ?? i + 1)}</Text></Table.Td>
@@ -369,11 +477,24 @@ export default function SalesPdfImport({ companyId, companyName, cardCode, onLoa
                       <Table.Td style={{ textAlign: 'right' }}>{Number(l.Quantity).toLocaleString('es-CO')}</Table.Td>
                       <Table.Td style={{ textAlign: 'right' }}>{money(l.UnitPrice)}</Table.Td>
                       <Table.Td style={{ textAlign: 'right' }}>{money(l.ListPrice)}</Table.Td>
+                      <Table.Td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}><Text size="sm" fw={500} c={l.include ? undefined : 'dimmed'}>{money(Number(l.Quantity ?? 0) * Number(l.UnitPrice ?? 0))}</Text></Table.Td>
                     </Table.Tr>
                   ))}
                 </Table.Tbody>
               </Table>
+              {sim.lines.length > simShown && (
+                <Group justify="center" my="xs">
+                  <Button size="xs" variant="light" onClick={() => setSimShown((n) => n + 100)}>
+                    Mostrar 100 más (se ven {simShown} de {sim.lines.length})
+                  </Button>
+                </Group>
+              )}
             </ScrollArea.Autosize>
+            <Group justify="flex-end">
+              <Text fw={700}>
+                Total del documento (antes de impuestos): {money(sim.lines.filter((l) => l.include).reduce((a, l) => a + Number(l.Quantity ?? 0) * Number(l.UnitPrice ?? 0), 0))}
+              </Text>
+            </Group>
             <Group justify="space-between">
               <Text size="xs" c="dimmed">Desmarque las líneas que no correspondan. Lo marcado «Revisar» se eligió por la descripción.</Text>
               <Group gap="xs">
