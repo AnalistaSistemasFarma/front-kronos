@@ -13,6 +13,7 @@ import {
   SegmentedControl,
   Select,
   Stack,
+  Switch,
   Table,
   Text,
   TextInput,
@@ -42,6 +43,8 @@ interface Config {
   output: 'pdf' | 'pdf_docx';
   mode: 'auto' | 'revisar';
   file_name_pattern: string | null;
+  /** 2026-11-26: anexar al PDF las imágenes adjuntas de la solicitud. */
+  append_images?: boolean | null;
 }
 
 interface SgcDoc {
@@ -69,6 +72,7 @@ const EMPTY: Config = {
   output: 'pdf',
   mode: 'auto',
   file_name_pattern: '',
+  append_images: false,
 };
 
 /** Distintivo de la tarjeta de la tarea + acceso a la configuración. */
@@ -310,6 +314,16 @@ export function TaskDocTemplateConfigModal({ task, onClose }: { task: { id: numb
               setCfg((c) => ({ ...c, file_name_pattern: v }));
             }}
             maxLength={200}
+          />
+
+          <Switch
+            label='Anexar al PDF las imágenes adjuntas de la solicitud (JPG o PNG, una por página)'
+            description='Para informes con evidencias fotográficas, p. ej. el informe de auditoría.'
+            checked={Boolean(cfg.append_images)}
+            onChange={(e) => {
+              const v = e.currentTarget.checked;
+              setCfg((c) => ({ ...c, append_images: v }));
+            }}
           />
 
           <div>
