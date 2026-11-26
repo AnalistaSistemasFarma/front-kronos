@@ -53,12 +53,12 @@ export const NETWORK_FIELD_LIMITS: Record<keyof ServerNetworkInput, number> = {
   notes: 1000,
 };
 
-const IPV4 = /^(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}$/;
+export const IPV4 = /^(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}$/;
 const IPV6 = /^[0-9a-f:]+$/i;
 const HOSTNAME = /^[A-Za-z0-9]([A-Za-z0-9_.\-]*[A-Za-z0-9])?$/;
 const MAC = /^([0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}$/;
 /** CIDR prefix written as «/24» or «24». */
-const CIDR = /^\/?([0-9]|[12]\d|3[0-2])$/;
+export const CIDR = /^\/?([0-9]|[12]\d|3[0-2])$/;
 
 export function isIpAddress(value: string): boolean {
   const v = value.trim();
