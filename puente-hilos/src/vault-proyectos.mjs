@@ -55,6 +55,7 @@ const MARK = {
   ownStart: '<!-- synerlink:notas:inicio -->',
   ownEnd: '<!-- synerlink:notas:fin -->',
   log: '<!-- synerlink:bitacora -->',
+  logEnd: '<!-- synerlink:bitacora:fin -->',
 };
 
 const TASK_STATUS = { pendiente: 'Pendiente', en_curso: 'En curso', hecha: 'Hecha', bloqueada: 'Bloqueada' };
@@ -162,7 +163,10 @@ function between(text, start, end) {
 export function parseNote(text) {
   const t = String(text ?? '');
   const logAt = t.indexOf(MARK.log);
-  const logLines = logAt < 0 ? [] : t.slice(logAt + MARK.log.length).split('\n').filter((l) => l.startsWith('- '));
+  // The log ends at its end mark (notes written before it had none: up to the end of the file).
+  const logEndAt = logAt < 0 ? -1 : t.indexOf(MARK.logEnd, logAt);
+  const logText = logAt < 0 ? '' : t.slice(logAt + MARK.log.length, logEndAt < 0 ? undefined : logEndAt);
+  const logLines = logText.split('\n').filter((l) => l.startsWith('- '));
   let conversations = {};
   try {
     const raw = frontmatterValue(t, 'conversaciones_json');
@@ -278,6 +282,12 @@ export function buildNote({ contexto, agent, state, own, logLines, conversations
     '',
     MARK.log,
     ...logLines.slice(0, MAX_LOG_ENTRIES),
+    MARK.logEnd,
+    '',
+    // Vault convention: every note ends with «🔗 Relacionado».
+    '## 🔗 Relacionado',
+    '',
+    `- [[${INDEX_FILE.replace(/\.md$/, '')}]]`,
     '',
   ].join('\n');
 }

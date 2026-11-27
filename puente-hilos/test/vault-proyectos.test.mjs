@@ -196,3 +196,22 @@ test('config: engram project from the vault git repo, explicit bin, and off with
   assert.equal(cargarConfig(baseEnv(base, { HILOS_VAULT_PROYECTOS_DIR: vault, HILOS_VAULT_ENGRAM: 'no' })).vaultProyectos.engram, null);
   assert.throws(() => cargarConfig(baseEnv(base, { HILOS_VAULT_PROYECTOS_DIR: vault, HILOS_VAULT_ENGRAM_BIN: 'engram' })), /absoluta/);
 });
+
+test('the note ends with «🔗 Relacionado»; its links are not read as log lines; old notes without the end mark still parse', () => {
+  const { dir, rutas } = setup();
+  updateProjectNote({ dir, rutas, contexto: context(), agent: 'Orus', idConversation: 205, lote, reply: 'uno', now });
+  const file = path.join(dir, 'feature-proyectos-synerlink.md');
+  let text = readFileSync(file, 'utf8');
+  assert.match(text.trimEnd(), /## 🔗 Relacionado\n\n- \[\[Proyectos SynerLink\]\]$/);
+  updateProjectNote({ dir, rutas, contexto: context(), agent: 'Orus', idConversation: 205, lote, reply: 'dos', now });
+  text = readFileSync(file, 'utf8');
+  const log = text.slice(text.indexOf('<!-- synerlink:bitacora -->'), text.indexOf('<!-- synerlink:bitacora:fin -->'));
+  assert.equal(log.split('\n').filter((l) => l.startsWith('- ')).length, 2);
+  assert.equal((text.match(/\[\[Proyectos SynerLink\]\]/g) ?? []).length, 2, 'header link + Relacionado, no duplicates');
+  // A note written before the end mark existed: the log runs to the end of the file.
+  writeFileSync(file, text.replace(/<!-- synerlink:bitacora:fin -->[\s\S]*$/, ''));
+  updateProjectNote({ dir, rutas, contexto: context(), agent: 'Orus', idConversation: 205, lote, reply: 'tres', now });
+  text = readFileSync(file, 'utf8');
+  const log2 = text.slice(text.indexOf('<!-- synerlink:bitacora -->'), text.indexOf('<!-- synerlink:bitacora:fin -->'));
+  assert.equal(log2.split('\n').filter((l) => l.startsWith('- ')).length, 3);
+});
