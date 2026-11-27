@@ -48,7 +48,7 @@ import SeccionPermisos from './permisos/SeccionPermisos';
 import SeccionMesas from './mesas/SeccionMesas';
 import SeccionMatrices from './matrices/SeccionMatrices';
 import SeccionReuniones from './reuniones/SeccionReuniones';
-import { AgentesApilados, AvisoArriba, MiembrosApilados, BadgeRol, CONSULTA_ESCRITORIO, Encabezado, EsqueletoFilas, type Aviso } from './ui';
+import { AgentesApilados, AvisoArriba, StackedMembers, BadgeRol, CONSULTA_ESCRITORIO, Encabezado, EsqueletoFilas, type Aviso } from './ui';
 import css from './proyectos.module.css';
 import { useEstadosAgentes } from './useEstadosAgentes';
 import { BadgeSilenciado, BotonSilenciar } from './BotonSilenciar';
@@ -78,12 +78,12 @@ import type { EstadoAgenteProyectoDto } from '../../lib/proyectos/estado-agente'
 type Seccion = 'conversaciones' | 'mesas' | 'matrices' | 'cronograma' | 'reuniones' | 'equipo' | 'vinculados' | 'archivos' | 'miembros' | 'permisos' | 'detalles';
 const SECCIONES: Seccion[] = ['conversaciones', 'mesas', 'matrices', 'cronograma', 'reuniones', 'equipo', 'vinculados', 'archivos', 'miembros', 'permisos', 'detalles'];
 
-/** «Orus, Troy, Doki · 3 miembros»: los asistentes por nombre y las personas contadas. */
-function resumenEquipo(p: { agents: { displayName: string }[]; members: unknown[] }): string {
-  const agentes = p.agents.map((a) => a.displayName).join(', ');
+/** "Orus, Troy, Doki · 3 miembros": the agents by name and the people as a count. */
+function teamSummary(p: { agents: { displayName: string }[]; members: unknown[] }): string {
+  const agentNames = p.agents.map((a) => a.displayName).join(', ');
   const n = p.members.length;
-  const miembros = n > 0 ? `${n} ${n === 1 ? 'miembro' : 'miembros'}` : '';
-  return [agentes, miembros].filter(Boolean).join(' · ');
+  const memberCount = n > 0 ? `${n} ${n === 1 ? 'miembro' : 'miembros'}` : '';
+  return [agentNames, memberCount].filter(Boolean).join(' · ');
 }
 
 function esSeccion(v: string | null): v is Seccion {
@@ -676,11 +676,11 @@ export default function ProyectoPage({ idProject }: { idProject: number }) {
             {proyecto.members.length > 0 && (
               <>
                 <Divider orientation='vertical' />
-                <MiembrosApilados miembros={proyecto.members} size={24} />
+                <StackedMembers members={proyecto.members} size={24} />
               </>
             )}
             <Text size='xs' c='dimmed' className={css.truncar} style={{ flex: '1 1 140px' }}>
-              {resumenEquipo(proyecto)}
+              {teamSummary(proyecto)}
             </Text>
           </Group>
         </>
@@ -776,7 +776,7 @@ export default function ProyectoPage({ idProject }: { idProject: number }) {
               </Title>
               <Group gap={6} wrap='nowrap'>
                 <Text size='xs' c='dimmed' className={css.truncar}>
-                  {proyecto.company.companyName} · {resumenEquipo(proyecto)}
+                  {proyecto.company.companyName} · {teamSummary(proyecto)}
                 </Text>
               </Group>
             </>

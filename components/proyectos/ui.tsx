@@ -51,20 +51,20 @@ export function AgentesApilados({ agentes, size = 26 }: { agentes: AgenteMiniDto
   );
 }
 
-/** Avatares de las personas miembro del proyecto (foto o iniciales), encimados (máx. 5 + contador). */
-export function MiembrosApilados({ miembros, size = 26 }: { miembros: MiembroDto[]; size?: number }) {
-  const visibles = miembros.slice(0, 5);
-  const resto = miembros.length - visibles.length;
-  if (miembros.length === 0) return null;
+/** Avatars of the project's member people (photo or initials), stacked (max. 5 + counter). */
+export function StackedMembers({ members, size = 26 }: { members: MiembroDto[]; size?: number }) {
+  const visible = members.slice(0, 5);
+  const rest = members.length - visible.length;
+  if (members.length === 0) return null;
   return (
-    <Tooltip label={miembros.map((m) => m.name).join(', ')} withArrow openDelay={300} multiline maw={280}>
-      <Avatar.Group spacing={size / 3} data-testid='proyecto-miembros-apilados'>
-        {visibles.map((m) => (
+    <Tooltip label={members.map((m) => m.name).join(', ')} withArrow openDelay={300} multiline maw={280}>
+      <Avatar.Group spacing={size / 3} data-testid='project-stacked-members'>
+        {visible.map((m) => (
           <AgentAvatar key={m.id} code={m.id} displayName={m.name} avatarUrl={m.avatarUrl} size={size} showStatus={false} withTooltip={false} />
         ))}
-        {resto > 0 && (
+        {rest > 0 && (
           <Avatar size={size} radius='xl'>
-            +{resto}
+            +{rest}
           </Avatar>
         )}
       </Avatar.Group>
