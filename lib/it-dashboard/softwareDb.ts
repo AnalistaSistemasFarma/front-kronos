@@ -27,6 +27,7 @@ type Row = {
   updatedBy: string | null;
   notifyEmails: string | null;
   noticeSentAt: Date | null;
+  platformEmail: string | null;
 };
 
 const day = (d: Date | null) => (d ? new Date(d).toISOString().slice(0, 10) : '');
@@ -49,6 +50,7 @@ function toItem(r: Row): SoftwareItem {
     updatedBy: r.updatedBy ?? null,
     notifyEmails: parseEmailList(r.notifyEmails ?? ''),
     noticeSentAt: r.noticeSentAt ? new Date(r.noticeSentAt).toISOString() : null,
+    platformEmail: r.platformEmail ?? '',
   };
 }
 
@@ -63,7 +65,7 @@ export async function loadSoftware(companyId: number | null): Promise<SoftwareIt
       s.purchase_date AS purchaseDate, s.expiration_date AS expirationDate, s.licenses,
       s.assigned_to AS assignedTo, CAST(s.cost AS float) AS cost, s.license_type AS licenseType,
       s.updated_at AS updatedAt, s.updated_by AS updatedBy,
-      s.notify_emails AS notifyEmails, s.notice_sent_at AS noticeSentAt
+      s.notify_emails AS notifyEmails, s.notice_sent_at AS noticeSentAt, s.platform_email AS platformEmail
     FROM it_software s
     LEFT JOIN company c ON c.id_company = s.id_company
     ${where}
@@ -79,7 +81,7 @@ export async function loadSoftwareById(id: number): Promise<SoftwareItem | null>
       s.purchase_date AS purchaseDate, s.expiration_date AS expirationDate, s.licenses,
       s.assigned_to AS assignedTo, CAST(s.cost AS float) AS cost, s.license_type AS licenseType,
       s.updated_at AS updatedAt, s.updated_by AS updatedBy,
-      s.notify_emails AS notifyEmails, s.notice_sent_at AS noticeSentAt
+      s.notify_emails AS notifyEmails, s.notice_sent_at AS noticeSentAt, s.platform_email AS platformEmail
     FROM it_software s
     LEFT JOIN company c ON c.id_company = s.id_company
     WHERE s.id = ${id}
@@ -93,12 +95,12 @@ export async function createSoftware(input: SoftwareInput, user: string): Promis
   const rows = await prisma.$queryRaw<Array<{ id: number }>>`
     INSERT INTO it_software
       (id_company, kind, description, provider, purchase_date, expiration_date, licenses,
-       assigned_to, cost, license_type, notify_emails, created_at, created_by, updated_at, updated_by)
+       assigned_to, cost, license_type, notify_emails, platform_email, created_at, created_by, updated_at, updated_by)
     OUTPUT INSERTED.id
     VALUES (${input.companyId}, ${input.kind}, ${input.description}, ${orNull(input.provider)},
             ${orNull(input.purchaseDate)}, ${orNull(input.expirationDate)}, ${input.licenses},
             ${orNull(input.assignedTo)}, ${input.cost}, ${orNull(input.licenseType)},
-            ${joinEmails(input.notifyEmails)}, SYSUTCDATETIME(), ${user}, SYSUTCDATETIME(), ${user})
+            ${joinEmails(input.notifyEmails)}, ${orNull(input.platformEmail)}, SYSUTCDATETIME(), ${user}, SYSUTCDATETIME(), ${user})
   `;
   return rows[0] ? loadSoftwareById(Number(rows[0].id)) : null;
 }
@@ -117,6 +119,7 @@ export async function updateSoftware(id: number, input: SoftwareInput, user: str
       cost = ${input.cost},
       license_type = ${orNull(input.licenseType)},
       notify_emails = ${joinEmails(input.notifyEmails)},
+      platform_email = ${orNull(input.platformEmail)},
       updated_at = SYSUTCDATETIME(),
       updated_by = ${user}
     WHERE id = ${id}

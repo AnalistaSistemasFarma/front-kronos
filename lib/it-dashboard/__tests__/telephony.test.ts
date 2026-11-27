@@ -2,8 +2,9 @@ import { describe, expect, it } from 'vitest';
 import { telephonyServiceLabel, validateTelephonyInput } from '../telephony';
 
 describe('validateTelephonyInput', () => {
-  it('accepts empty and a full record', () => {
-    expect(validateTelephonyInput({}).ok).toBe(true);
+  it('needs the provider or a name; accepts a full record', () => {
+    expect(validateTelephonyInput({}).ok).toBe(false);
+    expect(validateTelephonyInput({ label: 'Celulares gerencia' }).ok).toBe(true);
     const r = validateTelephonyInput({
       provider: ' Claro ',
       serviceType: 'ip',
@@ -25,7 +26,7 @@ describe('validateTelephonyInput', () => {
   });
 
   it('rejects bad service, number, counts and cost', () => {
-    const r = validateTelephonyInput({ serviceType: 'radio', mainNumber: 'abc', lines: '1.5', extensions: -1, monthlyCost: 'x' });
+    const r = validateTelephonyInput({ provider: 'Claro', serviceType: 'radio', mainNumber: 'abc', lines: '1.5', extensions: -1, monthlyCost: 'x' });
     expect(r.ok).toBe(false);
     if (!r.ok) expect(Object.keys(r.errors).sort()).toEqual(['extensions', 'lines', 'mainNumber', 'monthlyCost', 'serviceType']);
   });

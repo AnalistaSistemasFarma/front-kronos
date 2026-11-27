@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { channelLabel, connectionLabel, validateInternetInput } from '../internet';
+import { channelLabel, connectionLabel, internetButtonLabel, validateInternetInput } from '../internet';
 
 describe('validateInternetInput', () => {
-  it('accepts empty and a full valid record (trimmed)', () => {
-    expect(validateInternetInput({}).ok).toBe(true);
+  it('needs the provider or a name; accepts a full record (trimmed)', () => {
+    expect(validateInternetInput({}).ok).toBe(false);
+    expect(validateInternetInput({ label: 'Canal respaldo' }).ok).toBe(true);
     const r = validateInternetInput({
       provider: ' Claro ',
       publicIp: '190.85.10.20',
@@ -22,6 +23,7 @@ describe('validateInternetInput', () => {
 
   it('rejects bad IPs, mask, DNS and unknown channel / connection', () => {
     const r = validateInternetInput({
+      provider: 'ETB',
       publicIp: '1.2.3',
       subnetMask: 'abc',
       gateway: '999.0.0.1',
@@ -39,9 +41,11 @@ describe('validateInternetInput', () => {
     }
   });
 
-  it('labels', () => {
+  it('labels and button text', () => {
     expect(channelLabel('banda_ancha')).toBe('Banda ancha');
     expect(connectionLabel('coaxial')).toBe('Coaxial');
-    expect(channelLabel('')).toBe('');
+    expect(internetButtonLabel({ label: '', provider: 'ETB', bandwidth: '100 Mbps' }, 0)).toBe('ETB · 100 Mbps');
+    expect(internetButtonLabel({ label: 'Respaldo', provider: 'Claro', bandwidth: '50 Mbps' }, 1)).toBe('Respaldo');
+    expect(internetButtonLabel({ label: '', provider: '', bandwidth: '' }, 2)).toBe('Canal 3');
   });
 });
