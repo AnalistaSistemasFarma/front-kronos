@@ -11,11 +11,11 @@
  * -------------------------------------------------------------------------
  * PERSONA (resolveProjectForUser): entra a un proyecto solo si
  *   (a) es MIEMBRO (chat_project_member: dueño, editor o lector);
- *   (b) TODAVÍA tiene el permiso del módulo «Proyectos» en la empresa del
- *       proyecto (un permiso revocado cierra el proyecto sin que el dueño
- *       tenga que acordarse de retirarla) — o, desde el 2026-11-25 (msg 39725),
- *       lo tiene en OTRA empresa y además tiene asignado (en cualquier
- *       empresa) al menos uno de los agentes del proyecto;
+ *   (b) TODAVÍA tiene el permiso del módulo «Proyectos» en ALGUNA empresa
+ *       (activa y no proveedora). Desde el 2026-11-27 (msg 41680, proyectos
+ *       MULTIEMPRESA) la empresa del proyecto no importa: la pertenencia es la
+ *       que da la visibilidad. Un permiso revocado en todas las empresas
+ *       cierra el proyecto sin que el dueño tenga que acordarse de retirarla;
  *   (c) el proyecto no está archivado — salvo el DUEÑO, que lo ve para
  *       restaurarlo (y nada más: sus conversaciones siguen cerradas).
  *
@@ -30,6 +30,11 @@
  *       (la del proyecto, o la suya si es de otra empresa). El agente trae
  *       conectores de SAP: no debe ser una puerta a datos que la persona no
  *       tiene.
+ *
+ * MIEMBRO SIN EL ASISTENTE (2026-11-27): si solo falla (f), la persona sigue
+ * participando en la conversación como MIEMBRO HUMANO — lee, escribe a los
+ * demás miembros, reacciona y sube archivos — pero su mensaje NUNCA despierta
+ * al asistente (assertProjectConversationAccess devuelve `soloPersonas`).
  *
  * AGENTE (assertAgentProjectConversation): solo con una llave de alcance
  * 'projects' (la del puente), solo conversaciones de SU agente y solo en
@@ -100,33 +105,15 @@ export async function projectModuleCompanies(userId: string): Promise<{ idCompan
   return [...out.values()].sort((a, b) => a.companyName.localeCompare(b.companyName));
 }
 
-async function tieneModuloEn(userId: string, idCompany: number): Promise<boolean> {
+/** (b) ¿Tiene el módulo «Proyectos» en ALGUNA empresa (activa y no proveedora)? */
+async function tieneModulo(userId: string): Promise<boolean> {
   const n = await prisma.subprocessUserCompany.count({
     where: {
-      companyUser: { id_user: userId, id_company: idCompany, user: { isActive: true, NOT: { role: 'supplier' } } },
+      companyUser: { id_user: userId, user: { isActive: true, NOT: { role: 'supplier' } } },
       subprocess: { subprocess_url: PROJECTS_MODULE_URL },
     },
   });
   return n > 0;
-}
-
-/**
- * (b) por agente (2026-11-25, msg 39725): sin el módulo en la empresa del
- * proyecto, entra si tiene «Proyectos» en ALGUNA empresa y tiene asignado (en
- * cualquier empresa) al menos uno de los agentes del proyecto.
- */
-async function entraPorAgente(user: ProjectUser, idProject: number): Promise<boolean> {
-  const n = await prisma.subprocessUserCompany.count({
-    where: {
-      companyUser: { id_user: user.id, user: { isActive: true, NOT: { role: 'supplier' } } },
-      subprocess: { subprocess_url: PROJECTS_MODULE_URL },
-    },
-  });
-  if (n === 0) return false;
-  const designados = await prisma.chatProjectAgent.findMany({ where: { id_project: idProject }, select: { id_agent: true } });
-  if (designados.length === 0) return false;
-  const asignados = await agentesAsignados(user.email);
-  return designados.some((d) => (asignados.get(d.id_agent)?.size ?? 0) > 0);
 }
 
 /* ───────────────────────────── Puerta ───────────────────────────── */
@@ -159,7 +146,7 @@ export async function resolveProjectForUser(
   const role = roleFromDb(mio.role);
 
   if (project.archived && !(opciones.allowArchived && role === 'owner')) return null; // (c)
-  if (!(await tieneModuloEn(user.id, project.id_company)) && !(await entraPorAgente(user, project.id_project))) return null; // (b)
+  if (!(await tieneModulo(user.id))) return null; // (b)
 
   return {
     idProject: project.id_project,
@@ -173,7 +160,29 @@ export async function resolveProjectForUser(
 
 /* ─────────────────────── Escribirle a un agente ─────────────────────── */
 
-export type WriteAccess = { ok: true } | { ok: false; motivo: string };
+/**
+ * `ok: true` con `soloPersonas` (2026-11-27): puede escribir en la conversación
+ * como miembro humano, pero el asistente NO atiende sus mensajes (no lo tiene
+ * asignado). `nota` es el aviso que ve en la interfaz.
+ * `ok: false` con `sinAsignar`: lo único que falla es (f).
+ */
+export type WriteAccess =
+  | { ok: true; soloPersonas?: false }
+  | { ok: true; soloPersonas: true; nota: string }
+  | { ok: false; motivo: string; sinAsignar?: boolean };
+
+/** Aviso para quien participa en una conversación sin tener asignado su asistente. */
+export const NOTA_SIN_ASISTENTE =
+  'No tiene asignado este asistente: sus mensajes los ven los miembros del proyecto, pero el asistente no los atiende.';
+
+/**
+ * Escritura en una CONVERSACIÓN (no en el agente): si solo falta tener el
+ * asistente asignado, participa como miembro humano.
+ */
+export function comoMiembroHumano(w: WriteAccess): WriteAccess {
+  if (!w.ok && w.sinAsignar) return { ok: true, soloPersonas: true, nota: NOTA_SIN_ASISTENTE };
+  return w;
+}
 
 interface AgenteDesignado {
   idAgent: number;
@@ -199,6 +208,7 @@ function evaluarAgente(
   if (!agentesDeLaPersona.get(agente.idAgent)?.has(agente.conectores.idCompany)) {
     return {
       ok: false,
+      sinAsignar: true,
       motivo: agente.conectores.otraEmpresa
         ? 'Usted no tiene este asistente asignado en la empresa de la que trae sus conectores.'
         : 'Usted no tiene este asistente asignado en la empresa del proyecto.',
@@ -298,7 +308,8 @@ export async function assertProjectConversationAccess(
   const acceso = await resolveProjectForUser(user, conv.id_project);
   if (!acceso) return null;
 
-  const writable = await writeAccessForAgent(user, acceso, conv.id_agent);
+  // Sin el asistente asignado: participa como miembro humano (ver arriba).
+  const writable = comoMiembroHumano(await writeAccessForAgent(user, acceso, conv.id_agent));
   return { ...acceso, conversationId: conv.id, idAgent: conv.id_agent, writable };
 }
 
@@ -490,52 +501,54 @@ export async function filtroProyectosDelPuente(idAgent: number, code: string, co
 
 /* ─────────────────────────── Personas elegibles ───────────────────────── */
 
+/** Tope de candidatos a invitar (todas las empresas del grupo). */
+export const MAX_CANDIDATOS_INVITAR = 2000;
+
 /**
- * Personas que PUEDEN ser miembros de un proyecto: activas, no proveedoras y
- * que cumplen la condición (b) de la puerta (invitar a alguien que no la
- * cumple dejaría un miembro que nunca puede entrar):
- *   - el permiso del módulo «Proyectos» en la empresa del proyecto, o
- *   - (2026-11-25, msg 39725) el permiso del módulo en OTRA empresa y, en
- *     cualquier empresa, el permiso de al menos uno de los agentes designados
- *     en el proyecto (`idProject`).
- * `ids` acota la búsqueda (validar una invitación).
+ * Personas que se pueden INVITAR a un proyecto: activas, no proveedoras y con
+ * el permiso del módulo «Proyectos» en ALGUNA empresa (2026-11-27, msg 41680,
+ * proyectos MULTIEMPRESA: ni la empresa del proyecto ni sus asistentes
+ * importan). Es la condición (b) de la puerta: invitar a alguien que no la
+ * cumple dejaría un miembro que nunca puede entrar. Hablarle a un asistente
+ * sigue exigiendo tenerlo asignado (f).
+ *
+ * `companies`: empresas donde tiene «Proyectos» (la etiqueta del selector).
+ * `ids` acota la búsqueda (validar una invitación); `email`, a una persona.
  */
 export async function eligibleProjectUsers(
-  idCompany: number,
-  ids?: string[],
-  idProject?: number
-): Promise<{ id: string; name: string; email: string; image: string | null }[]> {
-  const conModulo = { subprocesses: { some: { subprocess: { subprocess_url: PROJECTS_MODULE_URL } } } };
-  // Subprocesos-permiso de los agentes designados (agent.id_subprocess).
-  const subprocesosAgentes =
-    typeof idProject === 'number'
-      ? (
-          await prisma.chatProjectAgent.findMany({ where: { id_project: idProject }, select: { agent: { select: { id_subprocess: true } } } })
-        )
-          .map((f) => f.agent.id_subprocess)
-          .filter((x): x is number => typeof x === 'number')
-      : [];
-  const ramas: Prisma.UserWhereInput[] = [{ companyUsers: { some: { id_company: idCompany, ...conModulo } } }];
-  if (subprocesosAgentes.length > 0) {
-    ramas.push({
-      AND: [
-        { companyUsers: { some: conModulo } },
-        { companyUsers: { some: { subprocesses: { some: { id_subprocess: { in: subprocesosAgentes } } } } } },
-      ],
-    });
-  }
+  opciones: { ids?: string[]; email?: string } = {}
+): Promise<{ id: string; name: string; email: string; image: string | null; companies: string[] }[]> {
+  const { ids, email } = opciones;
+  if (ids && ids.length === 0) return [];
+  const modulo = { subprocess: { subprocess_url: PROJECTS_MODULE_URL } };
   const filas = await prisma.user.findMany({
     where: {
       isActive: true,
       NOT: { role: 'supplier' },
       ...(ids ? { id: { in: ids } } : {}),
-      OR: ramas,
+      ...(email ? { email } : {}),
+      companyUsers: { some: { subprocesses: { some: modulo } } },
     },
-    select: { id: true, name: true, email: true, image: true },
+    select: {
+      id: true,
+      name: true,
+      email: true,
+      image: true,
+      companyUsers: {
+        where: { subprocesses: { some: modulo } },
+        select: { company: { select: { company: true } } },
+      },
+    },
     orderBy: [{ name: 'asc' }, { email: 'asc' }],
-    take: 500,
+    take: MAX_CANDIDATOS_INVITAR,
   });
-  return filas.map((u) => ({ id: u.id, name: u.name?.trim() || u.email, email: u.email, image: u.image }));
+  return filas.map((u) => ({
+    id: u.id,
+    name: u.name?.trim() || u.email,
+    email: u.email,
+    image: u.image,
+    companies: [...new Set(u.companyUsers.map((c) => c.company.company.trim()))].sort((x, y) => x.localeCompare(y)),
+  }));
 }
 
 /* ─────────────────────────── Agentes designables ──────────────────────── */
@@ -673,19 +686,16 @@ function aAgenteMini(a: {
 
 /**
  * Proyectos que esta persona puede abrir: es miembro y conserva el permiso del
- * módulo en la empresa del proyecto. Archivados: solo los suyos (dueño).
+ * módulo en ALGUNA empresa (2026-11-27, multiempresa: la pertenencia da la
+ * visibilidad, sea cual sea la empresa del proyecto). Archivados: solo los
+ * suyos (dueño).
  */
 export async function listProjectsForUser(user: ProjectUser, opciones: { archivados: boolean }) {
   const empresas = await projectModuleCompanies(user.id);
   if (empresas.length === 0) return null;
-  // (b) por agente (2026-11-25): también proyectos de OTRAS empresas donde es
-  // miembro y tiene asignado alguno de sus agentes (en cualquier empresa).
-  const misAgentes = [...(await agentesAsignados(user.email)).entries()].filter(([, cs]) => cs.size > 0).map(([id]) => id);
-  const porEmpresa = { id_company: { in: empresas.map((e) => e.idCompany) } };
 
   const filas = await prisma.chatProject.findMany({
     where: {
-      ...(misAgentes.length > 0 ? { OR: [porEmpresa, { agents: { some: { id_agent: { in: misAgentes } } } }] } : porEmpresa),
       archived: opciones.archivados,
       members: opciones.archivados
         ? { some: { id_user: user.id, role: 'owner' } }
@@ -942,7 +952,8 @@ export async function getProjectDetail(user: ProjectUser, acceso: ProjectAccess,
     })),
     folders: p.folders.map((x) => x.path),
     conversations: p.conversations.map((c) => {
-      const w = motivoDe(c.id_agent);
+      // Sin el asistente asignado: escribe como miembro humano (2026-11-27).
+      const w = comoMiembroHumano(motivoDe(c.id_agent));
       return {
         id: c.id,
         title: c.title,
@@ -951,6 +962,7 @@ export async function getProjectDetail(user: ProjectUser, acceso: ProjectAccess,
         agent: aAgenteMini(c.agent),
         createdBy: persona(c.created_by),
         soloLectura: w.ok ? null : w.motivo,
+        sinAsistente: w.ok && w.soloPersonas ? w.nota : null,
         // Renombrar y eliminar (2026-10-29): creador con escritura, dueño o administrador.
         puedoGestionar: puedeGestionarHilo({
           actorId: user.id,

@@ -122,6 +122,12 @@ export interface ConversacionDto {
   /** Null = se puede escribir. Si no, el motivo (rol, agente retirado…). */
   soloLectura: string | null;
   /**
+   * Multiempresa (2026-11-27): la persona escribe aquí como miembro, pero no
+   * tiene asignado el asistente de la conversación — su mensaje no lo despierta.
+   * Null = sí lo tiene (o es de solo lectura). Si viene, es el aviso a mostrar.
+   */
+  sinAsistente: string | null;
+  /**
    * Puedo RENOMBRAR y ELIMINAR esta conversación (2026-10-29): la creé y sigo
    * escribiendo, soy el dueño del proyecto o administrador. La reja real está
    * en el servidor; esto solo dice si se pintan las acciones.
@@ -205,6 +211,8 @@ export interface CandidatoDto {
   id: string;
   name: string;
   email: string;
+  /** Empresas donde tiene el permiso Proyectos (2026-11-27: se invita desde cualquiera). */
+  companies: string[];
 }
 
 /* ───────────────────────────── Cronograma (2026-10-18) ───────────────────────────── */

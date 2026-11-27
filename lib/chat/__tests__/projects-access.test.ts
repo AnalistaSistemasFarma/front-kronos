@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 /*
  * Puertas del módulo «Proyectos» (lib/chat/projects.ts).
- *   - Entrar: miembro + permiso del módulo en la empresa del proyecto. Un no
+ *   - Entrar: miembro + permiso del módulo en ALGUNA empresa (multiempresa). Un no
  *     miembro, un permiso revocado o un archivado (salvo su dueño) → null (404).
  *   - Escribir: dueño o editor + agente designado y habilitado + la persona lo
  *     tiene asignado en la empresa del proyecto. Un lector lee pero no escribe.
@@ -34,6 +34,8 @@ vi.mock('../access', () => ({ CHAT_MODULE_URL: '/process/chat', getChatAccess: c
 import {
   assertAgentProjectConversation,
   assertProjectConversationAccess,
+  eligibleProjectUsers,
+  NOTA_SIN_ASISTENTE,
   resolveProjectForUser,
   writeAccessForAgent,
 } from '../projects';
@@ -76,8 +78,9 @@ describe('resolveProjectForUser (entrar)', () => {
     expect(await resolveProjectForUser(ANA, 7)).toMatchObject({ idProject: 7, role: 'editor', idCompany: EMPRESA, archived: false });
     // La pertenencia se consulta SOLO para la persona de la sesión…
     expect(findProject.mock.calls[0][0].select.members.where).toEqual({ id_user: ANA.id });
-    // …y el permiso del módulo, en la empresa DEL PROYECTO.
-    expect(moduleCount.mock.calls[0][0].where.companyUser).toMatchObject({ id_user: ANA.id, id_company: EMPRESA });
+    // …y el permiso del módulo, en CUALQUIER empresa (multiempresa, 2026-11-27).
+    expect(moduleCount.mock.calls[0][0].where.companyUser).toMatchObject({ id_user: ANA.id });
+    expect(moduleCount.mock.calls[0][0].where.companyUser).not.toHaveProperty('id_company');
     expect(moduleCount.mock.calls[0][0].where.subprocess).toEqual({ subprocess_url: '/process/proyectos' });
   });
 
@@ -96,7 +99,7 @@ describe('resolveProjectForUser (entrar)', () => {
     expect(moduleCount).not.toHaveBeenCalled();
   });
 
-  it('sin el permiso del módulo en esa empresa (revocado), tampoco', async () => {
+  it('sin el permiso del módulo en ninguna empresa (revocado), tampoco', async () => {
     findProject.mockResolvedValue(proyecto());
     moduleCount.mockResolvedValue(0);
     expect(await resolveProjectForUser(ANA, 7)).toBeNull();
@@ -197,6 +200,53 @@ describe('assertProjectConversationAccess (conversación)', () => {
     findConversation.mockResolvedValue({ id: 40, id_project: 7, id_agent: PLAY, archived: false });
     findProject.mockResolvedValue(proyecto({ archived: true, members: [{ role: 'owner' }] }));
     expect(await assertProjectConversationAccess(ANA, 40)).toBeNull();
+  });
+  it('multiempresa (2026-11-27): sin el asistente asignado, escribe como miembro humano (soloPersonas, con la nota)', async () => {
+    findConversation.mockResolvedValue({ id: 40, id_project: 7, id_agent: PLAY, archived: false });
+    findProject.mockResolvedValue(proyecto());
+    chatAccess.mockResolvedValue(conAgente([]));
+    const r = await assertProjectConversationAccess(ANA, 40);
+    expect(r?.writable).toEqual({ ok: true, soloPersonas: true, nota: NOTA_SIN_ASISTENTE });
+    // Hablarle al asistente (crear hilos, sugerir equipo, analizar) sigue cerrado.
+    expect(await writeAccessForAgent(ANA, { idProject: 7, name: 'Comex', idCompany: EMPRESA, profile: 'comex-latam', role: 'editor', archived: false }, PLAY)).toMatchObject({
+      ok: false,
+      sinAsignar: true,
+    });
+  });
+
+  it('multiempresa: el lector sin el asistente sigue sin escribir; un asistente retirado no se vuelve conversación de personas', async () => {
+    findConversation.mockResolvedValue({ id: 40, id_project: 7, id_agent: PLAY, archived: false });
+    chatAccess.mockResolvedValue(conAgente([]));
+    findProject.mockResolvedValue(proyecto({ members: [{ role: 'reader' }] }));
+    expect((await assertProjectConversationAccess(ANA, 40))?.writable.ok).toBe(false);
+    findProject.mockResolvedValue(proyecto());
+    findDesignation.mockResolvedValue(null);
+    expect((await assertProjectConversationAccess(ANA, 40))?.writable.ok).toBe(false);
+  });
+});
+
+describe('eligibleProjectUsers (invitar, multiempresa 2026-11-27)', () => {
+  it('cualquier persona activa, no proveedora, con «Proyectos» en ALGUNA empresa; sin mirar la empresa del proyecto ni sus agentes', async () => {
+    findUsers.mockResolvedValue([
+      { id: 'u-sandy', name: ' Sandy ', email: 'sandy@gsslatam.com', image: null, companyUsers: [{ company: { company: 'GSS ' } }, { company: { company: 'ABAMIA' } }] },
+    ]);
+    const r = await eligibleProjectUsers();
+    expect(r).toEqual([{ id: 'u-sandy', name: 'Sandy', email: 'sandy@gsslatam.com', image: null, companies: ['ABAMIA', 'GSS'] }]);
+    const where = findUsers.mock.calls[0][0].where;
+    expect(where).toMatchObject({ isActive: true, NOT: { role: 'supplier' } });
+    expect(where.companyUsers).toEqual({ some: { subprocesses: { some: { subprocess: { subprocess_url: '/process/proyectos' } } } } });
+    expect(JSON.stringify(where)).not.toMatch(/id_company|id_subprocess/);
+    expect(findDesignations).not.toHaveBeenCalled();
+  });
+
+  it('acota por ids o por correo; una lista vacía no consulta', async () => {
+    findUsers.mockResolvedValue([]);
+    await eligibleProjectUsers({ ids: ['u1', 'u2'] });
+    expect(findUsers.mock.calls[0][0].where.id).toEqual({ in: ['u1', 'u2'] });
+    await eligibleProjectUsers({ email: 'x@gsslatam.com' });
+    expect(findUsers.mock.calls[1][0].where.email).toBe('x@gsslatam.com');
+    expect(await eligibleProjectUsers({ ids: [] })).toEqual([]);
+    expect(findUsers).toHaveBeenCalledTimes(2);
   });
 });
 
@@ -355,18 +405,15 @@ describe('agente de OTRA empresa', () => {
     expect(await assertAgentProjectConversation(DOKI, 90)).toMatchObject({ perfil: 'sin-conectores' });
   });
 
-  it('entrar: sin «Proyectos» en GSS, entra con «Proyectos» en otra empresa y uno de los agentes asignado', async () => {
+  it('entrar (multiempresa, 2026-11-27): miembro con «Proyectos» en otra empresa entra aunque no tenga ninguno de los agentes', async () => {
     findProject.mockResolvedValue({ id_project: 32, name: 'GSS', id_company: GSS, profile: 'gss', archived: false, members: [{ role: 'editor' }] });
-    moduleCount.mockResolvedValueOnce(0).mockResolvedValueOnce(1);
-    findDesignations.mockResolvedValue([{ id_agent: DOKI }]);
-    expect(await resolveProjectForUser(NICO, 32)).toMatchObject({ idProject: 32, role: 'editor' });
-    // Sin ninguno de los agentes del proyecto: no entra.
-    moduleCount.mockResolvedValueOnce(0).mockResolvedValueOnce(1);
+    moduleCount.mockResolvedValueOnce(1);
     chatAccess.mockResolvedValue(conDoki([]));
-    expect(await resolveProjectForUser(NICO, 32)).toBeNull();
+    expect(await resolveProjectForUser(NICO, 32)).toMatchObject({ idProject: 32, role: 'editor' });
+    // Los agentes del proyecto no se consultan para entrar.
+    expect(findDesignations).not.toHaveBeenCalled();
     // Sin «Proyectos» en ninguna empresa: no entra.
-    moduleCount.mockResolvedValueOnce(0).mockResolvedValueOnce(0);
-    chatAccess.mockResolvedValue(conDoki([OLP]));
+    moduleCount.mockResolvedValueOnce(0);
     expect(await resolveProjectForUser(NICO, 32)).toBeNull();
   });
 });
