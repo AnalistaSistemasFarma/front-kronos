@@ -165,6 +165,19 @@ test('HILOS_MODELO: modelo del hilo principal por agente (2026-10-20) y --model 
   assert.equal(args[args.indexOf('--model') + 1], 'claude-opus-5-5');
 });
 
+test('HILOS_EFFORT: reasoning effort of the main thread per agent and --effort in the turn', async () => {
+  assert.equal(cargarConfig(envProd(tmp())).esfuerzo, null);
+  assert.equal(cargarConfig(envProd(tmp(), { HILOS_EFFORT: ' Medium ' })).esfuerzo, 'medium');
+  for (const malo of ['ultra', '--dangerously-skip-permissions', 'medium high']) {
+    assert.throws(() => cargarConfig(envProd(tmp(), { HILOS_EFFORT: malo })), /HILOS_EFFORT inválido/, malo);
+  }
+  const { armarArgumentos } = await import('../src/claude.mjs');
+  const base = { perfil: { mcpServers: {}, herramientas: [], web: false }, sesion: { id: '11111111-2222-3333-4444-555555555555', nueva: false }, rutaMcp: '/m', rutaSistema: '/s' };
+  const args = armarArgumentos({ ...base, esfuerzo: 'medium' });
+  assert.equal(args[args.indexOf('--effort') + 1], 'medium');
+  assert.equal(armarArgumentos(base).includes('--effort'), false);
+});
+
 test('PRUEBAS para todos los hilos: encendido por defecto, se apaga con «no» y solo contra la web de pruebas', () => {
   const cfg = cargarConfig(envBase(tmp()));
   assert.deepEqual(cfg.pruebasKronos, { habilitado: true, base: 'http://192.168.11.230:3030' });

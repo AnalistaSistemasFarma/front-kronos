@@ -55,7 +55,7 @@ export const SETTINGS_HIJO = {
  * fija el id con --session-id (así el puente lo conoce de antemano); después,
  * --resume con ese mismo id.
  */
-export function armarArgumentos({ perfil, sesion, rutaMcp, rutaSistema, dirArchivos, modelo, presupuestoUsd, equipo = null, codigo = null, plugins = null, objetivo = false, lectura = null, scripts = null }) {
+export function armarArgumentos({ perfil, sesion, rutaMcp, rutaSistema, dirArchivos, modelo, esfuerzo = null, presupuestoUsd, equipo = null, codigo = null, plugins = null, objetivo = false, lectura = null, scripts = null }) {
   if (!perfil) throw new Error('Falta el perfil.');
   if (!sesion?.id || !/^[0-9a-f-]{36}$/i.test(sesion.id)) throw new Error('session id inválido.');
 
@@ -133,6 +133,7 @@ export function armarArgumentos({ perfil, sesion, rutaMcp, rutaSistema, dirArchi
   if (sesion.nueva) args.push('--session-id', sesion.id);
   else args.push('--resume', sesion.id);
   if (modelo) args.push('--model', modelo);
+  if (esfuerzo) args.push('--effort', esfuerzo);
   if (presupuestoUsd) args.push('--max-budget-usd', String(presupuestoUsd));
   if (equipo) args.push(...equipo.extra);
 
@@ -160,7 +161,7 @@ export const SETTINGS_COMPLETO = {
  * settings de proyecto/local plantado en la carpeta del hilo), sin hooks y las negaciones de
  * protección de ramas cuando hay repos montados.
  */
-export function armarArgumentosCompleto({ completo, sesion, rutaSistema, dirArchivos, modelo, presupuestoUsd, codigo = null, plugins = null, objetivo = false, rutaAgentes = null }) {
+export function armarArgumentosCompleto({ completo, sesion, rutaSistema, dirArchivos, modelo, esfuerzo = null, presupuestoUsd, codigo = null, plugins = null, objetivo = false, rutaAgentes = null }) {
   if (completo?.activo !== true || !completo.rutaMcp) throw new Error('Modo completo sin activar: no se arma.');
   if (!sesion?.id || !/^[0-9a-f-]{36}$/i.test(sesion.id)) throw new Error('session id inválido.');
   const prohibidas = [...NEGADAS_COMPLETO, ...(codigo?.prohibidas ?? [])];
@@ -191,6 +192,7 @@ export function armarArgumentosCompleto({ completo, sesion, rutaSistema, dirArch
   if (sesion.nueva) args.push('--session-id', sesion.id);
   else args.push('--resume', sesion.id);
   if (modelo) args.push('--model', modelo);
+  if (esfuerzo) args.push('--effort', esfuerzo);
   if (presupuestoUsd) args.push('--max-budget-usd', String(presupuestoUsd));
   // Equipo aprobado del proyecto: sus definiciones quedan disponibles (sin restringir Agent).
   if (rutaAgentes) args.push('--agents', rutaAgentes, '--forward-subagent-text');

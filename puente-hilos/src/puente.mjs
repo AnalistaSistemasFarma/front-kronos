@@ -549,6 +549,7 @@ export function crearPuente({ cfg, synerlink, estado, correr = correrTurno, conv
               rutaSistema: rutas.sistema,
               dirArchivos: rutas.archivos,
               modelo: cfg.modelo,
+              esfuerzo: cfg.esfuerzo,
               presupuestoUsd: cfg.presupuestoUsd,
               codigo,
               plugins: pluginsTurno,
@@ -563,6 +564,7 @@ export function crearPuente({ cfg, synerlink, estado, correr = correrTurno, conv
           rutaSistema: rutas.sistema,
           dirArchivos: rutas.archivos,
           modelo: cfg.modelo,
+          esfuerzo: cfg.esfuerzo,
           // Con equipo, el tope de gasto POR PEDIDO es obligatorio.
           presupuestoUsd: equipo ? topes.presupuestoUsd : cfg.presupuestoUsd,
           equipo: equipo ? argumentosEquipo({ equipo, rutaAgentes: rutas.agentes }) : null,
@@ -1119,7 +1121,7 @@ async function principal() {
     const oc = cfg.openclaw;
     log(`listo: agente ${cfg.agente} (${cfg.agenteNombre}), entorno ${cfg.entorno}, RUNNER OPENCLAW: agente ${oc.agente}${oc.perfil ? `, perfil ${oc.perfil}` : ''}${oc.local ? ', --local' : ', por el Gateway'}; sesiones ${oc.prefijo}c<conv>-<gen>; área ${cfg.areaDir}; outbox ${oc.outbox ?? 'no'}; indicador fino ${oc.actividad && !oc.local ? 'sí' : 'no'}; tope ${cfg.maxConcurrencia} hilos; tope por turno ${duracionLegible(cfg.timeoutTurnoMs)}; avisos ${cfg.avisoProgresoMs ? `cada ${duracionLegible(cfg.avisoProgresoMs)}` : 'apagados'}; perfil: ${perfilListo(cfg)}; PDF del puente ${cfg.pdf?.habilitado ? `sí${oc.recursos?.length ? ` (recursos: ${oc.recursos.join(', ')})` : ''}` : 'no'}; ${esNegocio(cfg) ? 'sin capacidades del puente (conectores, PRUEBAS, código, equipo, plugins): el agente usa SOLO las suyas' : `CÓDIGO con guardia de git/gh (${cfg.rutaReposPorProyecto ?? 'sin archivo de repos'}; token ${cfg.githubTokenArchivo ? 'en archivo' : 'NO'}); PR solo a la rama de pruebas, sin pases; sin conectores, PRUEBAS, equipo ni plugins del puente`}.`);
   } else
-  log(`listo: agente ${cfg.agente} (${cfg.agenteNombre}), entorno ${cfg.entorno}, tope ${cfg.maxConcurrencia} hilos, credencial: ${cfg.origenCredencial}, modelo del hilo principal: ${cfg.modelo ?? 'el predeterminado de la cuenta (sin HILOS_MODELO)'}; tope por turno ${duracionLegible(cfg.timeoutTurnoMs)}; gasto ${cfg.sinTopeGasto ? 'SIN TOPE' : cfg.presupuestoUsd ? `tope ${cfg.presupuestoUsd} USD` : `sin tope general (equipo ${cfg.subagentesPresupuestoUsd} USD)`}; avisos de progreso ${cfg.avisoProgresoMs ? `cada ${duracionLegible(cfg.avisoProgresoMs)}` : 'apagados'}; continuación automática ${cfg.continuarAlAgotar ? 'sí' : 'no'}; perfil: ${perfilListo(cfg)}; PRUEBAS para todos los hilos: ${pruebasListo(cfg)}; conectores del agente: ${conectoresAgenteListo(cfg)}.`);
+  log(`listo: agente ${cfg.agente} (${cfg.agenteNombre}), entorno ${cfg.entorno}, tope ${cfg.maxConcurrencia} hilos, credencial: ${cfg.origenCredencial}, modelo del hilo principal: ${cfg.modelo ?? 'el predeterminado de la cuenta (sin HILOS_MODELO)'}, esfuerzo ${cfg.esfuerzo ?? 'el predeterminado (sin HILOS_EFFORT)'}; tope por turno ${duracionLegible(cfg.timeoutTurnoMs)}; gasto ${cfg.sinTopeGasto ? 'SIN TOPE' : cfg.presupuestoUsd ? `tope ${cfg.presupuestoUsd} USD` : `sin tope general (equipo ${cfg.subagentesPresupuestoUsd} USD)`}; avisos de progreso ${cfg.avisoProgresoMs ? `cada ${duracionLegible(cfg.avisoProgresoMs)}` : 'apagados'}; continuación automática ${cfg.continuarAlAgotar ? 'sí' : 'no'}; perfil: ${perfilListo(cfg)}; PRUEBAS para todos los hilos: ${pruebasListo(cfg)}; conectores del agente: ${conectoresAgenteListo(cfg)}.`);
 
   let parar = false;
   for (const senal of ['SIGTERM', 'SIGINT']) {

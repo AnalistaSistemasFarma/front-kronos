@@ -323,6 +323,8 @@ Gotchas de `claude` 2.1.299: `cd <dir> && git …` se niega siempre (por eso `gi
 
 **Modelo del hilo principal:** `HILOS_MODELO` en el `.env` de cada puente (p. ej. `claude-opus-5-5`); se pasa como `--model` y el log de arranque lo muestra. Sin ella, el predeterminado de la cuenta. Los subagentes usan el modelo que fijó su equipo (`null` = heredan el principal).
 
+**Esfuerzo del hilo principal:** `HILOS_EFFORT` (`low`, `medium`, `high`, `xhigh` o `max`) en el `.env` de cada puente; se pasa como `--effort` y el log de arranque lo muestra. Sin ella, el predeterminado del binario. Úselo para igualar el `effortLevel` del chat del agente (p. ej. Cosmo en `medium`).
+
 **Verificar sin escribir en hilos:** `scripts/simular-turno-codigo.mjs` (conversación ficticia ≥ 990000; `--sin-reglas-texto` prueba solo los controles duros).
 
 **Límites conocidos:** con `npm test`/`node`, el modelo puede correr código arbitrario dentro del sandbox, incluido usar `GH_TOKEN` contra GitHub. El control de pases es local (reglas y hook): GitHub no lo impone si el token tiene permisos de administrador y el repo no tiene protección de ramas.
