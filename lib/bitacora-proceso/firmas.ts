@@ -167,7 +167,7 @@ export function assertPuedeConfirmar(o: OrdenActores, firmas: readonly FirmaFila
       if (o.jefe && c.idUser === o.jefe) return 'JEFE_PROD';
       if (!c.access?.canManage) {
         throw new OtError(
-          'Para cerrar le falta el permiso «Bitácora de Proceso: Gestión» en esta empresa (supervisor), o ser el jefe de producción designado en esta bitácora.',
+          'Para cerrar le falta el permiso Bitácora de Proceso: Gestión en esta empresa (supervisor), o ser el jefe de producción designado en esta bitácora.',
           403
         );
       }
@@ -218,7 +218,7 @@ export function parseConfirmacion(body: Record<string, unknown> | null, rolFijo?
   if (!body) throw new OtError('Se esperaba un JSON con la confirmación.', 400);
   const rol = rolFijo ?? body.rol;
   if (!isOtFirmaRol(rol)) throw new OtError('Visto bueno no válido.', 400);
-  if (body.confirmo !== true) throw new OtError('Toque «Sí, confirmo» para dar el visto bueno.', 400);
+  if (body.confirmo !== true) throw new OtError('Toque Sí, confirmo para dar el visto bueno.', 400);
   let persona: string | null = null;
   let idOperador: number | null = null;
   if (rol === 'OPERARIO') {

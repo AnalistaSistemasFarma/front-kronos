@@ -884,8 +884,8 @@ if (session?.user?.id) return session.user.id as unknown as number;
       type: 'success',
       text:
         tipo === 'paralelizar'
-          ? 'Mejora continua: el cambio quedó preparado (la tarea resaltada ya no es secuencial). Revíselo y pulse «Guardar cambios».'
-          : 'Mejora continua: la edición quedó abierta en la tarea resaltada. Haga el ajuste sugerido y pulse «Guardar cambios».',
+          ? 'Mejora continua: el cambio quedó preparado (la tarea resaltada ya no es secuencial). Revíselo y pulse Guardar cambios.'
+          : 'Mejora continua: la edición quedó abierta en la tarea resaltada. Haga el ajuste sugerido y pulse Guardar cambios.',
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tasks, loadingTasks, searchParams]);
@@ -2009,7 +2009,7 @@ if (session?.user?.id) return session.user.id as unknown as number;
                         {startsCond && (
                           <ConditionalObject
                             label={condLabel}
-                            note={sapWhenLabel ? 'si no se cumple, la tarea queda «Omitida»' : undefined}
+                            note={sapWhenLabel ? 'si no se cumple, la tarea queda Omitida' : undefined}
                           />
                         )}
                         <Card
@@ -3165,7 +3165,7 @@ if (session?.user?.id) return session.user.id as unknown as number;
             {newTaskForm.task_kind === 'doc_template' && (
               <Alert color='violet' variant='light' icon={<IconFileText size={16} />}>
                 Genera un documento con los valores del formulario y lo deja en los adjuntos de la solicitud. En modo
-                automático no necesita responsable. Guarde el flujo y luego use «Configurar plantilla» en la tarjeta de
+                automático no necesita responsable. Guarde el flujo y luego use Configurar plantilla en la tarjeta de
                 la tarea.
               </Alert>
             )}

@@ -211,13 +211,13 @@ export function normalizeHeaderGrid(raw: unknown): SgcHeaderGrid {
   if (errors.length) throw new SgcError(errors[0]);
   const missing: string[] = [];
   for (let rr = 0; rr < heights.length; rr++) for (let k = 0; k < columns.length; k++) if (!owner.has(`${rr},${k}`)) missing.push(`fila ${rr + 1}, columna ${k + 1}`);
-  if (missing.length) throw new SgcError(`Hay casillas sin celda: ${missing.slice(0, 4).join('; ')}${missing.length > 4 ? '…' : ''}. Use «Celda vacía» si no lleva nada.`);
+  if (missing.length) throw new SgcError(`Hay casillas sin celda: ${missing.slice(0, 4).join('; ')}${missing.length > 4 ? '…' : ''}. Use Celda vacía si no lleva nada.`);
   for (const f of UNIQUE_FIELDS) {
     const n = cells.filter((c) => c.field === f).length;
-    if (n > 1) throw new SgcError(`«${SGC_HEADER_FIELD_LABELS[f]}» va en una sola celda (está en ${n}).`);
+    if (n > 1) throw new SgcError(`${SGC_HEADER_FIELD_LABELS[f]} va en una sola celda (está en ${n}).`);
   }
   if (cells.some((c) => c.field === 'codigo_version_pagina') && cells.some((c) => c.field === 'codigo' || c.field === 'version' || c.field === 'pagina')) {
-    throw new SgcError('Use «Código, versión y página (juntos)» o las celdas separadas, no ambos.');
+    throw new SgcError('Use Código, versión y página (juntos) o las celdas separadas, no ambos.');
   }
   const absent = SGC_HEADER_GRID_REQUIRED.filter((req) => !cells.some((c) => req.any.includes(c.field)));
   if (absent.length) throw new SgcError(`Al encabezado le falta ${absent.map((a) => a.label).join(', ')}.`);

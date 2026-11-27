@@ -57,7 +57,7 @@ export async function POST(req) {
       if (pendingTasks.length > 0) {
         const lines = pendingTasks.map(
           (t) =>
-            `• «${t.task_name}» — Responsable: ${t.assigned_name || 'Sin asignar'} (${t.status_name})`
+            `• ${t.task_name} — Responsable: ${t.assigned_name || 'Sin asignar'} (${t.status_name})`
         );
         return new Response(
           JSON.stringify({

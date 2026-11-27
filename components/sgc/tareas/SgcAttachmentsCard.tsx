@@ -97,7 +97,7 @@ export default function SgcAttachmentsCard({ requestId, attachments, currentDraf
                         </Badge>
                       )}
                       {draftLabel === 'reemplazado' && (
-                        <Tooltip label={currentDraft?.kind === 'borrador_editor' ? `El vigente es «${currentDraft.name}»` : 'Hay un borrador más reciente: no es lo que se firma'}>
+                        <Tooltip label={currentDraft?.kind === 'borrador_editor' ? `El vigente es ${currentDraft.name}` : 'Hay un borrador más reciente: no es lo que se firma'}>
                           <Badge variant='outline' color='gray' size='sm' data-testid='sgc-adjunto-reemplazado'>
                             Reemplazado
                           </Badge>

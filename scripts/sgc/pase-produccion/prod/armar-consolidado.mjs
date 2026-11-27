@@ -75,7 +75,7 @@ const partCond = (archivo, texto, cond) => {
 };
 const replaceOnce = (texto, de, a, archivo) => {
   const n = texto.split(de).length - 1;
-  if (n !== 1) throw new Error(`${archivo}: se esperaba 1 ocurrencia de «${de}» y hay ${n}`);
+  if (n !== 1) throw new Error(`${archivo}: se esperaba 1 ocurrencia de ${de} y hay ${n}`);
   return texto.replace(de, a);
 };
 
@@ -187,7 +187,7 @@ const wrap = (p, cond) => {
   return part(`${p} (solo si ${cond})`, `IF ${cond}\n  EXEC sp_executesql N'${t.replace(/'/g, "''")}';\nELSE PRINT N'${path.basename(path.dirname(p))}: ya aplicada, se omite.';`);
 };
 const r2 = [encabezado('PASE SGC · R2 · RESTAURAR EL MÓDULO DOCUMENTAL VIEJO (solo con reversa del CÓDIGO)',
-  '\n  El código anterior de main hace JOIN a dbo.document_version en «Ver actividades»: correr R2 ANTES de arrancar el código anterior.')];
+  '\n  El código anterior de main hace JOIN a dbo.document_version en Ver actividades: correr R2 ANTES de arrancar el código anterior.')];
 r2.push(wrap(`${MIG}/20260821000000_add_document_management/migration.sql`, "OBJECT_ID(N'dbo.document', N'U') IS NULL"));
 r2.push(wrap(`${MIG}/20260821120000_document_management_workflow/migration.sql`, "COL_LENGTH(N'dbo.document_version', N'id_request_general') IS NULL"));
 r2.push(file(`${SQLD}/01-retiro-modulo-viejo-reversa.sql`));

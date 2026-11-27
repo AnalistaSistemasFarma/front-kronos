@@ -186,7 +186,7 @@ export default function NabucoAsistida({ config }: { config: ConfigAsistida }) {
         Transferencia asistida
       </Title>
       <Text size='sm' c='dimmed' mb='sm'>
-        {`Busca en SAP los documentos de ${config.entidad_sap} que cumplen el filtro de la configuración y aún no se han enviado. «Simular» arma las solicitudes sin enviarlas; «Crear» las envía de verdad a Nabuco aunque la configuración esté en modo simulación.`}
+        {`Busca en SAP los documentos de ${config.entidad_sap} que cumplen el filtro de la configuración y aún no se han enviado. Simular arma las solicitudes sin enviarlas; Crear las envía de verdad a Nabuco aunque la configuración esté en modo simulación.`}
       </Text>
       {error && (
         <Stack mb='sm' gap={4}>

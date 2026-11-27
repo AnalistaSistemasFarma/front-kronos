@@ -131,8 +131,8 @@ export function checklistDe(raw: unknown): ItemChequeo[] {
     if (vistos.has(item.toLowerCase())) throw new SgcError(`Ítem repetido en la lista de chequeo: ${item}.`, 400);
     vistos.add(item.toLowerCase());
     const resultado = String(o.resultado ?? '') as ResultadoChequeo;
-    if (!RESULTADOS_CHEQUEO.includes(resultado)) throw new SgcError(`Marque el resultado de «${item}» (OK, No OK o N/A).`, 400);
-    out.push({ item, resultado, nota: textoOpcional(o.nota, `Nota de «${item}»`, 300) });
+    if (!RESULTADOS_CHEQUEO.includes(resultado)) throw new SgcError(`Marque el resultado de ${item} (OK, No OK o N/A).`, 400);
+    out.push({ item, resultado, nota: textoOpcional(o.nota, `Nota de ${item}`, 300) });
   }
   return out;
 }

@@ -204,7 +204,7 @@ export async function POST(req) {
           const isDocTask = !taskIsAuthorization && taskKindIn === 'doc_template';
           if (isSapTask && (action === 'create' || action === 'update')) {
             const sapErrors = validateTaskAction({ taskKind: 'sap_executor', actionKey: String(taskSapActionKey || ''), trigger: taskSapTrigger });
-            if (sapErrors.length > 0) throw new Error(`Tarea SAP «${taskName}»: ${sapErrors.join(' ')}`);
+            if (sapErrors.length > 0) throw new Error(`Tarea SAP ${taskName}: ${sapErrors.join(' ')}`);
           }
 
           if (action === 'create') {

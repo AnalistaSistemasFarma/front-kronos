@@ -102,7 +102,7 @@ export default function BiomedEditor({ idCompany, idRegistro, onClose, onChanged
                   {error}
                 </Text>
               ) : null}
-              Escriba sobre el formato vigente (V{registro.versionNumber}) como si lo llenara a mano: «Texto», clic donde va el dato y escriba
+              Escriba sobre el formato vigente (V{registro.versionNumber}) como si lo llenara a mano: Texto, clic donde va el dato y escriba
               (para marcar una casilla, escriba X). El formato del SGC no cambia. Guarde cuando quiera y, al terminar, cierre el registro: queda como
               evidencia y ya no se modifica.
             </>

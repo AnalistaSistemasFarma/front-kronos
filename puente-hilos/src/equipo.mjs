@@ -141,7 +141,7 @@ function linea(v) {
 export function textoSubagente({ agente, proyecto, miembro, perfil, codigo = null }) {
   const puedeEscribir = miembro.tools.includes('trabajo');
   const lineas = [
-    `Usted es «${linea(miembro.name)}», un SUBAGENTE especializado que trabaja para ${agente} (asistente de inteligencia artificial de la organización Group Shared Services Latinoamérica) en el proyecto «${linea(proyecto.name)}» (empresa: ${linea(proyecto.company?.companyName)}).`,
+    `Usted es ${linea(miembro.name)}, un SUBAGENTE especializado que trabaja para ${agente} (asistente de inteligencia artificial de la organización Group Shared Services Latinoamérica) en el proyecto ${linea(proyecto.name)} (empresa: ${linea(proyecto.company?.companyName)}).`,
     `Su rol: ${linea(miembro.purpose) || 'apoyar al asistente principal en lo que le pida.'}`,
     'Reglas que no cambian:',
     '- Usted recibe UNA tarea del asistente principal y le devuelve UN informe. No habla con las personas del proyecto: su informe lo lee el asistente principal.',
@@ -154,7 +154,7 @@ export function textoSubagente({ agente, proyecto, miembro, perfil, codigo = nul
       : '- No puede escribir archivos: entregue todo en su informe.',
     `- Conectores: ${miembro.tools.includes('conectores') && perfil.herramientas.length > 0 ? 'los de solo lectura del perfil del proyecto.' : 'ninguno.'} Navegación web: ${miembro.tools.includes('web') && perfil.web ? 'sí, solo para LEER información pública.' : 'no.'}`,
     '- Informe final: breve (idealmente menos de 400 palabras), con hallazgos concretos, cifras y de dónde salieron. Si no encontró algo, dígalo; no lo invente.',
-    '- Escriba en español colombiano formal, trato de «usted».',
+    '- Escriba en español colombiano formal, trato de usted.',
   ];
   if (codigo?.worktrees?.length) {
     lineas.push(
@@ -427,7 +427,7 @@ export function armarPromptSugerencia({ brief, disponibles, agente }) {
     `Usted es ${agente}, asistente de inteligencia artificial de la organización Group Shared Services Latinoamérica.`,
     `Proponga un EQUIPO de ${MIN_SUGERIDOS} a ${MAX_SUGERIDOS} subagentes especializados para apoyarle en el proyecto descrito abajo. Cada subagente recibe tareas suyas y le devuelve informes; no habla con las personas.`,
     'Para cada uno: nombre corto (máximo 60 caracteres), rol (una o dos frases), instrucciones (qué hace, cómo y qué entrega; máximo 4.000 caracteres), herramientas MÍNIMAS del catálogo y, si conviene, un modelo (haiku para tareas mecánicas y baratas, sonnet para análisis, opus solo si es indispensable; null = el mismo del asistente).',
-    `Catálogo de herramientas disponible en este proyecto: ${disponibles.map((d) => `«${d}»`).join(', ')}.`,
+    `Catálogo de herramientas disponible en este proyecto: ${disponibles.map((d) => `${d}`).join(', ')}.`,
     '  - archivos: leer los archivos del proyecto, lo vinculado y el cronograma (siempre incluida).',
     '  - trabajo: escribir documentos en una carpeta de trabajo (no en SynerLink).',
     ...(disponibles.includes('web') ? ['  - web: buscar y leer páginas web públicas.'] : []),

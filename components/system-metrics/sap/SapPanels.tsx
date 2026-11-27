@@ -262,7 +262,7 @@ export function SapDatabasePanel({ range }: { range: RangeKey }) {
       <div className={styles.grid2} style={{ marginTop: 16 }}>
         <div className={styles.card}>
           <h3 className={styles.cardTitle}>Cadenas de bloqueo</h3>
-          <p className={styles.cardHint}>La «cabeza» es quien retiene; debajo, quién está esperando.</p>
+          <p className={styles.cardHint}>La cabeza es quien retiene; debajo, quién está esperando.</p>
           {!detail?.chains?.length ? (
             <div className={styles.empty}>Sin bloqueos en la última lectura.</div>
           ) : (

@@ -245,7 +245,7 @@ test.describe('SGC · documentos padre e hijos y grilla del encabezado (APIs sim
     await snap(page, '05-mapa-relacionado');
   });
 
-  test('[SGC-REQ-183] celular: el botón «Relacionar con padre» del árbol hace lo mismo sin arrastrar', async ({ page }) => {
+  test('[SGC-REQ-183] celular: el botón Relacionar con padre del árbol hace lo mismo sin arrastrar', async ({ page }) => {
     const { posted } = await simular(page);
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto(`/process/sgc-documental/arbol?empresa=${EMPRESA}`);

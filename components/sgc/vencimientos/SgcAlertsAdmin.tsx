@@ -138,11 +138,11 @@ export function SgcAlertConfigPanel({ company, calendar }: { company: SgcCompany
             <Title order={5}>Programador de avisos</Title>
             {sched ? (
               <Text size='sm' data-testid='sgc-programador'>
-                Job «sgc_review_alerts» {sched.active ? 'activo' : 'INACTIVO'} · cron {sched.cron} · próxima corrida {sched.nextRun?.slice(0, 16).replace('T', ' ') ?? '—'} · última {sched.lastRun?.slice(0, 16).replace('T', ' ') ?? '—'} ({sched.lastStatus ?? 'sin corridas'})
+                Job sgc_review_alerts {sched.active ? 'activo' : 'INACTIVO'} · cron {sched.cron} · próxima corrida {sched.nextRun?.slice(0, 16).replace('T', ' ') ?? '—'} · última {sched.lastRun?.slice(0, 16).replace('T', ' ') ?? '—'} ({sched.lastStatus ?? 'sin corridas'})
               </Text>
             ) : (
               <Text size='sm' c='red' data-testid='sgc-programador'>
-                No está registrado el job del programador: los avisos solo salen con «Ejecutar ahora».
+                No está registrado el job del programador: los avisos solo salen con Ejecutar ahora.
               </Text>
             )}
           </div>
@@ -283,7 +283,7 @@ export function SgcAlertLogPanel({ company }: { company: SgcCompanyAccess }) {
         </Button>
       </Group>
       <Text size='xs' c='dimmed' mb='sm'>
-        Cada aviso sale una sola vez. «Omitido» = su día pasó sin que corriera el programador; en su lugar salió el más urgente. El detalle por persona y canal también
+        Cada aviso sale una sola vez. Omitido = su día pasó sin que corriera el programador; en su lugar salió el más urgente. El detalle por persona y canal también
         queda en la auditoría.
       </Text>
       <Table.ScrollContainer minWidth={820}>

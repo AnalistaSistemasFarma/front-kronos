@@ -57,7 +57,7 @@ async function totalVinculos(idProject: number): Promise<number> {
 
 async function accesoCorreo(user: ProjectUser) {
   const acceso = await getCorreoAccess(prisma, user.email);
-  if (!acceso) throw new LinkError('Para vincular correos necesita el permiso del módulo «Correo».', 403);
+  if (!acceso) throw new LinkError('Para vincular correos necesita el permiso del módulo Correo.', 403);
   return acceso;
 }
 

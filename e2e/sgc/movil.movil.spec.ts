@@ -105,7 +105,7 @@ test.describe.serial('SGC documental · celular', () => {
     await ctx.close();
   });
 
-  test('[SGC-REQ-105] «Ubicar firmas» en el celular: documento a todo el ancho, tocar para ubicar, arrastrar con el dedo y desplazar el documento', async ({ browser, page }, testInfo) => {
+  test('[SGC-REQ-105] Ubicar firmas en el celular: documento a todo el ancho, tocar para ubicar, arrastrar con el dedo y desplazar el documento', async ({ browser, page }, testInfo) => {
     const cat = await ok<{ processes: { id: number; code: string }[]; documentTypes: { id: number; code: string }[] }>(await page.request.get(`/api/sgc/catalogs?company=${OLP}`));
     // S15 (DOC v7): quien pide elabora, así que la pide qa.sgc y qa.sgc2 autoriza la creación.
     const v7 = (await flowRoleModel(page.request)) === 'solicitante_elabora';
@@ -157,7 +157,7 @@ test.describe.serial('SGC documental · celular', () => {
       .poll(async () => {
         if (!(await near())) await page.touchscreen.tap(target.x, target.y);
         return Boolean(await near());
-      }, { message: 'la caja de «Elaboró» quedó donde se tocó', timeout: 20_000 })
+      }, { message: 'la caja de Elaboró quedó donde se tocó', timeout: 20_000 })
       .toBe(true);
     const moved = (await near())!;
 
@@ -208,7 +208,7 @@ test.describe.serial('SGC documental · celular', () => {
     expect(layout.fields).toHaveLength(3);
   });
 
-  test('[SGC-REQ-106] la firma electrónica cabe en la pantalla del celular y se firma «Elaboró» con la contraseña', async ({ page }) => {
+  test('[SGC-REQ-106] la firma electrónica cabe en la pantalla del celular y se firma Elaboró con la contraseña', async ({ page }) => {
     const { tasks } = await ok<{ tasks: { idTask: number; task: string; status: string }[] }>(await page.request.get(`/api/sgc/tasks?request=${idRequest}`));
     const elab = tasks.find((t) => t.task.startsWith('Elaboración') && t.status === 'abierta')!;
     await page.goto(`/process/sgc-documental/tareas/${elab.idTask}?empresa=${OLP}`);
@@ -287,7 +287,7 @@ test.describe.serial('SGC documental · celular', () => {
     }
   });
 
-  test('[SGC-REQ-107] las pantallas del SGC caben en el celular: sin desborde, campos de 16 px, «Autorizar» a la vista y calendario en agenda', async ({ page }) => {
+  test('[SGC-REQ-107] las pantallas del SGC caben en el celular: sin desborde, campos de 16 px, Autorizar a la vista y calendario en agenda', async ({ page }) => {
     for (const path of ['', '/listado', '/areas', '/solicitudes', '/solicitudes/nueva', '/tareas', '/autorizaciones', '/vencimientos', '/firmas', '/configuracion', '/flujos', '/relaciones']) {
       await page.goto(`/process/sgc-documental${path}?empresa=${OLP}`);
       await expect(page.locator('h1').first()).toBeVisible({ timeout: 45_000 });

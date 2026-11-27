@@ -102,7 +102,7 @@ describe('SGC · S8 · formato del Excel del listado maestro', () => {
     expect(getMasterListRowsError([{ rowNumber: 1, values: {} }])).toContain('número');
     expect(getMasterListRowsError([{ rowNumber: 2, values: [] }])).toContain('faltan los valores');
     expect(getMasterListRowsError([{ rowNumber: 2 }])).toContain('faltan los valores');
-    expect(getMasterListRowsError([{ rowNumber: 2, values: { otra: 'x' } }])).toContain('columna desconocida «otra»');
+    expect(getMasterListRowsError([{ rowNumber: 2, values: { otra: 'x' } }])).toContain('columna desconocida otra');
     expect(getMasterListRowsError([{ rowNumber: 2, values: { code: 5 } }])).toContain('texto');
     expect(getMasterListRowsError([{ rowNumber: 2, values: { title: 'x'.repeat(1001) } }])).toContain('texto');
     expect(getMasterListRowsError([ok(2, 'OLP-GCC-02')])).toBeNull();
@@ -146,20 +146,20 @@ describe('SGC · S8 · validación del listado maestro por fila', () => {
       ctx()
     );
     const errs = (n: number) => r.items.find((i) => i.rowNumber === n)!.errors.join(' | ');
-    expect(errs(2)).toContain('Falta «Código».');
-    expect(errs(2)).toContain('Falta «Fecha de vigencia».');
+    expect(errs(2)).toContain('Falta Código.');
+    expect(errs(2)).toContain('Falta Fecha de vigencia.');
     expect(errs(3)).toContain('solo admite letras');
     expect(errs(4)).toBe('');
     expect(errs(5)).toBe('El código OLP-GCC-05 está repetido (fila 4).');
     expect(errs(6)).toBe('El código OLP-DT-01 ya existe en el SGC de la empresa.');
-    expect(errs(7)).toContain('El tipo documental «XX» no existe');
-    expect(errs(7)).toContain('El proceso «ZZ» no existe');
+    expect(errs(7)).toContain('El tipo documental XX no existe');
+    expect(errs(7)).toContain('El proceso ZZ no existe');
     expect(errs(8)).toContain('entero entre 1 y 999');
     expect(errs(9)).toContain('entero entre 1 y 999');
     expect(errs(10)).toBe('La fecha de vigencia 2099-01-01 es futura.');
     expect(r.items.find((i) => i.rowNumber === 10)!.effectiveDate).toBeNull();
     expect(errs(11)).toContain('no es válida (use AAAA-MM-DD');
-    expect(errs(12)).toContain('La confidencialidad «secreto» no es válida');
+    expect(errs(12)).toContain('La confidencialidad secreto no es válida');
     expect(errs(13)).toContain('necesita que el proceso DT tenga departamento dueño');
     expect(errs(14)).toContain('muy corto');
     expect(errs(15)).toContain('máximo 300');
@@ -188,7 +188,7 @@ describe('SGC · S8 · validación del listado maestro por fila', () => {
     expect(item(4).warnings[0]).toContain('no sigue la guía de codificación');
     expect(item(5)).toMatchObject({ status: 'ok', warnings: [] });
     expect(item(6).errors).toEqual(['El documento padre OLP-GCC-99 no está en el listado ni en el SGC de la empresa.']);
-    expect(item(7).warnings).toEqual(['El tipo FO hereda el número de su documento padre: indique el «Código del documento padre» para relacionarlo.']);
+    expect(item(7).warnings).toEqual(['El tipo FO hereda el número de su documento padre: indique el Código del documento padre para relacionarlo.']);
     expect(item(8).errors).toEqual(['Un documento no puede ser su propio padre.']);
     expect(item(9)).toMatchObject({ status: 'ok', sequence: null });
     expect(item(9).warnings[0]).toContain('GCC-PR-15 no sigue la guía');
@@ -211,7 +211,7 @@ describe('SGC · S8 · plantilla descargable y lectura del Excel', () => {
     ],
   };
 
-  it('[SGC-REQ-114] la plantilla trae la hoja «Listado maestro» solo con encabezados, las instrucciones con ejemplo y los catálogos de la empresa', async () => {
+  it('[SGC-REQ-114] la plantilla trae la hoja Listado maestro solo con encabezados, las instrucciones con ejemplo y los catálogos de la empresa', async () => {
     const buf = await buildMasterListTemplate(catalogs);
     const wb = new ExcelJS.Workbook();
     await wb.xlsx.load(buf);
@@ -332,13 +332,13 @@ describe('SGC · carga inicial real · listado de Calidad OLP (2026-10-19)', () 
     const v = validateMasterList(rows, olp());
     const by = (n: number) => v.items.find((i) => i.rowNumber === n)!;
     expect(by(2)).toMatchObject({ status: 'ok', documentTypeCode: 'PR', idDocumentType: 200, confidentiality: 'publica', parentCode: null });
-    expect(by(2).warnings).toContain('El tipo documental «Procedimientos» se tomó como PR.');
+    expect(by(2).warnings).toContain('El tipo documental Procedimientos se tomó como PR.');
     expect(by(3)).toMatchObject({ status: 'ok', documentTypeCode: 'IN', idDocumentType: 202, parentCode: 'OLP-GGC-01-PR-1' });
     expect(by(3).warnings).toContain('El documento padre OLP-GGC-01-PR se tomó como OLP-GGC-01-PR-1.');
     expect(by(4)).toMatchObject({ status: 'ok', documentTypeCode: 'FR', confidentiality: 'departamento', parentCode: 'OLP-GGC-01-PR-1' });
     expect(by(5).errors).toContain('El código OLP-GGC-01-PR-1 está repetido (fila 2).');
-    expect(by(6).errors).toContain('El tipo documental «PLANES» no existe o está inactivo en el SGC de la empresa.');
-    expect(by(7).errors.join(' ')).toMatch(/confidencialidad «secreta» no es válida/);
+    expect(by(6).errors).toContain('El tipo documental PLANES no existe o está inactivo en el SGC de la empresa.');
+    expect(by(7).errors.join(' ')).toMatch(/confidencialidad secreta no es válida/);
     expect(by(8).errors).toContain('El documento padre OLP-GGC-07-PR no está en el listado ni en el SGC de la empresa.');
     expect(v.summary).toMatchObject({ total: 7, ok: 3, errors: 4 });
   });

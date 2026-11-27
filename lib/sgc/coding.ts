@@ -126,7 +126,7 @@ export function validateChildCoding(guide: Pick<SgcCodingGuideInput, 'childPatte
   if (codes.length === 0) errors.push('Herencia: indique qué tipos documentales heredan el número (por ejemplo FO, IN).');
   for (const c of codes) {
     const e = getMasterCodeError(c);
-    if (e) errors.push(`Herencia, tipo «${c}»: ${e}`);
+    if (e) errors.push(`Herencia, tipo ${c}: ${e}`);
   }
   const d = guide.childSequenceDigits ?? 2;
   if (!Number.isInteger(d) || d < 1 || d > 6) errors.push('Herencia: los dígitos del consecutivo deben estar entre 1 y 6.');

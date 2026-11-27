@@ -79,7 +79,7 @@ const constructor = (page: Page) => page.getByTestId('constructor-formulario');
 const tarjeta = (page: Page, codigo: string) => page.getByTestId(`formulario-sst-${codigo}`);
 
 test.describe('Portal TH · formularios SST (etapa 5: administrar)', () => {
-  test('quien NO es administrador no ve «Crear formulario», «Editar» ni «Retirar», y ni siquiera pide las definiciones', async ({ page }) => {
+  test('quien NO es administrador no ve Crear formulario, Editar ni Retirar, y ni siquiera pide las definiciones', async ({ page }) => {
     await page.setViewportSize({ width: 1366, height: 900 });
     const s = await simular(page, { admin: false, conPropio: true });
     await page.goto('/portal/formularios-sst');
@@ -90,7 +90,7 @@ test.describe('Portal TH · formularios SST (etapa 5: administrar)', () => {
     expect(s.definicionesPedidas()).toBe(0);
   });
 
-  test('el administrador ve «Crear formulario», «Editar» en cada uno y «Retirar» solo en los propios', async ({ page }) => {
+  test('el administrador ve Crear formulario, Editar en cada uno y Retirar solo en los propios', async ({ page }) => {
     await page.setViewportSize({ width: 1366, height: 900 });
     await simular(page, { admin: true, conPropio: true });
     await page.goto('/portal/formularios-sst');
@@ -145,7 +145,7 @@ test.describe('Portal TH · formularios SST (etapa 5: administrar)', () => {
     expect(JSON.stringify(d.autorizacion)).toContain('Seguridad y Salud en el Trabajo');
   });
 
-  test('editar el de salud: se abre con todo lo suyo (escala, imagen, «Otras») y guardar SIN tocar nada envía exactamente la misma definición', async ({ page }) => {
+  test('editar el de salud: se abre con todo lo suyo (escala, imagen, Otras) y guardar SIN tocar nada envía exactamente la misma definición', async ({ page }) => {
     await page.setViewportSize({ width: 1366, height: 1000 });
     const s = await simular(page, { admin: true });
     await page.goto('/portal/formularios-sst');
@@ -218,7 +218,7 @@ test.describe('Portal TH · formularios SST (etapa 5: administrar)', () => {
     await expect(page.getByTestId('formularios-sst-aviso')).toHaveCount(0);
   });
 
-  test('retirar uno propio pide confirmación; «No» no hace nada; confirmar lo retira y la lista se actualiza', async ({ page }) => {
+  test('retirar uno propio pide confirmación; No no hace nada; confirmar lo retira y la lista se actualiza', async ({ page }) => {
     await page.setViewportSize({ width: 1366, height: 900 });
     const s = await simular(page, { admin: true, conPropio: true });
     await page.goto('/portal/formularios-sst');

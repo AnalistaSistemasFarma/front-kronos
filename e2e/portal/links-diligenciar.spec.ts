@@ -33,7 +33,7 @@ async function simular(page: Page, o: { puedeVer?: boolean; listaFalla?: boolean
 const seccion = (page: Page) => page.getByTestId('links-diligenciar');
 
 test.describe('Portal TH · links para diligenciar (etapa 4)', () => {
-  test('el título y los dos botones salen DEBAJO de la tarjeta «Formación» y de «Políticas y reglamentos», con el texto pedido', async ({ page }) => {
+  test('el título y los dos botones salen DEBAJO de la tarjeta Formación y de Políticas y reglamentos, con el texto pedido', async ({ page }) => {
     await page.setViewportSize({ width: 1366, height: 900 });
     await simular(page);
     await page.goto('/portal');

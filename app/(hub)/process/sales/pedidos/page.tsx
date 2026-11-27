@@ -148,7 +148,7 @@ export default function PedidosVentaPage() {
 
   if (companies === null) return <Group justify='center' mt='xl'><Loader /></Group>;
   if (!companies.length) {
-    return <Alert color='yellow' m='md' title='Pedidos de venta'>No tiene acceso a Ventas en ninguna empresa con SAP configurado («Ventas · Ofertas»).</Alert>;
+    return <Alert color='yellow' m='md' title='Pedidos de venta'>No tiene acceso a Ventas en ninguna empresa con SAP configurado (Ventas · Ofertas).</Alert>;
   }
 
   return (

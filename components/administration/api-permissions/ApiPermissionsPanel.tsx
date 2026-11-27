@@ -537,7 +537,7 @@ export default function ApiPermissionsPanel() {
               <IconApi size={28} stroke={1.4} className={s.emptyIcon} />
               <div className={s.emptyTitle}>
                 {needle
-                  ? `Nadie coincide con «${query.trim()}»`
+                  ? `Nadie coincide con ${query.trim()}`
                   : filter === 'all'
                     ? 'Aún no hay nadie con acceso'
                     : `Nadie en ${API_CLIENT_FILTERS.find((f) => f.value === filter)?.label ?? 'este filtro'}`}
@@ -561,7 +561,7 @@ export default function ApiPermissionsPanel() {
 
       <ActionSheet
         opened={accessConfirm !== null}
-        title={`¿Permitir escritura a «${accessConfirm?.name ?? ''}»?`}
+        title={`¿Permitir escritura a ${accessConfirm?.name ?? ''}?`}
         message='Podrá cambiar datos con los permisos de escritura que le marques (crear solicitudes, agregar notas, subir adjuntos…). Mientras no tenga ninguno marcado, sigue solo consultando.'
         confirmLabel='Permitir escritura'
         confirmIcon={<IconPencil size={18} />}

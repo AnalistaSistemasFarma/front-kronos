@@ -243,8 +243,8 @@ export function buildReassignNote(p: {
 }): string {
   const motivo = p.reason?.trim() ? ` Motivo: ${p.reason.trim().slice(0, 500)}` : '';
   if (p.isAuthorization)
-    return `Reasignación de autorización: «${p.taskName}» (#${p.taskId}) pasó de ${p.fromName} a ${p.toName}, que queda como aprobador; ${p.fromName} ya no puede aprobarla ni rechazarla. Realizada por ${p.actorName}.${motivo}`;
-  return `Reasignación por distribución de carga: la tarea «${p.taskName}» (#${p.taskId}) pasó de ${p.fromName} a ${p.toName}. Realizada por ${p.actorName}.${motivo}`;
+    return `Reasignación de autorización: ${p.taskName} (#${p.taskId}) pasó de ${p.fromName} a ${p.toName}, que queda como aprobador; ${p.fromName} ya no puede aprobarla ni rechazarla. Realizada por ${p.actorName}.${motivo}`;
+  return `Reasignación por distribución de carga: la tarea ${p.taskName} (#${p.taskId}) pasó de ${p.fromName} a ${p.toName}. Realizada por ${p.actorName}.${motivo}`;
 }
 
 /**

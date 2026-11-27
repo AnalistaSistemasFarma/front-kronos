@@ -396,7 +396,7 @@ function Configuracion({ company }: { company: SgcCompanyAccess }) {
                 />
                 <SgcSelect
                   label='Plantilla de encabezado'
-                  description='Sin plantilla propia, el tipo usa la plantilla por defecto de la empresa (pestaña «Encabezados»).'
+                  description='Sin plantilla propia, el tipo usa la plantilla por defecto de la empresa (pestaña Encabezados).'
                   data={[{ value: '', label: 'Por defecto de la empresa' }, ...(templates.data?.templates ?? []).filter((x) => x.isActive).map((x) => ({ value: String(x.id), label: `${x.name} (${x.code})` }))]}
                   value={editing.form.idHeaderTemplate ? String(editing.form.idHeaderTemplate) : ''}
                   onChange={(v) => set('idHeaderTemplate', v ? Number(v) : null)}

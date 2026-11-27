@@ -209,7 +209,7 @@ export default function NabucoPruebas({ company }: { company: NabucoCompany }) {
           {esProduccion && <Badge color='red'>Producción de Nabuco</Badge>}
         </Group>
         <Text size='sm' c='dimmed' mt='xs'>
-          Las pruebas manuales envían de verdad a Nabuco aunque la configuración esté en modo simulación. «Probar conexión» y el JSON libre no afectan el
+          Las pruebas manuales envían de verdad a Nabuco aunque la configuración esté en modo simulación. Probar conexión y el JSON libre no afectan el
           envío automático ni el tablero; la Transferencia asistida sí registra en el tablero (simulados y enviados) y no reenvía lo ya enviado.
         </Text>
       </Card>

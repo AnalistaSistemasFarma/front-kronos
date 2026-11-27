@@ -130,7 +130,7 @@ export function unauthorizedApprovers(
 }
 
 export function unauthorizedApproverMessage(emails: readonly string[], stepName: string): string {
-  return `${emails.join(', ')} no ${emails.length === 1 ? 'está' : 'están'} en la lista de aprobadores autorizados de este proceso: no ${emails.length === 1 ? 'puede' : 'pueden'} quedar en «${stepName}». Aseguramiento de Calidad mantiene la lista.`;
+  return `${emails.join(', ')} no ${emails.length === 1 ? 'está' : 'están'} en la lista de aprobadores autorizados de este proceso: no ${emails.length === 1 ? 'puede' : 'pueden'} quedar en ${stepName}. Aseguramiento de Calidad mantiene la lista.`;
 }
 
 // ---------------------------------------------------------------------------

@@ -491,7 +491,7 @@ export async function moverEquipos(db: BiomedDb, access: BiomedAccess, input: Mo
       if (!destino.cliente || !destino.sede || !destino.ciudad) throw new SgcError('Para distribuir indique cliente, sede y ciudad.', 400);
       if (esBodega(destino.sede)) throw new SgcError('La sede de destino no puede ser la bodega.', 400);
     } else if (!esBodega(destino.sede)) {
-      throw new SgcError('Al volver a bodega la sede es «Bodega».', 400);
+      throw new SgcError('Al volver a bodega la sede es Bodega.', 400);
     }
   }
   const obligatoria = accion === 'faltante' || accion === 'danado' || accion === 'reintegrar';

@@ -115,7 +115,7 @@ export default function CopyPermissionsDialog({ opened, source, clients, permiss
     <Modal
       opened={opened}
       onClose={close}
-      title={`Copiar los permisos de «${source.name}»`}
+      title={`Copiar los permisos de ${source.name}`}
       size={640}
       centered
       zIndex={300}
@@ -198,7 +198,7 @@ export default function CopyPermissionsDialog({ opened, source, clients, permiss
 
         <Alert variant='light' color='blue' icon={<IconInfoCircle size={16} />} p='sm'>
           Cada cliente conserva sus reglas: en solo lectura no recibe permisos de escritura y sin agente no recibe los de
-          Proyectos, Correo ni «Solicitar conectores de IA». Los proveedores no salen aquí: lo que ven se maneja en su portal.
+          Proyectos, Correo ni Solicitar conectores de IA. Los proveedores no salen aquí: lo que ven se maneja en su portal.
         </Alert>
 
         <Group justify='flex-end'>

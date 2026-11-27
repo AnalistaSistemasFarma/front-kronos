@@ -122,7 +122,7 @@ export function SelectorEmoji({ onElegir, alto = 260 }: { onElegir: (emoji: stri
             <div className='chat-emoji-grid'>{encontrados.map((x) => boton(x.e, x.n))}</div>
           ) : (
             <Text size='xs' className='chat-text-muted' ta='center' py='md'>
-              No hay emojis con «{consulta.trim()}».
+              No hay emojis con {consulta.trim()}.
             </Text>
           )
         ) : (

@@ -304,7 +304,7 @@ export default function IndicadorAutomatizacionesPage() {
             )}
           </SimpleGrid>
           <Text size="xs" c="dimmed" mt={8}>
-            Se actualiza cada lunes o con «Analizar ahora». Último análisis:{" "}
+            Se actualiza cada lunes o con Analizar ahora. Último análisis:{" "}
             {fechaHora(datos?.ultima?.finishedAt ?? null)}
             {datos?.ultima?.tareas
               ? ` · ${h(datos.ultima.tareas)} tareas revisadas`
@@ -404,8 +404,8 @@ export default function IndicadorAutomatizacionesPage() {
                   <b>Cómo se calcula.</b> Por cada caso de uso: las veces que
                   se pidió en el chat × (los minutos que le tomaría a una
                   persona sin IA − los minutos de la persona pidiendo y
-                  revisando). «Acumulado del periodo» suma todo el periodo
-                  analizado; «Por mes» es ese mismo total llevado a un mes
+                  revisando). Acumulado del periodo suma todo el periodo
+                  analizado; Por mes es ese mismo total llevado a un mes
                   promedio (30,44 días). Estimación conservadora, por validar
                   con cada área.
                 </Text>

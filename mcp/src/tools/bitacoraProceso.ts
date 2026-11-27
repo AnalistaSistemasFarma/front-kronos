@@ -195,7 +195,7 @@ export function registerBitacoraTools(server: McpServer, deps: BitacoraToolDeps)
   // -------------------------------------------------------------------------
   server.tool(
     'kronos_list_bitacoras',
-    'Lista las bitácoras de proceso (módulo «Bitácora de Proceso» de SynerLink: una bitácora = un turno de planta) de las empresas del alcance, más recientes primero. Cuatro actores: operario, supervisor, inspector y jefe de producción, cada uno con su visto bueno (en orden operario → supervisor, que cierra → inspector → jefe). Filtros: empresa, estado (abierta, cerrada = cerrada por el supervisor y con vistos buenos pendientes, verificada = con el visto bueno final del jefe de producción), rango de fechas de apertura, producto, lote, supervisor, inspector, jefe de producción y orden de producción de SAP. Devuelve el código BP-xxxx, producto, lote, turno con horario, área, horas de apertura y cierre (UTC), supervisor, inspector, jefe de producción, número de operarios y de registros, los cuatro vistos buenos (dados o no) con el siguiente pendiente, y la última actividad. Solo lectura.',
+    'Lista las bitácoras de proceso (módulo Bitácora de Proceso de SynerLink: una bitácora = un turno de planta) de las empresas del alcance, más recientes primero. Cuatro actores: operario, supervisor, inspector y jefe de producción, cada uno con su visto bueno (en orden operario → supervisor, que cierra → inspector → jefe). Filtros: empresa, estado (abierta, cerrada = cerrada por el supervisor y con vistos buenos pendientes, verificada = con el visto bueno final del jefe de producción), rango de fechas de apertura, producto, lote, supervisor, inspector, jefe de producción y orden de producción de SAP. Devuelve el código BP-xxxx, producto, lote, turno con horario, área, horas de apertura y cierre (UTC), supervisor, inspector, jefe de producción, número de operarios y de registros, los cuatro vistos buenos (dados o no) con el siguiente pendiente, y la última actividad. Solo lectura.',
     {
       companyId: z.number().int().positive().optional().describe('Empresa a consultar; se interseca con el alcance de la key.'),
       estado: z.enum(['abierta', 'cerrada', 'verificada']).optional().describe('abierta | cerrada (con vistos buenos pendientes) | verificada (con el visto bueno del jefe de producción).'),
@@ -314,7 +314,7 @@ export function registerBitacoraTools(server: McpServer, deps: BitacoraToolDeps)
   // -------------------------------------------------------------------------
   server.tool(
     'kronos_get_bitacora',
-    'Trae UNA bitácora de proceso completa: encabezado (código BP-xxxx, producto, lote, turno con horario, área, orden de producción de SAP y su copia, estado, horas de apertura y cierre, observación de cierre), participantes (supervisor, inspector, jefe de producción y operarios), todos los registros en orden cronológico (actividad, hora del servidor en UTC, operario que la hizo, usuario de la sesión que la registró y observación) y los cuatro vistos buenos (operario, supervisor «Cerró», inspector y jefe de producción) con nombre, hora y cómo se confirmó (sesión propia, PIN en tablet u operario en tablet). Indique id, o código (BP-0003) más companyId si la key ve varias empresas. Nunca devuelve imágenes de firma, huellas ni IP. Solo lectura.',
+    'Trae UNA bitácora de proceso completa: encabezado (código BP-xxxx, producto, lote, turno con horario, área, orden de producción de SAP y su copia, estado, horas de apertura y cierre, observación de cierre), participantes (supervisor, inspector, jefe de producción y operarios), todos los registros en orden cronológico (actividad, hora del servidor en UTC, operario que la hizo, usuario de la sesión que la registró y observación) y los cuatro vistos buenos (operario, supervisor Cerró, inspector y jefe de producción) con nombre, hora y cómo se confirmó (sesión propia, PIN en tablet u operario en tablet). Indique id, o código (BP-0003) más companyId si la key ve varias empresas. Nunca devuelve imágenes de firma, huellas ni IP. Solo lectura.',
     {
       id: z.number().int().positive().optional().describe('Id interno de la bitácora (campo id de kronos_list_bitacoras).'),
       codigo: z.string().trim().min(1).max(20).optional().describe('Código visible, p. ej. BP-0003 (el consecutivo es por empresa).'),
@@ -564,7 +564,7 @@ export function registerBitacoraTools(server: McpServer, deps: BitacoraToolDeps)
   // -------------------------------------------------------------------------
   server.tool(
     'kronos_list_bitacora_actividades',
-    'Lista el catálogo de intervenciones de la Bitácora de Proceso por empresa (alimentación de tolva, mantenimiento, refrigerio, «Otra», etc.), en el orden en que se muestran en planta. La observación es opcional en todas. Por defecto solo las activas. Solo lectura.',
+    'Lista el catálogo de intervenciones de la Bitácora de Proceso por empresa (alimentación de tolva, mantenimiento, refrigerio, Otra, etc.), en el orden en que se muestran en planta. La observación es opcional en todas. Por defecto solo las activas. Solo lectura.',
     {
       companyId: z.number().int().positive().optional().describe('Empresa a consultar; se interseca con el alcance de la key.'),
       incluirInactivas: z.boolean().optional().describe('Incluir actividades desactivadas. Por defecto false.'),

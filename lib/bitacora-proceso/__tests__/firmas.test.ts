@@ -52,13 +52,13 @@ describe('Bitácora de Proceso · cuatro vistos buenos (B2/B3, 2026-10-15)', () 
   const f = (rol: string, id_user: string, significado = 'Visto bueno'): FirmaFila => ({ rol, significado, id_user });
   const cerro = f('SUPERVISOR', 'sup', 'Cerró');
 
-  it('es un visto bueno propio de la bitácora: sin consentimiento de GSS Firma, sin contraseña, con «Sí, confirmo»', () => {
+  it('es un visto bueno propio de la bitácora: sin consentimiento de GSS Firma, sin contraseña, con Sí, confirmo', () => {
     expect(OT_CONFIRMACION_VERSION).toBe('bitacora-visto-bueno-2026-10-17');
     expect(OT_FIRMA_SIGNIFICADO).toEqual({ OPERARIO: 'Visto bueno', SUPERVISOR: 'Cerró', INSPECTOR: 'Visto bueno', JEFE_PROD: 'Visto bueno' });
     expect(Object.values(OT_CONFIRMACION_TEXTO).join(' ')).not.toMatch(/ley 527|firma electr|contraseña/i);
   });
 
-  it('las filas viejas INSPECTOR «Verificó» se leen como el visto bueno del JEFE de producción', () => {
+  it('las filas viejas INSPECTOR Verificó se leen como el visto bueno del JEFE de producción', () => {
     expect(rolVisible({ rol: 'INSPECTOR', significado: 'Verificó' })).toBe('JEFE_PROD');
     expect(rolVisible({ rol: 'INSPECTOR', significado: 'Visto bueno' })).toBe('INSPECTOR');
     expect(rolVisible({ rol: 'SUPERVISOR', significado: 'Cerró' })).toBe('SUPERVISOR');
@@ -102,7 +102,7 @@ describe('Bitácora de Proceso · cuatro vistos buenos (B2/B3, 2026-10-15)', () 
     expect(assertPuedeConfirmar(abierta, [], { rol: 'SUPERVISOR', idUser: 'sup', idOperador: null, access: sup })).toBe('SUPERVISOR');
     const sinGestion = errorOf(() => assertPuedeConfirmar(abierta, [op], { rol: 'SUPERVISOR', idUser: 'u', idOperador: null, access: op_ }));
     expect(sinGestion.status).toBe(403);
-    expect(sinGestion.message).toMatch(/le falta el permiso «Bitácora de Proceso: Gestión».*jefe de producción designado/);
+    expect(sinGestion.message).toMatch(/le falta el permiso Bitácora de Proceso: Gestión.*jefe de producción designado/);
     expect(errorOf(() => assertPuedeConfirmar(abierta, [op], { rol: 'SUPERVISOR', idUser: 'u', idOperador: null, access: null })).status).toBe(403);
     // El inspector nunca cierra, ni con Gestión.
     const insp = errorOf(() => assertPuedeConfirmar(abierta, [op], { rol: 'SUPERVISOR', idUser: 'insp', idOperador: null, access: sup }));
@@ -137,7 +137,7 @@ describe('Bitácora de Proceso · cuatro vistos buenos (B2/B3, 2026-10-15)', () 
     expect(errorOf(() => assertActoresDistintos({ abre: 's', inspector: 'i', jefe: 'i' })).status).toBe(400);
   });
 
-  it('R3: el JEFE designado cierra (aun sin Gestión); su cierre cuenta como su visto bueno y queda la traza «Cerró (jefe)»', () => {
+  it('R3: el JEFE designado cierra (aun sin Gestión); su cierre cuenta como su visto bueno y queda la traza Cerró (jefe)', () => {
     const c = (rol: 'SUPERVISOR' | 'INSPECTOR' | 'JEFE_PROD', idUser: string, access = op_) => ({ rol, idUser, idOperador: null, access });
     expect(assertPuedeConfirmar(abierta, [], c('SUPERVISOR', 'jefe'))).toBe('JEFE_PROD');
     // Un jefe que NO es el designado de esta bitácora, sin Gestión, no cierra.
@@ -168,7 +168,7 @@ describe('Bitácora de Proceso · cuatro vistos buenos (B2/B3, 2026-10-15)', () 
     expect(huellaContenido({ ...cierre, cierreComo: 'JEFE_PROD' })).not.toBe(sinCampo);
   });
 
-  it('cuerpo: rol, «Sí, confirmo», persona u operario y PIN opcional de 4 dígitos; sin contraseña', () => {
+  it('cuerpo: rol, Sí, confirmo, persona u operario y PIN opcional de 4 dígitos; sin contraseña', () => {
     expect(parseConfirmacion({ rol: 'SUPERVISOR', confirmo: true, persona: ' u1 ', observacion: ' fin ' })).toEqual({ rol: 'SUPERVISOR', persona: 'u1', idOperador: null, pin: null, observacion: 'fin' });
     expect(parseConfirmacion({ rol: 'OPERARIO', confirmo: true, operador: '7', observacion: 'x' })).toEqual({ rol: 'OPERARIO', persona: null, idOperador: 7, pin: null, observacion: null });
     expect(parseConfirmacion({ rol: 'JEFE_PROD', confirmo: true, persona: 'j', pin: '4821' }).pin).toBe('4821');

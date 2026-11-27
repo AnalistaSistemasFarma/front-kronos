@@ -12,7 +12,7 @@ import { OLP, createRequestElaboratedByQaSgc } from './flujo-v7';
  * Requiere la migración y el SQL de OLP del S16 en KRONOSDB_PRUEBAS.
  */
 test.describe('SGC · Sprint 16 (con sesión)', () => {
-  test('[SGC-REQ-163] «Encabezados» muestra las plantillas y la vista previa del encabezado', async ({ page }) => {
+  test('[SGC-REQ-163] Encabezados muestra las plantillas y la vista previa del encabezado', async ({ page }) => {
     const list = await page.request.get(`/api/sgc/header-templates?company=${OLP}`);
     test.skip(list.status() !== 200, 'Sin la migración del S16 en PRUEBAS.');
     const { templates } = (await list.json()) as { templates: { code: string; isDefault: boolean }[] };
@@ -27,7 +27,7 @@ test.describe('SGC · Sprint 16 (con sesión)', () => {
   test('[SGC-REQ-164] un formato en Excel se carga como borrador y el visor lo muestra compuesto (sin Word)', async ({ browser, page }) => {
     const cat = (await (await page.request.get(`/api/sgc/catalogs?company=${OLP}`)).json()) as { processes: { id: number; code: string }[]; documentTypes: { id: number; code: string; draftExtensions?: string[] }[] };
     const fo = cat.documentTypes.find((t) => t.code === 'FO');
-    test.skip(!fo?.draftExtensions?.includes('xlsx'), 'El tipo «Formato» aún no admite Excel en PRUEBAS (falta el SQL del S16).');
+    test.skip(!fo?.draftExtensions?.includes('xlsx'), 'El tipo Formato aún no admite Excel en PRUEBAS (falta el SQL del S16).');
     const { idRequest } = await createRequestElaboratedByQaSgc(browser, page.request, {
       requestType: 'nuevo',
       subject: `E2E S16 · formato en Excel ${new Date().toISOString()}`,

@@ -82,7 +82,7 @@ export function tableHeaderRow(pages: string[]): string {
 
 export function pdfOrderChunkPrompt(chunk: string, k: number, n: number, header: string): string {
   return (
-    `Fragmento ${k} de ${n} de una orden de compra (texto por renglones; las columnas van separadas por «|»).` +
+    `Fragmento ${k} de ${n} de una orden de compra (texto por renglones; las columnas van separadas por |).` +
     (header ? `\nEncabezados de la tabla de productos: ${header}` : '') +
     `\n"""\n${chunk}\n"""\n` +
     'Extrae TODAS las líneas de producto que aparezcan en ESTE fragmento (no las de otros fragmentos). ' +
@@ -234,7 +234,7 @@ export function bestCandidate(
  */
 export function agentOrderInstruction(companyName: string, fileName: string): string {
   return [
-    `Solicitud automática del formulario «Oferta de venta» de SynerLink (${companyName}).`,
+    `Solicitud automática del formulario Oferta de venta de SynerLink (${companyName}).`,
     `Adjunto la orden de compra de un cliente (${fileName}). Léela COMPLETA, todas las hojas.`,
     '',
     'Responde SOLO con un bloque ```json con este formato exacto, sin texto adicional:',

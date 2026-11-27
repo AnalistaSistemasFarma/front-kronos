@@ -204,7 +204,7 @@ export default function OrganigramaVisor({ onCerrar }: { onCerrar: () => void })
         </div>
 
         <p className='portal-th__org-ayuda'>
-          Pulse un cargo para ver quiénes lo ocupan. Arrastre para moverse; acerque con «+».{' '}
+          Pulse un cargo para ver quiénes lo ocupan. Arrastre para moverse; acerque con +.{' '}
           <span className='portal-th__org-leyenda'>
             <i className='portal-th__org-muestra portal-th__org-muestra--con' aria-hidden='true' /> con personas de {EMPRESA_POR_DEFECTO}
           </span>

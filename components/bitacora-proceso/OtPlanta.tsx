@@ -193,7 +193,7 @@ export default function OtPlanta({ company, idOrden }: { company: OtCompanyAcces
     const sig = r.siguiente ? ` Sigue: ${OT_ROL_LABEL[r.siguiente].toLowerCase()} (se le avisó).` : ' Ya tiene todos sus vistos buenos.';
     const text =
       rol === 'SUPERVISOR'
-        ? `Bitácora ${codigoOt(o.consecutivo)} cerrada («Cerró»: ${quien}). Ya no admite registros.${sig}`
+        ? `Bitácora ${codigoOt(o.consecutivo)} cerrada (Cerró: ${quien}). Ya no admite registros.${sig}`
         : `Visto bueno del ${OT_ROL_LABEL[rol].toLowerCase()} registrado (${quien}).${sig}`;
     setConfirmar(null);
     setAviso({ ok: true, text });

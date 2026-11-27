@@ -14,12 +14,12 @@ export const COLUMNAS_PLANTILLA: { header: string; obligatoria: string; ayuda: s
   { header: 'CODIGO INTERNO', obligatoria: 'No', ayuda: 'Código del material. Si el modelo ya existe, se toma el suyo.', ancho: 16 },
   { header: 'EQUIPO', obligatoria: 'Sí (o el modelo)', ayuda: 'Tipo de equipo (p. ej. BOMBA DE INFUSION). Si el modelo ya existe, se toma el suyo.', ancho: 30 },
   { header: 'MARCA', obligatoria: 'No', ayuda: 'Si el modelo ya existe, se toma la suya.', ancho: 14 },
-  { header: 'MODELO', obligatoria: 'Recomendada', ayuda: 'Uno de la hoja «Modelos» (o uno nuevo, con su equipo).', ancho: 30 },
+  { header: 'MODELO', obligatoria: 'Recomendada', ayuda: 'Uno de la hoja Modelos (o uno nuevo, con su equipo).', ancho: 30 },
   { header: 'SERIE', obligatoria: 'Sí', ayuda: 'Única: identifica el equipo. Si ya está en el inventario, la fila ACTUALIZA ese equipo.', ancho: 20 },
   { header: 'CLASIFICACION DE RIESGO', obligatoria: 'No', ayuda: 'I, IIA, IIB o III. Si el modelo ya existe, se toma la suya.', ancho: 14 },
   { header: 'REGISTRO SANITARIO', obligatoria: 'No', ayuda: 'Si aplica.', ancho: 18 },
   { header: 'CLIENTE', obligatoria: 'No', ayuda: 'Dueño o cliente donde está el equipo.', ancho: 34 },
-  { header: 'SEDE', obligatoria: 'No', ayuda: '«Bodega» = en bodega; otra sede = distribuido. Vacía = bodega.', ancho: 40 },
+  { header: 'SEDE', obligatoria: 'No', ayuda: 'Bodega = en bodega; otra sede = distribuido. Vacía = bodega.', ancho: 40 },
   { header: 'ZONA', obligatoria: 'No', ayuda: '', ancho: 12 },
   { header: 'CIUDAD', obligatoria: 'No', ayuda: '', ancho: 16 },
 ];
@@ -38,9 +38,9 @@ export async function construirPlantillaInventario(empresa: string, plantillas: 
 
   const ayuda = wb.addWorksheet('Instrucciones');
   ayuda.addRow([`Inventario de equipos biomédicos (OLP-GCC-04-FR-017)${empresa ? ` · ${empresa}` : ''}`]).font = { bold: true, size: 13 };
-  ayuda.addRow(['Llene la hoja «Inventario»: una fila por equipo. La fila 1 son los encabezados y no se cambia.']);
+  ayuda.addRow(['Llene la hoja Inventario: una fila por equipo. La fila 1 son los encabezados y no se cambia.']);
   ayuda.addRow(['Basta la SERIE, el MODELO y la ubicación (cliente, sede, ciudad): si el modelo ya está en el inventario, el resto se completa solo.']);
-  ayuda.addRow(['Al cargar, primero se SIMULA: verá qué es nuevo, qué cambia y qué filas tienen error. No se escribe nada hasta «Cargar».']);
+  ayuda.addRow(['Al cargar, primero se SIMULA: verá qué es nuevo, qué cambia y qué filas tienen error. No se escribe nada hasta Cargar.']);
   ayuda.addRow(['Si una serie ya está en el inventario, la fila actualiza ese equipo (con justificación). Un equipo faltante o dañado no lo cambia el archivo.']);
   ayuda.addRow([]);
   ayuda.addRow(['Columna', 'Obligatoria', 'Qué escribir']).font = { bold: true };

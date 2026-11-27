@@ -131,7 +131,7 @@ export default function DashboardVentaDiariaPage() {
 
       {sinAcceso && (
         <Alert color='yellow' title='Sin acceso'>
-          No tiene acceso a este tablero. Solicite el permiso «Dashboard de venta diaria» al administrador.
+          No tiene acceso a este tablero. Solicite el permiso Dashboard de venta diaria al administrador.
         </Alert>
       )}
 
@@ -237,7 +237,7 @@ export default function DashboardVentaDiariaPage() {
 
           <Text size='xs' c='dimmed'>
             Fuente: facturas de venta (Invoices) de SAP, valor del documento (DocTotal), sin documentos cancelados.
-            «Mismo lapso» = del día 1 al día del corte en ambos meses. El día en curso puede ser parcial.
+            Mismo lapso = del día 1 al día del corte en ambos meses. El día en curso puede ser parcial.
           </Text>
         </>
       )}

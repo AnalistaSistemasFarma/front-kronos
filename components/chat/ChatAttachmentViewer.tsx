@@ -600,7 +600,7 @@ function VistaHoja({ url }: { url: string }) {
           <Text size='xs'>
             {modo === 'pdf'
               ? 'Este Excel trae fórmulas sin calcular (lo generó un programa). Se muestra como PDF, que sí las calcula.'
-              : 'Este Excel trae fórmulas sin calcular: en esta vista esas celdas salen vacías. Use «PDF» para ver los resultados.'}
+              : 'Este Excel trae fórmulas sin calcular: en esta vista esas celdas salen vacías. Use PDF para ver los resultados.'}
           </Text>
         </Alert>
       )}

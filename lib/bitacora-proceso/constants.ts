@@ -290,7 +290,7 @@ export const OT_JEFE_PRODUCCION_LABEL = 'Jefe de producción';
 /** Texto de la confirmación por rol (B3: un botón «Sí, confirmo», sin contraseña). */
 export const OT_CONFIRMACION_TEXTO: Record<OtFirmaRol, string> = {
   OPERARIO: 'Confirmo, como operario del turno, que la cronología de esta bitácora refleja las intervenciones realizadas.',
-  SUPERVISOR: 'Confirmo que revisé los registros de este turno y cierro la bitácora («Cerró»). Después ya no admite registros.',
+  SUPERVISOR: 'Confirmo que revisé los registros de este turno y cierro la bitácora (Cerró). Después ya no admite registros.',
   INSPECTOR: 'Confirmo, como inspector, que revisé la bitácora cerrada.',
   JEFE_PROD: 'Confirmo, como jefe de producción, que revisé la bitácora y doy mi visto bueno.',
 };
@@ -336,7 +336,7 @@ export function isOtResponsableRol(v: unknown): v is OtResponsableRol {
 
 /** Qué hace cada responsable (texto de ayuda del catálogo). */
 export const OT_RESPONSABLE_AYUDA: Record<OtResponsableRol, string> = {
-  SUPERVISOR: 'Abre y cierra la bitácora («Cerró»). Debe tener el permiso «Bitácora de Proceso: Gestión».',
+  SUPERVISOR: 'Abre y cierra la bitácora (Cerró). Debe tener el permiso Bitácora de Proceso: Gestión.',
   INSPECTOR: 'Ya no forma parte del flujo (2026-11-24). Solo se conserva en las bitácoras anteriores.',
   JEFE_PROD: 'Puede abrir y cerrar la bitácora de la que es jefe; si la cierra el supervisor, da el último visto bueno.',
 };

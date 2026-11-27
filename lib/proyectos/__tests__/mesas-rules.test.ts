@@ -133,7 +133,7 @@ describe('decidirTick', () => {
     expect(decidirTick(mesa({ estado: 'cerrada' }), MIE_10).tipo).toBe('nada');
   });
 
-  it('«ronda ahora» la fuerza aunque no sea la hora ni el horario', () => {
+  it('ronda ahora la fuerza aunque no sea la hora ni el horario', () => {
     const noche = new Date('2026-11-05T02:00:00Z');
     const d = decidirTick(mesa({ proximoTurnoAt: null }), noche, { forzar: true });
     expect(d.tipo).toBe('entregar');
@@ -299,7 +299,7 @@ describe('mesas: archivos compartidos (2026-11-11)', () => {
       archivos: [{ idAttachment: 10, nombre: 'pagos-octubre.csv', idAgent: 2, agente: 'Mechita', ronda: 1 }],
     });
     expect(t).toContain('Archivos de la mesa');
-    expect(t).toContain('«pagos-octubre.csv» (lo compartió Mechita en la ronda 1)');
+    expect(t).toContain('pagos-octubre.csv (lo compartió Mechita en la ronda 1)');
     expect(t).toContain('Puede abrirlos, leerlos y citarlos');
     expect(t).toContain('adjúntelo a su intervención');
     expect(t).toContain(ADVERTENCIA_ARCHIVOS);
@@ -316,7 +316,7 @@ describe('mesas: archivos compartidos (2026-11-11)', () => {
     expect(t).toContain('No comparta contraseñas, llaves ni datos personales sensibles');
   });
 
-  it('síntesis: exige la línea «Archivos compartidos:» con los de las rondas desde la síntesis anterior', () => {
+  it('síntesis: exige la línea Archivos compartidos: con los de las rondas desde la síntesis anterior', () => {
     const archivos = [archivo(10, 2, 2, 'Mechita'), archivo(11, 3, 4, 'Duo'), archivo(12, 2, 6, 'Mechita')];
     expect(archivosDesdeUltimaSintesis(archivos, 6, 3).map((a) => a.idAttachment)).toEqual([11, 12]);
     const t = instruccionesTurno({
@@ -326,10 +326,10 @@ describe('mesas: archivos compartidos (2026-11-11)', () => {
       archivos,
       sintesisCada: 3,
     });
-    expect(t).toContain('«Archivos compartidos:»');
+    expect(t).toContain('Archivos compartidos:');
     expect(t).toContain('quién lo compartió y para qué sirve');
-    expect(t).toContain('«archivo-11.csv» (lo compartió Duo en la ronda 4)');
-    expect(t).toContain('«archivo-12.csv» (lo compartió Mechita en la ronda 6)');
+    expect(t).toContain('archivo-11.csv (lo compartió Duo en la ronda 4)');
+    expect(t).toContain('archivo-12.csv (lo compartió Mechita en la ronda 6)');
     // El de la ronda 2 ya lo informó la síntesis de la ronda 3: no se exige otra vez en esa línea.
     const lineaSintesis = t.split('\n').filter((l) => l.startsWith('- «archivo-10'));
     expect(lineaSintesis).toEqual([]);
@@ -346,7 +346,7 @@ describe('mesas: archivos compartidos (2026-11-11)', () => {
   });
 
   it('detalle del evento archivo_compartido: nombre, agente y ronda, dentro del tope', () => {
-    expect(detalleArchivoCompartido('pagos.csv', 'Mechita', 2)).toBe('Mechita compartió «pagos.csv» en la ronda 2.');
+    expect(detalleArchivoCompartido('pagos.csv', 'Mechita', 2)).toBe('Mechita compartió pagos.csv en la ronda 2.');
     expect(detalleArchivoCompartido('x'.repeat(2000), 'Mechita', 2).length).toBeLessThanOrEqual(1000);
   });
 });

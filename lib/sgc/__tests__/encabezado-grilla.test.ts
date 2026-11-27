@@ -96,7 +96,7 @@ describe('SGC · encabezado con grilla · validación', () => {
     expect(cfg.grid?.cells).toHaveLength(9);
     expect(parseHeaderTemplateConfig(JSON.stringify(cfg)).grid).toEqual(cfg.grid);
     expect(() => normalizeHeaderTemplateConfig({ grid: { ...FORMATO, rows: [80, 80, 34, 16] } })).toThrow(/máximo es/);
-    expect(describeHeaderTemplateChanges(SGC_DEFAULT_HEADER_TEMPLATE, { ...SGC_DEFAULT_HEADER_TEMPLATE, grid: normalizeHeaderGrid(FORMATO) })).toEqual(['grilla: «tabla institucional» → «4 fila(s) × 3 columna(s), 9 celda(s)»']);
+    expect(describeHeaderTemplateChanges(SGC_DEFAULT_HEADER_TEMPLATE, { ...SGC_DEFAULT_HEADER_TEMPLATE, grid: normalizeHeaderGrid(FORMATO) })).toEqual(['grilla: tabla institucional → 4 fila(s) × 3 columna(s), 9 celda(s)']);
     const g2 = normalizeHeaderGrid({ ...FORMATO, cells: FORMATO.cells.map((c) => (c.field === 'texto' ? { ...c, text: 'Otro texto' } : c)) });
     expect(describeHeaderTemplateChanges({ ...SGC_DEFAULT_HEADER_TEMPLATE, grid: normalizeHeaderGrid(FORMATO) }, { ...SGC_DEFAULT_HEADER_TEMPLATE, grid: g2 })[0]).toMatch(/cambió el contenido de las celdas/);
   });
@@ -130,7 +130,7 @@ describe('SGC · encabezado con grilla · editor', () => {
 });
 
 describe('SGC · encabezado con grilla · PDF', () => {
-  it('[SGC-REQ-185] las celdas caen dentro del espacio del encabezado y la firma sugerida va en su celda «Firma»', () => {
+  it('[SGC-REQ-185] las celdas caen dentro del espacio del encabezado y la firma sugerida va en su celda Firma', () => {
     const g = normalizeHeaderGrid(FORMATO);
     const rects = headerGridRects(g, 595.28, 841.89);
     const bottom = Math.min(...rects.map((r) => r.rect.y));

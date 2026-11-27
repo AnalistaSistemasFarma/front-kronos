@@ -705,7 +705,7 @@ export default function SeccionMatrices({ proyecto, version, avisar }: { proyect
 
       {matrices.length === 0 ? (
         <Alert color='blue' variant='light' icon={<IconFileSpreadsheet size={18} />}>
-          Todavía no hay matrices en este proyecto.{puedeSubir ? ' Suba la primera con «Subir matriz».' : ''}
+          Todavía no hay matrices en este proyecto.{puedeSubir ? ' Suba la primera con Subir matriz.' : ''}
         </Alert>
       ) : (
         <Group gap='xs'>
@@ -820,7 +820,7 @@ function SubirMatrizModal({
   };
 
   return (
-    <Modal opened onClose={onClose} title={idMatrix ? `Nueva versión de «${nombreActual}»` : 'Subir matriz'} size='md'>
+    <Modal opened onClose={onClose} title={idMatrix ? `Nueva versión de ${nombreActual}` : 'Subir matriz'} size='md'>
       <Stack gap='sm'>
         {error && (
           <Alert color='red' variant='light'>

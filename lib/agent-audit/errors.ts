@@ -105,7 +105,7 @@ export function calcularClaveEvento(huella: string, clave: string): string {
 export function parsePublicacion(body: unknown, ahora: Date = new Date()): PublicacionErrores {
   if (!body || typeof body !== 'object') throw new ErroresValidacionError('Cuerpo vacío.');
   const b = body as Record<string, unknown>;
-  if (!Array.isArray(b.eventos)) throw new ErroresValidacionError('Falta la lista «eventos».');
+  if (!Array.isArray(b.eventos)) throw new ErroresValidacionError('Falta la lista eventos.');
   if (b.eventos.length > MAX_EVENTOS)
     throw new ErroresValidacionError(`Máximo ${MAX_EVENTOS} eventos por publicación.`);
   const host = texto(b.host, 60);
@@ -146,7 +146,7 @@ export function parsePublicacion(body: unknown, ahora: Date = new Date()): Publi
 /** Lista de huellas que el recolector ya avisó (acuse de la notificación). */
 export function parseAcuse(body: unknown): string[] {
   const b = (body ?? {}) as Record<string, unknown>;
-  if (!Array.isArray(b.huellas)) throw new ErroresValidacionError('Falta la lista «huellas».');
+  if (!Array.isArray(b.huellas)) throw new ErroresValidacionError('Falta la lista huellas.');
   const out = b.huellas.filter((h): h is string => typeof h === 'string' && /^[0-9a-f]{64}$/.test(h));
   if (out.length > 500) throw new ErroresValidacionError('Demasiadas huellas.');
   return [...new Set(out)];

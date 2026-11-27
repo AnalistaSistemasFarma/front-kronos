@@ -116,7 +116,7 @@ async function vigenteContent(db: SgcDb, deps: Pick<SgcGeneratorDeps, 'download'
   if (doc.status !== 'vigente' || !doc.current_version_id) throw new SgcError('La plantilla solo parte de un documento VIGENTE.', 409);
   const version = await db.sgcDocumentVersion.findUniqueOrThrow({ where: { id_document_version: doc.current_version_id } });
   const format = version.source_item_id ? generatorSourceFormat(version.source_file_name) : null;
-  if (!format) throw new SgcError(`${doc.code} V${version.version_number} solo tiene el PDF controlado: la plantilla debe partir de un Word o del editor de la app (RN «borrador solo Word»).`, 409);
+  if (!format) throw new SgcError(`${doc.code} V${version.version_number} solo tiene el PDF controlado: la plantilla debe partir de un Word o del editor de la app (RN borrador solo Word).`, 409);
   const bytes = await deps.download(version.source_item_id!);
   const html = sanitizeDraftHtml(format === 'docx' ? await deps.docxToHtml(bytes) : new TextDecoder().decode(bytes));
   return { version, format, html };
@@ -227,7 +227,7 @@ export async function proposeTemplateVersion(db: SgcDb, deps: Pick<SgcGeneratorD
   });
 
   const to = (await qualityEmails(db, access.idCompany)).filter((e) => e !== me);
-  await notifier([{ emails: to, payload: { title: SGC_NOTIFICATION_TITLES.plantillaPropuesta, body: `${me} propone la plantilla «${name}» v${created.versionNumber} (${doc.code}).`.slice(0, 300), url: `${GENERATOR_URL}?empresa=${access.idCompany}&tab=plantillas`, tag: `sgc-plantilla-${created.idTemplateVersion}` } }]).catch((e: unknown) => console.error('[sgc/generador]', e));
+  await notifier([{ emails: to, payload: { title: SGC_NOTIFICATION_TITLES.plantillaPropuesta, body: `${me} propone la plantilla ${name} v${created.versionNumber} (${doc.code}).`.slice(0, 300), url: `${GENERATOR_URL}?empresa=${access.idCompany}&tab=plantillas`, tag: `sgc-plantilla-${created.idTemplateVersion}` } }]).catch((e: unknown) => console.error('[sgc/generador]', e));
   return { ...created, fields, notified: to.length };
 }
 
@@ -263,7 +263,7 @@ export async function decideTemplateVersion(db: SgcDb, notifier: SgcNotifier, ac
       userAgent: actor.userAgent,
     });
   });
-  await notifier([{ emails: recipients([version.proposed_by], me), payload: { title: SGC_NOTIFICATION_TITLES.plantillaDecidida, body: `La plantilla «${version.template.name}» v${version.version_number} fue ${approve ? 'APROBADA' : 'RECHAZADA'} por Calidad: ${reason}`.slice(0, 300), url: `${GENERATOR_URL}?empresa=${access.idCompany}&tab=plantillas`, tag: `sgc-plantilla-${version.id_template_version}` } }]).catch((e: unknown) => console.error('[sgc/generador]', e));
+  await notifier([{ emails: recipients([version.proposed_by], me), payload: { title: SGC_NOTIFICATION_TITLES.plantillaDecidida, body: `La plantilla ${version.template.name} v${version.version_number} fue ${approve ? 'APROBADA' : 'RECHAZADA'} por Calidad: ${reason}`.slice(0, 300), url: `${GENERATOR_URL}?empresa=${access.idCompany}&tab=plantillas`, tag: `sgc-plantilla-${version.id_template_version}` } }]).catch((e: unknown) => console.error('[sgc/generador]', e));
   return { status: approve ? 'aprobada' : 'rechazada' };
 }
 

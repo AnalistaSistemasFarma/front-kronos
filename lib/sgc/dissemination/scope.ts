@@ -228,8 +228,8 @@ export function getReadSignError(r: SgcReadRecordState | null): string | null {
   if (!r) return 'Usted no tiene una lectura asignada en esta divulgación.';
   if (r.status === 'leido') return 'Usted ya firmó la lectura de este documento.';
   if (r.status === 'excluido') return 'Su lectura fue excluida por Calidad: no se firma.';
-  if (!r.openedAt) return 'Abra el documento y léalo hasta el final antes de firmar «Leído».';
-  if (!r.reachedEndAt) return 'Aún no llega al final del documento: «Leído» se habilita al terminar de leerlo.';
+  if (!r.openedAt) return 'Abra el documento y léalo hasta el final antes de firmar Leído.';
+  if (!r.reachedEndAt) return 'Aún no llega al final del documento: Leído se habilita al terminar de leerlo.';
   return null;
 }
 

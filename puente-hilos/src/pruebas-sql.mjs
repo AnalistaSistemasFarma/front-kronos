@@ -283,8 +283,8 @@ export function validarSql(sql, modo = 'ejecutar', { bases = null } = {}) {
     }
   }
   for (const r of basesReferidas(toks)) {
-    if (r.servidor !== null) throw new ErrorGuarda(`no se permiten nombres de 4 partes (servidor vinculado «${r.servidor}»)`);
-    if (esOtraBase(r)) throw new ErrorGuarda(`no se permite referirse a otra base («${r.base}»): solo KRONOSDB_PRUEBAS`);
+    if (r.servidor !== null) throw new ErrorGuarda(`no se permiten nombres de 4 partes (servidor vinculado ${r.servidor})`);
+    if (esOtraBase(r)) throw new ErrorGuarda(`no se permite referirse a otra base (${r.base}): solo KRONOSDB_PRUEBAS`);
   }
   // Nombres de varias partes dentro de cadenas (SQL dinámico): misma regla.
   for (const t of toks) {
@@ -299,8 +299,8 @@ export function validarSql(sql, modo = 'ejecutar', { bases = null } = {}) {
     const pareceSql = sub.some((x) => esPalabra(x, 'SELECT', 'INSERT', 'UPDATE', 'DELETE', 'FROM', 'JOIN', 'INTO', 'EXEC', 'EXECUTE', 'TABLE', 'VIEW', 'PROCEDURE', 'REFERENCES', 'ALTER', 'CREATE', 'DROP'));
     if (!pareceSql) continue;
     for (const r of basesReferidas(sub)) {
-      if (r.servidor !== null) throw new ErrorGuarda(`no se permiten nombres de 4 partes en SQL dinámico («${r.servidor}»)`);
-      if (esOtraBase(r)) throw new ErrorGuarda(`no se permite referirse a otra base en SQL dinámico («${r.base}»)`);
+      if (r.servidor !== null) throw new ErrorGuarda(`no se permiten nombres de 4 partes en SQL dinámico (${r.servidor})`);
+      if (esOtraBase(r)) throw new ErrorGuarda(`no se permite referirse a otra base en SQL dinámico (${r.base})`);
     }
   }
   if (modo === 'consultar') {
@@ -308,7 +308,7 @@ export function validarSql(sql, modo = 'ejecutar', { bases = null } = {}) {
     if (!esPalabra(primera, 'SELECT', 'WITH')) throw new ErrorGuarda('pruebas_sql_consultar solo admite SELECT (o WITH … SELECT). Para escribir use pruebas_sql_ejecutar con un motivo');
     for (const t of toks) {
       if (t.tipo === 'palabra' && ESCRITURA.has(t.valor.toUpperCase())) {
-        throw new ErrorGuarda(`pruebas_sql_consultar es de solo lectura y el SQL trae «${t.valor}». Para escribir use pruebas_sql_ejecutar con un motivo`);
+        throw new ErrorGuarda(`pruebas_sql_consultar es de solo lectura y el SQL trae ${t.valor}. Para escribir use pruebas_sql_ejecutar con un motivo`);
       }
     }
   }

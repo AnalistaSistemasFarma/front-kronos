@@ -42,7 +42,7 @@ describe('cierre de la tarea de origen de un subproceso', () => {
     await closeLinkedOriginTask(pool, { originTaskId: 2086, mirroredStatus: 2, closedByUserId: 'u3', linkedRequestId: 10126 });
     expect(h.updates).toHaveLength(1);
     expect(h.advanced).toBe(1);
-    expect(h.closed).toEqual([{ requestId: 10125, closedByUserId: 'u3', resolution: 'Cerrada automáticamente al cerrarse la tarea «Solicitud de Firma» (solicitud #10126).' }]);
+    expect(h.closed).toEqual([{ requestId: 10125, closedByUserId: 'u3', resolution: 'Cerrada automáticamente al cerrarse la tarea Solicitud de Firma (solicitud #10126).' }]);
   });
 
   it('si quedan tareas abiertas, la madre sigue abierta', async () => {

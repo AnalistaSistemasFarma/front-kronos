@@ -43,12 +43,12 @@ export function normalizeChecklist(fields: readonly SgcFormFieldDefinition[], ra
     const obj = entry && typeof entry === 'object' ? (entry as Record<string, unknown>) : { answer: entry };
     const answer = obj.answer;
     if (typeof answer !== 'string' || !(SGC_CHECK_ANSWERS as readonly string[]).includes(answer)) {
-      throw new SgcError(`Lista de chequeo de Calidad: responda «${f.label}».`);
+      throw new SgcError(`Lista de chequeo de Calidad: responda ${f.label}.`);
     }
-    if (answer === 'no_aplica' && f.required) throw new SgcError(`Lista de chequeo de Calidad: «${f.label}» es obligatorio (no admite «No aplica»).`);
+    if (answer === 'no_aplica' && f.required) throw new SgcError(`Lista de chequeo de Calidad: ${f.label} es obligatorio (no admite No aplica).`);
     const observation = typeof obj.observation === 'string' ? obj.observation.trim().slice(0, 500) : '';
     if (answer === 'no_cumple' && observation.length < 5) {
-      throw new SgcError(`Lista de chequeo de Calidad: explique por qué «${f.label}» no cumple (mínimo 5 caracteres).`);
+      throw new SgcError(`Lista de chequeo de Calidad: explique por qué ${f.label} no cumple (mínimo 5 caracteres).`);
     }
     return {
       key: f.key,

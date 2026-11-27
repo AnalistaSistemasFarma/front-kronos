@@ -194,7 +194,7 @@ export default function SgcBulkFilesModal({ opened, onClose, idCompany, onLoaded
 
         {files.length > 0 && (
           <Text size='sm'>
-            Archivos: <b>{files.length}</b> seleccionados (PDF, Word o Excel). El nombre de cada archivo debe empezar con el código del documento (por ejemplo «OLP-GCC-02 Almacenamiento.pdf» o «OLP-GCC-02-FO01 Registro.xlsx»). Un Word o un Excel se convierte a PDF para el visor y el original se guarda con su huella. Después de «Simular», cada Excel tiene «Ajustar y previsualizar» para ver el PDF antes de cargarlo.
+            Archivos: <b>{files.length}</b> seleccionados (PDF, Word o Excel). El nombre de cada archivo debe empezar con el código del documento (por ejemplo OLP-GCC-02 Almacenamiento.pdf o OLP-GCC-02-FO01 Registro.xlsx). Un Word o un Excel se convierte a PDF para el visor y el original se guarda con su huella. Después de Simular, cada Excel tiene Ajustar y previsualizar para ver el PDF antes de cargarlo.
           </Text>
         )}
 

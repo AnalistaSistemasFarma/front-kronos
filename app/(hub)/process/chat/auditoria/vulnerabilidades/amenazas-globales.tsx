@@ -306,7 +306,7 @@ export default function AmenazasGlobales() {
       const j = await r.json();
       if (!r.ok) throw new Error(j?.error ?? "No se pudo guardar.");
       setNotice(
-        `«${editing.form.product}» guardado. Use «Actualizar ahora» para consultar NVD con la versión nueva.`,
+        `${editing.form.product} guardado. Use Actualizar ahora para consultar NVD con la versión nueva.`,
       );
       setEditing(null);
       await load();
@@ -318,7 +318,7 @@ export default function AmenazasGlobales() {
   };
 
   const removeItem = async (it: StoredItem) => {
-    if (!window.confirm(`¿Quitar «${it.product}» (${it.role}) del inventario?`))
+    if (!window.confirm(`¿Quitar ${it.product} (${it.role}) del inventario?`))
       return;
     try {
       const r = await fetch(
@@ -327,7 +327,7 @@ export default function AmenazasGlobales() {
       );
       const j = await r.json();
       if (!r.ok) throw new Error(j?.error ?? "No se pudo quitar.");
-      setNotice(`«${it.product}» se quitó del inventario.`);
+      setNotice(`${it.product} se quitó del inventario.`);
       await load();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -476,7 +476,7 @@ export default function AmenazasGlobales() {
         explotadas de CISA (KEV) y las críticas y altas recientes de NVD,
         cruzadas con el software de terceros que usamos (SAP Business One,
         Tomcat, SQL Server, Windows Server, IIS, Node.js…). Se actualiza una vez
-        al día o con «Actualizar ahora».
+        al día o con Actualizar ahora.
       </Text>
 
       {notice && (
@@ -510,7 +510,7 @@ export default function AmenazasGlobales() {
           mb="md"
           icon={<IconAlertCircle size={18} />}
         >
-          La pestaña «Lo más reciente y crítico» aún no está habilitada en este
+          La pestaña Lo más reciente y crítico aún no está habilitada en este
           ambiente.
         </Alert>
       )}
@@ -676,8 +676,8 @@ export default function AmenazasGlobales() {
               </Table.ScrollContainer>
               {affecting.length > 15 && (
                 <Text size="xs" c="dimmed" mt="xs">
-                  Y {affecting.length - 15} más: use el filtro «Solo lo que nos
-                  afecta».
+                  Y {affecting.length - 15} más: use el filtro Solo lo que nos
+                  afecta.
                 </Text>
               )}
             </Card>
@@ -759,7 +759,7 @@ export default function AmenazasGlobales() {
                 <Text size="sm">
                   {rows.length
                     ? "Ninguna vulnerabilidad con esos filtros."
-                    : "Todavía no hay datos: use «Actualizar ahora»."}
+                    : "Todavía no hay datos: use Actualizar ahora."}
                 </Text>
               </Center>
             ) : (
@@ -788,8 +788,8 @@ export default function AmenazasGlobales() {
             )}
             <Text size="xs" c="dimmed" mt="sm">
               Orden: primero las explotadas, luego por CVSS y luego las más
-              nuevas. «Nos afecta»: nuestra versión está en el rango que publica
-              NVD. «Revisar»: el producto coincide, pero la versión no se
+              nuevas. Nos afecta: nuestra versión está en el rango que publica
+              NVD. Revisar: el producto coincide, pero la versión no se
               conoce, no hay rangos o nuestra rama ya no la evalúa el
               fabricante. Se muestran las del último año y, sin importar la
               fecha, todas las que nos afectan o hay que revisar.
@@ -827,7 +827,7 @@ export default function AmenazasGlobales() {
               <Text size="xs" c="dimmed" mt="xs" mb="sm">
                 Solo productos de terceros (no nuestro código) con el rol del
                 equipo, sin direcciones IP ni nombres de servidor. La clave CPE
-                («fabricante:producto», como la usa NVD) es la que permite
+                (fabricante:producto, como la usa NVD) es la que permite
                 comparar versiones.
               </Text>
               <Table.ScrollContainer minWidth={760}>

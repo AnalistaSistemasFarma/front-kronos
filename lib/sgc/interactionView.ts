@@ -119,7 +119,7 @@ function parse(kind: string, lines: string[], nameOf: NameOf): Parsed {
 
   if (kind === 'nota') return { action: 'agregó una nota', consumed: [] };
   // 2026-10-03: «No entendí» de la lectura obligatoria (va al historial de la solicitud).
-  if (kind === 'duda') return { action: 'marcó «No entendí» en la lectura del documento', note: first, consumed: [0] };
+  if (kind === 'duda') return { action: 'marcó No entendí en la lectura del documento', note: first, consumed: [0] };
 
   const assigned = parseAssigned(first);
   if (assigned) {
@@ -128,14 +128,14 @@ function parse(kind: string, lines: string[], nameOf: NameOf): Parsed {
       .map((p) => (p.startsWith('grupo ') ? pool(p.slice(6)) : nameOf(p)))
       .join(', ');
     return {
-      action: `«${assigned.task}» quedó asignada a ${who}`,
+      action: `${assigned.task} quedó asignada a ${who}`,
       note: [assigned.round ? `Ronda ${assigned.round}` : null, assigned.mode ? `Firma ${assigned.mode}` : null].filter(Boolean).join(' · ') || null,
       automatic: true,
     };
   }
 
   if ((m = first.match(/^Solicitud documental creada \((.+)\)\. Flujo «(.+)» versión (\d+)\.$/))) {
-    return { action: `creó la solicitud (${lowerFirst(m[1])})`, details: [`Flujo «${m[2]}», versión ${m[3]}.`] };
+    return { action: `creó la solicitud (${lowerFirst(m[1])})`, details: [`Flujo ${m[2]}, versión ${m[3]}.`] };
   }
 
   const decided = parseDecision(first);
@@ -162,15 +162,15 @@ function parse(kind: string, lines: string[], nameOf: NameOf): Parsed {
     });
     const base =
       verb === 'Envió el documento'
-        ? `envió el documento desde «${task}»`
+        ? `envió el documento desde ${task}`
         : verb === 'Aprobó'
-          ? `aprobó «${task}»`
+          ? `aprobó ${task}`
           : verb === 'Devolvió a elaboración'
-            ? `devolvió el documento a elaboración desde «${task}»`
+            ? `devolvió el documento a elaboración desde ${task}`
             : verb === 'Cerró la capacitación'
               ? 'cerró la capacitación'
               : 'leyó el documento completo';
-    const sign = signed && !/Leído/.test(verb) ? ` y firmó como «${signed}»` : /Leído/.test(verb) ? ' y firmó «Leído»' : '';
+    const sign = signed && !/Leído/.test(verb) ? ` y firmó como ${signed}` : /Leído/.test(verb) ? ' y firmó Leído' : '';
     const details = group ? [`Como integrante de ${pool(group)}.`] : [];
     return {
       action: `${base}${sign}`,
@@ -192,7 +192,7 @@ function parse(kind: string, lines: string[], nameOf: NameOf): Parsed {
   }
 
   if ((m = first.match(/^Reasignó «(.+)» de (\S+) a (\S+)\.$/))) {
-    return { action: `reasignó «${m[1]}» de ${nameOf(m[2])} a ${nameOf(m[3])}` };
+    return { action: `reasignó ${m[1]} de ${nameOf(m[2])} a ${nameOf(m[3])}` };
   }
 
   if (/^Canceló la solicitud\.$/.test(first)) {
@@ -213,11 +213,11 @@ function parse(kind: string, lines: string[], nameOf: NameOf): Parsed {
   }
 
   if ((m = first.match(/^Adjuntó (el borrador|un soporte): (.+)\.$/))) {
-    return { action: `adjuntó ${m[1]} «${m[2]}»` };
+    return { action: `adjuntó ${m[1]} ${m[2]}` };
   }
 
   if ((m = first.match(/^Retiró el adjunto (.+) \(no se borra: queda en el historial\)\.$/))) {
-    return { action: `retiró el adjunto «${m[1]}»`, details: ['El archivo no se borra: queda en el historial.'] };
+    return { action: `retiró el adjunto ${m[1]}`, details: ['El archivo no se borra: queda en el historial.'] };
   }
 
   if ((m = first.match(/^Guardó la revisión (\d+) del borrador en el editor de la app(?:: ([\s\S]+)|\.)$/))) {
@@ -233,13 +233,13 @@ function parse(kind: string, lines: string[], nameOf: NameOf): Parsed {
   }
 
   if ((m = first.match(/^(Registró|Actualizó) la capacitación: (.+?) \((.+?)\)\. (.+)$/))) {
-    return { action: `${lowerFirst(m[1])} la capacitación «${m[2]}»`, note: `${m[3]}. ${m[4]}` };
+    return { action: `${lowerFirst(m[1])} la capacitación ${m[2]}`, note: `${m[3]}. ${m[4]}` };
   }
 
   if ((m = first.match(/^Cargó los resultados de la capacitación: (.+?) \(SHA-256 (\w+)\)\.$/))) {
     const sum = lines[1]?.match(/(\d+) aprobaron, (\d+) reprobaron y (\d+) sin resultado/);
     return {
-      action: `cargó los resultados de la capacitación «${m[1]}»`,
+      action: `cargó los resultados de la capacitación ${m[1]}`,
       note: sum ? `${sum[1]} aprobaron, ${sum[2]} reprobaron, ${sum[3]} sin resultado.` : null,
       details: [`SHA-256 del archivo: ${m[2]}`, ...lines.slice(1)],
       consumed: lines.map((_, i) => i).slice(1),
@@ -275,7 +275,7 @@ function parse(kind: string, lines: string[], nameOf: NameOf): Parsed {
   }
 
   if ((m = first.match(/^La solicitud llegó a «(.+)»\./))) {
-    return { action: `la solicitud quedó en espera en «${m[1]}»`, automatic: true };
+    return { action: `la solicitud quedó en espera en ${m[1]}`, automatic: true };
   }
 
   if ((m = first.match(/^(Asignó|Cambió) los firmantes de «(.+)»\.$/))) {
@@ -304,7 +304,7 @@ function parse(kind: string, lines: string[], nameOf: NameOf): Parsed {
     });
     const parts = [add.length ? `agregó a ${add.join(', ')}` : null, remove.length ? `quitó a ${remove.join(', ')}` : null].filter(Boolean);
     return {
-      action: `${lowerFirst(m[1])} los firmantes de «${m[2]}»${parts.length ? `: ${parts.join('; ')}` : ''}`,
+      action: `${lowerFirst(m[1])} los firmantes de ${m[2]}${parts.length ? `: ${parts.join('; ')}` : ''}`,
       note: mode ? `Firma ${mode}.` : null,
       details,
       consumed,

@@ -96,7 +96,7 @@ export default function VitrinaModoPresentacion({
             </Alert>
           ) : !p ? (
             <Alert color='blue' variant='light' icon={<IconInfoCircle size={18} />} m='md' data-testid='vitrina-presentacion-vacia'>
-              No hay presentaciones para mostrar al cliente{filtros && Object.keys(filtros).length ? ' con estos filtros' : ''}. Aquí solo salen las marcadas como «Vista al cliente» u «Ofertable», con registro sanitario vigente.
+              No hay presentaciones para mostrar al cliente{filtros && Object.keys(filtros).length ? ' con estos filtros' : ''}. Aquí solo salen las marcadas como Vista al cliente u Ofertable, con registro sanitario vigente.
             </Alert>
           ) : (
             <SimpleGrid cols={{ base: 1, md: 2 }} spacing='xl' p={{ base: 'md', sm: 'xl' }} maw={1400} mx='auto'>

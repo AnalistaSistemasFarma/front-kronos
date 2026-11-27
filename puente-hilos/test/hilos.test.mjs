@@ -93,7 +93,7 @@ test('cronograma.md: tareas con fechas, estado, avance y responsable; solicitude
   assert.match(t, /2026-10-10 → 2026-10-15 · estado: En curso · avance: 40 % · VENCIDA/);
   assert.match(t, /Tarea #13 \(hito\)/);
   assert.match(t, /Solicitud #18342[\s\S]*fecha objetivo del proyecto: 2026-10-20/);
-  assert.match(t, /Actividad «Validación»/);
+  assert.match(t, /Actividad Validación/);
 });
 
 test('cronograma.md: un contexto viejo sin schedule no falla', () => {

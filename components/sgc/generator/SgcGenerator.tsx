@@ -181,7 +181,7 @@ export function SgcGenerateForm({ idCompany, idTemplate }: { idCompany: number; 
     try {
       const out = await sgcSend<{ record: { id: number; code: string } }>(`/api/sgc/generator/templates/${idTemplate}/generate`, 'POST', { company: idCompany, modo: 'emitir', values });
       setIssued(out.record);
-      setMsg({ ok: true, text: `Documento emitido: ${out.record.code}. Quedó en «Mis documentos» y en el registro de Calidad.` });
+      setMsg({ ok: true, text: `Documento emitido: ${out.record.code}. Quedó en Mis documentos y en el registro de Calidad.` });
     } catch (e) {
       setMsg({ ok: false, text: e instanceof Error ? e.message : String(e) });
     } finally {
@@ -365,7 +365,7 @@ function GeneratedTable({ idCompany, rows, showAuthor, onChanged, onMessage }: {
       <Modal opened={!!annulling} onClose={() => setAnnulling(null)} title='Anular documento generado' centered>
         {annulling && (
           <Stack>
-            <Text size='sm'>{annulling.code} queda en el registro marcado «ANULADO»; su número no se reutiliza.</Text>
+            <Text size='sm'>{annulling.code} queda en el registro marcado ANULADO; su número no se reutiliza.</Text>
             <Textarea label='Motivo' description='Mínimo 10 caracteres: queda en el historial.' required autosize minRows={2} value={reason} onChange={(e) => setReason(e.currentTarget.value)} {...sgcNoAutofill('generador-anular-motivo')} data-testid='sgc-generado-motivo' />
             <Button color='red' disabled={reason.trim().length < 10} onClick={() => void annul()} data-testid='sgc-generado-confirmar-anular'>
               Anular
@@ -472,7 +472,7 @@ export function SgcTemplateProposalForm({ idCompany, initialDocument = null, onD
         La plantilla parte de un documento VIGENTE en Word o del editor. Marque en su contenido lo que la persona puede cambiar con {'{{CAMPO:Etiqueta}}'} (o {'{{CAMPO:Etiqueta|fecha}}'}); todo lo demás queda fijo. La aprueba Aseguramiento de Calidad.
       </Text>
       <Alert color='blue' variant='light' icon={<IconAlertTriangle size={16} />} data-testid='sgc-plantilla-solo-sin-codificacion'>
-        El Generador es solo para documentos <b>sin codificación</b>: la plantilla parte de un vigente de un tipo documental marcado como «plantilla guía»
+        El Generador es solo para documentos <b>sin codificación</b>: la plantilla parte de un vigente de un tipo documental marcado como plantilla guía
         {docs.data?.guideTypes.length ? ` (${docs.data.guideTypes.join(', ')})` : ''} y lo que se genera no lleva código documental. Los documentos codificados van por solicitud.
         {docs.data && docs.data.guideTypes.length === 0 && ' Hoy ningún tipo documental está marcado: Aseguramiento de Calidad lo marca en Configuración del SGC.'}
       </Alert>
@@ -562,7 +562,7 @@ export function SgcTemplatesManagement({ idCompany }: { idCompany: number }) {
     setMsg(null);
     try {
       await sgcSend(`/api/sgc/generator/versions/${deciding.version.id}/decision`, 'POST', { company: idCompany, decision: deciding.decision, reason });
-      setMsg({ ok: true, text: deciding.decision === 'aprobar' ? `Plantilla «${deciding.template.name}» v${deciding.version.versionNumber} aprobada: ya se puede generar desde ella.` : 'Configuración rechazada.' });
+      setMsg({ ok: true, text: deciding.decision === 'aprobar' ? `Plantilla ${deciding.template.name} v${deciding.version.versionNumber} aprobada: ya se puede generar desde ella.` : 'Configuración rechazada.' });
       setDeciding(null);
       setReason('');
       reload();
@@ -575,7 +575,7 @@ export function SgcTemplatesManagement({ idCompany }: { idCompany: number }) {
     setMsg(null);
     try {
       await sgcSend(`/api/sgc/generator/templates/${retiring.id}/retire`, 'POST', { company: idCompany, reason });
-      setMsg({ ok: true, text: `Plantilla «${retiring.name}» retirada.` });
+      setMsg({ ok: true, text: `Plantilla ${retiring.name} retirada.` });
       setRetiring(null);
       setReason('');
       reload();
@@ -758,7 +758,7 @@ export function SgcTemplatesManagement({ idCompany }: { idCompany: number }) {
       <Modal opened={!!retiring} onClose={() => setRetiring(null)} title='Retirar plantilla' centered>
         {retiring && (
           <Stack>
-            <Text size='sm'>Desde «{retiring.name}» ya no se podrá generar. Los documentos ya emitidos se conservan.</Text>
+            <Text size='sm'>Desde {retiring.name} ya no se podrá generar. Los documentos ya emitidos se conservan.</Text>
             <Textarea label='Motivo' description='Mínimo 10 caracteres: queda en el historial.' required autosize minRows={2} value={reason} onChange={(e) => setReason(e.currentTarget.value)} {...sgcNoAutofill('generador-retiro-motivo')} />
             <Button color='red' disabled={reason.trim().length < 10} onClick={() => void retire()}>
               Retirar

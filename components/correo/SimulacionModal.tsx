@@ -724,7 +724,7 @@ export default function SimulacionModal({
                 <Switch
                   checked={etiquetar}
                   onChange={(e) => setEtiquetar(e.currentTarget.checked)}
-                  label='Marcar los correos en Outlook con la categoría «SynerLink #número»'
+                  label='Marcar los correos en Outlook con la categoría SynerLink #número'
                   disabled={Boolean(creando)}
                 />
               ) : (

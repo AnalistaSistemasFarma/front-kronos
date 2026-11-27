@@ -259,7 +259,7 @@ test.describe('Administración de usuarios · permisos de Proyectos', () => {
     await sesion(context, baseURL!);
   });
 
-  test('el modal muestra «Proyectos» y «Configuración de Proyectos» y guarda los dos para la empresa', async ({ page }) => {
+  test('el modal muestra Proyectos y Configuración de Proyectos y guarda los dos para la empresa', async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 900 });
     const guardados: unknown[] = [];
     await page.route('**/api/auth/session', (r) => r.fulfill({ json: { user: { email: 'nicolas.rivera@gsslatam.com', name: 'Nicolás Rivera', id: 'u-nr', role: 'admin' }, expires: '2099-01-01T00:00:00Z' } }));

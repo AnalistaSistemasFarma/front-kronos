@@ -174,9 +174,9 @@ export interface PresentacionInput {
 
 function idsDe(v: unknown, campo: string): number[] {
   if (v === undefined || v === null) return [];
-  if (!Array.isArray(v) || v.length > 500) throw new VitrinaError(`«${campo}» debe ser una lista.`, 400);
+  if (!Array.isArray(v) || v.length > 500) throw new VitrinaError(`${campo} debe ser una lista.`, 400);
   const out = v.map((x) => Number(x));
-  if (out.some((n) => !Number.isInteger(n) || n <= 0)) throw new VitrinaError(`«${campo}» tiene valores no válidos.`, 400);
+  if (out.some((n) => !Number.isInteger(n) || n <= 0)) throw new VitrinaError(`${campo} tiene valores no válidos.`, 400);
   return [...new Set(out)];
 }
 
@@ -226,7 +226,7 @@ async function lineaPedida(db: Tx, idCompany: number, v: unknown, actual: number
   if (!id) return null;
   const l = await db.vitrinaLineaComercial.findFirst({ where: { id_linea: id, id_company: idCompany } });
   if (!l) throw new VitrinaError('La línea comercial no existe en esta empresa.', 400);
-  if (!l.activa && id !== actual) throw new VitrinaError(`La línea «${l.nombre}» está inactiva.`, 400);
+  if (!l.activa && id !== actual) throw new VitrinaError(`La línea ${l.nombre} está inactiva.`, 400);
   return id;
 }
 
@@ -583,7 +583,7 @@ export async function crearArea(db: VitrinaDb, actor: VitrinaActor, body: { nomb
   const nombre = textoObligatorio(body.nombre, VITRINA_LIMITS.areaNombre, 'Nombre del área');
   const orden = enteroOpcional(body.orden, 'Orden', 0, 10_000) ?? 0;
   return db.$transaction(async (tx) => {
-    if (await tx.vitrinaArea.findFirst({ where: { nombre } })) throw new VitrinaError(`Ya existe el área «${nombre}».`, 409);
+    if (await tx.vitrinaArea.findFirst({ where: { nombre } })) throw new VitrinaError(`Ya existe el área ${nombre}.`, 409);
     const a = await tx.vitrinaArea.create({ data: { nombre, orden, activa: true } });
     await registrarHistorial(tx, { idCompany: actor.idCompany, entidad: 'area', idEntidad: a.id_area, accion: 'CREAR', nuevo: { nombre, orden }, idUser: actor.idUser });
     return { id: a.id_area };
@@ -598,7 +598,7 @@ export async function editarArea(db: VitrinaDb, actor: VitrinaActor, id: number,
     if (body.nombre !== undefined) data.nombre = textoObligatorio(body.nombre, VITRINA_LIMITS.areaNombre, 'Nombre del área');
     if (body.orden !== undefined) data.orden = enteroOpcional(body.orden, 'Orden', 0, 10_000) ?? 0;
     if (body.activa !== undefined) data.activa = Boolean(body.activa);
-    if (data.nombre && data.nombre !== a.nombre && (await tx.vitrinaArea.findFirst({ where: { nombre: data.nombre } }))) throw new VitrinaError(`Ya existe el área «${data.nombre}».`, 409);
+    if (data.nombre && data.nombre !== a.nombre && (await tx.vitrinaArea.findFirst({ where: { nombre: data.nombre } }))) throw new VitrinaError(`Ya existe el área ${data.nombre}.`, 409);
     const d = diff(a as unknown as Record<string, unknown>, data);
     if (!d) return { id, cambios: 0 };
     await tx.vitrinaArea.update({ where: { id_area: id }, data });
@@ -643,7 +643,7 @@ export async function listarLineas(db: VitrinaDb, idCompany: number) {
 export async function crearLinea(db: VitrinaDb, actor: VitrinaActor, body: ClasificacionInput) {
   const { nombre, orden } = camposClasificacion(body, VITRINA_LIMITS.lineaNombre, 'la línea', false) as { nombre: string; orden: number };
   return db.$transaction(async (tx) => {
-    if (await tx.vitrinaLineaComercial.findFirst({ where: { id_company: actor.idCompany, nombre } })) throw new VitrinaError(`Ya existe la línea «${nombre}» en esta empresa.`, 409);
+    if (await tx.vitrinaLineaComercial.findFirst({ where: { id_company: actor.idCompany, nombre } })) throw new VitrinaError(`Ya existe la línea ${nombre} en esta empresa.`, 409);
     const l = await tx.vitrinaLineaComercial.create({ data: { id_company: actor.idCompany, nombre, orden, activa: true } });
     await registrarHistorial(tx, { idCompany: actor.idCompany, entidad: 'linea_comercial', idEntidad: l.id_linea, accion: 'CREAR', nuevo: { nombre, orden }, idUser: actor.idUser });
     return { id: l.id_linea };
@@ -656,7 +656,7 @@ export async function editarLinea(db: VitrinaDb, actor: VitrinaActor, id: number
     if (!l) throw new VitrinaError('La línea comercial no existe en esta empresa.', 404);
     const data = camposClasificacion(body, VITRINA_LIMITS.lineaNombre, 'la línea', true);
     if (data.nombre && data.nombre !== l.nombre && (await tx.vitrinaLineaComercial.findFirst({ where: { id_company: actor.idCompany, nombre: data.nombre } }))) {
-      throw new VitrinaError(`Ya existe la línea «${data.nombre}» en esta empresa.`, 409);
+      throw new VitrinaError(`Ya existe la línea ${data.nombre} en esta empresa.`, 409);
     }
     const d = diff(l as unknown as Record<string, unknown>, data);
     if (!d) return { id, cambios: 0 };
@@ -677,7 +677,7 @@ export async function listarGrupos(db: VitrinaDb, idCompany: number) {
 export async function crearGrupo(db: VitrinaDb, actor: VitrinaActor, body: ClasificacionInput) {
   const { nombre, orden } = camposClasificacion(body, VITRINA_LIMITS.grupoNombre, 'el grupo terapéutico', false) as { nombre: string; orden: number };
   return db.$transaction(async (tx) => {
-    if (await tx.vitrinaGrupoTerapeutico.findFirst({ where: { nombre } })) throw new VitrinaError(`Ya existe el grupo terapéutico «${nombre}».`, 409);
+    if (await tx.vitrinaGrupoTerapeutico.findFirst({ where: { nombre } })) throw new VitrinaError(`Ya existe el grupo terapéutico ${nombre}.`, 409);
     const g = await tx.vitrinaGrupoTerapeutico.create({ data: { nombre, orden, activo: true } });
     await registrarHistorial(tx, { idCompany: actor.idCompany, entidad: 'grupo_terapeutico', idEntidad: g.id_grupo, accion: 'CREAR', nuevo: { nombre, orden }, idUser: actor.idUser });
     return { id: g.id_grupo };
@@ -690,7 +690,7 @@ export async function editarGrupo(db: VitrinaDb, actor: VitrinaActor, id: number
     if (!g) throw new VitrinaError('El grupo terapéutico no existe.', 404);
     const campos = camposClasificacion(body, VITRINA_LIMITS.grupoNombre, 'el grupo terapéutico', true);
     if (campos.nombre && campos.nombre !== g.nombre && (await tx.vitrinaGrupoTerapeutico.findFirst({ where: { nombre: campos.nombre } }))) {
-      throw new VitrinaError(`Ya existe el grupo terapéutico «${campos.nombre}».`, 409);
+      throw new VitrinaError(`Ya existe el grupo terapéutico ${campos.nombre}.`, 409);
     }
     const data: { nombre?: string; orden?: number; activo?: boolean } = { nombre: campos.nombre, orden: campos.orden, activo: campos.activa };
     for (const k of Object.keys(data) as (keyof typeof data)[]) if (data[k] === undefined) delete data[k];

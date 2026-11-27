@@ -287,7 +287,7 @@ export default function AdopcionIaPage() {
             )}
           </SimpleGrid>
           <Text size="xs" c="dimmed" mt={8}>
-            El modelo se recalcula cada 6 horas o con «Recalcular ahora». Calculado: {datos ? new Date(datos.generatedAt).toLocaleString("es-CO") : "—"}.
+            El modelo se recalcula cada 6 horas o con Recalcular ahora. Calculado: {datos ? new Date(datos.generatedAt).toLocaleString("es-CO") : "—"}.
           </Text>
         </Card>
 
@@ -404,7 +404,7 @@ export default function AdopcionIaPage() {
               </Text>
               <Text size="xs" mt={4}>
                 <b>Fuentes complementarias.</b> Microsoft 365: personas con licencia activa por tenant (solo buzones de persona,
-                nombre.apellido@; no cuenta buzones compartidos). Talento Humano: «BASE PERSONAL» (activos por empresa y área). Ninguna
+                nombre.apellido@; no cuenta buzones compartidos). Talento Humano: BASE PERSONAL (activos por empresa y área). Ninguna
                 de las dos guarda historia: se toma una foto por semana
                 {datos.sources.snapshotsAvailable
                   ? datos.sources.firstSnapshotWeek

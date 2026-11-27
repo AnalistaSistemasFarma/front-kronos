@@ -86,7 +86,7 @@ test.describe('Chat · llamada de voz en segundo plano', () => {
     await sesion(context, baseURL!);
   });
 
-  test('la llamada sigue al cambiar de sección y al ocultar la pestaña; solo «Colgar» la termina', async ({ page }) => {
+  test('la llamada sigue al cambiar de sección y al ocultar la pestaña; solo Colgar la termina', async ({ page }) => {
     await simularChat(page);
     // Registered after simularChat: Playwright gives precedence to the latest route.
     await page.route('**/api/chat/access', (r) =>

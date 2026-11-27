@@ -61,7 +61,7 @@ export function SgcCopyRequestForm({ idCompany, initialDocument = null, onDone }
         </Alert>
       )}
       <Text size='sm' c='dimmed'>
-        Una copia no controlada sale de la compañía o se diligencia a mano (por ejemplo, un formato que se envía a un cliente). Se imprime con la marca «COPIA NO CONTROLADA» y vence a los días autorizados. Solo
+        Una copia no controlada sale de la compañía o se diligencia a mano (por ejemplo, un formato que se envía a un cliente). Se imprime con la marca COPIA NO CONTROLADA y vence a los días autorizados. Solo
         {cfg ? ` ${cfg.types.join(', ')}` : ' formatos'}. La decide Aseguramiento de Calidad.
       </Text>
       <SgcSelect
@@ -74,7 +74,7 @@ export function SgcCopyRequestForm({ idCompany, initialDocument = null, onDone }
         nothingFoundMessage='No hay documentos que admitan copia no controlada'
         data-testid='sgc-copia-documento'
       />
-      <Textarea label='Justificación' description='¿Para qué la necesita? Por ejemplo: «lo voy a llenar a mano» o «se envía al cliente X».' required autosize minRows={2} value={justification} onChange={(e) => setJustification(e.currentTarget.value)} data-testid='sgc-copia-justificacion' />
+      <Textarea label='Justificación' description='¿Para qué la necesita? Por ejemplo: lo voy a llenar a mano o se envía al cliente X.' required autosize minRows={2} value={justification} onChange={(e) => setJustification(e.currentTarget.value)} data-testid='sgc-copia-justificacion' />
       <Group grow align='flex-start'>
         <SgcSelect label='Destino' data={SGC_COPY_DESTINATIONS.map((d) => ({ value: d, label: SGC_COPY_DESTINATION_LABELS[d] }))} value={destination} onChange={(v) => setDestination(v ?? 'interno')} allowDeselect={false} data-testid='sgc-copia-destino' />
         <NumberInput label='Días de vigencia' description={cfg ? `Por defecto ${cfg.days}; máximo ${cfg.maxDays}.` : undefined} min={1} max={cfg?.maxDays ?? 90} value={days} onChange={setDays} data-testid='sgc-copia-dias' />

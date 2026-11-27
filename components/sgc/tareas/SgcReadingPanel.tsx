@@ -44,7 +44,7 @@ export default function SgcReadingPanel({ idTask, requestId, reading, canSign, o
       await sgcSend(`/api/sgc/reading/${reading.idAssignee}/doubt`, 'POST', { body: doubt.trim() });
       setDoubtOpen(false);
       setDoubt('');
-      setDoubtSent('Su «No entendí» quedó en el historial de la solicitud y se avisó al creador del documento y a Calidad.');
+      setDoubtSent('Su No entendí quedó en el historial de la solicitud y se avisó al creador del documento y a Calidad.');
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
       setDoubtOpen(false);
@@ -82,12 +82,12 @@ export default function SgcReadingPanel({ idTask, requestId, reading, canSign, o
       <Stack gap='sm'>
         {pending && (
           <Alert color='blue' variant='light' icon={<IconLock size={16} />}>
-            Lea el documento completo. «Leído» se habilita al llegar al final y se firma electrónicamente (contraseña de SynerLink y motivo). Mientras la divulgación no termine, la versión anterior sigue vigente.
+            Lea el documento completo. Leído se habilita al llegar al final y se firma electrónicamente (contraseña de SynerLink y motivo). Mientras la divulgación no termine, la versión anterior sigue vigente.
           </Alert>
         )}
         {reading.status === 'leido' && (
           <Alert color='teal' icon={<IconCheck size={16} />} data-testid='sgc-lectura-firmada'>
-            Firmó «Leído» el {formatDateCO(reading.signedAt)}.
+            Firmó Leído el {formatDateCO(reading.signedAt)}.
           </Alert>
         )}
         {reading.status === 'excluido' && <Alert color='gray'>Su lectura fue excluida por Calidad: {reading.excludeReason}</Alert>}
@@ -119,7 +119,7 @@ export default function SgcReadingPanel({ idTask, requestId, reading, canSign, o
               {reading.training.sessionDate && <Text size='sm'>Sesión: {reading.training.sessionDate}</Text>}
               {reading.training.evaluationUrl && reading.status !== 'leido' && (
                 <Text size='sm' data-testid='sgc-lectura-evaluacion-espera'>
-                  Evaluación en SynerLink: se habilita aquí mismo después de firmar «Leído» (tiene {reading.training.maxAttempts} intento(s)).
+                  Evaluación en SynerLink: se habilita aquí mismo después de firmar Leído (tiene {reading.training.maxAttempts} intento(s)).
                 </Text>
               )}
               {reading.training.formsUrl && (
@@ -150,7 +150,7 @@ export default function SgcReadingPanel({ idTask, requestId, reading, canSign, o
             )}
             {pending && (
               <Text size='xs' c='dimmed' data-testid='sgc-lectura-ayuda'>
-                {reachedEnd ? `Llegó al final del documento el ${formatDateCO(reachedEnd)}.` : '«Leído» se habilita al llegar al final del documento.'}
+                {reachedEnd ? `Llegó al final del documento el ${formatDateCO(reachedEnd)}.` : 'Leído se habilita al llegar al final del documento.'}
               </Text>
             )}
           </Group>
@@ -159,7 +159,7 @@ export default function SgcReadingPanel({ idTask, requestId, reading, canSign, o
       <Modal opened={doubtOpen} onClose={() => setDoubtOpen(false)} title='No entendí el documento' centered>
         <Stack>
           <Text size='sm' c='dimmed'>
-            Cuéntenos qué parte no entendió. Queda en el historial de la solicitud y se avisa al creador del documento y a Calidad. No reemplaza la firma «Leído».
+            Cuéntenos qué parte no entendió. Queda en el historial de la solicitud y se avisa al creador del documento y a Calidad. No reemplaza la firma Leído.
           </Text>
           <Textarea autoComplete='off' data-1p-ignore='true' data-lpignore='true' label='¿Qué no entendió?' required minRows={3} autosize value={doubt} onChange={(e) => setDoubt(e.currentTarget.value)} data-testid='sgc-no-entendi-texto' />
           <Group justify='flex-end'>
@@ -179,11 +179,11 @@ export default function SgcReadingPanel({ idTask, requestId, reading, canSign, o
           title={`Firmar lectura · Solicitud #${requestId}`}
           meaning='leyo'
           draft={reading.content}
-          submitLabel='Firmar «Leído»'
+          submitLabel='Firmar Leído'
           onSign={async (payload) => {
             await sgcSend(`/api/sgc/tasks/${idTask}/sign`, 'POST', { ...payload, idAssignee: reading.idAssignee });
             setSignOpen(false);
-            onDone('Lectura firmada: quedó registrada su firma «Leyó».');
+            onDone('Lectura firmada: quedó registrada su firma Leyó.');
           }}
         />
       )}

@@ -87,7 +87,7 @@ function ListaClasificacion({ config, company, version, avisar }: { config: Conf
     try {
       const siguiente = orden === '' ? (lista.length ? Math.max(...lista.map((a) => a.orden)) + 10 : 10) : Number(orden);
       await vitrinaSend(config.url, 'POST', { company: company.idCompany, nombre, orden: siguiente });
-      avisar(true, `Se agregó «${nombre.trim()}».`);
+      avisar(true, `Se agregó ${nombre.trim()}.`);
       setNombre('');
       setOrden('');
       await reload(true);
@@ -102,7 +102,7 @@ function ListaClasificacion({ config, company, version, avisar }: { config: Conf
     setBusy(a.id);
     try {
       await vitrinaSend(`${config.url}/${a.id}`, 'PATCH', { company: company.idCompany, activa });
-      avisar(true, activa ? `«${a.nombre}» activado.` : `«${a.nombre}» desactivado: ya no se ofrece para nuevas asignaciones ni se muestra a los comerciales.`);
+      avisar(true, activa ? `${a.nombre} activado.` : `${a.nombre} desactivado: ya no se ofrece para nuevas asignaciones ni se muestra a los comerciales.`);
       await reload(true);
     } catch (e) {
       avisar(false, errorTexto(e));
@@ -205,7 +205,7 @@ function EditarModal({ config, item, idCompany, onClose, onSaved }: { config: Co
     setError(null);
     try {
       await vitrinaSend(`${config.url}/${item.id}`, 'PATCH', { company: idCompany, nombre, orden: orden === '' ? 0 : Number(orden) });
-      onSaved(`«${nombre.trim()}» actualizado.`);
+      onSaved(`${nombre.trim()} actualizado.`);
     } catch (e) {
       setError(errorTexto(e));
     } finally {

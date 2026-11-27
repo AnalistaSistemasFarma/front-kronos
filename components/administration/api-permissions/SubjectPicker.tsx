@@ -517,7 +517,7 @@ function SystemPicker({ value, onChange, usedBy }: Props) {
         ) : !systems ? (
           <StateRow icon={<Loader size={14} color='currentColor' />}>Cargando sistemas…</StateRow>
         ) : active.length === 0 ? (
-          <StateRow icon={<IconApps size={14} />}>No hay sistemas activos. Agrega uno en «Administrar sistemas».</StateRow>
+          <StateRow icon={<IconApps size={14} />}>No hay sistemas activos. Agrega uno en Administrar sistemas.</StateRow>
         ) : (
           active.map((system) => {
             const ref = String(system.id);
@@ -556,7 +556,7 @@ function SystemPicker({ value, onChange, usedBy }: Props) {
       {chosenUnavailable && value && (
         <span className={s.rowError} role='alert'>
           <IconAlertTriangle size={14} />
-          «{value.label}» ya no está activo: elige otro sistema.
+          {value.label} ya no está activo: elige otro sistema.
         </span>
       )}
       <button type='button' className={`${s.actionRow} ${s.pickManage}`} onClick={() => setManage(true)} disabled={!systems}>
@@ -702,7 +702,7 @@ function ExternalSystemsSheet({
           <div className={s.sheetTitleMain} id={titleId}>
             Sistemas
           </div>
-          <div className={s.sheetTitleSub}>Para clientes tipo «Otro»</div>
+          <div className={s.sheetTitleSub}>Para clientes tipo Otro</div>
         </div>
         <button type='button' className={`${s.navButton} ${s.navEnd} ${s.press}`} onClick={close} disabled={busy}>
           Listo

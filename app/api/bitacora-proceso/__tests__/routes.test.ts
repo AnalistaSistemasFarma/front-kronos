@@ -277,7 +277,7 @@ describe('Bitácora de Proceso · rutas', () => {
     expect(m.asignarResponsable.mock.calls[0][1]).toEqual({ idCompany: FARMA, idUser: 'u-karen', rol: 'JEFE_PROD' });
     expect((await responsables.POST(send('POST', { company: 3, id_user: 'u-karen', rol: 'JEFE_PROD' }))).status).toBe(403);
     expect((await responsables.POST(send('POST', { company: FARMA, id_user: 'u-karen', rol: 'OPERARIO' }))).status).toBe(400);
-    m.asignarResponsable.mockRejectedValueOnce(new OtError('Judy no tiene el permiso «Bitácora de Proceso: Gestión»: sin él no puede ser supervisor.', 400));
+    m.asignarResponsable.mockRejectedValueOnce(new OtError('Judy no tiene el permiso Bitácora de Proceso: Gestión: sin él no puede ser supervisor.', 400));
     const sinGestion = await responsables.POST(send('POST', { company: FARMA, id_user: 'u-judy', rol: 'SUPERVISOR' }));
     expect(sinGestion.status).toBe(400);
     expect((await sinGestion.json()).error).toContain('Gestión');
@@ -466,23 +466,23 @@ describe('Bitácora de Proceso · rutas', () => {
 
   it('2026-10-17: el 403 dice EXACTAMENTE qué falta (permiso, Gestión o rol) y en qué empresa', async () => {
     asUser([]);
-    expect((await (await lista.GET(get(''))).json()).error).toMatch(/le falta el permiso «Bitácora de Proceso».*Administración → Usuarios/);
+    expect((await (await lista.GET(get(''))).json()).error).toMatch(/le falta el permiso Bitácora de Proceso.*Administración → Usuarios/);
     asUser([operario], null);
     expect((await (await lista.GET(get(''))).json()).error).toMatch(/inactivo/);
     asUser([operario]);
-    expect((await (await lista.GET(get('?company=3'))).json()).error).toMatch(/permiso «Bitácora de Proceso» en la empresa seleccionada \(id 3\)/);
-    expect((await (await operadores.GET(get('?company=1&todas=1'))).json()).error).toMatch(/«Bitácora de Proceso: Gestión» en FARMALOGICA S\.A\./);
+    expect((await (await lista.GET(get('?company=3'))).json()).error).toMatch(/permiso Bitácora de Proceso en la empresa seleccionada \(id 3\)/);
+    expect((await (await operadores.GET(get('?company=1&todas=1'))).json()).error).toMatch(/Bitácora de Proceso: Gestión en FARMALOGICA S\.A\./);
     const abrir = await (await lista.POST(send('POST', nueva))).json();
-    expect(abrir.error).toMatch(/Para abrir una bitácora en FARMALOGICA S\.A\. le falta el permiso «Bitácora de Proceso: Gestión» \(supervisor\) o estar asignado como jefe de producción/);
+    expect(abrir.error).toMatch(/Para abrir una bitácora en FARMALOGICA S\.A\. le falta el permiso Bitácora de Proceso: Gestión \(supervisor\) o estar asignado como jefe de producción/);
   });
 
-  it('TEXTO LIBRE (2026-10-17): el texto llega SANEADO a la capa de datos y el 400 de «obligatorio» pasa tal cual', async () => {
+  it('TEXTO LIBRE (2026-10-17): el texto llega SANEADO a la capa de datos y el 400 de obligatorio pasa tal cual', async () => {
     asUser([operario]);
     m.crearRegistro.mockResolvedValue({ id: '1', registradoEn: '2026-10-17T20:00:00.000Z', actividad: 'Novedad', operador: 'Ana' });
     const ok = await registros.POST(send('POST', { id_actividad: 9, id_operador: 7, texto: '  Se cayó\u202E un frasco\u0000  ' }, '?company=1'), params('5'));
     expect(ok.status).toBe(201);
     expect(m.crearRegistro.mock.calls[0][3]).toEqual({ idActividad: 9, idOperador: 7, observacion: null, texto: 'Se cayó un frasco' });
-    m.crearRegistro.mockRejectedValue(new OtError('«Novedad» es de texto libre: escriba qué pasó (mínimo 3 caracteres).', 400));
+    m.crearRegistro.mockRejectedValue(new OtError('Novedad es de texto libre: escriba qué pasó (mínimo 3 caracteres).', 400));
     const falta = await registros.POST(send('POST', { id_actividad: 9, id_operador: 7 }, '?company=1'), params('5'));
     expect(falta.status).toBe(400);
     expect((await falta.json()).error).toMatch(/texto libre/);

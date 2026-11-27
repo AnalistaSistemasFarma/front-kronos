@@ -184,7 +184,7 @@ export default function SgcCompanySettings({ idCompany }: { idCompany: number })
         </div>
         <TextInput
           label='Dominios de correo de la empresa'
-          description='«Toda la empresa», departamentos y cargos solo incluyen estos correos en la divulgación. A una persona de otra empresa se le asigna lectura solo eligiéndola como «Persona». Vacío = sin filtro.'
+          description='Toda la empresa, departamentos y cargos solo incluyen estos correos en la divulgación. A una persona de otra empresa se le asigna lectura solo eligiéndola como Persona. Vacío = sin filtro.'
           placeholder='onelatampharma.com'
           value={domains}
           onChange={(e) => setDomains(e.currentTarget.value)}
@@ -193,7 +193,7 @@ export default function SgcCompanySettings({ idCompany }: { idCompany: number })
         />
         <SgcSelect
           label='Correo del SGC'
-          description='Los avisos siempre llegan a la campana y al tablero «Mis pendientes». El correo es opcional: por defecto, ninguno.'
+          description='Los avisos siempre llegan a la campana y al tablero Mis pendientes. El correo es opcional: por defecto, ninguno.'
           data={SGC_EMAIL_MODES.map((m) => ({ value: m, label: SGC_EMAIL_MODE_LABELS[m] }))}
           value={emailMode}
           onChange={(v) => setEmailMode(v ?? 'nunca')}
@@ -207,7 +207,7 @@ export default function SgcCompanySettings({ idCompany }: { idCompany: number })
           <NumberInput label='Días máximos' min={1} max={365} value={copyMaxDays} onChange={setCopyMaxDays} w={140} />
         </Group>
         <Switch
-          label='Protección del visor: marca de agua en mosaico, ocultar el documento sin foco y registrar «Imprimir pantalla»'
+          label='Protección del visor: marca de agua en mosaico, ocultar el documento sin foco y registrar Imprimir pantalla'
           description='Una página web no puede impedir una captura de pantalla: la marca identifica a quién se le filtró y el intento queda en la auditoría.'
           checked={viewerProtection}
           onChange={(e) => setViewerProtection(e.currentTarget.checked)}
@@ -229,7 +229,7 @@ export default function SgcCompanySettings({ idCompany }: { idCompany: number })
         />
         <Switch
           label='Flujo DOC v7: aprueban solo los líderes autorizados del departamento de quien elabora'
-          description='Lista «Líder del departamento» en Configuración → Aprobadores autorizados. Apagado por defecto (decisión del 2026-10-13: por ahora sin restricción); al encenderlo, un departamento sin líderes cargados no puede asignar aprobadores.'
+          description='Lista Líder del departamento en Configuración → Aprobadores autorizados. Apagado por defecto (decisión del 2026-10-13: por ahora sin restricción); al encenderlo, un departamento sin líderes cargados no puede asignar aprobadores.'
           checked={approverDepartmentEnforced}
           onChange={(e) => setApproverDepartmentEnforced(e.currentTarget.checked)}
           data-testid='sgc-config-lideres-departamento'

@@ -105,7 +105,7 @@ async function complete(task: PendingExecutor, idRequest: number, resolution: st
       await closeRequestGeneral(pool, {
         requestId: idRequest,
         closedByUserId: null,
-        resolution: `Cerrada automáticamente al ejecutar en SAP la tarea «${task.task}».`,
+        resolution: `Cerrada automáticamente al ejecutar en SAP la tarea ${task.task}.`,
       });
     }
   }
@@ -137,7 +137,7 @@ async function runAction(
       const link = await prisma.purchaseAuthorization.findUnique({ where: { id_request_general: idRequest } });
       if (!link) return { ok: false, error: 'La solicitud no está enlazada a un borrador de compra.' };
       if (link.status === want) {
-        return { ok: true, detail: want === 'rejected' ? 'Borrador en «No aprobado»' : 'Borrador en «En cotización»' };
+        return { ok: true, detail: want === 'rejected' ? 'Borrador en No aprobado' : 'Borrador en En cotización' };
       }
       if (link.status === 'reject_error') return { ok: false, error: link.error ?? 'No se pudo aplicar el rechazo en SAP.' };
       return { ok: false, wait: true, error: 'Esperando que se aplique la decisión en SAP.' };
@@ -168,7 +168,7 @@ async function runAction(
       return { ok: false, wait: true, error: 'Esperando que se aplique el rechazo en SAP.' };
     }
     default:
-      return { ok: false, error: `La acción «${actionKey}» no tiene ejecutor automático.` };
+      return { ok: false, error: `La acción ${actionKey} no tiene ejecutor automático.` };
   }
 }
 
@@ -232,7 +232,7 @@ async function markError(
     idTaskRequest: task.id,
     idTask: task.id_task,
     stepKind: 'system',
-    stepName: `Tarea «${task.task}» quedó en error`,
+    stepName: `Tarea ${task.task} quedó en error`,
     actionKey,
     triggerEvent: 'on_execute',
     triggeredBy,

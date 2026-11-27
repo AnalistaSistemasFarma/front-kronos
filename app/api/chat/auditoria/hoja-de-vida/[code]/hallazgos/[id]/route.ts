@@ -28,7 +28,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ co
     if (!user) return unauthorized();
     if (!(await canConfigureAgents(user.email))) {
       return jsonNoStore(
-        { error: 'Cambiar hallazgos requiere el permiso «Auditoría de agentes · Configurar».' },
+        { error: 'Cambiar hallazgos requiere el permiso Auditoría de agentes · Configurar.' },
         { status: 403 }
       );
     }

@@ -111,7 +111,7 @@ test('config: HILOS_CONECTORES_AGENTE_* validan rutas y no aceptan el config ais
   assert.throws(() => cargarConfig({ ...base, HILOS_CONECTORES_AGENTE_CONFIG_DIR: conf, HILOS_CONECTORES_AGENTE_ENGRAM_PROYECTO: '../x y' }), /ENGRAM_PROYECTO/);
   const listo = conectoresAgenteListo(cfg);
   assert.match(listo, /^engram, mi-api, playwright \(de /);
-  assert.ok(!listo.includes('llave-secreta'), 'la línea «listo:» no lleva valores');
+  assert.ok(!listo.includes('llave-secreta'), 'la línea listo: no lleva valores');
 });
 
 // ---------- Integración con el puente (correr falso) ----------

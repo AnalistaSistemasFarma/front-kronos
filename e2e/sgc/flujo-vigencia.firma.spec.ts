@@ -142,7 +142,7 @@ test.describe.serial('SGC documental · Sprint 4 · divulgación, capacitación 
     await p3.context().close();
   });
 
-  test('[SGC-REQ-055][SGC-REQ-056] «Leído» NO se habilita (ni el servidor lo acepta) sin llegar al final; al llegar, se firma con reautenticación', async ({ browser }) => {
+  test('[SGC-REQ-055][SGC-REQ-056] Leído NO se habilita (ni el servidor lo acepta) sin llegar al final; al llegar, se firma con reautenticación', async ({ browser }) => {
     const p3 = await ctxFor(browser, STORAGE_STATE_3);
     const idTask = await taskId(p3.request, idRequest, /^Divulgación/);
     await p3.goto(`/process/sgc-documental/tareas/${idTask}?empresa=${OLP}`);
@@ -199,7 +199,7 @@ test.describe.serial('SGC documental · Sprint 4 · divulgación, capacitación 
     await expect(page.getByTestId(`sgc-capacitado-${U3.toLowerCase()}`)).toContainText('Reprobó');
   });
 
-  test('[SGC-REQ-060][SGC-REQ-061] «Capacitó» con reprobados exige justificación; al firmar, el documento queda VIGENTE', async ({ browser, page }) => {
+  test('[SGC-REQ-060][SGC-REQ-061] Capacitó con reprobados exige justificación; al firmar, el documento queda VIGENTE', async ({ browser, page }) => {
     const p2 = await ctxFor(browser, STORAGE_STATE_2);
     const idTask = await taskId(p2.request, idRequest, /^Capacitación/);
     const d = await ok<{ training: { upload: { id: number; sha256: string } } }>(await page.request.get(`/api/sgc/requests/${idRequest}`));

@@ -61,7 +61,7 @@ export function OtOperadores({ company }: { company: OtCompanyAccess }) {
     setAviso(null);
     try {
       await otSend('/api/bitacora-proceso/operadores', 'POST', { company: company.idCompany, nombre, documento: documento || undefined, tipo });
-      await ok(`Operario «${nombre.trim()}» agregado.`);
+      await ok(`Operario ${nombre.trim()} agregado.`);
       setNombre('');
       setDocumento('');
       setTipo('OPERARIO');
@@ -135,7 +135,7 @@ export function OtOperadores({ company }: { company: OtCompanyAccess }) {
                         leftSection={<IconDeviceFloppy size={18} />}
                         loading={busy === o.id_operador}
                         disabled={!ed.nombre.trim()}
-                        onClick={() => cambiar(o.id_operador, { nombre: ed.nombre, documento: ed.documento, tipo: ed.tipo }, `Operario «${ed.nombre.trim()}» actualizado.`)}
+                        onClick={() => cambiar(o.id_operador, { nombre: ed.nombre, documento: ed.documento, tipo: ed.tipo }, `Operario ${ed.nombre.trim()} actualizado.`)}
                       >
                         Guardar
                       </Button>
@@ -162,7 +162,7 @@ export function OtOperadores({ company }: { company: OtCompanyAccess }) {
                         label='Activo'
                         checked={o.activo}
                         disabled={busy !== null}
-                        onChange={(e) => cambiar(o.id_operador, { activo: e.currentTarget.checked }, `«${o.nombre}» ${e.currentTarget.checked ? 'activado' : 'desactivado'}.`)}
+                        onChange={(e) => cambiar(o.id_operador, { activo: e.currentTarget.checked }, `${o.nombre} ${e.currentTarget.checked ? 'activado' : 'desactivado'}.`)}
                       />
                     </Group>
                   </Group>
@@ -198,7 +198,7 @@ export function OtAreas({ company }: { company: OtCompanyAccess }) {
     try {
       const siguiente = orden === '' ? (lista.length ? Math.max(...lista.map((a) => a.orden)) + 10 : 10) : Number(orden);
       await otSend('/api/bitacora-proceso/areas', 'POST', { company: company.idCompany, nombre, orden: siguiente });
-      const text = `Área «${nombre.trim()}» agregada.`;
+      const text = `Área ${nombre.trim()} agregada.`;
       setAviso({ ok: true, text });
       toast.success(text);
       setNombre('');
@@ -216,7 +216,7 @@ export function OtAreas({ company }: { company: OtCompanyAccess }) {
     setAviso(null);
     try {
       await otSend('/api/bitacora-proceso/areas', 'PATCH', { company: company.idCompany, id_area: a.id_area, activo });
-      setAviso({ ok: true, text: `«${a.nombre}» ${activo ? 'activada' : 'desactivada'}.` });
+      setAviso({ ok: true, text: `${a.nombre} ${activo ? 'activada' : 'desactivada'}.` });
       await reload(true);
     } catch (e) {
       setAviso({ ok: false, text: e instanceof Error ? e.message : String(e) });
@@ -327,7 +327,7 @@ export function OtResponsables({ company }: { company: OtCompanyAccess }) {
       await otSend('/api/bitacora-proceso/responsables', 'POST', { company: company.idCompany, id_user: persona, rol });
       setPersona(null);
       setFiltro('');
-      await ok(`«${nombre}» asignado como ${OT_ROL_LABEL[rol].toLowerCase()}.`);
+      await ok(`${nombre} asignado como ${OT_ROL_LABEL[rol].toLowerCase()}.`);
     } catch (e) {
       setAviso({ ok: false, text: e instanceof Error ? e.message : String(e) });
     } finally {
@@ -340,7 +340,7 @@ export function OtResponsables({ company }: { company: OtCompanyAccess }) {
     setAviso(null);
     try {
       await otSend('/api/bitacora-proceso/responsables', 'PATCH', { company: company.idCompany, id_responsable: r.idResponsable, activo });
-      await ok(`«${r.name}» (${OT_ROL_LABEL[r.rol].toLowerCase()}) ${activo ? 'activado' : 'desactivado'}.`);
+      await ok(`${r.name} (${OT_ROL_LABEL[r.rol].toLowerCase()}) ${activo ? 'activado' : 'desactivado'}.`);
     } catch (e) {
       setAviso({ ok: false, text: e instanceof Error ? e.message : String(e) });
     } finally {

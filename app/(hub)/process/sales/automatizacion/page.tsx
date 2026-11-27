@@ -172,7 +172,7 @@ export default function VentasAutomatizacionPage() {
                 Ventas · Automatización
               </Title>
               <Text size='md' c='dimmed'>
-                {`Borradores de Salesforce que pasan solos al flujo «Oferta de venta» · ${company?.companyName.trim() ?? ''}`}
+                {`Borradores de Salesforce que pasan solos al flujo Oferta de venta · ${company?.companyName.trim() ?? ''}`}
               </Text>
             </div>
             <Group gap='sm'>
@@ -218,7 +218,7 @@ export default function VentasAutomatizacionPage() {
           )}
           {cfg?.simulacion && (
             <Alert color='yellow' variant='light' mt='md' icon={<IconTestPipe size={18} />}>
-              Modo simulación: la automatización solo registra qué haría con cada borrador; no crea solicitudes ni toca SAP. Desde «Asistida» puede pasar al flujo los que elija.
+              Modo simulación: la automatización solo registra qué haría con cada borrador; no crea solicitudes ni toca SAP. Desde Asistida puede pasar al flujo los que elija.
             </Alert>
           )}
         </Card>
@@ -249,7 +249,7 @@ export default function VentasAutomatizacionPage() {
             <Card withBorder radius='md' p='md'>
               <Text fw={600} mb='sm'>Borradores procesados</Text>
               {data.docs.length === 0 ? (
-                <Text c='dimmed' size='sm'>Todavía no hay borradores procesados. Use «Ejecutar ahora» o la pestaña «Asistida».</Text>
+                <Text c='dimmed' size='sm'>Todavía no hay borradores procesados. Use Ejecutar ahora o la pestaña Asistida.</Text>
               ) : (
                 <Table.ScrollContainer minWidth={1000}>
                   <Table striped highlightOnHover verticalSpacing='xs'>
@@ -332,14 +332,14 @@ export default function VentasAutomatizacionPage() {
                     Simular ({sel.length})
                   </Button>
                   <Button leftSection={<IconSend size={16} />} disabled={!sel.length} loading={busy === 'crear'}
-                    onClick={() => { if (window.confirm(`Se pasarán ${sel.length} borrador(es) al flujo «Oferta de venta». ¿Continuar?`)) run('crear', sel); }}>
+                    onClick={() => { if (window.confirm(`Se pasarán ${sel.length} borrador(es) al flujo Oferta de venta. ¿Continuar?`)) run('crear', sel); }}>
                     Pasar al flujo ({sel.length})
                   </Button>
                 </Group>
               </Group>
-              {!cfg?.user_signs?.length && <Alert color='yellow' variant='light' mb='sm'>Configure primero el usuario SAP de la integración en «Configuración».</Alert>}
+              {!cfg?.user_signs?.length && <Alert color='yellow' variant='light' mb='sm'>Configure primero el usuario SAP de la integración en Configuración.</Alert>}
               {pending == null ? (
-                <Text c='dimmed' size='sm'>Pulse «Buscar pendientes» para ver los borradores de Salesforce que aún no pasan al flujo (máximo 30 por acción).</Text>
+                <Text c='dimmed' size='sm'>Pulse Buscar pendientes para ver los borradores de Salesforce que aún no pasan al flujo (máximo 30 por acción).</Text>
               ) : pending.length === 0 ? (
                 <Text c='dimmed' size='sm'>No hay borradores pendientes.</Text>
               ) : (
@@ -393,7 +393,7 @@ export default function VentasAutomatizacionPage() {
                 <Switch label='Modo simulación (no crea solicitudes ni toca SAP)' checked={form.simulacion} onChange={(e) => setForm({ ...form, simulacion: e.currentTarget.checked })} />
                 <NumberInput label='Cada cuántos minutos corre' min={5} max={1440} value={form.intervalo_min} onChange={(v) => setForm({ ...form, intervalo_min: Number(v) || 10 })} />
                 <TextInput label='Usuarios SAP que crean los borradores (UserSign)'
-                  description='Uno o varios, separados por coma (por ejemplo «14, 30»). Toma los borradores de cualquiera de ellos. El de la integración de Salesforce es ServiceLayer_01.'
+                  description='Uno o varios, separados por coma (por ejemplo 14, 30). Toma los borradores de cualquiera de ellos. El de la integración de Salesforce es ServiceLayer_01.'
                   placeholder='14, 30' value={form.user_signs} onChange={(e) => setForm({ ...form, user_signs: e.currentTarget.value })} />
                 <TextInput label='Fecha del documento desde (opcional)' type='date'
                   description='Solo toma borradores con fecha de documento igual o posterior. Vacío = sin filtro de fecha.'

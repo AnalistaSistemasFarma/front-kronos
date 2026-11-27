@@ -115,7 +115,7 @@ export default function PreviousPurchasesModal({ opened, onClose, onCreated }: {
     <>
       <Modal opened={opened && !dup && !view} onClose={onClose} size="95%" title={<Text fw={700}>Solicitudes de compra anteriores (SAP)</Text>}>
         <Text size="sm" c="dimmed" mb="sm">
-          Las solicitudes creadas antes en SAPSEND, consultadas en el SAP de cada compañía. Use «Duplicar» para crearla como una
+          Las solicitudes creadas antes en SAPSEND, consultadas en el SAP de cada compañía. Use Duplicar para crearla como una
           solicitud nueva en SynerLink (se copian comentarios y líneas; las fechas se ponen de nuevo).
         </Text>
         <Group align="flex-end" gap="sm" mb="sm" wrap="wrap">

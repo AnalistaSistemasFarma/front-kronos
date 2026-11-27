@@ -63,7 +63,7 @@ export default function SgcFlowTransitionsCard({ definition, isEditing, onChange
 
       {transitions.length === 0 ? (
         <Alert icon={<IconAlertCircle size={16} />} title='Sin transiciones' color='gray' variant='light'>
-          Este flujo no tiene transiciones. Cada tarea necesita al menos «Aprobar / enviar».
+          Este flujo no tiene transiciones. Cada tarea necesita al menos Aprobar / enviar.
           {isEditing && (
             <Button size='xs' mt='sm' leftSection={<IconPlus size={14} />} onClick={add} color='blue' variant='light'>
               Agregar primera transición

@@ -87,7 +87,7 @@ export interface SgcSignInput {
 export function validateSignInput(raw: SgcSignInputRaw, expected: SgcSignatureMeaning | null, signerEmail?: string | null): SgcSignInput {
   if (!expected) throw new SgcError('Esta tarea no lleva firma electrónica.', 409);
   if (raw.meaning !== expected) {
-    throw new SgcError(`El significado de la firma de esta tarea es «${SGC_SIGNATURE_LABELS[expected]}».`);
+    throw new SgcError(`El significado de la firma de esta tarea es ${SGC_SIGNATURE_LABELS[expected]}.`);
   }
   if (!(SGC_SIGNATURE_MEANINGS as readonly string[]).includes(expected)) throw new SgcError('Significado de firma inválido.');
   const reason = typeof raw.reason === 'string' ? raw.reason.trim() : '';

@@ -168,7 +168,7 @@ export async function confirmMasterListImport(
       entity: 'master_list_import',
       entityId: imp.id_master_list_import,
       after: { fileName, rowsSha256, total: validation.summary.total, loaded: ok.length, errors: validation.summary.errors, warnings: validation.summary.warnings },
-      detail: `Listado maestro «${fileName}»: ${ok.length} documento(s) cargado(s) como pendientes de archivo y ${validation.summary.errors} fila(s) con error.`,
+      detail: `Listado maestro ${fileName}: ${ok.length} documento(s) cargado(s) como pendientes de archivo y ${validation.summary.errors} fila(s) con error.`,
       ip: actor.ip,
       userAgent: actor.userAgent,
     });

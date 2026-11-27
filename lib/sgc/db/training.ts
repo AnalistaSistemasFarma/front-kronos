@@ -159,7 +159,7 @@ export async function uploadTrainingResults(
   const training = await trainingOfRequest(db, idRequest);
   if (!training) throw new SgcError('Registre primero la capacitación (modalidad, video o sesión, evaluación y nota mínima).', 409);
   // S17 (R30): con la evaluación en SynerLink los resultados se consolidan en la app (no se carga un Excel de Forms).
-  if (training.evaluation_provider === 'synerlink') throw new SgcError('Esta capacitación evalúa en SynerLink: use «Consolidar resultados de la evaluación» (no se carga un Excel).', 409);
+  if (training.evaluation_provider === 'synerlink') throw new SgcError('Esta capacitación evalúa en SynerLink: use Consolidar resultados de la evaluación (no se carga un Excel).', 409);
   const fileName = file.fileName.replace(/[\\/:*?"<>|]+/g, '_').trim().slice(0, 200) || 'resultados.xlsx';
   if (!/\.(xlsx|csv)$/i.test(fileName)) throw new SgcError('El archivo de resultados debe ser un Excel (.xlsx) o un CSV exportado de Microsoft Forms o Google Forms.');
   const rows = await readTrainingRows(file.bytes, fileName);

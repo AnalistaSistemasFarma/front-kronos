@@ -270,7 +270,7 @@ export function validateMasterList(rows: readonly SgcMasterListRawRow[], ctx: Sg
     const errors: string[] = [];
     const warnings: string[] = [];
     const v = r.values;
-    for (const c of SGC_MASTER_LIST_COLUMNS) if (c.required && !(v[c.field] ?? '').trim()) errors.push(`Falta «${c.header}».`);
+    for (const c of SGC_MASTER_LIST_COLUMNS) if (c.required && !(v[c.field] ?? '').trim()) errors.push(`Falta ${c.header}.`);
 
     const code = normalizeDocumentCode(v.code ?? '');
     if (code) {
@@ -289,23 +289,23 @@ export function validateMasterList(rows: readonly SgcMasterListRawRow[], ctx: Sg
     const resolvedType = resolveMasterListTypeCode(v.documentTypeCode ?? '', ctx.documentTypes);
     const typeCode = resolvedType ?? rawTypeCode;
     const type = typeCode ? ctx.documentTypes.get(typeCode) : undefined;
-    if (resolvedType && resolvedType !== rawTypeCode) warnings.push(`El tipo documental «${(v.documentTypeCode ?? '').trim()}» se tomó como ${resolvedType}.`);
-    if (typeCode && !type) errors.push(`El tipo documental «${typeCode}» no existe o está inactivo en el SGC de la empresa.`);
+    if (resolvedType && resolvedType !== rawTypeCode) warnings.push(`El tipo documental ${(v.documentTypeCode ?? '').trim()} se tomó como ${resolvedType}.`);
+    if (typeCode && !type) errors.push(`El tipo documental ${typeCode} no existe o está inactivo en el SGC de la empresa.`);
     const processCode = (v.processCode ?? '').trim().toUpperCase();
     const process = processCode ? ctx.processes.get(processCode) : undefined;
-    if (processCode && !process) errors.push(`El proceso «${processCode}» no existe o está inactivo en el SGC de la empresa.`);
+    if (processCode && !process) errors.push(`El proceso ${processCode} no existe o está inactivo en el SGC de la empresa.`);
 
     let versionNumber: number | null = null;
     if ((v.versionNumber ?? '').trim()) {
       const raw = (v.versionNumber ?? '').trim().replace(/^v(ersi[oó]n)?\s*/i, '');
       const n = Number(raw);
-      if (!/^[\d.]{1,12}$/.test(raw) || !Number.isInteger(n) || n < 1 || n > 999) errors.push(`La versión «${v.versionNumber}» debe ser un número entero entre 1 y 999.`);
+      if (!/^[\d.]{1,12}$/.test(raw) || !Number.isInteger(n) || n < 1 || n > 999) errors.push(`La versión ${v.versionNumber} debe ser un número entero entre 1 y 999.`);
       else versionNumber = n;
     }
     let effectiveDate: string | null = null;
     if ((v.effectiveDate ?? '').trim()) {
       effectiveDate = parseListDate(v.effectiveDate ?? '');
-      if (!effectiveDate) errors.push(`La fecha de vigencia «${v.effectiveDate}» no es válida (use AAAA-MM-DD o DD/MM/AAAA).`);
+      if (!effectiveDate) errors.push(`La fecha de vigencia ${v.effectiveDate} no es válida (use AAAA-MM-DD o DD/MM/AAAA).`);
       else if (effectiveDate > ctx.today) {
         errors.push(`La fecha de vigencia ${effectiveDate} es futura.`);
         effectiveDate = null;
@@ -316,10 +316,10 @@ export function validateMasterList(rows: readonly SgcMasterListRawRow[], ctx: Sg
     if (rawConf) {
       const resolvedConf = resolveMasterListConfidentiality(v.confidentiality ?? '');
       if (resolvedConf) confidentiality = resolvedConf;
-      else errors.push(`La confidencialidad «${v.confidentiality}» no es válida (publica, departamento o confidencial).`);
+      else errors.push(`La confidencialidad ${v.confidentiality} no es válida (publica, departamento o confidencial).`);
     }
     if (confidentiality === 'departamento' && process && process.idDepartment === null) {
-      errors.push(`Un documento «por departamento» necesita que el proceso ${processCode} tenga departamento dueño.`);
+      errors.push(`Un documento por departamento necesita que el proceso ${processCode} tenga departamento dueño.`);
     }
 
     const listedParentCode = normalizeDocumentCode(v.parentCode ?? '') || null;
@@ -345,7 +345,7 @@ export function validateMasterList(rows: readonly SgcMasterListRawRow[], ctx: Sg
       const parts = { processTypeCode: process.processTypeCode, processCode, documentTypeCode: typeCode };
       const inherits = inheritsParentNumber(ctx.guide, typeCode);
       if (inherits && !parentCode) {
-        warnings.push(`El tipo ${typeCode} hereda el número de su documento padre: indique el «Código del documento padre» para relacionarlo.`);
+        warnings.push(`El tipo ${typeCode} hereda el número de su documento padre: indique el Código del documento padre para relacionarlo.`);
       }
       const parent = parentCode && parentInfo
         ? { code: parentCode, sequence: parentInfo.sequence, parts: { processTypeCode: parentInfo.processTypeCode, processCode: parentInfo.processCode, documentTypeCode: parentInfo.documentTypeCode } }
@@ -395,7 +395,7 @@ export function getMasterListRowsError(rows: unknown): string | null {
     if (!row || typeof row !== 'object' || !Number.isInteger(row.rowNumber) || (row.rowNumber as number) < 2) return 'Filas inválidas: cada fila necesita su número.';
     if (!row.values || typeof row.values !== 'object' || Array.isArray(row.values)) return 'Filas inválidas: faltan los valores de una fila.';
     for (const [k, val] of Object.entries(row.values as Record<string, unknown>)) {
-      if (!fields.has(k)) return `Filas inválidas: columna desconocida «${k}».`;
+      if (!fields.has(k)) return `Filas inválidas: columna desconocida ${k}.`;
       if (typeof val !== 'string' || val.length > 1000) return 'Filas inválidas: cada valor debe ser texto (máximo 1.000 caracteres).';
     }
   }

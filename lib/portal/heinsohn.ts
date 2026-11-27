@@ -76,8 +76,8 @@ export function ubicarColumnasHeinsohn(encabezados: unknown[]): { empresa: numbe
   const h = encabezados.map(normalizar);
   const empresa = h.findIndex((x) => x === 'EMPRESA' || x.startsWith('EMPRESA '));
   const enlace = h.findIndex((x) => x.startsWith('LINK') || x.startsWith('ENLACE') || x === 'URL');
-  if (empresa < 0) throw new FormacionStorageError('El Excel de nómina no tiene la columna «EMPRESA».');
-  if (enlace < 0) throw new FormacionStorageError('El Excel de nómina no tiene la columna «LINK DE ACCESO».');
+  if (empresa < 0) throw new FormacionStorageError('El Excel de nómina no tiene la columna EMPRESA.');
+  if (enlace < 0) throw new FormacionStorageError('El Excel de nómina no tiene la columna LINK DE ACCESO.');
   return { empresa, enlace };
 }
 

@@ -141,7 +141,7 @@ export function permissionRequiresAgentCode(code: string): boolean {
 
 /** Mensaje común (servidor y pantalla) cuando faltan el código de agente. */
 export const AGENT_CODE_REQUIRED_MESSAGE =
-  'Los permisos de Proyectos, Correo y «Solicitar conectores de IA» exigen elegir el agente';
+  'Los permisos de Proyectos, Correo y Solicitar conectores de IA exigen elegir el agente';
 
 export const API_CLIENT_LIMITS = {
   name: 120,
@@ -292,7 +292,7 @@ export function normalizePermissionAccessKind(value: unknown): ApiPermissionAcce
 }
 
 export const WRITE_PERMISSION_NEEDS_WRITE_MODE_MESSAGE =
-  'Para marcar permisos de escritura activa «Permitir escritura» en este cliente';
+  'Para marcar permisos de escritura activa Permitir escritura en este cliente';
 
 /* ─────────────────────────────── Copiar permisos a otros clientes (2026-11-11) ─────────────────────────────── */
 

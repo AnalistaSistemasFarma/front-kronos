@@ -65,7 +65,7 @@ export type ResultadoPin = { ok: true } | { ok: false; intentos: number; bloquea
 /** Antes de comparar: debe existir, tener hash y no estar bloqueado. */
 export function assertPinUsable(fila: PinFila | null, nombre: string): asserts fila is PinFila & { pin_hash: string } {
   if (!fila || !fila.pin_hash) {
-    throw new OtError(`${nombre} no tiene PIN de bitácora. Debe configurarlo desde su propia sesión («Configurar PIN de bitácora»).`, 409);
+    throw new OtError(`${nombre} no tiene PIN de bitácora. Debe configurarlo desde su propia sesión (Configurar PIN de bitácora).`, 409);
   }
   if (fila.bloqueado) {
     throw new OtError(`El PIN de ${nombre} está bloqueado por ${OT_PIN_MAX_FALLOS} intentos fallidos. Un supervisor debe restablecerlo, o la persona configurarlo de nuevo desde su sesión.`, 423);

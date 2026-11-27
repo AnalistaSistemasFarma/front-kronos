@@ -113,7 +113,7 @@ export default function SgcRedisseminationModal({ opened, onClose, idCompany, id
       <Stack gap='sm'>
         <Alert color='blue' icon={<IconInfoCircle size={18} />}>
           <Text size='sm'>
-            Se vuelve a divulgar la <b>versión vigente</b> (no se crea una versión nueva ni se firma otra vez). Cada persona del alcance recibe su tarea de lectura obligatoria con firma «Leyó», <b>aunque ya la hubiera leído antes</b>.
+            Se vuelve a divulgar la <b>versión vigente</b> (no se crea una versión nueva ni se firma otra vez). Cada persona del alcance recibe su tarea de lectura obligatoria con firma Leyó, <b>aunque ya la hubiera leído antes</b>.
           </Text>
         </Alert>
         {error && (

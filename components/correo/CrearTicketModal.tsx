@@ -319,7 +319,7 @@ export default function CrearTicketModal({ opened, conversationId, onClose }: Cr
             onChange={(e) => set('asunto', e.currentTarget.value)}
             required
             maxLength={200}
-            description='«Solicitante - asunto», como los casos que llegan por correo'
+            description='Solicitante - asunto, como los casos que llegan por correo'
             data-testid='correo-ticket-asunto'
           />
 

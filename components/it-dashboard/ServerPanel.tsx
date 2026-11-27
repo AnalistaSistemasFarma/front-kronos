@@ -250,7 +250,7 @@ export default function ServerPanel({ asset }: { asset: ItAssetListItem }) {
           ) : !perf || perf.state === 'none' ? (
             <Text size='sm' c='dimmed'>
               {net?.hostname
-                ? `No hay métricas para «${net.hostname}». Hoy reportan rendimiento los servidores que tienen el recolector de métricas de SynerLink.`
+                ? `No hay métricas para ${net.hostname}. Hoy reportan rendimiento los servidores que tienen el recolector de métricas de SynerLink.`
                 : 'Registre el nombre del equipo (hostname) en Datos de red para enlazar las métricas del servidor.'}
             </Text>
           ) : (

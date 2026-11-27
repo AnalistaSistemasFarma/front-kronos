@@ -50,7 +50,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     // Quien invita sí puede saber si el correo no entra: la ruta de ingreso, en cambio, nunca lo revela (ver /login).
     if (!(await correoAutorizado(correo))) {
       return NextResponse.json(
-        { error: 'Ese correo no está autorizado para entrar al portal: debe ser de un dominio del grupo o estar en «Cuentas Autorizadas».' },
+        { error: 'Ese correo no está autorizado para entrar al portal: debe ser de un dominio del grupo o estar en Cuentas Autorizadas.' },
         { status: 422 }
       );
     }

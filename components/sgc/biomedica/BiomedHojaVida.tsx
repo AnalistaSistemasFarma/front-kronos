@@ -235,7 +235,7 @@ function Mantenimientos({ idCompany, idEquipo, d, onDone }: { idCompany: number;
       setBusy(false);
     }
   };
-  if (d.mantenimientos.length === 0) return <Text c='dimmed'>Sin mantenimientos registrados. Use «Nuevo mantenimiento».</Text>;
+  if (d.mantenimientos.length === 0) return <Text c='dimmed'>Sin mantenimientos registrados. Use Nuevo mantenimiento.</Text>;
   return (
     <>
       <Table.ScrollContainer minWidth={900}>

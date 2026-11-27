@@ -108,7 +108,7 @@ async function markOption(idRequest: number, optionLabel: string): Promise<void>
       WHERE pcr.id_request_general = @req;`);
   const hit = r.recordset[0];
   if (!hit) {
-    throw new Error(`El flujo no tiene el campo «${EVAL_FIELD_LABEL}» con la opción «${optionLabel}». Revise la configuración del proceso.`);
+    throw new Error(`El flujo no tiene el campo ${EVAL_FIELD_LABEL} con la opción ${optionLabel}. Revise la configuración del proceso.`);
   }
   await p
     .request()
@@ -319,7 +319,7 @@ export async function moveToStage(idRequest: number, target: 'AP' | 'AE' | 'AEDA
               }
             : {};
       await withStep(
-        { idRequest, stepKind: 'sap', stepName: `Pasar a «${STATE_LABEL[target]}»`, actionKey: `sales.state_${target.toLowerCase()}`, triggerEvent: 'on_execute', triggeredBy, idCompany: link.id_company, sapEntity: 'Drafts', requestSummary: { docEntry: link.doc_entry, de: state, a: target } },
+        { idRequest, stepKind: 'sap', stepName: `Pasar a ${STATE_LABEL[target]}`, actionKey: `sales.state_${target.toLowerCase()}`, triggerEvent: 'on_execute', triggeredBy, idCompany: link.id_company, sapEntity: 'Drafts', requestSummary: { docEntry: link.doc_entry, de: state, a: target } },
         // Sin If-Match: el Service Layer devuelve en los borradores un etag que no cambia y, desde la segunda
         // escritura, SAP responde -2039 («Another user … modified data»). El estado se validó justo arriba.
         () => sapPatch(s, `Drafts(${link.doc_entry})`, { U_SEND_State: target, ...extra }),
@@ -327,9 +327,9 @@ export async function moveToStage(idRequest: number, target: 'AP' | 'AE' | 'AEDA
       );
       return { moved: true as const };
     });
-    if ('already' in outcome) return { ok: true, detail: `Oferta ya en «${STATE_LABEL[target]}»` };
+    if ('already' in outcome) return { ok: true, detail: `Oferta ya en ${STATE_LABEL[target]}` };
     if ('invalid' in outcome) return { ok: false, error: outcome.invalid as string };
-    return { ok: true, detail: `Oferta pasó a «${STATE_LABEL[target]}»` };
+    return { ok: true, detail: `Oferta pasó a ${STATE_LABEL[target]}` };
   } catch (e) {
     return { ok: false, error: friendly(e) };
   } finally {

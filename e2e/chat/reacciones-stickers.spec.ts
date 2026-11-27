@@ -293,7 +293,7 @@ test.describe('Chat · reacciones, stickers y GIF · escritorio', () => {
     await capturar(page, 'escritorio-4-reaccion-en-vivo');
   });
 
-  test('envía un sticker y un GIF desde el menú «+» del compositor; el GIF llega por el proxy', async ({ page }) => {
+  test('envía un sticker y un GIF desde el menú + del compositor; el GIF llega por el proxy', async ({ page }) => {
     const estado = await simularChat(page);
     await page.goto('/process/chat?agent=horus');
     await expect(burbuja(page, 'quedó en SharePoint')).toBeVisible();

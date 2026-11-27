@@ -109,7 +109,7 @@ test.describe('SGC documental · Sprint 2 · paridad visual con SynerLink', () =
     });
   }
 
-  test('[SGC-REQ-032] «Tareas documentales» se ve igual que «Tareas Asignadas» de SynerLink (misma cabecera, indicadores, filtros y columnas)', async ({ page }, testInfo) => {
+  test('[SGC-REQ-032] Tareas documentales se ve igual que Tareas Asignadas de SynerLink (misma cabecera, indicadores, filtros y columnas)', async ({ page }, testInfo) => {
     // 2026-10-09 (#49abf32, fuera del SGC): «Tareas Asignadas» de SynerLink se unificó con
     // «Solicitudes Asignadas»; la ruta vieja redirige a assigned-requests?type=tasks.
     await page.goto('/process/request-general/assigned-requests?type=tasks');
@@ -202,7 +202,7 @@ test.describe('SGC documental · paridad visual del administrador de flujos con 
     });
   }
 
-  test('[SGC-REQ-032] la vista interna de un flujo de Documentos se ve igual que «view-workflows» de SynerLink (tipografía, tarjetas, tablas de tareas y botones)', async ({ page }, testInfo) => {
+  test('[SGC-REQ-032] la vista interna de un flujo de Documentos se ve igual que view-workflows de SynerLink (tipografía, tarjetas, tablas de tareas y botones)', async ({ page }, testInfo) => {
     await page.goto('/process');
     await page.evaluate(() =>
       sessionStorage.setItem(

@@ -249,7 +249,7 @@ export default function PortalFormacion({
           onCambio={cargarCursos}
           onEliminado={(titulo) => {
             setCursoGestionId(null);
-            setAvisoEliminado(`Se eliminó el curso «${titulo}». Ya no aparece en Formación; sus inscripciones y certificados se conservan.`);
+            setAvisoEliminado(`Se eliminó el curso ${titulo}. Ya no aparece en Formación; sus inscripciones y certificados se conservan.`);
             void cargarCursos();
           }}
         />
@@ -1712,7 +1712,7 @@ export function VistaCursoFormador({
       >
         <Stack gap='sm'>
           <Text size='sm'>
-            Va a eliminar el curso <strong>«{detalle.curso.titulo}»</strong>. Dejará de aparecer en Formación para todos,
+            Va a eliminar el curso <strong>{detalle.curso.titulo}</strong>. Dejará de aparecer en Formación para todos,
             estudiantes y formadores.
           </Text>
           {(() => {
@@ -2265,7 +2265,7 @@ function FilaMaterialFormador({
         />
         {m.tipo === 'FORM' ? (
           <Text size='sm' c='dimmed'>
-            Formulario propio: las preguntas se editan en «Formularios» al agregar un material.
+            Formulario propio: las preguntas se editan en Formularios al agregar un material.
           </Text>
         ) : tipo === 'LINK' ? (
           <TextInput aria-label='Enlace' placeholder='https://…' value={url} onChange={(e) => setUrl(e.currentTarget.value)} />

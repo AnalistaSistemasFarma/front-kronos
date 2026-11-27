@@ -439,7 +439,7 @@ export function GobiernoVigente({
           />
           <TextInput
             label='Plantilla de mínimo privilegio'
-            description='Por ejemplo «Plantilla A — sin SAP».'
+            description='Por ejemplo Plantilla A — sin SAP.'
             maxLength={120}
             value={form.privilegeTemplate}
             onChange={(e) => { const v = e.currentTarget.value; setForm((f) => ({ ...f, privilegeTemplate: v })); }}
@@ -688,7 +688,7 @@ export function HallazgosGobiernoIA({
     onAviso({
       color: 'green',
       titulo: 'Hallazgo actualizado',
-      texto: `${ref} quedó como «${ESTADO_EXTERNO[status]?.label ?? status}». El cambio quedó en el historial.`,
+      texto: `${ref} quedó como ${ESTADO_EXTERNO[status]?.label ?? status}. El cambio quedó en el historial.`,
     });
     await onRecargar();
   };

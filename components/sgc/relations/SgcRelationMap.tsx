@@ -238,7 +238,7 @@ function MapCanvas({ company, graph, showObsolete, setShowObsolete, onChanged }:
         </Group>
         {company.canQuality && (
           <Text size='xs' c='dimmed' mt='xs' data-testid='sgc-mapa-ayuda-arrastre'>
-            <IconHierarchy2 size={12} style={{ verticalAlign: 'middle' }} /> Para relacionar un formato o instructivo con su procedimiento, arrástrelo y suéltelo sobre el procedimiento (marcado «Padre»). En el celular, use «Relacionar con padre» en la ficha o en el árbol documental.
+            <IconHierarchy2 size={12} style={{ verticalAlign: 'middle' }} /> Para relacionar un formato o instructivo con su procedimiento, arrástrelo y suéltelo sobre el procedimiento (marcado Padre). En el celular, use Relacionar con padre en la ficha o en el árbol documental.
           </Text>
         )}
         {linked && (

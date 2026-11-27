@@ -54,7 +54,7 @@ async function llenar(f: Locator, definicion: Definicion, salvo: string[] = []) 
 }
 
 test.describe('Portal TH · formularios SST (etapa 2)', () => {
-  test('B2: autorización, imagen del cuerpo, escala 0 a 10 y «Otras» se dibujan y se pueden contestar', async ({ page }) => {
+  test('B2: autorización, imagen del cuerpo, escala 0 a 10 y Otras se dibujan y se pueden contestar', async ({ page }) => {
     await page.setViewportSize({ width: 1366, height: 900 });
     const envios = await simular(page, salud);
     const f = await abrir(page);
@@ -110,7 +110,7 @@ test.describe('Portal TH · formularios SST (etapa 2)', () => {
     expect(cuerpo.respuestas.o01).toBe('Laura Gómez'); // el nombre sale de la sesión
   });
 
-  test('«Otras» desmarcada borra el texto escrito; la escala admite el 0; marcar «Otras» sin texto no estorba', async ({ page }) => {
+  test('Otras desmarcada borra el texto escrito; la escala admite el 0; marcar Otras sin texto no estorba', async ({ page }) => {
     await page.setViewportSize({ width: 1366, height: 900 });
     const envios = await simular(page, salud);
     const f = await abrir(page);

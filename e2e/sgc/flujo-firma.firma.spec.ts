@@ -136,7 +136,7 @@ test.describe.serial('SGC documental · Sprint 3 · recorrido con firma electró
     }
   });
 
-  test('[SGC-REQ-038][SGC-REQ-039][SGC-REQ-040][SGC-REQ-110] firmar «Elaboró» exige reautenticación: con contraseña errada NO se firma; con la correcta sí', async ({ page }) => {
+  test('[SGC-REQ-038][SGC-REQ-039][SGC-REQ-040][SGC-REQ-110] firmar Elaboró exige reautenticación: con contraseña errada NO se firma; con la correcta sí', async ({ page }) => {
     const elab = await taskRow(page.request, idRequest, /^Elaboración/);
     // Sin firma no se aprueba; sin contraseña, 401.
     expect((await page.request.post(`/api/sgc/tasks/${elab!.idTask}/decision`, { data: { decision: 'aprobar' } })).status()).toBe(409);
@@ -155,10 +155,10 @@ test.describe.serial('SGC documental · Sprint 3 · recorrido con firma electró
     await page.getByTestId('sgc-firma-confirmar').click();
     await expect(page.getByTestId('sgc-mensaje')).toContainText('Firma registrada', { timeout: 60_000 });
     await expect(page.getByTestId('sgc-firma-fila').filter({ hasText: 'Elaboró' })).toBeVisible();
-    await expect(page.getByTestId('sgc-historial')).toContainText('firmó como «Elaboró»');
+    await expect(page.getByTestId('sgc-historial')).toContainText('firmó como Elaboró');
   });
 
-  test('[SGC-REQ-029][SGC-REQ-040] qa.sgc2 y qa.sgc3 firman «Revisó» EN PARALELO sobre el mismo contenido', async ({ browser }) => {
+  test('[SGC-REQ-029][SGC-REQ-040] qa.sgc2 y qa.sgc3 firman Revisó EN PARALELO sobre el mismo contenido', async ({ browser }) => {
     const p2 = await asUser(browser, STORAGE_STATE_2);
     const p3 = await asUser(browser, STORAGE_STATE_3);
     const r3 = await taskRow(p3.request, idRequest, /^Revisión/);

@@ -15,7 +15,7 @@ const OLP = 3;
 type Doc = { idDocument: number; code: string; idVersion: number | null; documentType: { code: string } };
 
 test.describe('SGC · Sprint 11 (con sesión)', () => {
-  test('[SGC-REQ-127][SGC-REQ-130] «Copias no controladas» muestra las copias propias y permite pedir (y cancelar) una copia de un formato', async ({ page }) => {
+  test('[SGC-REQ-127][SGC-REQ-130] Copias no controladas muestra las copias propias y permite pedir (y cancelar) una copia de un formato', async ({ page }) => {
     await page.goto(`/process/sgc-documental/copias?empresa=${OLP}`);
     await expect(page.getByRole('tab', { name: 'Mis copias' })).toBeVisible({ timeout: 30_000 });
     await page.getByRole('tab', { name: 'Solicitar copia' }).click();

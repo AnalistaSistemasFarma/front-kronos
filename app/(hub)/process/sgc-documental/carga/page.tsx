@@ -175,7 +175,7 @@ function Carga({ company }: { company: SgcCompanyAccess }) {
           <div>
             <Text fw={600}>Listado maestro (Excel)</Text>
             <Text size='sm' c='dimmed'>
-              Cargue el listado de documentos internos que ya existen: cada fila queda «pendiente de archivo» con su código, versión y fecha de vigencia.
+              Cargue el listado de documentos internos que ya existen: cada fila queda pendiente de archivo con su código, versión y fecha de vigencia.
               Primero se ve la vista previa con los errores por fila.
             </Text>
           </div>

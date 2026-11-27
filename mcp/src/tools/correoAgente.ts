@@ -80,7 +80,7 @@ function lectorDe(ctx: CorreoAgenteCtx, mailbox: string): LectorCorreo {
 }
 
 const SIGUIENTE =
-  'Se mostró a la persona como TARJETA en el chat, con los botones para confirmar («Enviar», «Crear solicitud» o «Agregar nota»), «Editar» y «Descartar». NADA se ejecuta hasta que ella confirme desde su sesión. No la envíe ni la cree por otro medio, no insista y espere su decisión (le llegará un mensaje).';
+  'Se mostró a la persona como TARJETA en el chat, con los botones para confirmar (Enviar, Crear solicitud o Agregar nota), Editar y Descartar. NADA se ejecuta hasta que ella confirme desde su sesión. No la envíe ni la cree por otro medio, no insista y espere su decisión (le llegará un mensaje).';
 
 type Resultado = { content: Array<{ type: 'text'; text: string } | { type: 'image'; data: string; mimeType: string }>; isError?: boolean };
 
@@ -112,7 +112,7 @@ async function ejecutar(ctx: CorreoAgenteCtx, tool: string, args: Record<string,
 const TEXTO_RE = /^(text\/|application\/(json|xml|csv|x-csv|rtf|x-yaml|yaml|javascript)|message\/rfc822)/i;
 const IMAGEN_RE = /^image\/(png|jpe?g|gif|webp)$/i;
 
-const shareParam = z.string().trim().min(10).max(80).describe('El share_id que aparece en el mensaje con el que la persona le compartió el hilo (empieza por «cs_»).');
+const shareParam = z.string().trim().min(10).max(80).describe('El share_id que aparece en el mensaje con el que la persona le compartió el hilo (empieza por cs_).');
 
 export function registerCorreoAgenteTools(server: McpServer, ctx: CorreoAgenteCtx): void {
   server.tool(
@@ -167,7 +167,7 @@ export function registerCorreoAgenteTools(server: McpServer, ctx: CorreoAgenteCt
           mailbox: concesion.mailbox,
           accion: 'AGENTE_LEER_ADJUNTO',
           conversationId: concesion.conversationId,
-          detalle: `Agente ${agente.code} descargó el adjunto «${a.nombre.slice(0, 200)}» (${a.bytes.length} bytes, concesión #${concesion.id})`,
+          detalle: `Agente ${agente.code} descargó el adjunto ${a.nombre.slice(0, 200)} (${a.bytes.length} bytes, concesión #${concesion.id})`,
         });
         const info = { nombre: a.nombre, tipo: a.tipo, tamano_bytes: a.bytes.length };
         if (TEXTO_RE.test(a.tipo) || /\.(txt|csv|json|xml|md|html?|log|ya?ml)$/i.test(a.nombre)) {
@@ -183,7 +183,7 @@ export function registerCorreoAgenteTools(server: McpServer, ctx: CorreoAgenteCt
 
   server.tool(
     'correo_proponer_respuesta',
-    'PROPONE (NO envía) una respuesta en el hilo compartido. Queda PENDIENTE como tarjeta en el chat con la vista previa y los botones «Enviar», «Editar» y «Descartar»: solo el clic de la persona la envía, desde SU buzón, como respuesta al último mensaje del hilo. Escriba el cuerpo en Markdown sencillo (negrita, cursiva, listas, enlaces), en el tono y el idioma del hilo, con saludo y firma de la persona. responder_a_todos=true incluye a todos los participantes.',
+    'PROPONE (NO envía) una respuesta en el hilo compartido. Queda PENDIENTE como tarjeta en el chat con la vista previa y los botones Enviar, Editar y Descartar: solo el clic de la persona la envía, desde SU buzón, como respuesta al último mensaje del hilo. Escriba el cuerpo en Markdown sencillo (negrita, cursiva, listas, enlaces), en el tono y el idioma del hilo, con saludo y firma de la persona. responder_a_todos=true incluye a todos los participantes.',
     {
       share_id: shareParam,
       cuerpo_markdown: z.string().trim().min(2).max(MAX_CUERPO_RESPUESTA).describe('Cuerpo de la respuesta en Markdown.'),
@@ -201,12 +201,12 @@ export function registerCorreoAgenteTools(server: McpServer, ctx: CorreoAgenteCt
         const r = await proponer(ctx.scope, args.share_id, 'RESPUESTA', async (c) => ({
           payload: { cuerpo: args.cuerpo_markdown, todos: args.responder_a_todos, para },
           chat: [
-            `✉️ **Propuesta de respuesta** para el hilo «${c.asunto}»`,
+            `✉️ **Propuesta de respuesta** para el hilo ${c.asunto}`,
             `**Para:** ${para.join(', ') || '(sin destinatarios)'}${args.responder_a_todos ? ' · a todos' : ''}`,
             '',
             citar(args.cuerpo_markdown, 3000),
             '',
-            '_Nada sale hasta que usted la confirme en la tarjeta («Enviar»)._',
+            '_Nada sale hasta que usted la confirme en la tarjeta (Enviar)._',
           ].join('\n'),
           detalle: `respuesta${args.responder_a_todos ? ' a todos' : ''} para ${para.length} destinatario(s), ${args.cuerpo_markdown.length} caracteres`,
         }));
@@ -216,7 +216,7 @@ export function registerCorreoAgenteTools(server: McpServer, ctx: CorreoAgenteCt
 
   server.tool(
     'correo_crear_solicitud_desde_hilo',
-    'PROPONE (NO crea) una solicitud de SynerLink a partir del hilo compartido, que quedará vinculada al hilo. Queda PENDIENTE como tarjeta en el chat: la persona revisa empresa, proceso, solicitante, título y descripción (la misma simulación del Correo) y solo su clic la crea; puede además «Informar en el hilo». Indique el proceso por su id o su nombre exacto (consúltelos con kronos_list_process_categories) y, si lo sabe, la categoría. No funciona si el hilo ya está vinculado a una solicitud (en ese caso use correo_agregar_nota).',
+    'PROPONE (NO crea) una solicitud de SynerLink a partir del hilo compartido, que quedará vinculada al hilo. Queda PENDIENTE como tarjeta en el chat: la persona revisa empresa, proceso, solicitante, título y descripción (la misma simulación del Correo) y solo su clic la crea; puede además Informar en el hilo. Indique el proceso por su id o su nombre exacto (consúltelos con kronos_list_process_categories) y, si lo sabe, la categoría. No funciona si el hilo ya está vinculado a una solicitud (en ese caso use correo_agregar_nota).',
     {
       share_id: shareParam,
       proceso: z.union([z.number().int().positive(), z.string().trim().min(2).max(200)]).describe('Id o nombre del proceso (process_category) de la solicitud.'),
@@ -232,7 +232,7 @@ export function registerCorreoAgenteTools(server: McpServer, ctx: CorreoAgenteCt
           return {
             payload: { proceso: args.proceso, categoria: args.categoria ?? null, titulo: args.titulo, descripcion: args.descripcion },
             chat: [
-              `🗂️ **Propuesta de solicitud** desde el hilo «${c.asunto}»`,
+              `🗂️ **Propuesta de solicitud** desde el hilo ${c.asunto}`,
               `**Proceso:** ${String(args.proceso)}${args.categoria ? ` (${args.categoria})` : ''}`,
               `**Título:** ${args.titulo}`,
               '',
@@ -240,7 +240,7 @@ export function registerCorreoAgenteTools(server: McpServer, ctx: CorreoAgenteCt
               '',
               '_Nada se crea hasta que usted la revise y confirme en la tarjeta._',
             ].join('\n'),
-            detalle: `solicitud «${args.titulo.slice(0, 120)}» en el proceso ${String(args.proceso).slice(0, 80)}`,
+            detalle: `solicitud ${args.titulo.slice(0, 120)} en el proceso ${String(args.proceso).slice(0, 80)}`,
           };
         });
         return texto({ propuesta_id: r.propuesta_id, estado: 'PENDIENTE', siguiente_paso: SIGUIENTE });
@@ -261,7 +261,7 @@ export function registerCorreoAgenteTools(server: McpServer, ctx: CorreoAgenteCt
           if (!idRequest) throw new CorreoAgenteRechazo('El hilo no está vinculado a ninguna solicitud: no hay caso al cual agregar la nota. Puede proponer crear una con correo_crear_solicitud_desde_hilo.');
           return {
             payload: { texto: args.texto, idRequest },
-            chat: [`📝 **Propuesta de nota** para la solicitud #${idRequest} (hilo «${c.asunto}»)`, '', citar(args.texto, 2000), '', '_Nada se agrega hasta que usted la confirme en la tarjeta._'].join('\n'),
+            chat: [`📝 **Propuesta de nota** para la solicitud #${idRequest} (hilo ${c.asunto})`, '', citar(args.texto, 2000), '', '_Nada se agrega hasta que usted la confirme en la tarjeta._'].join('\n'),
             detalle: `nota de ${args.texto.length} caracteres para la solicitud #${idRequest}`,
             idRequest,
           };

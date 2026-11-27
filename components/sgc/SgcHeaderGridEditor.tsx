@@ -235,7 +235,7 @@ export default function SgcHeaderGridEditor({ config, onChange }: { config: SgcH
               ) : (
                 <TextInput
                   label='Rótulo propio'
-                  description={`Vacío: el de la plantilla${defaultLabel(sel.field, config) ? ` («${defaultLabel(sel.field, config)}»)` : ''}.`}
+                  description={`Vacío: el de la plantilla${defaultLabel(sel.field, config) ? ` (${defaultLabel(sel.field, config)})` : ''}.`}
                   value={sel.label ?? ''}
                   disabled={sel.label === ''}
                   onChange={(e) => setCell({ label: e.currentTarget.value ? e.currentTarget.value : null })}
@@ -251,7 +251,7 @@ export default function SgcHeaderGridEditor({ config, onChange }: { config: SgcH
           </Card>
         )}
         <Text size='xs' c='dimmed'>
-          Obligatorios: nombre, código, versión, página, fecha de emisión y las tres firmas (Elaboró, Revisó, Aprobó), cada uno una sola vez. Las demás páginas conservan el encabezado corto. Use «Ver cómo queda» para ver el PDF real.
+          Obligatorios: nombre, código, versión, página, fecha de emisión y las tres firmas (Elaboró, Revisó, Aprobó), cada uno una sola vez. Las demás páginas conservan el encabezado corto. Use Ver cómo queda para ver el PDF real.
         </Text>
       </Stack>
     </Card>

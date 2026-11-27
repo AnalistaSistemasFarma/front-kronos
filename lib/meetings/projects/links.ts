@@ -160,7 +160,7 @@ async function applyRules(mailbox: string, events: GraphMeetingEvent[]): Promise
         entity: 'reunion',
         idEntity: row.id_project_meeting,
         action: 'vincular',
-        detail: `Reunión «${clip(m.subject, 200)}» del ${m.start.slice(0, 10)} asignada por la regla de la serie.`,
+        detail: `Reunión ${clip(m.subject, 200)} del ${m.start.slice(0, 10)} asignada por la regla de la serie.`,
         idUser: rule.id_user,
         via: 'web',
       }).catch(() => null);
@@ -289,7 +289,7 @@ export async function linkMeeting(
       existing.id_project === project.idProject
         ? 'Esa reunión ya está en este proyecto.'
         : member > 0
-          ? `Esa reunión ya está asignada al proyecto «${existing.project.name}». Quítela de allá primero.`
+          ? `Esa reunión ya está asignada al proyecto ${existing.project.name}. Quítela de allá primero.`
           : 'Esa reunión ya está asignada a otro proyecto.',
       409
     );
@@ -342,7 +342,7 @@ export async function linkMeeting(
       entity: 'reunion',
       idEntity: row.id_project_meeting,
       action: seriesKey ? 'regla_serie' : 'vincular',
-      detail: `Reunión «${clip(m.subject, 200)}» del ${m.start.slice(0, 10)} asignada${seriesKey ? ' con toda su serie' : ''}.`,
+      detail: `Reunión ${clip(m.subject, 200)} del ${m.start.slice(0, 10)} asignada${seriesKey ? ' con toda su serie' : ''}.`,
       idUser: user.id,
       via: 'web',
     });
@@ -373,7 +373,7 @@ export async function unlinkMeeting(user: ProjectUser, project: ProjectAccess, l
       entity: 'reunion',
       idEntity: linkId,
       action: 'desvincular',
-      detail: `Reunión «${clip(row.subject, 200)}» del ${row.start_at.toISOString().slice(0, 10)} quitada del proyecto.`,
+      detail: `Reunión ${clip(row.subject, 200)} del ${row.start_at.toISOString().slice(0, 10)} quitada del proyecto.`,
       idUser: user.id,
       via: 'web',
     });
@@ -395,7 +395,7 @@ export async function deleteRule(user: ProjectUser, idRule: number): Promise<voi
       entity: 'reunion',
       idEntity: null,
       action: 'quitar_regla',
-      detail: `Se quitó la regla de la serie «${clip(rule.subject_snapshot, 200)}»: las próximas reuniones ya no se asignan solas.`,
+      detail: `Se quitó la regla de la serie ${clip(rule.subject_snapshot, 200)}: las próximas reuniones ya no se asignan solas.`,
       idUser: user.id,
       via: 'web',
     });

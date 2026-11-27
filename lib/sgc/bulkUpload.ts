@@ -101,7 +101,7 @@ export function matchBulkFile(fileName: string, candidates: readonly SgcBulkCand
   const rest = baseName(fileName).slice(best.code.length);
   const similarity = nameSimilarity(rest, best.title);
   const warning =
-    similarity !== null && similarity < SGC_BULK_NAME_THRESHOLD ? `El nombre del archivo no coincide con el del listado («${best.title}»): revise que sea el documento correcto.` : null;
+    similarity !== null && similarity < SGC_BULK_NAME_THRESHOLD ? `El nombre del archivo no coincide con el del listado (${best.title}): revise que sea el documento correcto.` : null;
   return { ...matched, status: 'cargable', similarity, warning };
 }
 
@@ -112,7 +112,7 @@ export function matchBulkFiles(fileNames: readonly string[], candidates: readonl
     const m = matchBulkFile(f, candidates);
     if (m.status !== 'cargable' || m.idDocument === null) return m;
     const prev = used.get(m.idDocument);
-    if (prev) return { ...m, status: 'error', warning: null, error: `El documento ${m.code} ya recibe el archivo «${prev}» en esta carga.` };
+    if (prev) return { ...m, status: 'error', warning: null, error: `El documento ${m.code} ya recibe el archivo ${prev} en esta carga.` };
     used.set(m.idDocument, f);
     return m;
   });

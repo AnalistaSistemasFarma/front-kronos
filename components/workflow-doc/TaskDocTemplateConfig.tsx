@@ -307,7 +307,7 @@ export function TaskDocTemplateConfigModal({ task, onClose }: { task: { id: numb
 
           <TextInput
             label='Nombre del archivo'
-            description='Admite marcas, p. ej. «Contrato @{N.º de solicitud} - @{Razón social}». Vacío: «Documento solicitud N».'
+            description='Admite marcas, p. ej. Contrato @{N.º de solicitud} - @{Razón social}. Vacío: Documento solicitud N.'
             value={cfg.file_name_pattern ?? ''}
             onChange={(e) => {
               const v = e.currentTarget.value;
@@ -380,7 +380,7 @@ export function TaskDocTemplateConfigModal({ task, onClose }: { task: { id: numb
           {cfg.engine === 'editor' ? (
             <div>
               <Text size='sm' fw={500} mb={4}>
-                Contenido (escriba «@» para insertar un campo)
+                Contenido (escriba @ para insertar un campo)
               </Text>
               <DocTemplateEditor initialHtml={editorSeed} markers={markers} onChange={setHtml} />
             </div>
