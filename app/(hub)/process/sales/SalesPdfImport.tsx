@@ -1,15 +1,17 @@
 'use client';
 
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
-import { Alert, Badge, Button, Checkbox, Group, Menu, Modal, Progress, ScrollArea, Select, Stack, Table, Tabs, Text, Tooltip } from '@mantine/core';
+import { Alert, Badge, Button, Checkbox, Group, Menu, Modal, Progress, ScrollArea, Select, Stack, Table, Tabs, Text, Textarea, Tooltip } from '@mantine/core';
 import { useMediaQuery } from '@mantine/hooks';
-import { IconAlertCircle, IconCircleCheck, IconFileText, IconHistory, IconLoader2, IconRobot, IconSearch, IconSparkles } from '@tabler/icons-react';
+import { IconAlertCircle, IconArrowBackUp, IconCircleCheck, IconSchool, IconSend, IconFileText, IconHistory, IconLoader2, IconRobot, IconSearch, IconSparkles } from '@tabler/icons-react';
 import toast from 'react-hot-toast';
 import SalesSearchModal from './SalesSearchModal';
 import PoDocumentViewer from './PoDocumentViewer';
 import CustomerOrdersModal, { type PoLineRef } from './CustomerOrdersModal';
 import { CONFIDENCE_LABEL, type Confidence } from '../../../../lib/sales/itemPrediction';
 import { blockingLines, canApply, lowConfidenceIndexes, offerAiNote } from '../../../../lib/sales/pdfReview';
+import { agentPatchInstruction, cleanPatch, parseLineCommand, patchContext, type LinePatch } from '../../../../lib/sales/linePatch';
+import type { LearnedEntry } from '../../../../lib/sales/learnedMappings';
 import { agentOrderInstruction, assembleAgentReply, chunkOrderText, isJsonAttachment, rawLineCount, mergePdfOrders, PDF_ORDER_SCHEMA, PDF_ORDER_SYSTEM_PROMPT, parsePdfOrder, pdfOrderChunkPrompt, tableHeaderRow, type PdfOrderResult } from '../../../../lib/sales/pdfOrder';
 
 /**
@@ -23,6 +25,7 @@ import { agentOrderInstruction, assembleAgentReply, chunkOrderText, isJsonAttach
 type Line = Record<string, unknown>;
 type Support = 'checking' | 'unsupported' | 'ready';
 type Phase = 'idle' | 'leyendo' | 'descargando' | 'analizando' | 'agente' | 'montando' | 'simulacion' | 'error';
+type SimLine = Line & LineExtra & { include: boolean };
 type ChatAgent = { idAgent: number; code: string; displayName: string; companies: { idCompany: number }[] };
 /** Espera máxima de la respuesta del agente: si está ocupado en otra conversación hace fila, así que no se falla pronto. */
 const AGENT_TIMEOUT_MS = 30 * 60 * 1000;
@@ -43,7 +46,11 @@ type Match = {
   confirmed: boolean;
   source: { barcode: string; clientCode: string; description: string; quantity: number; price: number | null };
   candidates: MatchCandidate[];
+  /** The item comes from what the users taught for this customer (directo) or for the same ingredient (similar). */
+  learned?: { kind: 'directo' | 'similar'; id: number };
 };
+/** Extra state of a line in the review: remember the item for this customer, changed by an instruction, corrected from what was learned. */
+type LineExtra = { remember?: boolean; patched?: 'usuario' | 'agente'; corrected?: boolean; factor?: number };
 const CONFIDENCE_COLOR: Record<Confidence, string> = { alta: 'green', media: 'yellow', baja: 'red', ninguna: 'gray' };
 const matchOf = (l: Line) => (l.match ?? null) as Match | null;
 
@@ -110,6 +117,28 @@ async function readPdf(file: File): Promise<{ pages: string[]; images: Blob[] }>
   return { pages: parts, images };
 }
 
+/** Waits for the agent's JSON answer after message `sentId` (text or attached .json). null on timeout. */
+async function pollAgentJson(convId: number, sentId: number, timeoutMs: number): Promise<string | null> {
+  const start = Date.now();
+  const tried = new Set<string>();
+  while (Date.now() - start < timeoutMs) {
+    await new Promise((res) => setTimeout(res, 3000));
+    const g = await fetch(`/api/chat/conversations/${convId}/messages?limit=30`, { cache: 'no-store' }).catch(() => null);
+    const gd = g && g.ok ? await g.json().catch(() => ({})) : {};
+    const after = ((gd.messages ?? []) as ReplyMessage[]).filter((x) => x.id > sentId && x.role === 'agent').sort((x, y) => x.id - y.id);
+    for (const f of after.flatMap((x) => x.attachments ?? []).filter(isJsonAttachment)) {
+      if (tried.has(f.downloadUrl)) continue;
+      tried.add(f.downloadUrl);
+      const fr = await fetch(f.downloadUrl, { cache: 'no-store' }).catch(() => null);
+      const a = assembleAgentReply([fr && fr.ok ? await fr.text().catch(() => '') : '']);
+      if (a.status === 'ok') return a.json;
+    }
+    const a = assembleAgentReply(after.map((x) => x.body ?? ''));
+    if (a.status === 'ok') return a.json;
+  }
+  return null;
+}
+
 export default function SalesPdfImport({ companyId, companyName, cardCode, onLoaded }: Props) {
   const [support, setSupport] = useState<Support>('checking');
   const [phase, setPhase] = useState<Phase>('idle');
@@ -117,7 +146,7 @@ export default function SalesPdfImport({ companyId, companyName, cardCode, onLoa
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState('');
   /** Simulación: lo que se montaría, antes de agregarlo a la oferta (Nicolás Rivera, 2026-11-09). */
-  const [sim, setSim] = useState<(Omit<PdfOffer, 'lines'> & { lines: (Line & { include: boolean })[] }) | null>(null);
+  const [sim, setSim] = useState<(Omit<PdfOffer, 'lines'> & { lines: SimLine[] }) | null>(null);
   /** Filas visibles de la simulación: se dibujan de a 100 (una OC de 360 líneas colgaba el navegador). */
   const [simShown, setSimShown] = useState(100);
   /** Rows of the simulation table, to jump to the next Baja line. */
@@ -417,24 +446,113 @@ export default function SalesPdfImport({ companyId, companyName, cardCode, onLoa
     const m = matchOf(l);
     return { index: i, row: String(l.row ?? i + 1), codes: [...new Set([String(l.ItemCode || ''), ...(m?.candidates.map((c) => c.ItemCode) ?? [])].filter(Boolean))] };
   });
-  const setLine = (i: number, f: (l: Line & { include: boolean }) => Line & { include: boolean }) =>
+  const setLine = (i: number, f: (l: SimLine) => SimLine) =>
     setSim((prev) => (prev ? { ...prev, lines: prev.lines.map((x, j) => (j === i ? f(x) : x)) } : prev));
   /** The user picks one of the suggested candidates. */
+  /** What the PO prints for a line plus the chosen item: the learned mapping (see lib/sales/learnedMappings.ts). */
+  const entryOf = (l: SimLine, item?: Record<string, unknown>, factor?: number): LearnedEntry | null => {
+    const m = matchOf(l);
+    const code = String(item?.ItemCode ?? l.ItemCode ?? '');
+    if (!m || !code) return null;
+    return {
+      clientCode: m.source.clientCode || null, barcode: m.source.barcode || null, description: m.source.description || null,
+      itemCode: code, itemName: String(item?.ItemDescription ?? l.ItemDescription ?? ''), factor: factor ?? l.factor ?? 1,
+    };
+  };
+  /** Saves or forgets learned mappings (KRONOSDB only, never SAP). */
+  const learn = async (action: 'save' | 'forget', entries: LearnedEntry[], source: 'usuario' | 'agente' = 'usuario'): Promise<boolean> => {
+    if (!sim || !entries.length) return false;
+    try {
+      const res = await fetch('/api/sales/learned', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action, companyId: Number(companyId), cardCode: sim.customer.CardCode, source, entries }),
+      });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(d.error || 'No se pudo guardar lo aprendido.');
+      return true;
+    } catch (e) {
+      toast.error((e as Error).message);
+      return false;
+    }
+  };
+  /** Conversation with the agent about the lines (instructions and answers). */
+  const [chatText, setChatText] = useState('');
+  const [chatBusy, setChatBusy] = useState<string | null>(null);
+  const [chatLog, setChatLog] = useState<{ who: 'usuario' | 'agente' | 'sistema'; text: string }[]>([]);
+  const say = (who: 'usuario' | 'agente' | 'sistema', text: string) => setChatLog((x) => [...x.slice(-5), { who, text }]);
+  /** Undo stack of the instructions: previous lines and the mappings they saved. */
+  const [undoStack, setUndoStack] = useState<{ lines: SimLine[]; saved: LearnedEntry[]; source: 'usuario' | 'agente' }[]>([]);
+
+  /**
+   * «Que la corrija sola»: after something is learned, the lines the user has not touched are predicted again;
+   * those that now come from what was learned take the new item with a «Sugerencia corregida» badge.
+   */
+  const selfCorrect = async () => {
+    if (!sim) return;
+    const pending = sim.lines
+      .map((l, i) => ({ l, i, m: matchOf(l) }))
+      .filter(({ l, m }) => m && !m.confirmed && !l.patched);
+    if (!pending.length) return;
+    try {
+      const res = await fetch('/api/sales/pdf-resolve', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          companyId: Number(companyId), cardCode: sim.customer.CardCode,
+          lines: pending.map(({ l, m }) => ({
+            row: Number(l.row), ItemCode: '', Quantity: m!.source.quantity, UnitPrice: m!.source.price, WarehouseCode: '', ItemDescription: m!.source.description,
+            ...(m!.source.barcode ? { Barcode: m!.source.barcode } : {}), ...(m!.source.clientCode ? { ClientCode: m!.source.clientCode } : {}),
+          })),
+        }),
+      });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) return;
+      const fresh = new Map(((d.lines ?? []) as Line[]).filter((x) => matchOf(x)?.learned && x.ItemCode).map((x) => [Number(x.row), x]));
+      const n = pending.filter(({ l }) => fresh.has(Number(l.row)) && fresh.get(Number(l.row))!.ItemCode !== l.ItemCode).length;
+      if (!n) return;
+      setSim((prev) => prev && {
+        ...prev,
+        lines: prev.lines.map((l) => {
+          const f = fresh.get(Number(l.row));
+          const m = matchOf(l);
+          if (!f || !m || m.confirmed || l.patched || f.ItemCode === l.ItemCode) return l;
+          return { ...l, ...f, include: l.include, corrected: true };
+        }),
+      });
+      say('sistema', `Se corrigieron ${n} línea(s) con lo aprendido.`);
+    } catch {
+      /* the correction is a suggestion: nothing to do */
+    }
+  };
+
+  /** Remembers (or not) the item the user chose for a line, then lets the other lines correct themselves. */
+  const rememberChoice = async (entry: LearnedEntry | null) => {
+    if (!entry) return;
+    if (await learn('save', [entry])) await selfCorrect();
+  };
+
+  /** The user picks one of the suggested candidates. */
   const chooseCandidate = (i: number, code: string | null) => {
+    if (!sim) return;
+    const cur = sim.lines[i];
+    const c = matchOf(cur)?.candidates.find((x) => x.ItemCode === code);
     setLine(i, (l) => {
       const m = matchOf(l);
-      const c = m?.candidates.find((x) => x.ItemCode === code);
       if (!m || !c) return l;
-      return { ...l, ...c.line, include: true, match: { ...m, confirmed: true, reason: c.reason } };
+      return { ...l, ...c.line, include: true, remember: true, factor: c.factor, corrected: false, match: { ...m, confirmed: true, reason: c.reason } };
     });
+    if (c && c.ItemCode !== cur.ItemCode) void rememberChoice(entryOf(cur, { ItemCode: c.ItemCode, ItemDescription: c.ItemName }, c.factor));
   };
-  /** The user searched an item in SAP: it is validated (price list, warehouse) with the PO quantity and price. */
-  const chooseSearched = async (i: number, row: Record<string, unknown>, reason = 'Elegido por el usuario') => {
-    if (!sim) return;
+  /** The user (or an instruction) chose an item in SAP: it is validated (price list, warehouse) with the PO quantity and price. */
+  const chooseSearched = async (
+    i: number, row: Record<string, unknown>, reason = 'Elegido por el usuario', opts: { factor?: number; remember?: boolean; patched?: 'usuario' | 'agente' } = {}
+  ): Promise<Line | null> => {
+    if (!sim) return null;
     const l = sim.lines[i];
     const m = matchOf(l);
-    const qty = Number(m?.source.quantity ?? l.Quantity);
-    const price = m ? m.source.price : (l.UnitPrice as number | null);
+    const factor = opts.factor && opts.factor > 0 ? opts.factor : 1;
+    const qty = Number(m?.source.quantity ?? l.Quantity) * factor;
+    const srcPrice = m ? m.source.price : (l.UnitPrice as number | null);
+    const price = srcPrice == null ? null : Math.round((Number(srcPrice) / factor) * 10000) / 10000;
     try {
       const res = await fetch('/api/sales/lines-validate', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -443,23 +561,121 @@ export default function SalesPdfImport({ companyId, companyName, cardCode, onLoa
       const d = await res.json().catch(() => ({}));
       const v = (d.lines ?? [])[0] as Line | undefined;
       if (!res.ok || !v) throw new Error(d.error || (d.errors ?? [])[0]?.error || 'No se pudo validar el artículo en SAP.');
+      const remember = opts.remember ?? true;
       setLine(i, (x) => {
         const mm = matchOf(x);
-        const cand: MatchCandidate = { ItemCode: String(v.ItemCode), ItemName: String(v.ItemDescription ?? ''), score: 0, reason, factor: 1, line: { ...v, row: x.row } };
+        const cand: MatchCandidate = { ItemCode: String(v.ItemCode), ItemName: String(v.ItemDescription ?? ''), score: 0, reason, factor, line: { ...v, row: x.row } };
         return {
-          ...x, ...v, row: x.row, include: true,
-          match: mm ? { ...mm, confirmed: true, reason: cand.reason, candidates: [cand, ...mm.candidates.filter((c) => c.ItemCode !== cand.ItemCode)] } : undefined,
+          ...x, ...v, row: x.row, include: true, remember, factor, corrected: false, ...(opts.patched ? { patched: opts.patched } : {}),
+          match: mm ? { ...mm, learned: undefined, confirmed: true, reason: cand.reason, candidates: [cand, ...mm.candidates.filter((c) => c.ItemCode !== cand.ItemCode)] } : undefined,
         };
       });
+      if (!opts.patched && remember) void rememberChoice(entryOf(l, v, factor));
+      return v;
     } catch (e) {
       toast.error((e as Error).message);
+      return null;
+    }
+  };
+
+  /** Applies a patch (from the parser or the agent) to the lines on screen; can be undone. Never touches SAP. */
+  const applyPatch = async (patch: LinePatch, source: 'usuario' | 'agente') => {
+    if (!sim) return;
+    const before = sim.lines;
+    const saved: LearnedEntry[] = [];
+    const rowIndex = (n: number) => sim.lines.findIndex((l, i) => Number(l.row ?? i + 1) === n);
+    let fails = 0;
+    for (const ch of patch.cambios) {
+      const i = rowIndex(ch.linea);
+      if (i < 0) continue;
+      const l = sim.lines[i];
+      const m = matchOf(l);
+      if (ch.itemCode) {
+        const v = await chooseSearched(i, { ItemCode: ch.itemCode }, source === 'agente' ? `Indicado por ${agent?.displayName ?? 'el agente'}` : 'Indicado por el usuario', { factor: ch.factor ?? l.factor ?? 1, remember: ch.recordar !== false, patched: source });
+        if (!v) { fails++; continue; }
+        if (ch.recordar !== false) { const e = entryOf(l, v, ch.factor ?? l.factor ?? 1); if (e) saved.push(e); }
+      } else if (ch.factor && m) {
+        const f = ch.factor;
+        setLine(i, (x) => ({ ...x, factor: f, Quantity: Number(m.source.quantity) * f, UnitPrice: m.source.price == null ? x.UnitPrice : Math.round((Number(m.source.price) / f) * 10000) / 10000, patched: source }));
+        if (ch.recordar && l.ItemCode) { const e = entryOf(l, undefined, f); if (e) saved.push(e); }
+      }
+      if (ch.cantidad != null) setLine(i, (x) => ({ ...x, Quantity: ch.cantidad, patched: source }));
+      if (ch.precio != null) setLine(i, (x) => ({ ...x, UnitPrice: ch.precio, patched: source }));
+      if (ch.incluir !== undefined) setLine(i, (x) => ({ ...x, include: ch.incluir as boolean, patched: source }));
+    }
+    setUndoStack((u) => [...u.slice(-9), { lines: before, saved, source }]);
+    if (fails) say('sistema', `${fails} cambio(s) no se aplicaron: el artículo no se encontró o no se pudo validar en SAP.`);
+    if (saved.length && (await learn('save', saved, source))) {
+      say('sistema', `Aprendido para ${sim.customer.CardName}: ${[...new Set(saved.map((e) => e.itemCode))].join(', ')}.`);
+      await selfCorrect();
+    }
+  };
+
+  const undo = async () => {
+    const last = undoStack[undoStack.length - 1];
+    if (!last) return;
+    setUndoStack((u) => u.slice(0, -1));
+    setSim((prev) => prev && { ...prev, lines: last.lines });
+    if (last.saved.length) await learn('forget', last.saved, last.source);
+    say('sistema', 'Se deshizo el último cambio.');
+  };
+
+  /** Instruction typed by the user: common commands are applied at once; anything else goes to the agent. */
+  const sendInstruction = async () => {
+    const text = chatText.trim();
+    if (!sim || !text || chatBusy) return;
+    const rows = sim.lines.map((l, i) => Number(l.row ?? i + 1));
+    say('usuario', text);
+    setChatText('');
+    const local = parseLineCommand(text, rows);
+    if (local) {
+      setChatBusy('Aplicando…');
+      try {
+        await applyPatch(local, 'usuario');
+        say('sistema', local.mensaje);
+      } finally {
+        setChatBusy(null);
+      }
+      return;
+    }
+    const a = agent ?? agents[0] ?? null;
+    if (!a) {
+      say('sistema', 'No tiene un agente del chat asignado. Use instrucciones como: la línea 2 es PTCZ0111; quita la línea 3; las cantidades vienen en cajas de 10.');
+      return;
+    }
+    setChatBusy(`${a.displayName} está revisando la instrucción…`);
+    try {
+      let convId = conversationId;
+      if (!convId) {
+        const c = await fetch('/api/chat/conversations', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ idAgent: a.idAgent }) });
+        const cd = await c.json().catch(() => ({}));
+        if (!c.ok || !cd.conversation?.id) throw new Error(cd.error || `No se pudo abrir la conversación con ${a.displayName}.`);
+        convId = Number(cd.conversation.id);
+        setConversationId(convId);
+        setAgent(a);
+      }
+      const form = new FormData();
+      form.append('body', agentPatchInstruction(companyName ?? `empresa ${companyId}`, sim.customer, text));
+      form.append('files', new File([JSON.stringify({ cliente: sim.customer, lineas: patchContext(sim.lines) }, null, 1)], 'contexto-oferta.json', { type: 'application/json' }));
+      const r = await fetch(`/api/chat/conversations/${convId}/messages`, { method: 'POST', body: form });
+      const md = await r.json().catch(() => ({}));
+      if (!r.ok || !md.message?.id) throw new Error(md.error || `No se pudo enviar la instrucción a ${a.displayName}.`);
+      const json = await pollAgentJson(convId, Number(md.message.id), 10 * 60 * 1000);
+      if (!json) throw new Error(`${a.displayName} no respondió en 10 minutos. Revise la conversación en el chat.`);
+      const patch = cleanPatch(JSON.parse(json), rows);
+      say('agente', patch.mensaje || (patch.cambios.length ? `${patch.cambios.length} cambio(s).` : 'Sin cambios.'));
+      if (patch.cambios.length) await applyPatch(patch, 'agente');
+    } catch (e) {
+      say('sistema', (e as Error).message);
+    } finally {
+      setChatBusy(null);
     }
   };
 
   /** Agrega a la oferta lo simulado (las líneas marcadas; solo bloquean las que no tienen artículo). */
   const apply = () => {
     if (!sim || !canApply(sim.lines)) return;
-    const lines = sim.lines.filter((l) => l.include).map(({ include: _i, match, ...l }) => {
+    const lines = sim.lines.filter((l) => l.include).map(({ include: _i, match, remember: _r, patched: _p, corrected: _c, factor: _f, ...l }) => {
       const m = match as Match | undefined;
       return m ? { ...l, aiNote: offerAiNote(m) } : l;
     });
@@ -469,6 +685,8 @@ export default function SalesPdfImport({ companyId, companyName, cardCode, onLoa
     onLoaded({ ...sim, avisos, lines });
     setSim(null);
     setDocFile(null);
+    setChatLog([]);
+    setUndoStack([]);
     setPhase('idle');
   };
   const inputId = `pdf-ia-${companyId}`;
@@ -606,7 +824,8 @@ export default function SalesPdfImport({ companyId, companyName, cardCode, onLoa
                   <Table.Tbody>
                     {sim.lines.slice(0, simShown).map((l, i) => (
                       <Table.Tr key={i} ref={(el) => { rowRefs.current[i] = el; }} data-confianza={matchOf(l)?.confidence}
-                        style={matchOf(l)?.confidence === 'baja' && l.ItemCode ? { background: 'var(--mantine-color-red-light)', boxShadow: 'inset 3px 0 0 var(--mantine-color-red-filled)' } : undefined}>
+                        style={matchOf(l)?.confidence === 'baja' && l.ItemCode && !l.patched ? { background: 'var(--mantine-color-red-light)', boxShadow: 'inset 3px 0 0 var(--mantine-color-red-filled)' }
+                          : l.patched || l.corrected ? { background: 'var(--mantine-color-violet-light)', boxShadow: 'inset 3px 0 0 var(--mantine-color-violet-filled)' } : undefined}>
                         <Table.Td><Checkbox checked={l.include} onChange={(e) => { const c = e.currentTarget.checked; setSim({ ...sim, lines: sim.lines.map((x, j) => (j === i ? { ...x, include: c } : x)) }); }} /></Table.Td>
                         <Table.Td className="po-row-num"><Text size="xs" c="dimmed">{String(l.row ?? i + 1)}</Text></Table.Td>
                         <Table.Td>
@@ -648,6 +867,27 @@ export default function SalesPdfImport({ companyId, companyName, cardCode, onLoa
                                   </Tooltip>
                                 </Group>
                                 <Text size="xs" c={m.confidence === 'ninguna' ? 'red' : 'dimmed'}>{m.reason}</Text>
+                                {(m.learned || l.patched || l.corrected || l.remember !== undefined) && (
+                                  <Group gap={6} wrap="wrap">
+                                    {l.patched && <Badge size="xs" color="violet" variant="light">{l.patched === 'agente' ? `Cambiado por ${agent?.displayName ?? 'el agente'}` : 'Cambiado por su indicación'}</Badge>}
+                                    {l.corrected && <Badge size="xs" color="grape" variant="light">Sugerencia corregida</Badge>}
+                                    {m.learned && !l.corrected && <Badge size="xs" color="teal" variant="light" leftSection={<IconSchool size={11} />}>{m.learned.kind === 'directo' ? 'Aprendido' : 'Sugerencia corregida'}</Badge>}
+                                    {m.learned && (
+                                      <Button size="compact-xs" variant="subtle" color="gray"
+                                        onClick={async () => { const e = entryOf(l); if (e && (await learn('forget', [e]))) { setLine(i, (x) => ({ ...x, remember: false, match: { ...matchOf(x)!, learned: undefined } })); toast.success('Se olvidó lo aprendido para esta línea.'); } }}>
+                                        Olvidar
+                                      </Button>
+                                    )}
+                                    {l.remember !== undefined && !m.learned && Boolean(l.ItemCode) && (
+                                      <Checkbox size="xs" label="Recordar para este cliente" checked={l.remember}
+                                        onChange={async (ev) => {
+                                          const on = ev.currentTarget.checked;
+                                          const e = entryOf(l);
+                                          if (e && (await learn(on ? 'save' : 'forget', [e]))) setLine(i, (x) => ({ ...x, remember: on }));
+                                        }} />
+                                    )}
+                                  </Group>
+                                )}
                               </Stack>
                             );
                           })()}
@@ -669,12 +909,43 @@ export default function SalesPdfImport({ companyId, companyName, cardCode, onLoa
                 )}
               </ScrollArea>
               );
+              const chatBox = (
+                <Stack gap={4} mt={6} data-testid="po-instrucciones">
+                  {chatLog.length > 0 && (
+                    <Stack gap={2} style={{ maxHeight: 96, overflowY: 'auto' }}>
+                      {chatLog.map((c, k) => (
+                        <Text key={k} size="xs" c={c.who === 'sistema' ? 'dimmed' : undefined}>
+                          <b>{c.who === 'usuario' ? 'Usted' : c.who === 'agente' ? (agent?.displayName ?? 'Agente') : 'Formulario'}:</b> {c.text}
+                        </Text>
+                      ))}
+                    </Stack>
+                  )}
+                  <Group gap={6} wrap="nowrap" align="flex-end">
+                    <Textarea
+                      style={{ flex: 1 }} autosize minRows={1} maxRows={3} aria-label="Instrucción para las líneas" value={chatText} disabled={Boolean(chatBusy)}
+                      placeholder="Indique cambios: la línea 2 es PTCZ0111; quita la línea 3; las cantidades vienen en cajas de 10"
+                      onChange={(e) => setChatText(e.currentTarget.value)}
+                      onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void sendInstruction(); } }}
+                    />
+                    <Tooltip label="Aplicar la instrucción (las que no son comandos simples las resuelve su agente)" withinPortal zIndex={1400} multiline w={260}>
+                      <Button color="indigo" variant="light" onClick={() => void sendInstruction()} loading={Boolean(chatBusy)} disabled={!chatText.trim()} aria-label="Aplicar instrucción" leftSection={<IconSend size={14} />}>Aplicar</Button>
+                    </Tooltip>
+                    {undoStack.length > 0 && (
+                      <Tooltip label="Deshacer el último cambio (también olvida lo que aprendió)" withinPortal zIndex={1400}>
+                        <Button variant="default" onClick={() => void undo()} disabled={Boolean(chatBusy)} aria-label="Deshacer" leftSection={<IconArrowBackUp size={14} />}>Deshacer</Button>
+                      </Tooltip>
+                    )}
+                  </Group>
+                  {chatBusy && <Text size="xs" c="dimmed">{chatBusy}</Text>}
+                </Stack>
+              );
+              const left = <>{linesTable}{chatBox}</>;
               const viewer = hasDoc && docFile && docUrl ? <PoDocumentViewer file={docFile} url={docUrl} passive={dragging} /> : null;
-              if (!viewer) return linesTable;
+              if (!viewer) return left;
               if (isWide) {
                 return (
                   <div ref={splitRef} style={{ flex: 1, minHeight: 200, display: 'flex', userSelect: dragging ? 'none' : undefined }}>
-                    <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>{linesTable}</div>
+                    <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>{left}</div>
                     {showDoc && (
                       <>
                         <div role="separator" aria-orientation="vertical" aria-label="Cambiar el ancho del documento" title="Arrastre para cambiar el ancho"
@@ -696,7 +967,7 @@ export default function SalesPdfImport({ companyId, companyName, cardCode, onLoa
                       <Tabs.Tab value="documento" leftSection={<IconFileText size={14} />}>Documento</Tabs.Tab>
                     </Tabs.List>
                   </Tabs>
-                  {mobileTab === 'documento' ? <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>{viewer}</div> : linesTable}
+                  {mobileTab === 'documento' ? <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>{viewer}</div> : left}
                 </div>
               );
             })()}
@@ -726,7 +997,7 @@ export default function SalesPdfImport({ companyId, companyName, cardCode, onLoa
                 );
               })()}
               <Group gap="xs">
-                <Button variant="default" onClick={() => { setSim(null); setDocFile(null); setPhase('idle'); }}>Cancelar</Button>
+                <Button variant="default" onClick={() => { setSim(null); setDocFile(null); setChatLog([]); setUndoStack([]); setPhase('idle'); }}>Cancelar</Button>
                 <Button color="violet" disabled={!canApply(sim.lines)} onClick={apply}>
                   Agregar a la oferta ({sim.lines.filter((l) => l.include).length})
                 </Button>
