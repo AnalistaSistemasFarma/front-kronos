@@ -27,6 +27,7 @@ import PurchaseRequestDetail from '../purchases/PurchaseRequestDetail';
 import DocumentFlowCompact from '@/components/orion/DocumentFlowCompact';
 import { authorizationPreviewPdfUrl } from '../../../../lib/authorization/previewPdf';
 import SalesOfferDetail from '../sales/SalesOfferDetail';
+import PriceUpdateDetail from '../sales/price-lists/PriceUpdateDetail';
 import {
   IconBuilding,
   IconUser,
@@ -476,6 +477,9 @@ export default function AuthorizationDetailModal({ opened, onClose, request }: P
 
             {/* Ventas: oferta en SAP con cupo, % de extracupo y cartera por edades para decidir. */}
             {idReqGen ? <SalesOfferDetail requestId={idReqGen} onLoaded={setIsSale} /> : null}
+
+            {/* Price lists: current → new price per item, to decide. */}
+            {idReqGen ? <PriceUpdateDetail requestId={idReqGen} onLoaded={(x) => x && setIsSale(true)} /> : null}
 
             <Divider />
 

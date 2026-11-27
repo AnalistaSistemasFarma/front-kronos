@@ -62,6 +62,7 @@ describe('actionsFor / triggersFor', () => {
       'sales.state_ae',
       'sales.state_aeda',
       'sales.create_order',
+      'prices.apply',
     ]);
     expect(actionsFor('authorization', 'on_reject').map((a) => a.key)).toEqual(['purchase.state_rejected', 'sales.state_rejected']);
     expect(actionsFor('sap_executor', 'on_quote').map((a) => a.key)).toEqual(['purchase.state_quotation']);
