@@ -496,7 +496,7 @@ export function InvitarModal({
 
   const filtrados = (candidatos ?? []).filter((u) => {
     const t = q.trim().toLowerCase();
-    return !t || u.name.toLowerCase().includes(t) || u.email.toLowerCase().includes(t);
+    return !t || u.name.toLowerCase().includes(t) || u.email.toLowerCase().includes(t) || (u.companies ?? []).some((c) => c.toLowerCase().includes(t));
   });
 
   const invitar = async () => {
@@ -528,7 +528,8 @@ export function InvitarModal({
     >
       <ErrorArriba error={error} onClose={() => setError(null)} />
       <Text size='xs' c='dimmed'>
-        Solo aparecen quienes tienen el permiso Proyectos en {proyecto.company.companyName}. Verán todo lo trabajado en el proyecto.
+        Aparecen las personas de cualquier empresa del grupo con el permiso Proyectos. Verán todo lo trabajado en el proyecto; solo hablan con los
+        asistentes que tengan asignados.
       </Text>
       <Stack gap={4}>
         <Text size='sm' fw={500}>
@@ -547,7 +548,7 @@ export function InvitarModal({
           {rol === 'editor' ? 'Conversa con los asistentes, vincula correos y solicitudes y carga archivos.' : 'Solo consulta: no escribe ni vincula.'}
         </Text>
       </Stack>
-      <TextInput placeholder='Buscar por nombre o correo' leftSection={<IconSearch size={16} />} value={q} onChange={(e) => setQ(e.currentTarget.value)} radius='xl' aria-label='Buscar personas' />
+      <TextInput placeholder='Buscar por nombre, correo o empresa' leftSection={<IconSearch size={16} />} value={q} onChange={(e) => setQ(e.currentTarget.value)} radius='xl' aria-label='Buscar personas' />
       {candidatos === null ? (
         <EsqueletoFilas n={4} />
       ) : filtrados.length === 0 ? (
@@ -567,6 +568,7 @@ export function InvitarModal({
                     </Text>
                     <Text size='xs' c='dimmed' className={css.truncar}>
                       {u.email}
+                      {u.companies && u.companies.length > 0 ? ` · ${u.companies.join(', ')}` : ''}
                     </Text>
                   </div>
                 </Group>

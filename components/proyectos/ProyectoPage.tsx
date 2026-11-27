@@ -183,8 +183,9 @@ export default function ProyectoPage({ idProject }: { idProject: number }) {
   // correo. Si el mensaje menciona solo personas, ningún asistente lo atiende.
   const mencionables = useMemo(() => {
     if (!proyecto || !conversacion || conversacion.soloLectura) return [];
+    // Sin el asistente de la conversación asignado (2026-11-27): solo menciona personas.
     const agentes = proyecto.agents
-      .filter((a) => a.puedoEscribir && a.idAgent !== conversacion.agent.idAgent)
+      .filter((a) => !conversacion.sinAsistente && a.puedoEscribir && a.idAgent !== conversacion.agent.idAgent)
       .map((a) => ({ valor: a.code, nombre: a.displayName, avatarUrl: a.avatarUrl }));
     const tomados = new Set([conversacion.agent.code, ...agentes.map((a) => a.valor)].map((v) => v.toLowerCase()));
     const personas = proyecto.members
@@ -533,7 +534,7 @@ export default function ProyectoPage({ idProject }: { idProject: number }) {
         <ChatThread
           key={conversacion.id}
           agent={agenteConversacion}
-          project={{ idConversation: conversacion.id, name: proyecto.name, readOnly: conversacion.soloLectura, mencionables }}
+          project={{ idConversation: conversacion.id, name: proyecto.name, readOnly: conversacion.soloLectura, agentNote: conversacion.sinAsistente, mencionables }}
           currentUserId={miId}
           active
         />

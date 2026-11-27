@@ -76,12 +76,12 @@ function isPrivate(e: GraphMeetingEvent): boolean {
 
 /* ───────────────────────────── Projects the person can assign to ───────────────────────────── */
 
-/** Active projects where the person is OWNER or EDITOR and still has the module in the project's company. */
+/** Active projects where the person is OWNER or EDITOR and still has the module in any company (multi-company, 2026-11-27). */
 async function assignableProjects(user: ProjectUser): Promise<(SuggestionCandidate & { idCompany: number })[]> {
   const companies = new Set((await projectModuleCompanies(user.id)).map((c) => c.idCompany));
   if (companies.size === 0) return [];
   const rows = await prisma.chatProjectMember.findMany({
-    where: { id_user: user.id, role: { in: ['owner', 'editor'] }, project: { archived: false, id_company: { in: [...companies] } } },
+    where: { id_user: user.id, role: { in: ['owner', 'editor'] }, project: { archived: false } },
     select: {
       project: {
         select: {

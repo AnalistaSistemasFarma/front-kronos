@@ -18,6 +18,7 @@ import {
 } from '@mantine/core';
 import {
   IconAlertCircle,
+  IconInfoCircle,
   IconLock,
   IconMessage2,
   IconUpload,
@@ -843,6 +844,12 @@ export default function ChatThread({
      */
     readOnly?: string | null;
     /**
+     * Multiempresa (2026-11-27): la persona escribe como miembro, pero no tiene
+     * asignado el asistente de este hilo. Se muestra este aviso sobre la caja de
+     * escribir; sus mensajes no despiertan al asistente (el servidor lo garantiza).
+     */
+    agentNote?: string | null;
+    /**
      * Multiagente (2026-10-29): OTROS asistentes del proyecto que la persona
      * puede mencionar con @ en este hilo. Lo mencionado lo atiende ese
      * asistente con el historial del hilo; el servidor vuelve a validar.
@@ -1609,6 +1616,11 @@ export default function ChatThread({
         </Box>
       ) : (
       <Box className='chat-thread__composer'>
+        {enProyecto && project?.agentNote ? (
+          <Alert icon={<IconInfoCircle size={16} />} color='yellow' radius='md' py={6} mb={6} data-testid='chat-sin-asistente'>
+            <Text size='xs'>{project.agentNote}</Text>
+          </Alert>
+        ) : null}
         <ChatComposer
           voiceConversationId={!enProyecto && agent?.code === 'duo' ? thread.conversation?.id : undefined}
           ref={composerRef}
@@ -1624,7 +1636,9 @@ export default function ChatThread({
               : enPersonas
                 ? `Escríbale a ${person?.name ?? 'esta persona'}…`
                 : enProyecto
-                  ? project?.mencionables && project.mencionables.length > 0
+                  ? project?.agentNote
+                    ? `Escriba a los miembros de ${project?.name ?? 'el proyecto'}… (con @ menciona a una persona)`
+                    : project?.mencionables && project.mencionables.length > 0
                     ? `Escríbale a ${agent?.displayName ?? 'el asistente'}… (con @ menciona a otro asistente o a una persona del proyecto)`
                     : `Escríbale a ${agent?.displayName ?? 'el asistente'} en ${project?.name ?? 'el proyecto'}…`
                   : `Escríbale a ${agent?.displayName ?? 'el asistente'}…`
