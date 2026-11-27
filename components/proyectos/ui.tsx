@@ -6,7 +6,7 @@ import { IconAlertCircle, IconAlertTriangle, IconChevronRight, IconCircleCheck, 
 import type { ReactNode } from 'react';
 import AgentAvatar from '../chat/AgentAvatar';
 import { PROJECT_ROLE_LABELS, type ProjectRole } from '../../lib/chat/projects-rules';
-import type { AgenteMiniDto } from '../../lib/proyectos/tipos';
+import type { AgenteMiniDto, MiembroDto } from '../../lib/proyectos/tipos';
 import css from './proyectos.module.css';
 
 /** Corte de celular/tableta: el mismo del chat y del Correo (62em). */
@@ -44,6 +44,27 @@ export function AgentesApilados({ agentes, size = 26 }: { agentes: AgenteMiniDto
         {resto > 0 && (
           <Avatar size={size} radius='xl'>
             +{resto}
+          </Avatar>
+        )}
+      </Avatar.Group>
+    </Tooltip>
+  );
+}
+
+/** Avatars of the project's member people (photo or initials), stacked (max. 5 + counter). */
+export function StackedMembers({ members, size = 26 }: { members: MiembroDto[]; size?: number }) {
+  const visible = members.slice(0, 5);
+  const rest = members.length - visible.length;
+  if (members.length === 0) return null;
+  return (
+    <Tooltip label={members.map((m) => m.name).join(', ')} withArrow openDelay={300} multiline maw={280}>
+      <Avatar.Group spacing={size / 3} data-testid='project-stacked-members'>
+        {visible.map((m) => (
+          <AgentAvatar key={m.id} code={m.id} displayName={m.name} avatarUrl={m.avatarUrl} size={size} showStatus={false} withTooltip={false} />
+        ))}
+        {rest > 0 && (
+          <Avatar size={size} radius='xl'>
+            +{rest}
           </Avatar>
         )}
       </Avatar.Group>
