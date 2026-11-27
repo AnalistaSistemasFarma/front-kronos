@@ -96,7 +96,7 @@ export function ordenarDestinos(destinos: DestinoReenvio[]): DestinoReenvio[] {
  * enlace público de OneDrive lo dejaría abierto a cualquiera.
  */
 export function enlaceWhatsApp(fileName: string): string {
-  return `https://wa.me/?text=${encodeURIComponent(`Le comparto el archivo «${fileName}».`)}`;
+  return `https://wa.me/?text=${encodeURIComponent(`Le comparto el archivo ${fileName}.`)}`;
 }
 
 /**
@@ -105,7 +105,7 @@ export function enlaceWhatsApp(fileName: string): string {
  * wa.me. Igual que `enlaceWhatsApp`, no lleva ninguna URL del archivo.
  */
 export function enlaceWhatsAppWeb(fileName: string): string {
-  return `https://web.whatsapp.com/send?text=${encodeURIComponent(`Le comparto el archivo «${fileName}».`)}`;
+  return `https://web.whatsapp.com/send?text=${encodeURIComponent(`Le comparto el archivo ${fileName}.`)}`;
 }
 
 /* ─────────────── Estrategia de «WhatsApp u otra app» (2026-10-27) ───────────────
@@ -214,6 +214,6 @@ export function puedeCompartirArchivo(nav: Pick<Navigator, 'canShare' | 'share'>
 
 /** Mensaje de confirmación del reenvío. */
 export function mensajeReenviado(fileName: string, destino: Pick<DestinoReenvio, 'titulo' | 'tipo'>): string {
-  const a = destino.tipo === 'persona' ? destino.titulo : `${ETIQUETA_TIPO[destino.tipo].toLowerCase()} «${destino.titulo}»`;
-  return `Se reenvió «${fileName}» a ${a}.`;
+  const a = destino.tipo === 'persona' ? destino.titulo : `${ETIQUETA_TIPO[destino.tipo].toLowerCase()} ${destino.titulo}`;
+  return `Se reenvió ${fileName} a ${a}.`;
 }

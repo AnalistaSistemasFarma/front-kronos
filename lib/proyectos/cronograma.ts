@@ -350,7 +350,7 @@ export async function crearTarea(user: ProjectUser, project: ProjectAccess, raw:
       entity: 'tarea',
       idEntity: fila.id_project_task,
       action: 'crear',
-      detail: `${t.isMilestone ? 'Hito' : 'Tarea'} «${t.title}» (${t.startDate} → ${t.endDate})${origen.nota ? ` · ${origen.nota}` : ''}`,
+      detail: `${t.isMilestone ? 'Hito' : 'Tarea'} ${t.title} (${t.startDate} → ${t.endDate})${origen.nota ? ` · ${origen.nota}` : ''}`,
       changes: { nueva: t },
       idUser: user.id,
       idAgent: origen.idAgent,
@@ -410,7 +410,7 @@ export async function editarTarea(
       entity: 'tarea',
       idEntity: actual.id_project_task,
       action: Object.keys(cambios).every((c) => c === 'status' || c === 'progress') ? 'estado' : 'editar',
-      detail: `«${despues.title}»: ${describirCambios(cambios, (id) => (id ? nombres.get(id) ?? 'Persona retirada' : '—'))}${origen.nota ? ` · ${origen.nota}` : ''}`,
+      detail: `${despues.title}: ${describirCambios(cambios, (id) => (id ? nombres.get(id) ?? 'Persona retirada' : '—'))}${origen.nota ? ` · ${origen.nota}` : ''}`,
       changes: cambios,
       idUser: user.id,
       idAgent: origen.idAgent,
@@ -435,7 +435,7 @@ export async function borrarTarea(user: ProjectUser, project: ProjectAccess, idT
       entity: 'tarea',
       idEntity: actual.id_project_task,
       action: 'borrar',
-      detail: `Borró la tarea «${actual.title}»`,
+      detail: `Borró la tarea ${actual.title}`,
       changes: { borrada: valoresDeFila(actual) },
       idUser: user.id,
       via: 'web',
@@ -512,7 +512,7 @@ export async function miembroPorReferencia(idProject: number, ref: string | null
   const q = sinTildes(ref);
   const porCorreo = miembros.filter((m) => m.email === q);
   const hits = porCorreo.length > 0 ? porCorreo : miembros.filter((m) => sinTildes(m.name) === q);
-  if (hits.length !== 1) throw new ProyectoError(`«${ref}» no es un miembro del proyecto (o hay varios con ese nombre): no puede ser responsable.`, 400);
+  if (hits.length !== 1) throw new ProyectoError(`${ref} no es un miembro del proyecto (o hay varios con ese nombre): no puede ser responsable.`, 400);
   return hits[0].id;
 }
 

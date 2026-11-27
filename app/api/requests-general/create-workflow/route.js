@@ -347,7 +347,7 @@ export async function POST(req) {
       ========================= */
 
       await transaction.commit();
-      await logFlowChange(processId, guard.email, 'creación', `Flujo «${process}» creado (inactivo).`);
+      await logFlowChange(processId, guard.email, 'creación', `Flujo ${process} creado (inactivo).`);
 
 
       return new Response(

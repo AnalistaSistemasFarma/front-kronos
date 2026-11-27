@@ -144,7 +144,7 @@ test.describe('Correo · deslizar para eliminar (celular, con toque)', () => {
     await sesion(context, baseURL!);
   });
 
-  test('corto vuelve sin eliminar; largo elimina con «Deshacer», que lo devuelve a la bandeja', async ({ page }) => {
+  test('corto vuelve sin eliminar; largo elimina con Deshacer, que lo devuelve a la bandeja', async ({ page }) => {
     const api = await simular(page);
     await page.goto('/process/correo');
     const filas = page.getByTestId('correo-fila');
@@ -222,7 +222,7 @@ test.describe('Correo · deslizar para eliminar (celular, con toque)', () => {
     // La fila vuelve y se pide confirmación, sin llamar al servidor todavía.
     const modal = page.getByTestId('correo-confirmar-eliminar');
     await expect(modal.getByTestId('correo-confirmar-eliminar-si')).toBeVisible();
-    await expect(modal.getByTestId('correo-confirmar-eliminar-vinculos')).toContainText('Solicitud #321 · Proyecto «Contratos 2026»');
+    await expect(modal.getByTestId('correo-confirmar-eliminar-vinculos')).toContainText('Solicitud #321 · Proyecto Contratos 2026');
     await expect(filas).toHaveCount(3);
     expect(api.eliminaciones).toHaveLength(0);
     // La fila regresó a su sitio (sin desplazamiento) detrás de la confirmación.
@@ -235,7 +235,7 @@ test.describe('Correo · deslizar para eliminar (celular, con toque)', () => {
     await expect(page.getByTestId('correo-aviso-eliminado')).toBeVisible();
   });
 
-  test('con «reducir movimiento» elimina sin animación y la selección también ofrece «Eliminar»', async ({ page }) => {
+  test('con reducir movimiento elimina sin animación y la selección también ofrece Eliminar', async ({ page }) => {
     await page.emulateMedia({ reducedMotion: 'reduce' });
     const api = await simular(page);
     await page.goto('/process/correo');
@@ -261,7 +261,7 @@ test.describe('Correo · eliminar en el escritorio', () => {
     await sesion(context, baseURL!);
   });
 
-  test('botón «Eliminar» al pasar el mouse, arrastre con el mouse y eliminación masiva con «Deshacer»', async ({ page }) => {
+  test('botón Eliminar al pasar el mouse, arrastre con el mouse y eliminación masiva con Deshacer', async ({ page }) => {
     const api = await simular(page);
     await page.goto('/process/correo');
     const filas = page.getByTestId('correo-fila');

@@ -542,7 +542,7 @@ export function agrupacionDesdeParams(params: URLSearchParams | { get(k: string)
 
 /** Texto corto de los filtros activos, para el encabezado del modo presentación: «UCI · Antibióticos». */
 export function descripcionFiltros(f: CatalogoFiltros): string {
-  return [f.linea, f.grupo, f.area, f.forma, f.pais, f.canal ? (f.canal === 'INSTITUCIONAL' ? 'Institucional' : f.canal === 'COMERCIAL' ? 'Comercial' : null) : null, f.q ? `«${f.q.trim()}»` : null]
+  return [f.linea, f.grupo, f.area, f.forma, f.pais, f.canal ? (f.canal === 'INSTITUCIONAL' ? 'Institucional' : f.canal === 'COMERCIAL' ? 'Comercial' : null) : null, f.q ? `${f.q.trim()}` : null]
     .map((x) => x?.trim())
     .filter(Boolean)
     .join(' · ');

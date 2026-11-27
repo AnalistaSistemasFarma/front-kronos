@@ -29,7 +29,7 @@ import { executeWrite, type TxClient } from '../write.js';
 import type { AuthScope } from '../auth.js';
 
 export const RECHAZO_CONCESION_PROYECTOS =
-  'La concesión no existe, venció, fue revocada o no corresponde a este agente. Pídale a la persona que le vuelva a dar acceso desde Proyectos en SynerLink («Gestionar con un asistente»).';
+  'La concesión no existe, venció, fue revocada o no corresponde a este agente. Pídale a la persona que le vuelva a dar acceso desde Proyectos en SynerLink (Gestionar con un asistente).';
 export const RECHAZO_PROYECTO = 'Proyecto no encontrado entre los que la persona puede ver con esta concesión.';
 export const RECHAZO_PROYECTO_TURNO =
   'No autorizado: la persona que le escribe en este turno no tiene acceso a ese proyecto en SynerLink (o usted no está designado en él). No comparta nada de ese proyecto; si lo necesita, el dueño del proyecto puede agregarla como miembro.';
@@ -522,7 +522,7 @@ export async function proponerEnProyecto(
     `);
     const idP = Number(fila[0]?.id_proposal);
     const cuerpo =
-      `📌 **Propuesta #${idP}** para el proyecto **«${proyecto.name.replace(/[*_`]/g, '')}»**: ${resumen}.\n\n` +
+      `📌 **Propuesta #${idP}** para el proyecto **${proyecto.name.replace(/[*_`]/g, '')}**: ${resumen}.\n\n` +
       `Confírmela o recházela en [Proyectos → Cronograma](/process/proyectos/${proyecto.idProject}?seccion=cronograma). Nada cambia sin su clic.`;
     await tx.$executeRaw(Prisma.sql`
       INSERT INTO chat_message (id_conversation, role, body, created_at, id_agent_author, delivered_at)

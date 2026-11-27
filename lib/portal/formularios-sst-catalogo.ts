@@ -165,7 +165,7 @@ export async function guardarDefinicionSst(p: GuardarDefinicionSst, deps: Deps =
   const def = validacion.definicion;
   if (def.tipo === 'evaluacion') throw new ErrorCatalogoSst(422, 'Los formularios SST son encuestas, no evaluaciones.', ['Los formularios SST son encuestas, no evaluaciones.']);
   if (!CODIGO_FORMULARIO_SST.test(def.codigo) || (CODIGOS_RESERVADOS_SST as readonly string[]).includes(def.codigo.toLowerCase())) {
-    const m = 'El código solo puede llevar letras, números, guion y guion bajo (de 3 a 60 caracteres) y no puede ser «DEFINICIONES».';
+    const m = 'El código solo puede llevar letras, números, guion y guion bajo (de 3 a 60 caracteres) y no puede ser DEFINICIONES.';
     throw new ErrorCatalogoSst(422, m, [m]);
   }
 

@@ -94,7 +94,7 @@ describe('hojas', () => {
 });
 
 describe('CSV y ficha', () => {
-  it('lee CSV con «;», comillas y saltos de línea dentro de un campo', () => {
+  it('lee CSV con ;, comillas y saltos de línea dentro de un campo', () => {
     expect(leerCsv('﻿a;b\n"x;1";"di ""hola""\nmás"\n')).toEqual([
       ['a', 'b'],
       ['x;1', 'di "hola"\nmás'],
@@ -105,7 +105,7 @@ describe('CSV y ficha', () => {
     ]);
   });
 
-  it('escribe el CSV para el agente con «;» y comillas cuando hace falta', () => {
+  it('escribe el CSV para el agente con ; y comillas cuando hace falta', () => {
     const csv = hojaACsv(
       [
         { nombre: 'País', tipo: 'texto' },
@@ -154,7 +154,7 @@ describe('grilla e historial', () => {
   });
 
   it('resume lo que cambió entre versiones', () => {
-    expect(resumenCambios(null, [{ nombre: 'H', filas: 3 }])).toBe('Primera versión: «H» 3 filas.');
+    expect(resumenCambios(null, [{ nombre: 'H', filas: 3 }])).toBe('Primera versión: H 3 filas.');
     expect(
       resumenCambios(
         [
@@ -166,7 +166,7 @@ describe('grilla e historial', () => {
           { nombre: 'N', filas: 2 },
         ]
       )
-    ).toBe('«H»: +2 filas (5 en total); hoja nueva «N» (2 filas); se quitó la hoja «Old».');
+    ).toBe('H: +2 filas (5 en total); hoja nueva N (2 filas); se quitó la hoja Old.');
   });
 });
 

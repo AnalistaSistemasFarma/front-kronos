@@ -279,7 +279,7 @@ export default function SeccionMesas({
 
       {mesas.length === 0 ? (
         <Alert color='blue' variant='light'>
-          Todavía no hay mesas en este proyecto.{puedeManejar ? ' Cree la primera con «Nueva mesa».' : ''}
+          Todavía no hay mesas en este proyecto.{puedeManejar ? ' Cree la primera con Nueva mesa.' : ''}
         </Alert>
       ) : (
         <Group gap='xs'>
@@ -559,7 +559,7 @@ function NuevaMesaModal({
             Agentes que participan (mínimo 2) y su papel
           </Text>
           <Text size='xs' c='dimmed' mb={6}>
-            El papel orienta su aporte: por ejemplo «propone soluciones», «critica las propuestas», «revisa los datos».
+            El papel orienta su aporte: por ejemplo propone soluciones, critica las propuestas, revisa los datos.
           </Text>
           {disponibles === null ? (
             <Skeleton h={80} />

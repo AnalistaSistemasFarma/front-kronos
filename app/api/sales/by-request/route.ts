@@ -25,7 +25,7 @@ export async function GET(request: NextRequest) {
     const r = await pool.request().input('r', sql.Int, requestId).query(
       `SELECT TOP 1 id_company, doc_entry, status, order_doc_entry, error FROM dbo.sales_authorization WHERE id_request_general = @r
        IF @@ROWCOUNT = 0
-         -- Oferta guardada en borrador (sin flujo todavía): su solicitud está «En Borrador».
+         -- Oferta guardada en borrador (sin flujo todavía): su solicitud está En Borrador.
          SELECT TOP 1 id_company, doc_entry, CASE status WHEN N'anulado' THEN N'cancelled' ELSE N'borrador' END AS status, NULL AS order_doc_entry, NULL AS error
          FROM dbo.sales_offer_draft WHERE id_request_general = @r AND status IN (N'borrador', N'anulado');`
     );

@@ -65,10 +65,10 @@ export function resolverConexionPrueba(
   try {
     u = new URL(url);
   } catch {
-    falla(`La URL de Nabuco «${url}» no es válida.`, 'Escriba la URL completa con protocolo, p. ej. https://servidor:puerto');
+    falla(`La URL de Nabuco ${url} no es válida.`, 'Escriba la URL completa con protocolo, p. ej. https://servidor:puerto');
   }
   if (!protocoloNabucoPermitido(u, env)) falla(MENSAJE_PROTOCOLO_NABUCO);
-  if (!RUTA_RE.test(rutaToken)) falla('La ruta de token debe empezar por «/» y no llevar espacios.');
+  if (!RUTA_RE.test(rutaToken)) falla('La ruta de token debe empezar por / y no llevar espacios.');
 
   return {
     conexion: {

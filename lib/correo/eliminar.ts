@@ -91,7 +91,7 @@ interface Comprobante {
 
 function llave(d: CorreoDeps): Buffer {
   const secreto = String(d.secretoFirma ?? '');
-  if (secreto.length < 16) throw new CorreoError('«Deshacer» no está configurado en este ambiente (falta el secreto del servidor). Avise a Tecnología.', 503);
+  if (secreto.length < 16) throw new CorreoError('Deshacer no está configurado en este ambiente (falta el secreto del servidor). Avise a Tecnología.', 503);
   // Llave derivada solo para este uso: el secreto de NextAuth no firma nada más del módulo.
   return createHmac('sha256', secreto).update('synerlink-correo-deshacer-v1').digest();
 }
@@ -275,7 +275,7 @@ export async function deshacerEliminar(d: CorreoDeps, acceso: AccesoCorreo, toke
           mensajeId: id,
           conversationId: u?.conversationId || null,
           internetMessageId: u?.internetMessageId || null,
-          detalle: `«Deshacer»: devuelto de Elementos eliminados a la carpeta ${origenDe.get(id)}`,
+          detalle: `Deshacer: devuelto de Elementos eliminados a la carpeta ${origenDe.get(id)}`,
           ip,
         });
       })

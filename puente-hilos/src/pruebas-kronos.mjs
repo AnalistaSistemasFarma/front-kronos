@@ -47,7 +47,7 @@ export function verificarSecretosPruebas(ruta, { leer = (r) => readFileSync(r, '
   for (const k of ['server', 'user', 'password']) if (typeof s?.sql?.[k] !== 'string' || !s.sql[k]) faltan.push(`sql.${k}`);
   if (s?.sql?.database && String(s.sql.database).toUpperCase() !== 'KRONOSDB_PRUEBAS') faltan.push('sql.database=KRONOSDB_PRUEBAS');
   for (const k of ['email', 'password']) if (typeof s?.qa?.[k] !== 'string' || !s.qa[k]) faltan.push(`qa.${k}`);
-  if (faltan.length) throw new Error(`a «${LLAVE_SECRETOS}» le falta: ${faltan.join(', ')}`);
+  if (faltan.length) throw new Error(`a ${LLAVE_SECRETOS} le falta: ${faltan.join(', ')}`);
 }
 
 /** Bloque del encabezado del turno (textoSistema). */
@@ -72,7 +72,7 @@ export function textoPruebas({ disponible, motivo = null }) {
     `| \`${NOMBRE_WEB}\` | \`testing_http\`, \`testing_captura\` | Pedir páginas o APIs de testing (192.168.11.230:3030) con la sesión del usuario QA de pruebas, y tomar capturas de pantalla que quedan en ./trabajo/capturas. |`,
     '',
     'Reglas:',
-    '- **VERIFIQUE USTED MISMO antes de pedirle algo a la persona.** Si necesita saber si una tabla, columna, registro, script o pantalla ya está en PRUEBAS o en testing, consúltelo con estos conectores (un SELECT, una petición o una captura) en lugar de preguntarle o devolverle el trabajo. Nunca diga «desde este hilo no tengo cómo entrar» a PRUEBAS o a testing: sí tiene cómo.',
+    '- **VERIFIQUE USTED MISMO antes de pedirle algo a la persona.** Si necesita saber si una tabla, columna, registro, script o pantalla ya está en PRUEBAS o en testing, consúltelo con estos conectores (un SELECT, una petición o una captura) en lugar de preguntarle o devolverle el trabajo. Nunca diga desde este hilo no tengo cómo entrar a PRUEBAS o a testing: sí tiene cómo.',
     '- SOLO PRUEBAS: nada de USE, de KRONOSDB (producción) ni de otras bases; el conector lo rechaza y la sesión SQL está encerrada en KRONOSDB_PRUEBAS. Producción NO está habilitada por esta vía y no se promete.',
     '- Toda escritura lleva un `motivo` claro (queda en la auditoría). Prefiera scripts idempotentes; antes de cambiar datos, consulte cómo están, y al terminar, verifique el resultado.',
     '- Consultas acotadas: filtros, TOP y solo las columnas necesarias. No traiga tablas enteras.',

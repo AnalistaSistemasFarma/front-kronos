@@ -37,7 +37,7 @@ export async function POST(request: NextRequest) {
     const hoy = diaColombia(new Date());
     const hasta = esDia(body.hasta) ? body.hasta : hoy;
     const desde = esDia(body.desde) ? body.desde : sumarDias(hasta, -(VENTANA_NOCTURNA_DIAS - 1));
-    if (desde > hasta) return badRequest('«desde» no puede ser posterior a «hasta».');
+    if (desde > hasta) return badRequest('desde no puede ser posterior a hasta.');
     const dias = Math.round((Date.parse(hasta) - Date.parse(desde)) / 86_400_000) + 1;
     if (dias > MAX_DIAS) return badRequest(`La ventana no puede pasar de ${MAX_DIAS} días.`);
 

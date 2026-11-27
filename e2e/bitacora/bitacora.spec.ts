@@ -249,7 +249,7 @@ test.describe('Bitácora de Proceso · con sesión, base y SAP simulados', () =>
     await expect(page.getByTestId('ot-firma-supervisor')).toContainText('PIN en tablet');
   });
 
-  test('jefe en SU PROPIA sesión: «Sí, confirmo» sin PIN; informe con los cuatro vistos buenos', async ({ page, context, baseURL }) => {
+  test('jefe en SU PROPIA sesión: Sí, confirmo sin PIN; informe con los cuatro vistos buenos', async ({ page, context, baseURL }) => {
     await sesion(context, baseURL!, 'u-jefe', 'jefe@farmalogica.com');
     const dados = { OPERARIO: firma('OPERARIO', 'Ana Gómez', 'operario_tablet'), SUPERVISOR: firma('SUPERVISOR', 'Sandra Supervisora', 'pin_tablet'), INSPECTOR: firma('INSPECTOR', 'Iván Inspector', 'pin_tablet') };
     const estado: Estado = { orden: detalle({ estado: 'CERRADA', dados, sesion: 'u-jefe' }), enviados: [] };

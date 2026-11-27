@@ -101,7 +101,7 @@ export default function VitrinaShell({ title, subtitle, requireGestion, trail, a
       <Alert color='yellow' icon={<IconAlertTriangle size={18} />} title={title} m='md' data-testid='vitrina-sin-acceso'>
         {requireGestion
           ? `No tiene acceso a ${VITRINA_GESTION_NAME}: le falta ese permiso en alguna empresa. Lo asigna un administrador en Administración → Usuarios.`
-          : `No tiene acceso a ${VITRINA_MODULE_NAME}: le falta el permiso «${VITRINA_MODULE_NAME}» en alguna empresa. Lo asigna un administrador en Administración → Usuarios.`}
+          : `No tiene acceso a ${VITRINA_MODULE_NAME}: le falta el permiso ${VITRINA_MODULE_NAME} en alguna empresa. Lo asigna un administrador en Administración → Usuarios.`}
       </Alert>
     );
   }

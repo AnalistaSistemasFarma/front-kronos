@@ -91,7 +91,7 @@ export function avisoSiguienteVistoBueno(a: AvisoBitacora, dado: OtFirmaRol, sig
   if (siguiente !== 'INSPECTOR' && siguiente !== 'JEFE_PROD') return [];
   const emails = destinatario(siguiente === 'INSPECTOR' ? a.inspectorEmail : a.jefeEmail, a);
   if (emails.length === 0) return [];
-  const accion = dado === 'SUPERVISOR' ? `cerró ${referencia(a)} («Cerró»)` : `dio su visto bueno como ${OT_ROL_LABEL[dado].toLowerCase()} en ${referencia(a)}`;
+  const accion = dado === 'SUPERVISOR' ? `cerró ${referencia(a)} (Cerró)` : `dio su visto bueno como ${OT_ROL_LABEL[dado].toLowerCase()} en ${referencia(a)}`;
   return [
     {
       emails,

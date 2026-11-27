@@ -70,7 +70,7 @@ test.describe('Portal TH · mensajes de cumpleaños', () => {
     expect((await request.delete(`/api/portal/mensajes-cumple?fecha=${HOY}&id=x.json`)).status()).toBe(401);
   });
 
-  test('el nombre de quien cumple años es un botón: abre «Deja tu mensaje» para esa persona', async ({ page }) => {
+  test('el nombre de quien cumple años es un botón: abre Deja tu mensaje para esa persona', async ({ page }) => {
     await page.setViewportSize({ width: 1366, height: 900 });
     await simular(page);
     await irAlDia(page, HOY);
@@ -189,7 +189,7 @@ test.describe('Portal TH · mensajes de cumpleaños', () => {
     await expect(page.getByTestId('mensajes-recibidos').locator('img, b')).toHaveCount(0);
   });
 
-  test('el administrador ve todos, con el correo de quien escribió, el aviso «sin correo» y puede borrar con confirmación', async ({ page }) => {
+  test('el administrador ve todos, con el correo de quien escribió, el aviso sin correo y puede borrar con confirmación', async ({ page }) => {
     await page.setViewportSize({ width: 1366, height: 900 });
     const { borrados } = await simular(page, {
       mensajes: {

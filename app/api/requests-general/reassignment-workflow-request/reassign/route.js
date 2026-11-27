@@ -140,7 +140,7 @@ export async function POST(req) {
     }
     if ([workflowIds, requestIds, taskIds].some((ids) => ids.length > MAX_IDS)) {
       return fail(
-        `Máximo ${MAX_IDS} elementos por tipo. Para mover todo lo de una persona usa «Todo de una persona».`,
+        `Máximo ${MAX_IDS} elementos por tipo. Para mover todo lo de una persona usa Todo de una persona.`,
         400
       );
     }
@@ -352,7 +352,7 @@ export async function POST(req) {
         .query(`INSERT INTO user_process_category_request_general (id_process_category, id_user) VALUES (@id, @to)`);
 
       const leaderNames = p.leaders.map((l) => l.name).filter(Boolean).join(', ') || 'Sin asignar';
-      const note = `Reasignación del líder del flujo «${p.process}»: de ${leaderNames} a ${target.name}. Realizada por ${actorName}. Motivo: ${reason}`;
+      const note = `Reasignación del líder del flujo ${p.process}: de ${leaderNames} a ${target.name}. Realizada por ${actorName}. Motivo: ${reason}`;
       await new sql.Request(transaction)
         .input('note', sql.NVarChar(sql.MAX), note)
         .input('pc', sql.Int, p.id)
@@ -396,7 +396,7 @@ export async function POST(req) {
         .input(
           'note',
           sql.NVarChar(sql.MAX),
-          `Se reasigna la tarea «${t.task}» de ${t.assigned_name || 'sin asignar'} a ${target.name}. Realizada por ${actorName}. Motivo: ${reason}`
+          `Se reasigna la tarea ${t.task} de ${t.assigned_name || 'sin asignar'} a ${target.name}. Realizada por ${actorName}. Motivo: ${reason}`
         )
         .input('req', sql.Int, t.id_request_general)
         .input('pc', sql.Int, t.id_process_category ?? null)
@@ -579,7 +579,7 @@ async function reassignPerson({ pool, source, target, actorId, actorName, reason
 
     await q().query(`
       INSERT INTO notes (note, id_process_category, created_by, creation_date)
-      SELECT CONCAT(N'Reasignación del líder del flujo «', pc.process, N'»: de ', @fromName, N' a ', @toName,
+      SELECT CONCAT(N'Reasignación del líder del flujo ', pc.process, N': de ', @fromName, N' a ', @toName,
                     N'. Realizada por ', @actorName, N'. Motivo: ', @reason),
              pc.id, @by, GETDATE()
       FROM process_category pc
@@ -587,8 +587,8 @@ async function reassignPerson({ pool, source, target, actorId, actorName, reason
     `);
     await q().query(`
       INSERT INTO notes (note, id_request, created_by, creation_date, id_process_category)
-      SELECT CONCAT(N'La solicitud pasa a cargo de ', @toName, N' (antes ', @fromName, N') por reasignación del flujo «',
-                    pc.process, N'». Realizada por ', @actorName, N'. Motivo: ', @reason),
+      SELECT CONCAT(N'La solicitud pasa a cargo de ', @toName, N' (antes ', @fromName, N') por reasignación del flujo ',
+                    pc.process, N'. Realizada por ', @actorName, N'. Motivo: ', @reason),
              rg.id, @by, GETDATE(), pc.id
       FROM requests_general rg
       INNER JOIN process_category_request_general pcrg ON pcrg.id_request_general = rg.id
@@ -598,7 +598,7 @@ async function reassignPerson({ pool, source, target, actorId, actorName, reason
     `);
     await q().query(`
       INSERT INTO notes (note, id_request, created_by, creation_date, id_process_category)
-      SELECT CONCAT(N'Se reasigna la tarea «', tpc.task, N'» de ', @fromName, N' a ', @toName,
+      SELECT CONCAT(N'Se reasigna la tarea ', tpc.task, N' de ', @fromName, N' a ', @toName,
                     N'. Realizada por ', @actorName, N'. Motivo: ', @reason),
              trg.id_request_general, @by, GETDATE(), pcrg.id_process_category
       FROM task_request_general trg

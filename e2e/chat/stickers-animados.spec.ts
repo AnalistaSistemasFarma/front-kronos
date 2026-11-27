@@ -31,7 +31,7 @@ test.describe('Chat · stickers animados · escritorio', () => {
     await sesion(context, baseURL!);
   });
 
-  test('menú «+»: Emoji | Stickers | GIF, paquetes, emoji en el texto y sticker animado en el hilo', async ({ page }, info) => {
+  test('menú +: Emoji | Stickers | GIF, paquetes, emoji en el texto y sticker animado en el hilo', async ({ page }, info) => {
     const estado = await simularChat(page, { gif: true });
     await page.goto('/process/chat?agent=horus');
     await expect(hilo(page).getByText('quedó en SharePoint')).toBeVisible();

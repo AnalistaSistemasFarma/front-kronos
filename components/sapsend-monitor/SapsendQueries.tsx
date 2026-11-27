@@ -257,7 +257,7 @@ export function SapsendQueries({
         )}
         <Text size="xs" c="dimmed" mt="sm">
           Sale de la caché de planes del SQL Server: la misma consulta con distintos valores cuenta como una
-          fila. «Ahora» compara contra la lectura anterior (cada 30 s). Clic en una fila para ver la consulta
+          fila. Ahora compara contra la lectura anterior (cada 30 s). Clic en una fila para ver la consulta
           completa.
         </Text>
       </div>

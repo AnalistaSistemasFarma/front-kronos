@@ -57,7 +57,7 @@ function unir(base: string, ruta: string): string {
   try {
     u = new URL(base);
   } catch {
-    throw new NabucoDiagnosticoError(diagnosticoValidacion(`La URL de Nabuco «${base}» no es válida.`, 'Escriba la URL completa con protocolo, p. ej. https://servidor:puerto'));
+    throw new NabucoDiagnosticoError(diagnosticoValidacion(`La URL de Nabuco ${base} no es válida.`, 'Escriba la URL completa con protocolo, p. ej. https://servidor:puerto'));
   }
   if (!protocoloNabucoPermitido(u)) throw new NabucoDiagnosticoError(diagnosticoValidacion(MENSAJE_PROTOCOLO_NABUCO, 'Use https; http solo con NABUCO_PERMITIR_HTTP=1 en el servidor de pruebas.'));
   return `${base.replace(/\/+$/, '')}/${ruta.replace(/^\/+/, '')}`;

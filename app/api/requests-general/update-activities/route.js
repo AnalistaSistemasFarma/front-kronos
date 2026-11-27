@@ -393,7 +393,7 @@ export async function POST(req) {
             requestClosed = await closeRequestGeneral(pool, {
               requestId: prevRow.id_request_general,
               closedByUserId: executorId,
-              resolution: `Cerrada automáticamente al resolver la tarea «${prevRow.task}».`,
+              resolution: `Cerrada automáticamente al resolver la tarea ${prevRow.task}.`,
             });
           }
         }

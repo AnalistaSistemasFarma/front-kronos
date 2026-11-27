@@ -425,8 +425,8 @@ export default function ConfiguracionProyectos() {
 
         {companyId === null ? (
           <Alert color='yellow' icon={<IconAlertTriangle size={18} />} title='Solo administradores del módulo' data-testid='proyectos-config-sin-permiso'>
-            No tiene permiso para configurar Proyectos. Lo otorga Tecnología en Administración → Usuarios → Asignar subprocesos («Configuración de
-            Proyectos»), por empresa.
+            No tiene permiso para configurar Proyectos. Lo otorga Tecnología en Administración → Usuarios → Asignar subprocesos (Configuración de
+            Proyectos), por empresa.
           </Alert>
         ) : (
           <Configuracion idCompany={companyId} />

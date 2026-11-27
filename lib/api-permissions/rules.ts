@@ -287,7 +287,7 @@ export function parseApiClientInput(body: unknown, knownPermissions: ReadonlySet
   }
   // «Proveedor o cliente» no se conecta por API: no se le exigen empresas (solo se administra su portal).
   if (!allCompanies && companyIds.length === 0 && clientTypeUsesApiAccess(raw.clientType)) {
-    return { ok: false, error: 'Elija al menos una empresa o marque «Todas las empresas»' };
+    return { ok: false, error: 'Elija al menos una empresa o marque Todas las empresas' };
   }
 
   if (!Array.isArray(raw.permissionCodes) || raw.permissionCodes.length > API_CLIENT_LIMITS.maxPermissions) {

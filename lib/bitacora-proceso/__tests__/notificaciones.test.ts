@@ -42,7 +42,7 @@ describe('Bitácora de Proceso · avisos al inspector y al jefe de producción',
     const [n] = avisoSiguienteVistoBueno(aviso, 'SUPERVISOR', 'INSPECTOR');
     expect(n.emails).toEqual(['inspector@farmalogica.com']);
     expect(n.payload.title).toBe(OT_NOTIF_TITULOS.porVistoBueno);
-    expect(n.payload.body).toContain('Supervisor Planta cerró la bitácora N.º 7 (Cefazolina 1 g, lote 1565426) («Cerró»)');
+    expect(n.payload.body).toContain('Supervisor Planta cerró la bitácora N.º 7 (Cefazolina 1 g, lote 1565426) (Cerró)');
     expect(n.payload.body).toContain('como inspector');
     expect(n.payload.url).toBe('/process/bitacora-proceso/42?empresa=1');
     expect(n.payload.tag).toBe('ot-42-inspector');

@@ -350,7 +350,7 @@ function RailList({
   if (sections.length === 0) {
     return expandida ? (
       <Text size='sm' className='chat-text-muted' px='md' py='sm'>
-        {busqueda.trim() ? `Ningún chat coincide con «${busqueda.trim()}».` : 'No tiene chats todavía.'}
+        {busqueda.trim() ? `Ningún chat coincide con ${busqueda.trim()}.` : 'No tiene chats todavía.'}
       </Text>
     ) : null;
   }

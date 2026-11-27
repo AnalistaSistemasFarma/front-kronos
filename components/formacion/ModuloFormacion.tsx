@@ -273,7 +273,7 @@ export default function ModuloFormacion() {
             }}
             onEliminado={(titulo) => {
               abrirCurso(null);
-              setAviso(`Se eliminó el curso «${titulo}». Ya no aparece en Formación; sus inscripciones y certificados se conservan.`);
+              setAviso(`Se eliminó el curso ${titulo}. Ya no aparece en Formación; sus inscripciones y certificados se conservan.`);
               void cargarCursos();
             }}
           />

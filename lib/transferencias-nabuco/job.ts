@@ -38,7 +38,7 @@ export async function runNabucoVigilarJob(): Promise<{ ref: string; detail: stri
     if (yaAviso && ahora - yaAviso < n * 60000) continue;
     const enviados = await enviarAlerta(
       c.alertas_correos,
-      `«${c.nombre}» no ha corrido en ${n} minutos`,
+      `${c.nombre} no ha corrido en ${n} minutos`,
       [{ Configuración: c.nombre }, { 'Última corrida': c.last_run_date ? new Date(c.last_run_date).toLocaleString('es-CO', { timeZone: 'America/Bogota' }) : 'Nunca' }, { Programación: c.cron_expression ?? '—' }],
       'Revise que la tarea esté activa en SynerLink → Transferencias Nabuco y que el programador central esté corriendo.'
     );

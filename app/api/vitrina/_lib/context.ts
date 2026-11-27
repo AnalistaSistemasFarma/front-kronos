@@ -38,7 +38,7 @@ export function requireGestion(ctx: VitrinaRequestContext, idCompany: number | n
   if (!idCompany) return jsonNoStore({ error: 'Falta la empresa' }, 400);
   const a = companyVitrinaAccess(ctx.access, idCompany, 'canGestionar');
   if (!a) {
-    return jsonNoStore({ error: `No tiene el permiso «${VITRINA_GESTION_NAME}» en esta empresa. Lo asigna un administrador en Administración → Usuarios.` }, 403);
+    return jsonNoStore({ error: `No tiene el permiso ${VITRINA_GESTION_NAME} en esta empresa. Lo asigna un administrador en Administración → Usuarios.` }, 403);
   }
   return { idCompany, idUser: ctx.idUser };
 }
@@ -48,7 +48,7 @@ export function requireConsulta(ctx: VitrinaRequestContext, idCompany: number | 
   if (!idCompany) return jsonNoStore({ error: 'Falta la empresa' }, 400);
   const a = companyVitrinaAccess(ctx.access, idCompany, 'canConsultar');
   if (!a) {
-    return jsonNoStore({ error: `No tiene el permiso «${VITRINA_MODULE_NAME}» en esta empresa. Lo asigna un administrador en Administración → Usuarios.` }, 403);
+    return jsonNoStore({ error: `No tiene el permiso ${VITRINA_MODULE_NAME} en esta empresa. Lo asigna un administrador en Administración → Usuarios.` }, 403);
   }
   return { idCompany, idUser: ctx.idUser };
 }

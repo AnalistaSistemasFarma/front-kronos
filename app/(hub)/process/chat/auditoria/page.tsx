@@ -634,14 +634,14 @@ export default function AuditoriaAgentesPage() {
             {datos.alcance.empresas.length > 0
               ? `Está viendo solo los agentes de: ${datos.alcance.empresas.map((e) => e.nombre).join(', ')}.`
               : 'No tiene empresas asignadas en este módulo.'}{' '}
-            El alcance lo dan las empresas donde tiene el permiso «Auditoría de agentes».
+            El alcance lo dan las empresas donde tiene el permiso Auditoría de agentes.
           </Alert>
         )}
 
         {datos && !verTexto && (
           <Alert color='blue' radius='md' icon={<IconLock size={18} />} mb='md'>
             El texto de las conversaciones no se muestra en esta vista. Para leerlo se necesita el
-            permiso «Auditoría de agentes · Conversaciones», que se asigna aparte desde
+            permiso Auditoría de agentes · Conversaciones, que se asigna aparte desde
             Administración → Usuarios.
           </Alert>
         )}

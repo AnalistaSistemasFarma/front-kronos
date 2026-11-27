@@ -137,7 +137,7 @@ async function simular(page: Page, opciones: { compartido?: boolean; agenteApaga
 }
 
 test.describe('Correo · agente · sin sesión', () => {
-  test('las APIs de «Consultar a un agente» responden 401', async ({ request }) => {
+  test('las APIs de Consultar a un agente responden 401', async ({ request }) => {
     for (const ruta of ['/api/correo/agente/agentes', '/api/correo/agente/compartidos?conversationId=CONV-01AAAA', '/api/correo/agente/acciones?chat=1', '/api/correo/agente/acciones/1/preparar']) {
       expect((await request.get(ruta, { maxRedirects: 0 })).status(), ruta).toBe(401);
     }
@@ -154,7 +154,7 @@ test.describe('Correo · Consultar a un agente · con sesión y simulado', () =>
     await sesion(context, baseURL!);
   });
 
-  test('bandera CORREO_AGENTE_HABILITADO apagada: el hilo no ofrece «Consultar a un agente»', async ({ page }) => {
+  test('bandera CORREO_AGENTE_HABILITADO apagada: el hilo no ofrece Consultar a un agente', async ({ page }) => {
     await page.setViewportSize({ width: 1366, height: 900 });
     await simular(page, { agenteApagado: true });
     await page.goto('/process/correo?hilo=CONV-01AAAA');
@@ -192,7 +192,7 @@ test.describe('Correo · Consultar a un agente · con sesión y simulado', () =>
 
     // El agente PROPONE (correo_proponer_respuesta): llega su mensaje y se pinta como tarjeta.
     estado.propuso = true;
-    estado.chat.push(msgChat(2002, 'agent', '✉️ **Propuesta de respuesta** para el hilo «Revisión de contrato de arrendamiento»'));
+    estado.chat.push(msgChat(2002, 'agent', '✉️ **Propuesta de respuesta** para el hilo Revisión de contrato de arrendamiento'));
     const tarjeta = page.getByTestId('correo-agente-tarjeta');
     await expect(tarjeta).toBeVisible({ timeout: 15_000 });
     await expect(tarjeta.getByTestId('correo-agente-tarjeta-estado')).toHaveText('Pendiente de su confirmación');
@@ -217,7 +217,7 @@ test.describe('Correo · Consultar a un agente · con sesión y simulado', () =>
     if (CAPTURAS) await page.screenshot({ path: `${CAPTURAS}/13-chat-tarjeta-enviada.png` });
   });
 
-  test('el hilo muestra «Compartido con Orus» y se puede revocar', async ({ page }) => {
+  test('el hilo muestra Compartido con Orus y se puede revocar', async ({ page }) => {
     await page.setViewportSize({ width: 1366, height: 900 });
     const estado = await simular(page, { compartido: true });
     await page.goto('/process/correo?hilo=CONV-01AAAA');

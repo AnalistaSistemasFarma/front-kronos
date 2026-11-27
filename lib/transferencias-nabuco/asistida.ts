@@ -40,7 +40,7 @@ export interface ResultadoCrear {
   diagnostico?: DiagnosticoNabuco | null;
 }
 
-const MENSAJE_OCUPADA = 'Hay una corrida de esta configuración en curso (automática, «Ejecutar ahora» u otra acción manual). Espere a que termine e intente de nuevo.';
+const MENSAJE_OCUPADA = 'Hay una corrida de esta configuración en curso (automática, Ejecutar ahora u otra acción manual). Espere a que termine e intente de nuevo.';
 
 async function conLockYSap<T>(cfg: NabucoConfig, fn: (session: SapSession) => Promise<T>): Promise<T> {
   if (!(await tomarLock(cfg.id_config))) throw new NabucoError(MENSAJE_OCUPADA, 409);

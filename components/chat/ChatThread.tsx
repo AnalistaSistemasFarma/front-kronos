@@ -1518,7 +1518,7 @@ export default function ChatThread({
                     : enPersonas
                       ? `Escríbale a ${person?.name ?? 'esta persona'}. Solo ustedes dos ven esta conversación, además de la auditoría del área de Sistemas.`
                       : enProyecto
-                        ? `Escríbale a ${agent?.displayName ?? 'el asistente'}. En este hilo trabaja solo con las instrucciones y los archivos de «${project?.name ?? 'el proyecto'}», aparte de sus demás conversaciones. Los miembros del proyecto ven todo lo que se escriba aquí.`
+                        ? `Escríbale a ${agent?.displayName ?? 'el asistente'}. En este hilo trabaja solo con las instrucciones y los archivos de ${project?.name ?? 'el proyecto'}, aparte de sus demás conversaciones. Los miembros del proyecto ven todo lo que se escriba aquí.`
                         : agent?.description ||
                       `Escríbale a ${agent?.displayName ?? 'el asistente'} para empezar la conversación.`}
                 </Text>

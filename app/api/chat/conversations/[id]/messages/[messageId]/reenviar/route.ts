@@ -106,9 +106,9 @@ export async function POST(request: NextRequest, { params }: Params) {
       return badRequest(`El mensaje tiene más de ${MAX_ADJUNTOS_REENVIO} adjuntos; reenvíelos por separado.`);
     }
     for (const a of adjuntos) {
-      if (isBlockedAttachmentExtension(a.file_name)) return badRequest(`«${a.file_name}» no se puede reenviar.`);
+      if (isBlockedAttachmentExtension(a.file_name)) return badRequest(`${a.file_name} no se puede reenviar.`);
       if (a.size_bytes !== null && a.size_bytes > MAX_CHAT_ATTACHMENT_BYTES) {
-        return badRequest(`«${a.file_name}» supera el tamaño máximo de un adjunto.`);
+        return badRequest(`${a.file_name} supera el tamaño máximo de un adjunto.`);
       }
     }
 
@@ -131,7 +131,7 @@ export async function POST(request: NextRequest, { params }: Params) {
           if (!contenido?.stream) throw new Error('No se pudo bajar el archivo de OneDrive');
           const blob = await new Response(contenido.stream).blob();
           if (blob.size > MAX_CHAT_ATTACHMENT_BYTES) {
-            return badRequest(`«${a.file_name}» supera el tamaño máximo de un adjunto.`);
+            return badRequest(`${a.file_name} supera el tamaño máximo de un adjunto.`);
           }
           copias.push({ fileName: a.file_name, contentType: a.content_type, size: blob.size, blob });
         }

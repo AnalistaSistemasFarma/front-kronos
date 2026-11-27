@@ -110,24 +110,24 @@ export function esTimeout(codigo: string): boolean {
 /** Mensaje y sugerencia para un código de red. */
 export function clasificarRed(codigo: string, host: string, timeoutMs?: number): { mensaje: string; sugerencia: string } {
   if (codigo === 'ENOTFOUND' || codigo === 'EAI_AGAIN') {
-    return { mensaje: `No se pudo resolver el nombre «${host}» (DNS, ${codigo}).`, sugerencia: 'Revise que el host de la URL esté bien escrito y que el servidor de SynerLink tenga DNS/salida a Internet hacia ese dominio.' };
+    return { mensaje: `No se pudo resolver el nombre ${host} (DNS, ${codigo}).`, sugerencia: 'Revise que el host de la URL esté bien escrito y que el servidor de SynerLink tenga DNS/salida a Internet hacia ese dominio.' };
   }
   if (codigo === 'ECONNREFUSED') {
-    return { mensaje: `«${host}» rechazó la conexión (ECONNREFUSED).`, sugerencia: 'El puerto está cerrado o el servicio de Nabuco está caído. Verifique el puerto de la URL (pruebas usa :90 por HTTP) y que el API esté arriba.' };
+    return { mensaje: `${host} rechazó la conexión (ECONNREFUSED).`, sugerencia: 'El puerto está cerrado o el servicio de Nabuco está caído. Verifique el puerto de la URL (pruebas usa :90 por HTTP) y que el API esté arriba.' };
   }
   if (codigo === 'ECONNRESET' || codigo === 'UND_ERR_SOCKET' || codigo === 'EPIPE') {
-    return { mensaje: `La conexión con «${host}» se cortó (${codigo}).`, sugerencia: 'Un firewall/proxy o el servidor cerró la conexión. Pruebe de nuevo; si persiste, revise protocolo (http vs https) y puerto.' };
+    return { mensaje: `La conexión con ${host} se cortó (${codigo}).`, sugerencia: 'Un firewall/proxy o el servidor cerró la conexión. Pruebe de nuevo; si persiste, revise protocolo (http vs https) y puerto.' };
   }
   if (esTimeout(codigo)) {
     return {
       mensaje: `Nabuco no respondió a tiempo (${codigo}${timeoutMs ? `, timeout ${timeoutMs} ms` : ''}).`,
-      sugerencia: 'El servidor puede estar «dormido» (el de pruebas tarda ~9 s en la 1.ª llamada) o un firewall bloquea el tráfico. Reintente y, si persiste, suba el timeout (p. ej. 30 000–60 000 ms).',
+      sugerencia: 'El servidor puede estar dormido (el de pruebas tarda ~9 s en la 1.ª llamada) o un firewall bloquea el tráfico. Reintente y, si persiste, suba el timeout (p. ej. 30 000–60 000 ms).',
     };
   }
   if (/^(CERT_|UNABLE_TO_VERIFY|SELF_SIGNED|DEPTH_ZERO|ERR_TLS|ERR_SSL|EPROTO)/.test(codigo)) {
-    return { mensaje: `Falló la validación TLS con «${host}» (${codigo}).`, sugerencia: 'El certificado del servidor no es válido para Node (vencido, autofirmado o cadena incompleta). Use la URL con certificado válido o pida a Nabuco corregirlo; SynerLink no desactiva la validación TLS hacia Nabuco.' };
+    return { mensaje: `Falló la validación TLS con ${host} (${codigo}).`, sugerencia: 'El certificado del servidor no es válido para Node (vencido, autofirmado o cadena incompleta). Use la URL con certificado válido o pida a Nabuco corregirlo; SynerLink no desactiva la validación TLS hacia Nabuco.' };
   }
-  return { mensaje: `Error de red al llamar a «${host}» (${codigo}).`, sugerencia: 'Revise la URL, el puerto y la conectividad desde el servidor de SynerLink.' };
+  return { mensaje: `Error de red al llamar a ${host} (${codigo}).`, sugerencia: 'Revise la URL, el puerto y la conectividad desde el servidor de SynerLink.' };
 }
 
 // ---------------------------------------------------------------------------------- HTTP
@@ -137,7 +137,7 @@ export type ContextoHttp = 'autenticacion' | 'envio';
 /** Mensaje y sugerencia para un HTTP de Nabuco según dónde ocurrió (AuthBI o solicitudes). */
 export function clasificarHttp(status: number, contexto: ContextoHttp, mensajeNabuco?: string | null): { mensaje: string; sugerencia: string } {
   const donde = contexto === 'autenticacion' ? 'la autenticación (AuthBI)' : 'el envío de la solicitud';
-  const textoNabuco = mensajeNabuco ? ` Nabuco dice: «${mensajeNabuco}».` : '';
+  const textoNabuco = mensajeNabuco ? ` Nabuco dice: ${mensajeNabuco}.` : '';
   if (status === 401 || status === 403) {
     if (contexto === 'autenticacion') {
       return {
@@ -262,7 +262,7 @@ export function diagnosticoSap(e: { message?: string; status?: number; detail?: 
   const sugerencia =
     status === 401 ? 'La sesión del Service Layer expiró o las credenciales de la conexión SAP (sap_endpoints) son inválidas.'
     : status === 404 ? `El documento o la entidad no existe en SAP${contexto.docEntry ? ` (DocEntry ${contexto.docEntry})` : ''}.`
-    : status === 400 ? 'Consulta OData inválida: revise el «Filtro OData adicional» y los campos del mapeo.'
+    : status === 400 ? 'Consulta OData inválida: revise el Filtro OData adicional y los campos del mapeo.'
     : 'Revise la conexión SAP (Service Layer) de la configuración y el mensaje de SAP.';
   return {
     ok: false,

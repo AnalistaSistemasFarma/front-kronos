@@ -36,7 +36,7 @@ async function ctx(request: NextRequest, companyIdRaw: unknown) {
   const companies = await salesAdminCompanies(email);
   const companyId = Number(companyIdRaw) || companies[0]?.idCompany || 0;
   if (!companies.some((c) => c.idCompany === companyId)) {
-    return { error: NextResponse.json({ error: 'No tiene el permiso «Ventas · Automatización (administración)» en esta empresa.', companies }, { status: 403 }) };
+    return { error: NextResponse.json({ error: 'No tiene el permiso Ventas · Automatización (administración) en esta empresa.', companies }, { status: 403 }) };
   }
   const user = await prisma.user.findUnique({ where: { email }, select: { id: true } });
   return { email, companies, companyId, userId: user?.id ?? null };

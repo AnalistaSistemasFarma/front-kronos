@@ -362,7 +362,7 @@ export default function HelpdeskCasesModal({
               </Group>
               <Text size='xs' c='dimmed' mb='xs'>
                 Sobre los {formatNumber(rankingBase.length)} casos que cumplen los demás filtros. Haga clic en una fila para ver
-                solo esos casos; vuelva a hacer clic en ella (o en «Quitar filtro y ver todos») para regresar a la lista completa.
+                solo esos casos; vuelva a hacer clic en ella (o en Quitar filtro y ver todos) para regresar a la lista completa.
               </Text>
               {ranking.length === 0 ? (
                 <Text size='sm' c='dimmed' ta='center' py='xs'>

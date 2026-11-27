@@ -241,7 +241,7 @@ export async function editarMatriz(
   const r = aplicarEdicion(objetivo.columnas, objetivo.filas, edicion);
   if (!r.ok) throw new ProyectoError(r.error, 400);
   objetivo.filas = r.filas;
-  const resumen = `Edición en SynerLink, hoja «${objetivo.nombre}»: ${r.resumen}.`;
+  const resumen = `Edición en SynerLink, hoja ${objetivo.nombre}: ${r.resumen}.`;
   const ahora = new Date();
 
   return prisma.$transaction(

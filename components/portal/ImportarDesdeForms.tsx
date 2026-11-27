@@ -225,8 +225,8 @@ export function ImportarDesdeForms({
             {listo && (
               <Alert color='green' icon={<IconCircleCheck size={18} />} role='status' data-testid='importar-listo'>
                 Se importaron {listo.preguntas} {listo.preguntas === 1 ? 'pregunta' : 'preguntas'}
-                {listo.titulo ? ` de «${listo.titulo}»` : ''}
-                {listo.datos.length > 0 ? ` (${listo.datos.join(' y ')} quedaron en «Datos que se piden»)` : ''}. Revíselas abajo, edítelas si lo necesita y guarde el formulario. Todavía no se guardó nada.
+                {listo.titulo ? ` de ${listo.titulo}` : ''}
+                {listo.datos.length > 0 ? ` (${listo.datos.join(' y ')} quedaron en Datos que se piden)` : ''}. Revíselas abajo, edítelas si lo necesita y guarde el formulario. Todavía no se guardó nada.
               </Alert>
             )}
             {listo && listo.advertencias.length > 0 && (
@@ -244,7 +244,7 @@ export function ImportarDesdeForms({
         <div>
           <Text fw={600}>Importar desde Microsoft Forms</Text>
           <Text size='sm' c='dimmed'>
-            Opcional. Pegue el enlace para responder el formulario (debe ser público: «Cualquier persona con el vínculo puede responder»). Reemplaza lo que haya escrito abajo.
+            Opcional. Pegue el enlace para responder el formulario (debe ser público: Cualquier persona con el vínculo puede responder). Reemplaza lo que haya escrito abajo.
           </Text>
         </div>
 

@@ -91,10 +91,10 @@ describe('diaMesDeNacimiento', () => {
 describe('columnas', () => {
   it('se ubican por su encabezado aunque cambien de orden, tildes o mayúsculas; sin una necesaria lanza cuál falta', () => {
     expect(ubicarColumnasCumple(['FECHA DE NACIMIENTO', 'CARGO', 'Empresa Contratante', 'apellidos y nombres'])).toMatchObject({ nacimiento: 0, cargo: 1, empresa: 2, nombre: 3, estado: -1 });
-    expect(() => ubicarColumnasCumple(['Apellidos y Nombres', 'Empresa contratante', 'Cargo'])).toThrow(/«FECHA DE NACIMIENTO»/);
-    expect(() => ubicarColumnasCumple(['Apellidos y Nombres', 'Cargo', 'Fecha de nacimiento'])).toThrow(/«EMPRESA CONTRATANTE»/);
+    expect(() => ubicarColumnasCumple(['Apellidos y Nombres', 'Empresa contratante', 'Cargo'])).toThrow(/FECHA DE NACIMIENTO/);
+    expect(() => ubicarColumnasCumple(['Apellidos y Nombres', 'Cargo', 'Fecha de nacimiento'])).toThrow(/EMPRESA CONTRATANTE/);
     // El Área / Dependencia ya no se usa: tenerla no reemplaza al cargo.
-    expect(() => ubicarColumnasCumple(['Apellidos y Nombres', 'Empresa contratante', 'Área / Dependencia', 'Fecha de nacimiento'])).toThrow(/«CARGO»/);
+    expect(() => ubicarColumnasCumple(['Apellidos y Nombres', 'Empresa contratante', 'Área / Dependencia', 'Fecha de nacimiento'])).toThrow(/CARGO/);
   });
 });
 
@@ -120,7 +120,7 @@ describe('personasDesdeHojaCumple', () => {
     const p = personasDesdeHojaCumple(HOJA, HOY).personas[0];
     expect(p.cargo).toBe('ANALISTA');
     expect(Object.keys(p)).not.toContain('area');
-    expect(() => ubicarColumnasCumple(['Apellidos y Nombres', 'Empresa contratante', 'Área / Dependencia', 'Fecha de nacimiento'])).toThrow(/«CARGO»/);
+    expect(() => ubicarColumnasCumple(['Apellidos y Nombres', 'Empresa contratante', 'Área / Dependencia', 'Fecha de nacimiento'])).toThrow(/CARGO/);
   });
   it('hoja vacía o solo con encabezado: nadie', () => {
     expect(personasDesdeHojaCumple([], HOY)).toEqual({ personas: [], sinFechaValida: 0 });
@@ -175,7 +175,7 @@ describe('cumpleanerosDeLaFecha (uso interno de los mensajes de cumpleaños)', (
 });
 
 describe('cumpleanosComoEventos (lo que ve el calendario)', () => {
-  it('un evento «CUMPLEAÑOS» por día, de tipo fecha importante, con la lista de personas', () => {
+  it('un evento CUMPLEAÑOS por día, de tipo fecha importante, con la lista de personas', () => {
     const e = cumpleanosComoEventos([{ fecha: '2026-10-15', personas: [{ nombre: 'A', empresa: 'E', cargo: 'X' }] }]);
     expect(e).toEqual([{ fecha: '2026-10-15', titulo: 'CUMPLEAÑOS', tipo: 'conmemoracion', personas: [{ nombre: 'A', empresa: 'E', cargo: 'X' }] }]);
     expect(TITULO_CUMPLEANOS).toBe('CUMPLEAÑOS');

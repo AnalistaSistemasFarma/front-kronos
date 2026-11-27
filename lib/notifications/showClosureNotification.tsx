@@ -21,14 +21,14 @@ const COPY: Record<
       title: '¡Solicitud cerrada!',
       message: (ref, subject) =>
         subject
-          ? `La solicitud ${ref} «${subject}» fue resuelta correctamente.`
+          ? `La solicitud ${ref} ${subject} fue resuelta correctamente.`
           : `La solicitud ${ref} fue resuelta correctamente.`,
     },
     cancelled: {
       title: 'Solicitud cancelada',
       message: (ref, subject) =>
         subject
-          ? `La solicitud ${ref} «${subject}» fue cancelada.`
+          ? `La solicitud ${ref} ${subject} fue cancelada.`
           : `La solicitud ${ref} fue cancelada.`,
     },
   },
@@ -37,14 +37,14 @@ const COPY: Record<
       title: '¡Caso resuelto!',
       message: (ref, subject) =>
         subject
-          ? `El caso ${ref} «${subject}» fue cerrado exitosamente.`
+          ? `El caso ${ref} ${subject} fue cerrado exitosamente.`
           : `El caso ${ref} fue cerrado exitosamente.`,
     },
     cancelled: {
       title: 'Caso cancelado',
       message: (ref, subject) =>
         subject
-          ? `El caso ${ref} «${subject}» fue cancelado.`
+          ? `El caso ${ref} ${subject} fue cancelado.`
           : `El caso ${ref} fue cancelado.`,
     },
   },
@@ -53,14 +53,14 @@ const COPY: Record<
       title: '¡Actividad completada!',
       message: (ref, subject) =>
         subject
-          ? `La actividad ${ref} «${subject}» fue marcada como resuelta.`
+          ? `La actividad ${ref} ${subject} fue marcada como resuelta.`
           : `La actividad ${ref} fue marcada como resuelta.`,
     },
     cancelled: {
       title: 'Actividad cancelada',
       message: (ref, subject) =>
         subject
-          ? `La actividad ${ref} «${subject}» fue cancelada.`
+          ? `La actividad ${ref} ${subject} fue cancelada.`
           : `La actividad ${ref} fue cancelada.`,
     },
   },

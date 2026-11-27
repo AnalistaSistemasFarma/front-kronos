@@ -198,7 +198,7 @@ async function saveFollowedVersion(cfg: DocTemplateConfig, followedTo: { version
     .query(`UPDATE dbo.task_doc_template SET id_sgc_version = @v, source_item_id = @item, source_file_name = @name, updated_by = N'sistema (versión vigente del SGC)', updated_at = GETDATE() WHERE id = @id;`);
   const t = await p.request().input('t', sql.Int, cfg.id_task).query<{ id_process_category: number; task: string }>('SELECT id_process_category, task FROM task_process_category WHERE id = @t;');
   const row = t.recordset[0];
-  if (row) await logFlowChange(row.id_process_category, 'sistema@synerlink', 'plantilla', `Tarea «${row.task}»: pasó sola a ${followedTo.code} v${followedTo.versionNumber} (versión vigente del SGC).`);
+  if (row) await logFlowChange(row.id_process_category, 'sistema@synerlink', 'plantilla', `Tarea ${row.task}: pasó sola a ${followedTo.code} v${followedTo.versionNumber} (versión vigente del SGC).`);
 }
 
 async function graphToken(): Promise<string> {
@@ -374,7 +374,7 @@ export async function emitDocument(params: EmitParams): Promise<EmittedDocument>
   const missing = rendered.unknown.length ? ` Marcas sin campo (quedaron vacías): ${rendered.unknown.join(', ')}.` : '';
   await insertNote(
     params.idRequest,
-    `Documento generado «${fileName}» (versión ${row.version}) desde la plantilla ${rendered.sourceLabel}.${missing}`,
+    `Documento generado ${fileName} (versión ${row.version}) desde la plantilla ${rendered.sourceLabel}.${missing}`,
     params.actorUserId ?? info?.note_author ?? null
   );
   const step = await startStep({
@@ -498,7 +498,7 @@ async function complete(task: PendingDocTask, idRequest: number, resolution: str
       await closeRequestGeneral(p, {
         requestId: idRequest,
         closedByUserId: null,
-        resolution: `Cerrada automáticamente al generar el documento de la tarea «${task.task}».`,
+        resolution: `Cerrada automáticamente al generar el documento de la tarea ${task.task}.`,
       });
     }
   }
@@ -510,7 +510,7 @@ async function markError(idRequest: number, task: PendingDocTask, error: string,
     idTaskRequest: task.id,
     idTask: task.id_task,
     stepKind: 'system',
-    stepName: `Tarea «${task.task}» quedó en error`,
+    stepName: `Tarea ${task.task} quedó en error`,
     actionKey: 'doc_template.emit',
     triggerEvent: 'on_execute',
     triggeredBy,

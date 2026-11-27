@@ -116,7 +116,7 @@ export async function PUT(request: NextRequest) {
           source_file_name, template_html, output, mode, file_name_pattern, append_images, active, updated_by)
           VALUES (@t, @engine, @source, @doc, @ver, @item, @fname, @html, @output, @mode, @pattern, @imgs, @active, @by);
         UPDATE task_process_category SET task_kind = N'doc_template' WHERE id = @t AND ISNULL(is_authorization, 0) = 0;`);
-    await logFlowChange(g.task.id_process_category, g.email, 'plantilla', `Tarea «${g.task.task}»: ${source === 'sgc' ? 'documento del SGC' : 'Word subido'} (${engine}, ${mode}).`);
+    await logFlowChange(g.task.id_process_category, g.email, 'plantilla', `Tarea ${g.task.task}: ${source === 'sgc' ? 'documento del SGC' : 'Word subido'} (${engine}, ${mode}).`);
     return NextResponse.json({ ok: true, config: await getDocTemplateConfig(g.task.id) });
   } catch (e) {
     return fail(e, 'task-template');

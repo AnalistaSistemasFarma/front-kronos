@@ -303,7 +303,7 @@ function menor(a: VitrinaVisibilidad, b: VitrinaVisibilidad): VitrinaVisibilidad
 export function visibilidadPermitida(visibilidad: unknown, esParaTerceros: boolean): VitrinaVisibilidad {
   if (!esVisibilidad(visibilidad)) throw new VitrinaError('Visibilidad no válida: use Interna, Vista al cliente u Ofertable.', 400);
   if (esParaTerceros && visibilidad !== 'INTERNA') {
-    throw new VitrinaError('Los productos fabricados para terceros tienen visibilidad fija «Interna»: no se pueden mostrar al cliente ni ofertar.', 400);
+    throw new VitrinaError('Los productos fabricados para terceros tienen visibilidad fija Interna: no se pueden mostrar al cliente ni ofertar.', 400);
   }
   return visibilidad;
 }
@@ -392,12 +392,12 @@ export function validarVigencia(desde: unknown, hasta: unknown): { desde: string
   const norm = (v: unknown, campo: string): string | null => {
     if (v === null || v === undefined || v === '') return null;
     const s = String(v).slice(0, 10);
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(s) || Number.isNaN(Date.parse(`${s}T00:00:00Z`))) throw new VitrinaError(`La fecha «${campo}» no es válida.`, 400);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(s) || Number.isNaN(Date.parse(`${s}T00:00:00Z`))) throw new VitrinaError(`La fecha ${campo} no es válida.`, 400);
     return s;
   };
   const d = norm(desde, 'vigente desde');
   const h = norm(hasta, 'vigente hasta');
-  if (d && h && d > h) throw new VitrinaError('La vigencia «desde» no puede ser posterior a «hasta».', 400);
+  if (d && h && d > h) throw new VitrinaError('La vigencia desde no puede ser posterior a hasta.', 400);
   return { desde: d, hasta: h };
 }
 
@@ -447,7 +447,7 @@ export function agruparPorProductoRyan<T extends { item_code: string }>(codigos:
       grupos.set(p.producto, g);
     }
     g.codigos.push(c);
-    if (p.sufijo) g.avisos.push(`${c.item_code}: sufijo «${p.sufijo}», revisar en SAP`);
+    if (p.sufijo) g.avisos.push(`${c.item_code}: sufijo ${p.sufijo}, revisar en SAP`);
     if (p.unidades === null) g.avisos.push(`${c.item_code}: unidades sin dato en el código`);
   }
   for (const g of grupos.values()) {
@@ -566,7 +566,7 @@ export function parseSemilla(texto: string): SemillaResultado {
     : head.startsWith('codigo sap;presentacion propuesta')
       ? 'FARMALOGICA'
       : null;
-  if (!formato) throw new VitrinaError('Encabezado no reconocido: use la carga inicial de Farmalógica o la de Ryan (separador «;»).', 400);
+  if (!formato) throw new VitrinaError('Encabezado no reconocido: use la carga inicial de Farmalógica o la de Ryan (separador ;).', 400);
 
   const filas: SemillaFila[] = [];
   const errores: string[] = [];
@@ -639,20 +639,20 @@ export function textoOpcional(v: unknown, max: number, campo: string): string | 
   if (v === null || v === undefined) return null;
   const s = String(v).trim();
   if (!s) return null;
-  if (s.length > max) throw new VitrinaError(`«${campo}» supera ${max} caracteres.`, 400);
+  if (s.length > max) throw new VitrinaError(`${campo} supera ${max} caracteres.`, 400);
   return s;
 }
 
 export function textoObligatorio(v: unknown, max: number, campo: string): string {
   const s = textoOpcional(v, max, campo);
-  if (!s) throw new VitrinaError(`Falta «${campo}».`, 400);
+  if (!s) throw new VitrinaError(`Falta ${campo}.`, 400);
   return s;
 }
 
 export function enteroOpcional(v: unknown, campo: string, min = 1, max = 100_000): number | null {
   if (v === null || v === undefined || v === '') return null;
   const n = Number(v);
-  if (!Number.isInteger(n) || n < min || n > max) throw new VitrinaError(`«${campo}» debe ser un número entero entre ${min} y ${max}.`, 400);
+  if (!Number.isInteger(n) || n < min || n > max) throw new VitrinaError(`${campo} debe ser un número entero entre ${min} y ${max}.`, 400);
   return n;
 }
 

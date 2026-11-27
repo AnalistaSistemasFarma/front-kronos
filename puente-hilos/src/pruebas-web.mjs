@@ -49,14 +49,14 @@ export function validarBase(base = BASE_TESTING_DEFECTO) {
   }
   if (!['http:', 'https:'].includes(u.protocol)) throw new ErrorWeb('la base de testing debe ser http(s)');
   if (u.username || u.password || u.search || u.hash || (u.pathname && u.pathname !== '/')) throw new ErrorWeb('la base de testing no lleva usuario, ruta ni parámetros');
-  if (!HOSTS_PRUEBAS.includes(u.hostname)) throw new ErrorWeb(`«${u.hostname}» no es un servidor de PRUEBAS: este conector nunca va a producción`);
+  if (!HOSTS_PRUEBAS.includes(u.hostname)) throw new ErrorWeb(`${u.hostname} no es un servidor de PRUEBAS: este conector nunca va a producción`);
   return u.origin;
 }
 
 /** Ruta pedida → URL absoluta del MISMO origen; rechaza lo demás. */
 export function urlDeRuta(base, ruta) {
   const r = String(ruta ?? '').trim();
-  if (!r.startsWith('/') || r.startsWith('//') || r.includes('\\') || /[\u0000-\u001f]/.test(r)) throw new ErrorWeb('la ruta debe ser relativa a testing y empezar por «/» (por ejemplo /process o /api/companies)');
+  if (!r.startsWith('/') || r.startsWith('//') || r.includes('\\') || /[\u0000-\u001f]/.test(r)) throw new ErrorWeb('la ruta debe ser relativa a testing y empezar por / (por ejemplo /process o /api/companies)');
   const u = new URL(r, base);
   if (u.origin !== base) throw new ErrorWeb('la ruta sale del servidor de testing');
   const p = decodeURIComponent(u.pathname).replace(/\/+$/, '').toLowerCase();

@@ -158,7 +158,7 @@ export function normalizarImportacion(crudo: unknown): ImportacionForms {
         const suelta = limpias.find((o, k) => pareceLetraSuelta(o, k));
         if (suelta) {
           advertencias.push(
-            `Pregunta ${n}: la opción «${corto(suelta)}» parece traer una letra escrita a mano; no se quitó porque las demás opciones no la traen. Revísela.`
+            `Pregunta ${n}: la opción ${corto(suelta)} parece traer una letra escrita a mano; no se quitó porque las demás opciones no la traen. Revísela.`
           );
         }
       }
@@ -170,7 +170,7 @@ export function normalizarImportacion(crudo: unknown): ImportacionForms {
         vistas.add(op);
         opciones.push(op);
       }
-      if (opciones.length === 0) return void advertencias.push(`Pregunta ${n} «${corto(enunciado)}»: no tiene opciones; no se importó.`);
+      if (opciones.length === 0) return void advertencias.push(`Pregunta ${n} ${corto(enunciado)}: no tiene opciones; no se importó.`);
       if (opciones.length > MAX_OPCIONES) advertencias.push(`Pregunta ${n}: solo se importaron las primeras ${MAX_OPCIONES} opciones.`);
       if (recortada) advertencias.push(`Pregunta ${n}: alguna opción se recortó a ${MAX_TEXTO_OPCION} caracteres.`);
       const multiple = tipo === 'multiple';
@@ -183,7 +183,7 @@ export function normalizarImportacion(crudo: unknown): ImportacionForms {
       });
       return;
     }
-    advertencias.push(`Pregunta ${n} «${corto(enunciado)}»: es de tipo ${NOMBRE_TIPO[tipo] ?? NOMBRE_TIPO.otro} y no se puede importar; agréguela a mano si la necesita.`);
+    advertencias.push(`Pregunta ${n} ${corto(enunciado)}: es de tipo ${NOMBRE_TIPO[tipo] ?? NOMBRE_TIPO.otro} y no se puede importar; agréguela a mano si la necesita.`);
   });
 
   return {

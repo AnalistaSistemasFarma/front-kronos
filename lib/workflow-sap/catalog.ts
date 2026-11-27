@@ -97,7 +97,7 @@ export const SAP_ACTIONS: SapActionDef[] = [
   },
   {
     key: 'purchase.state_to_authorize',
-    label: 'Pasar a «Por autorizar»',
+    label: 'Pasar a Por autorizar',
     domain: 'Compras · Solicitud de compra',
     endpoint: 'PATCH Drafts(n) · U_SEND_State = LA',
     triggers: ['on_start', 'on_execute'],
@@ -107,7 +107,7 @@ export const SAP_ACTIONS: SapActionDef[] = [
   },
   {
     key: 'purchase.state_rejected',
-    label: 'Pasar a «No aprobado»',
+    label: 'Pasar a No aprobado',
     domain: 'Compras · Solicitud de compra',
     endpoint: 'PATCH Drafts(n) · U_SEND_State = NAD',
     triggers: ['on_reject'],
@@ -117,7 +117,7 @@ export const SAP_ACTIONS: SapActionDef[] = [
   },
   {
     key: 'purchase.state_quotation',
-    label: 'Pasar a «En cotización» y avisar a Compras',
+    label: 'Pasar a En cotización y avisar a Compras',
     domain: 'Compras · Solicitud de compra',
     endpoint: 'PATCH Drafts(n) · U_SEND_State = ENC',
     triggers: ['on_quote'],
@@ -159,7 +159,7 @@ export const SAP_ACTIONS: SapActionDef[] = [
     taskKinds: ['sap_executor'],
     resultingState: null,
     mapping: [
-      { source: 'Resultado (rama del flujo)', target: 'Campo «Resultado de la evaluación de venta»', editable: false },
+      { source: 'Resultado (rama del flujo)', target: 'Campo Resultado de la evaluación de venta', editable: false },
       { source: 'Regla de precio (por empresa)', target: 'UnitPrice vs U_SEND_PriceLP / lista del cliente', editable: false },
       { source: 'Regla de cupo (por empresa)', target: 'Saldo + remisiones + pedidos + ofertas en cupo vs CreditLimit', editable: false },
     ],
@@ -172,11 +172,11 @@ export const SAP_ACTIONS: SapActionDef[] = [
     triggers: ['on_execute'],
     taskKinds: ['sap_executor'],
     resultingState: null,
-    mapping: [{ source: 'Resultado (rama del flujo)', target: 'Campo «Resultado de la evaluación de venta»', editable: false }],
+    mapping: [{ source: 'Resultado (rama del flujo)', target: 'Campo Resultado de la evaluación de venta', editable: false }],
   },
   {
     key: 'sales.state_ap',
-    label: 'Pasar a «En autorización de precios»',
+    label: 'Pasar a En autorización de precios',
     domain: 'Ventas · Oferta de venta',
     endpoint: 'PATCH Drafts(n) · U_SEND_State = AP',
     triggers: ['on_execute'],
@@ -186,7 +186,7 @@ export const SAP_ACTIONS: SapActionDef[] = [
   },
   {
     key: 'sales.state_ae',
-    label: 'Pasar a «En autorización de extracupo (dir. comercial)»',
+    label: 'Pasar a En autorización de extracupo (dir. comercial)',
     domain: 'Ventas · Oferta de venta',
     endpoint: 'PATCH Drafts(n) · U_SEND_State = AE',
     triggers: ['on_execute'],
@@ -199,7 +199,7 @@ export const SAP_ACTIONS: SapActionDef[] = [
   },
   {
     key: 'sales.state_aeda',
-    label: 'Pasar a «En autorización por dir. administrativa»',
+    label: 'Pasar a En autorización por dir. administrativa',
     domain: 'Ventas · Oferta de venta',
     endpoint: 'PATCH Drafts(n) · U_SEND_State = AEDA',
     triggers: ['on_execute'],
@@ -278,19 +278,19 @@ export function validateTaskAction(params: {
   mapping?: Record<string, string> | null;
 }): string[] {
   const def = getSapAction(params.actionKey);
-  if (!def) return [`La acción «${params.actionKey}» no existe en el catálogo.`];
+  if (!def) return [`La acción ${params.actionKey} no existe en el catálogo.`];
   const errors: string[] = [];
-  if (def.available === false) errors.push(`«${def.label}» todavía no se puede ejecutar automáticamente.`);
+  if (def.available === false) errors.push(`${def.label} todavía no se puede ejecutar automáticamente.`);
   if (!def.taskKinds.includes(params.taskKind)) {
-    errors.push(`«${def.label}» no se puede usar en una tarea de tipo ${params.taskKind}.`);
+    errors.push(`${def.label} no se puede usar en una tarea de tipo ${params.taskKind}.`);
   }
   if (!def.triggers.includes(params.trigger)) {
-    errors.push(`«${def.label}» no admite el disparador «${TRIGGER_LABELS[params.trigger] ?? params.trigger}».`);
+    errors.push(`${def.label} no admite el disparador ${TRIGGER_LABELS[params.trigger] ?? params.trigger}.`);
   }
   for (const target of Object.keys(params.mapping ?? {})) {
     const field = def.mapping.find((m) => m.target === target);
-    if (!field) errors.push(`El campo «${target}» no es parte del mapeo de «${def.label}».`);
-    else if (!field.editable) errors.push(`El campo «${target}» es de compatibilidad con SAPSEND y no se puede editar.`);
+    if (!field) errors.push(`El campo ${target} no es parte del mapeo de ${def.label}.`);
+    else if (!field.editable) errors.push(`El campo ${target} es de compatibilidad con SAPSEND y no se puede editar.`);
   }
   return errors;
 }

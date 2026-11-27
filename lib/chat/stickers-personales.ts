@@ -28,7 +28,7 @@ import {
 
 export class MisStickersNoDisponibles extends Error {
   constructor() {
-    super('«Mis stickers» aún no está habilitado en esta base de datos.');
+    super('Mis stickers aún no está habilitado en esta base de datos.');
     this.name = 'MisStickersNoDisponibles';
   }
 }

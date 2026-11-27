@@ -319,12 +319,12 @@ export function parseNuevoRegistro(body: Record<string, unknown> | null): NuevoR
 export function textoDelRegistro(actividad: { texto_libre: boolean; nombre: string }, input: Pick<NuevoRegistroInput, 'observacion' | 'texto'>): { observacion: string | null; esTextoLibre: boolean } {
   if (actividad.texto_libre) {
     const t = input.texto ?? '';
-    if (t.length < OT_LIMITS.textoLibreMin) throw new OtError(`«${actividad.nombre}» es de texto libre: escriba qué pasó (mínimo ${OT_LIMITS.textoLibreMin} caracteres).`, 400);
+    if (t.length < OT_LIMITS.textoLibreMin) throw new OtError(`${actividad.nombre} es de texto libre: escriba qué pasó (mínimo ${OT_LIMITS.textoLibreMin} caracteres).`, 400);
     if (t.length > OT_LIMITS.textoLibre) throw new OtError(`El texto libre: máximo ${OT_LIMITS.textoLibre} caracteres.`, 400);
     if (input.observacion) throw new OtError('En una actividad de texto libre escriba todo en el texto (sin observación aparte).', 400);
     return { observacion: t, esTextoLibre: true };
   }
-  if (input.texto) throw new OtError(`«${actividad.nombre}» no es de texto libre: use la observación opcional.`, 400);
+  if (input.texto) throw new OtError(`${actividad.nombre} no es de texto libre: use la observación opcional.`, 400);
   return { observacion: input.observacion, esTextoLibre: false };
 }
 
@@ -657,9 +657,9 @@ export function parseCambioResponsable(body: Record<string, unknown> | null): Ca
  * además, el permiso de Gestión (es quien cierra). Lanza 400 con el motivo.
  */
 export function assertPuedeSerResponsable(rol: OtResponsableRol, access: OtCompanyAccess | null, nombre: string): void {
-  if (!access?.canOperate) throw new OtError(`${nombre} no tiene el permiso «Bitácora de Proceso» en esta empresa.`, 400);
+  if (!access?.canOperate) throw new OtError(`${nombre} no tiene el permiso Bitácora de Proceso en esta empresa.`, 400);
   if (rol === 'SUPERVISOR' && !access.canManage) {
-    throw new OtError(`${nombre} no tiene el permiso «Bitácora de Proceso: Gestión»: sin él no puede ser supervisor.`, 400);
+    throw new OtError(`${nombre} no tiene el permiso Bitácora de Proceso: Gestión: sin él no puede ser supervisor.`, 400);
   }
 }
 
@@ -689,17 +689,17 @@ export function motivoSinRol(rol: OtResponsableRol, e: EstadoRolPersona): string
   if (e.asignado === null) return `${e.nombre} no está asignado como ${label} en ${e.empresa}: asígnelo en Catálogo → Responsables.`;
   if (e.asignado === false) return `${e.nombre} está desactivado como ${label} en ${e.empresa}: actívelo en Catálogo → Responsables.`;
   if (!e.access?.canOperate) {
-    return `${e.nombre} está asignado como ${label}, pero le falta el permiso «Bitácora de Proceso» en ${e.empresa} (Administración → Usuarios).`;
+    return `${e.nombre} está asignado como ${label}, pero le falta el permiso Bitácora de Proceso en ${e.empresa} (Administración → Usuarios).`;
   }
   if (rol === 'SUPERVISOR' && !e.access.canManage) {
-    return `${e.nombre} está asignado como supervisor, pero le falta el permiso «Bitácora de Proceso: Gestión» en ${e.empresa} (Administración → Usuarios).`;
+    return `${e.nombre} está asignado como supervisor, pero le falta el permiso Bitácora de Proceso: Gestión en ${e.empresa} (Administración → Usuarios).`;
   }
   return null;
 }
 
 /** Mensaje de la sesión SIN ningún permiso del módulo (dice cuál pedir y dónde). */
 export const OT_MSG_SIN_MODULO =
-  'No tiene acceso a Bitácora de Proceso: le falta el permiso «Bitácora de Proceso» (o «Bitácora de Proceso: Gestión») en alguna empresa. Lo asigna un administrador en Administración → Usuarios.';
+  'No tiene acceso a Bitácora de Proceso: le falta el permiso Bitácora de Proceso (o Bitácora de Proceso: Gestión) en alguna empresa. Lo asigna un administrador en Administración → Usuarios.';
 
 /** Mensaje de la sesión con usuario inactivo. */
 export const OT_MSG_USUARIO_INACTIVO = 'Su usuario de SynerLink está inactivo. Pida a un administrador que lo active.';
@@ -710,17 +710,17 @@ export const OT_MSG_USUARIO_INACTIVO = 'Su usuario de SynerLink está inactivo. 
  */
 export function mensajeFaltaAcceso(need: 'canOperate' | 'canManage', entry: OtCompanyAccess | null, idCompany: number): string {
   if (!entry) {
-    return `Le falta el permiso «Bitácora de Proceso» en la empresa seleccionada (id ${idCompany}). Lo asigna un administrador en Administración → Usuarios.`;
+    return `Le falta el permiso Bitácora de Proceso en la empresa seleccionada (id ${idCompany}). Lo asigna un administrador en Administración → Usuarios.`;
   }
   if (need === 'canManage' && !entry.canManage) {
-    return `Le falta el permiso «Bitácora de Proceso: Gestión» en ${entry.companyName.trim()}: esto solo lo hace el supervisor. Lo asigna un administrador en Administración → Usuarios.`;
+    return `Le falta el permiso Bitácora de Proceso: Gestión en ${entry.companyName.trim()}: esto solo lo hace el supervisor. Lo asigna un administrador en Administración → Usuarios.`;
   }
-  return `Le falta el permiso «Bitácora de Proceso» en ${entry.companyName.trim()}.`;
+  return `Le falta el permiso Bitácora de Proceso en ${entry.companyName.trim()}.`;
 }
 
 /** Mensaje cuando no puede ABRIR (R3): ni Gestión ni jefe de producción asignado. */
 export function mensajeNoPuedeAbrir(entry: OtCompanyAccess): string {
-  return `Para abrir una bitácora en ${entry.companyName.trim()} le falta el permiso «Bitácora de Proceso: Gestión» (supervisor) o estar asignado como jefe de producción en Catálogo → Responsables.`;
+  return `Para abrir una bitácora en ${entry.companyName.trim()} le falta el permiso Bitácora de Proceso: Gestión (supervisor) o estar asignado como jefe de producción en Catálogo → Responsables.`;
 }
 
 /**

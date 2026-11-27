@@ -61,7 +61,7 @@ export function CriterioCalificacion() {
             </List.Item>
           ))}
           <List.Item>
-            «Lo normal» es la mediana: la mitad de las solicitudes tarda menos y la otra mitad, más. Se cuentan los últimos 6 meses y el
+            Lo normal es la mediana: la mitad de las solicitudes tarda menos y la otra mitad, más. Se cuentan los últimos 6 meses y el
             tiempo de cada tarea desde que quedó disponible.
           </List.Item>
         </List>

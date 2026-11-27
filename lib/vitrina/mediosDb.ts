@@ -71,7 +71,7 @@ export async function listarMedios(db: VitrinaDb, idCompany: number, idPresentac
         titulo: d?.title ?? null,
         estadoSgc: d?.status ?? null,
         mostrable,
-        motivo: mostrable ? null : !d ? 'El documento ya no existe en el SGC.' : d.status !== 'vigente' ? `En el SGC está «${d.status}»: no se muestra.` : 'No se puede mostrar (sin versión vigente o confidencial).',
+        motivo: mostrable ? null : !d ? 'El documento ya no existe en el SGC.' : d.status !== 'vigente' ? `En el SGC está ${d.status}: no se muestra.` : 'No se puede mostrar (sin versión vigente o confidencial).',
       };
     }),
   };
