@@ -52,6 +52,8 @@ export interface SoftwareInput {
   licenseType: LicenseType | '';
   /** People notified NOTIFY_DAYS_BEFORE days before the expiration date. */
   notifyEmails: string[];
+  /** Account e-mail used to register on the vendor platform (2026-11-27). */
+  platformEmail: string;
 }
 
 export interface SoftwareItem extends SoftwareInput {
@@ -133,6 +135,9 @@ export function validateSoftwareInput(body: unknown): SoftwareValidation {
   const licenseType = asText(src.licenseType);
   if (licenseType && !LICENSE_TYPES.some((l) => l.value === licenseType)) errors.licenseType = 'Tipo de licencia no válido';
 
+  const platformEmail = asText(src.platformEmail).toLowerCase();
+  if (platformEmail && !isEmail(platformEmail)) errors.platformEmail = 'Correo no válido';
+
   const notifyEmails = parseEmailList(src.notifyEmails);
   const badEmail = notifyEmails.find((e) => !isEmail(e));
   if (badEmail) errors.notifyEmails = `Correo no válido: ${badEmail}`;
@@ -154,6 +159,7 @@ export function validateSoftwareInput(body: unknown): SoftwareValidation {
       cost: costRaw === null ? null : Math.round((costRaw as number) * 100) / 100,
       licenseType: licenseType as LicenseType | '',
       notifyEmails,
+      platformEmail,
     },
   };
 }

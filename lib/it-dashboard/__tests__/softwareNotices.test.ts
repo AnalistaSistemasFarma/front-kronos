@@ -23,6 +23,10 @@ describe('notification e-mails and type «dominio»', () => {
 
     const bad = validateSoftwareInput({ companyId: 8, kind: 'dominio', description: 'x', expirationDate: '2027-01-10', notifyEmails: ['nope'] });
     expect(bad.ok).toBe(false);
+    const withPlatform = validateSoftwareInput({ companyId: 8, kind: 'software', description: 'x', platformEmail: ' Licencias@GSSlatam.com ' });
+    expect(withPlatform.ok && withPlatform.value.platformEmail).toBe('licencias@gsslatam.com');
+    expect(validateSoftwareInput({ companyId: 8, kind: 'software', description: 'x', platformEmail: 'nope' }).ok).toBe(false);
+
     const noDate = validateSoftwareInput({ companyId: 8, kind: 'software', description: 'x', notifyEmails: ['a@b.co'] });
     expect(noDate.ok).toBe(false);
   });

@@ -14,7 +14,6 @@ import {
   Skeleton,
   Stack,
   Table,
-  TagsInput,
   Text,
   TextInput,
   ThemeIcon,
@@ -29,7 +28,9 @@ import {
   IconDeviceFloppy,
   IconEdit,
   IconLicense,
+  IconMail,
   IconPlus,
+  IconX,
 } from '@tabler/icons-react';
 import {
   LICENSE_TYPES,
@@ -66,7 +67,103 @@ const EMPTY_FORM: FormState = {
   cost: '',
   licenseType: '',
   notifyEmails: [],
+  platformEmail: '',
 };
+
+/**
+ * «Correos de notificación»: one input + «Agregar» button, and the added
+ * e-mails below as removable chips (several allowed, up to MAX_NOTIFY_EMAILS).
+ */
+function NotifyEmailsField({
+  value,
+  onChange,
+  error,
+}: {
+  value: string[];
+  onChange: (list: string[]) => void;
+  error?: string;
+}) {
+  const [draft, setDraft] = useState('');
+  const [local, setLocal] = useState<string | null>(null);
+
+  const add = () => {
+    const parts = draft
+      .split(/[,;\s]+/)
+      .map((v) => v.trim().toLowerCase())
+      .filter(Boolean);
+    if (!parts.length) return;
+    const bad = parts.find((p) => !isEmail(p));
+    if (bad) {
+      setLocal(`Correo no válido: ${bad}`);
+      return;
+    }
+    const next = Array.from(new Set([...value, ...parts]));
+    if (next.length > MAX_NOTIFY_EMAILS) {
+      setLocal(`Máximo ${MAX_NOTIFY_EMAILS} correos`);
+      return;
+    }
+    onChange(next);
+    setDraft('');
+    setLocal(null);
+  };
+
+  return (
+    <Stack gap={6}>
+      <Group gap='xs' align='flex-end' wrap='nowrap'>
+        <TextInput
+          label='Correos de notificación'
+          description={`Se les envía un aviso ${NOTIFY_DAYS_BEFORE} días antes del vencimiento. Puede agregar varios.`}
+          placeholder='correo@empresa.com'
+          leftSection={<IconBell size={16} />}
+          value={draft}
+          error={local ?? error}
+          onChange={(e) => {
+            setDraft(e.currentTarget.value);
+            setLocal(null);
+          }}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              add();
+            }
+          }}
+          style={{ flex: 1 }}
+        />
+        <Button variant='light' leftSection={<IconPlus size={14} />} onClick={add} disabled={!draft.trim()}>
+          Agregar
+        </Button>
+      </Group>
+      {value.length ? (
+        <Group gap={6}>
+          {value.map((email) => (
+            <Badge
+              key={email}
+              variant='light'
+              size='lg'
+              tt='none'
+              rightSection={
+                <ActionIcon
+                  size='xs'
+                  variant='transparent'
+                  aria-label={`Quitar ${email}`}
+                  onClick={() => onChange(value.filter((v) => v !== email))}
+                >
+                  <IconX size={12} />
+                </ActionIcon>
+              }
+            >
+              {email}
+            </Badge>
+          ))}
+        </Group>
+      ) : (
+        <Text size='xs' c='dimmed'>
+          Aún no hay correos de notificación.
+        </Text>
+      )}
+    </Stack>
+  );
+}
 
 function ExpiryBadge({ date }: { date: string }) {
   const state = expiryState(date);
@@ -111,6 +208,7 @@ function SoftwareForm({
           cost: initial.cost ?? '',
           licenseType: initial.licenseType,
           notifyEmails: initial.notifyEmails,
+          platformEmail: initial.platformEmail,
         }
       : { ...EMPTY_FORM, companyId: lockedCompanyId ? String(lockedCompanyId) : '' }
   );
@@ -251,29 +349,24 @@ function SoftwareForm({
           clearable
           comboboxProps={{ zIndex: 500, withinPortal: true }}
         />
-        <TagsInput
-          label='Correos de notificación'
-          description={`Se les envía un aviso ${NOTIFY_DAYS_BEFORE} días antes del vencimiento`}
-          placeholder={form.notifyEmails.length ? '' : 'correo@empresa.com y Enter'}
-          value={form.notifyEmails}
-          onChange={(values) => {
-            const clean = values.map((v) => v.trim().toLowerCase()).filter(Boolean);
-            setErrors((cur) => ({ ...cur, notifyEmails: undefined }));
-            const bad = clean.find((v) => !isEmail(v));
-            if (bad) {
-              setErrors((cur) => ({ ...cur, notifyEmails: `Correo no válido: ${bad}` }));
-              return;
-            }
-            set('notifyEmails', Array.from(new Set(clean)));
-          }}
-          splitChars={[',', ';', ' ']}
-          maxTags={MAX_NOTIFY_EMAILS}
-          clearable
-          leftSection={<IconBell size={16} />}
-          error={errors.notifyEmails}
-          comboboxProps={{ zIndex: 500, withinPortal: true }}
+        <TextInput
+          label='Correo de registro en plataforma'
+          description='Cuenta con la que se registró en la plataforma del proveedor'
+          placeholder='licencias@gsslatam.com'
+          leftSection={<IconMail size={16} />}
+          value={form.platformEmail}
+          error={errors.platformEmail}
+          onChange={(e) => set('platformEmail', e.currentTarget.value)}
         />
       </SimpleGrid>
+      <NotifyEmailsField
+        value={form.notifyEmails}
+        onChange={(list) => {
+          setErrors((cur) => ({ ...cur, notifyEmails: undefined }));
+          set('notifyEmails', list);
+        }}
+        error={errors.notifyEmails}
+      />
       <Group justify='flex-end' gap='xs' mt='xs'>
         <Button variant='default' leftSection={<IconArrowLeft size={16} />} onClick={onCancel} disabled={saving}>
           Volver
@@ -420,7 +513,7 @@ export default function SoftwareModal({
             </Text>
           ) : (
             <ScrollArea.Autosize mah='60vh' type='auto'>
-              <Table striped highlightOnHover withTableBorder stickyHeader miw={1100}>
+              <Table striped highlightOnHover withTableBorder stickyHeader miw={1250}>
                 <Table.Thead>
                   <Table.Tr>
                     <Table.Th>Tipo</Table.Th>
@@ -430,6 +523,7 @@ export default function SoftwareModal({
                     <Table.Th>Licencia</Table.Th>
                     <Table.Th ta='right'>Licencias</Table.Th>
                     <Table.Th>Asignado a</Table.Th>
+                    <Table.Th>Correo de registro</Table.Th>
                     <Table.Th>Compra</Table.Th>
                     <Table.Th>Vencimiento</Table.Th>
                     <Table.Th ta='right'>Costo</Table.Th>
@@ -455,6 +549,7 @@ export default function SoftwareModal({
                       <Table.Td>{licenseTypeLabel(i.licenseType) || '—'}</Table.Td>
                       <Table.Td ta='right'>{i.licenses == null ? '—' : formatNumber(i.licenses)}</Table.Td>
                       <Table.Td>{text(i.assignedTo)}</Table.Td>
+                      <Table.Td>{text(i.platformEmail)}</Table.Td>
                       <Table.Td>{formatDate(i.purchaseDate || null)}</Table.Td>
                       <Table.Td>
                         <ExpiryBadge date={i.expirationDate} />
