@@ -132,6 +132,8 @@ export interface DescriptionMatch {
   formOk: boolean;
   /** Export/country variant that the PO did not ask for. */
   exportVariant: boolean;
+  /** Brand item («ZOLIBIOS (CEFAZOLINA 1g …)»): its name starts with a word that is not an ingredient and the PO does not mention it. */
+  brandVariant: boolean;
 }
 
 const sumKey = (keys: string[]): string | null => {
@@ -156,7 +158,10 @@ export function matchDescription(po: NormalizedDescription, itemName: string, it
   const strengthClash = poS.size > 0 && itS.size > 0 && !strengthOk;
   const formOk = po.forms.length > 0 && it.forms.some((f) => po.forms.includes(f));
   const exportVariant = !po.export && (it.export || /EXP/i.test(itemCode));
-  return { ingredientOk, ingredientShare, strengthOk, strengthClash, formOk, exportVariant };
+  const first = it.text.split(/[^a-z]+/).find((w) => w.length >= 4 && !FILLER.has(w));
+  const poWords = new Set(po.text.split(/[^a-z]+/));
+  const brandVariant = ingredientOk && Boolean(first) && !po.ingredients.includes(first!) && !mains.some((m) => first!.startsWith(m)) && !poWords.has(first!);
+  return { ingredientOk, ingredientShare, strengthOk, strengthClash, formOk, exportVariant, brandVariant };
 }
 
 /** Company-wide sales of an item (any customer, recent months). */

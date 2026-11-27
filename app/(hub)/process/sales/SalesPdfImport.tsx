@@ -3,9 +3,10 @@
 import { useEffect, useState } from 'react';
 import { Alert, Badge, Button, Checkbox, Group, Menu, Modal, Progress, ScrollArea, Select, Stack, Table, Text, Tooltip } from '@mantine/core';
 import { useMediaQuery } from '@mantine/hooks';
-import { IconAlertCircle, IconCircleCheck, IconLoader2, IconRobot, IconSearch, IconSparkles } from '@tabler/icons-react';
+import { IconAlertCircle, IconCircleCheck, IconHistory, IconLoader2, IconRobot, IconSearch, IconSparkles } from '@tabler/icons-react';
 import toast from 'react-hot-toast';
 import SalesSearchModal from './SalesSearchModal';
+import CustomerOrdersModal, { type PoLineRef } from './CustomerOrdersModal';
 import { CONFIDENCE_LABEL, type Confidence } from '../../../../lib/sales/itemPrediction';
 import { agentOrderInstruction, assembleAgentReply, chunkOrderText, isJsonAttachment, rawLineCount, mergePdfOrders, PDF_ORDER_SCHEMA, PDF_ORDER_SYSTEM_PROMPT, parsePdfOrder, pdfOrderChunkPrompt, tableHeaderRow, type PdfOrderResult } from '../../../../lib/sales/pdfOrder';
 
@@ -362,6 +363,12 @@ export default function SalesPdfImport({ companyId, companyName, cardCode, onLoa
 
   /** Line whose item is being searched by hand (index in sim.lines). */
   const [pickFor, setPickFor] = useState<number | null>(null);
+  /** Customer's previous documents: undefined = closed, null = whole PO, number = one line (index in sim.lines). */
+  const [ordersFor, setOrdersFor] = useState<number | null | undefined>(undefined);
+  const poLineRefs: PoLineRef[] = (sim?.lines ?? []).map((l, i) => {
+    const m = matchOf(l);
+    return { index: i, row: String(l.row ?? i + 1), codes: [...new Set([String(l.ItemCode || ''), ...(m?.candidates.map((c) => c.ItemCode) ?? [])].filter(Boolean))] };
+  });
   const setLine = (i: number, f: (l: Line & { include: boolean }) => Line & { include: boolean }) =>
     setSim((prev) => (prev ? { ...prev, lines: prev.lines.map((x, j) => (j === i ? f(x) : x)) } : prev));
   /** The user picks one of the suggested candidates: that is the confirmation. */
@@ -374,7 +381,7 @@ export default function SalesPdfImport({ companyId, companyName, cardCode, onLoa
     });
   };
   /** The user searched an item in SAP: it is validated (price list, warehouse) with the PO quantity and price. */
-  const chooseSearched = async (i: number, row: Record<string, unknown>) => {
+  const chooseSearched = async (i: number, row: Record<string, unknown>, reason = 'Elegido por el usuario') => {
     if (!sim) return;
     const l = sim.lines[i];
     const m = matchOf(l);
@@ -390,7 +397,7 @@ export default function SalesPdfImport({ companyId, companyName, cardCode, onLoa
       if (!res.ok || !v) throw new Error(d.error || (d.errors ?? [])[0]?.error || 'No se pudo validar el artículo en SAP.');
       setLine(i, (x) => {
         const mm = matchOf(x);
-        const cand: MatchCandidate = { ItemCode: String(v.ItemCode), ItemName: String(v.ItemDescription ?? ''), score: 0, reason: 'Elegido por el usuario', factor: 1, line: { ...v, row: x.row } };
+        const cand: MatchCandidate = { ItemCode: String(v.ItemCode), ItemName: String(v.ItemDescription ?? ''), score: 0, reason, factor: 1, line: { ...v, row: x.row } };
         return {
           ...x, ...v, row: x.row, include: true,
           match: mm ? { ...mm, confirmed: true, reason: cand.reason, candidates: [cand, ...mm.candidates.filter((c) => c.ItemCode !== cand.ItemCode)] } : undefined,
@@ -525,6 +532,9 @@ export default function SalesPdfImport({ companyId, companyName, cardCode, onLoa
               <Text size="sm"><Text span c="dimmed">OC: </Text>{sim.numeroOrdenCompra || '—'}</Text>
               <Text size="sm"><Text span c="dimmed">Entrega: </Text>{sim.fechaEntrega || '— (indíquela)'}</Text>
               <Text size="sm"><Text span c="dimmed">Líneas: </Text>{sim.lines.length}{sim.leidas && sim.leidas !== sim.lines.length ? ` de ${sim.leidas} leídas en el PDF` : ''}</Text>
+              <Button size="compact-xs" variant="light" color="violet" leftSection={<IconHistory size={14} />} onClick={() => setOrdersFor(null)}>
+                Pedidos anteriores del cliente
+              </Button>
             </Group>
             {sim.avisos.length > 0 && <Alert color="orange" variant="light">{sim.avisos.map((a, i) => <Text key={i} size="xs">{a}</Text>)}</Alert>}
             <ScrollArea style={{ flex: 1, minHeight: 200 }} type="auto" offsetScrollbars>
@@ -578,6 +588,9 @@ export default function SalesPdfImport({ companyId, companyName, cardCode, onLoa
                                 <Tooltip label="Buscar otro artículo en SAP" withinPortal zIndex={1400}>
                                   <Button size="compact-xs" variant="subtle" onClick={() => setPickFor(i)} aria-label="Buscar artículo"><IconSearch size={14} /></Button>
                                 </Tooltip>
+                                <Tooltip label="Ver pedidos anteriores" withinPortal zIndex={1400}>
+                                  <Button size="compact-xs" variant="subtle" color="violet" onClick={() => setOrdersFor(i)} aria-label="Ver pedidos anteriores"><IconHistory size={14} /></Button>
+                                </Tooltip>
                               </Group>
                               <Text size="xs" c={m.confidence === 'ninguna' ? 'red' : 'dimmed'}>{m.reason}</Text>
                               {pendiente && (
@@ -628,6 +641,18 @@ export default function SalesPdfImport({ companyId, companyName, cardCode, onLoa
           </Stack>
         )}
       </Modal>
+      {ordersFor !== undefined && sim && (
+        <CustomerOrdersModal
+          opened
+          onClose={() => setOrdersFor(undefined)}
+          companyId={companyId}
+          cardCode={sim.customer.CardCode}
+          customerName={sim.customer.CardName}
+          poLines={poLineRefs}
+          forLine={ordersFor}
+          onUse={(i, code) => { setOrdersFor(undefined); void chooseSearched(i, { ItemCode: code }, 'Elegido de un pedido anterior del cliente'); }}
+        />
+      )}
       {pickFor != null && sim && (
         <SalesSearchModal
           opened

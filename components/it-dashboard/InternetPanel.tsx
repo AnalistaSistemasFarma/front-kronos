@@ -1,13 +1,11 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import {
   Alert,
   Badge,
   Button,
-  Card,
   Group,
-  Modal,
   ScrollArea,
   Select,
   SimpleGrid,
@@ -17,19 +15,8 @@ import {
   Text,
   TextInput,
   Textarea,
-  ThemeIcon,
-  Tooltip,
-  UnstyledButton,
 } from '@mantine/core';
-import {
-  IconAlertCircle,
-  IconArrowLeft,
-  IconCheck,
-  IconDeviceFloppy,
-  IconEdit,
-  IconWorld,
-  IconX,
-} from '@tabler/icons-react';
+import { IconAlertCircle, IconArrowLeft, IconCheck, IconDeviceFloppy, IconEdit, IconX } from '@tabler/icons-react';
 import {
   CHANNEL_TYPES,
   CONNECTION_TYPES,
@@ -90,10 +77,7 @@ function ChannelBadges({ item }: { item: CompanyInternet }) {
   );
 }
 
-/* ------------------------------------------------------------------ */
-/* Detail / edit of one company                                        */
-/* ------------------------------------------------------------------ */
-
+/* Detail / edit of the internet channel of one company. */
 function CompanyInternetDetail({
   item,
   onSaved,
@@ -268,204 +252,124 @@ function CompanyInternetDetail({
   );
 }
 
-/* ------------------------------------------------------------------ */
-/* Card in the KPI row + its window                                    */
-/* ------------------------------------------------------------------ */
-
 /**
- * «Internet» card of the Dashboard TI. With a company selected it shows its
- * channel; with «Todas las empresas», how many have data. A click opens a
- * window to see and edit the data (provider, public IP, mask, gateway, DNS,
- * bandwidth, channel type and connection).
+ * «Internet» section of the Proveedores window. With a company selected it
+ * shows (and edits) its channel; with «Todas las empresas», the list of
+ * companies, and a click opens one.
  */
-export default function InternetCard({ companyId, color }: { companyId: number | null; color: string }) {
+export default function InternetPanel({ companyId }: { companyId: number | null }) {
   const [items, setItems] = useState<CompanyInternet[] | null>(null);
-  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [opened, setOpened] = useState(false);
-  const [modalCompany, setModalCompany] = useState<number | null>(null);
-
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const res = await fetch('/api/it-dashboard/internet', { cache: 'no-store' });
-      const json = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(json.error ?? 'No se pudieron cargar los datos de internet.');
-      setItems((json.companies ?? []) as CompanyInternet[]);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'No se pudo conectar con el servidor.');
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  const [picked, setPicked] = useState<number | null>(companyId);
 
   useEffect(() => {
-    void load();
-  }, [load]);
+    setPicked(companyId);
+  }, [companyId]);
 
-  const current = useMemo(
-    () => (companyId == null ? null : (items?.find((i) => i.companyId === companyId) ?? null)),
-    [items, companyId]
-  );
-  const registeredCount = items?.filter((i) => i.registered).length ?? 0;
-  const modalItem = modalCompany == null ? null : (items?.find((i) => i.companyId === modalCompany) ?? null);
-
-  const open = () => {
-    setModalCompany(companyId);
-    setOpened(true);
-  };
+  useEffect(() => {
+    let cancelled = false;
+    setError(null);
+    fetch('/api/it-dashboard/internet', { cache: 'no-store' })
+      .then(async (res) => {
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(json.error ?? 'No se pudieron cargar los datos de internet.');
+        if (!cancelled) setItems((json.companies ?? []) as CompanyInternet[]);
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) setError(err instanceof Error ? err.message : 'No se pudo conectar con el servidor.');
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const onSaved = (updated: CompanyInternet) =>
     setItems((cur) => (cur ?? []).map((i) => (i.companyId === updated.companyId ? updated : i)));
 
-  let value: ReactNode;
-  let hint: ReactNode;
-  if (loading && !items) {
-    value = <Skeleton height={28} width='70%' />;
-    hint = <Skeleton height={10} width='50%' mt={6} />;
-  } else if (error) {
-    value = '—';
-    hint = 'No se pudieron cargar los datos';
-  } else if (companyId == null) {
-    value = `${registeredCount} de ${items?.length ?? 0}`;
-    hint = 'Empresas con datos de internet registrados';
-  } else if (!current || !current.registered) {
-    value = 'Sin registrar';
-    hint = 'Haga clic para agregar los datos';
-  } else {
-    value = current.bandwidth || current.provider || 'Registrado';
-    hint = (
-      <Stack gap={4}>
-        <Text size='xs' c='dimmed' lineClamp={1}>
-          {current.provider || 'Proveedor sin registrar'}
-          {current.publicIp ? ` · ${current.publicIp}` : ''}
-        </Text>
-        <ChannelBadges item={current} />
+  if (error) {
+    return (
+      <Alert icon={<IconAlertCircle size={18} />} color='red' variant='light' title='Error al cargar'>
+        {error}
+      </Alert>
+    );
+  }
+  if (!items) return <Skeleton height={220} />;
+
+  const current = picked == null ? null : (items.find((i) => i.companyId === picked) ?? null);
+  if (current) {
+    return (
+      <Stack gap='md'>
+        {companyId == null ? (
+          <Group>
+            <Button size='xs' variant='subtle' leftSection={<IconArrowLeft size={14} />} onClick={() => setPicked(null)}>
+              Todas las empresas
+            </Button>
+          </Group>
+        ) : null}
+        <Text fw={600}>{current.company}</Text>
+        <CompanyInternetDetail item={current} onSaved={onSaved} />
       </Stack>
     );
   }
 
   return (
-    <>
-      <Tooltip label='Ver y editar los datos de internet' withArrow>
-        <UnstyledButton
-          onClick={open}
-          aria-label='Ver y editar los datos de internet'
-          style={{ display: 'block', width: '100%', height: '100%', borderRadius: 'var(--mantine-radius-md)' }}
-        >
-          <Card shadow='sm' padding='lg' radius='md' withBorder h='100%'>
-            <Group justify='space-between' mb='xs' wrap='nowrap'>
-              <Text size='xs' tt='uppercase' fw={600} c='dimmed'>
-                Internet
-              </Text>
-              <ThemeIcon size='lg' radius='md' variant='light' style={{ color }}>
-                <IconWorld size={18} />
-              </ThemeIcon>
-            </Group>
-            <Text fw={700} style={{ color, lineHeight: 1.1, fontSize: 'clamp(1.15rem, 2.2vw, 1.6rem)' }} lineClamp={1} component='div'>
-              {value}
-            </Text>
-            <Text size='xs' c='dimmed' mt='xs' component='div'>
-              {hint}
-            </Text>
-          </Card>
-        </UnstyledButton>
-      </Tooltip>
-
-      <Modal
-        opened={opened}
-        onClose={() => setOpened(false)}
-        size='xl'
-        radius='md'
-        centered
-        title={
-          <Group gap='sm' wrap='nowrap'>
-            <ThemeIcon variant='light' radius='md' size='lg'>
-              <IconWorld size={20} />
-            </ThemeIcon>
-            <Stack gap={0}>
-              <Text fw={700}>Internet{modalItem ? ` · ${modalItem.company}` : ''}</Text>
-              <Text size='xs' c='dimmed'>
-                {modalItem ? 'Canal de internet de la empresa' : 'Haga clic en una empresa para ver o editar sus datos'}
-              </Text>
-            </Stack>
-          </Group>
-        }
-      >
-        {error ? (
-          <Alert icon={<IconAlertCircle size={18} />} color='red' variant='light' title='Error al cargar'>
-            {error}
-          </Alert>
-        ) : !items ? (
-          <Skeleton height={240} />
-        ) : modalItem ? (
-          <Stack gap='md'>
-            {companyId == null ? (
-              <Group>
-                <Button size='xs' variant='subtle' leftSection={<IconArrowLeft size={14} />} onClick={() => setModalCompany(null)}>
-                  Todas las empresas
-                </Button>
-              </Group>
-            ) : null}
-            <CompanyInternetDetail item={modalItem} onSaved={onSaved} />
-          </Stack>
-        ) : (
-          <ScrollArea.Autosize mah='60vh' type='auto'>
-            <Table striped highlightOnHover withTableBorder miw={700}>
-              <Table.Thead>
-                <Table.Tr>
-                  <Table.Th>Empresa</Table.Th>
-                  <Table.Th>Proveedor</Table.Th>
-                  <Table.Th>IP pública</Table.Th>
-                  <Table.Th>Ancho de banda</Table.Th>
-                  <Table.Th>Canal</Table.Th>
-                </Table.Tr>
-              </Table.Thead>
-              <Table.Tbody>
-                {items.map((i) => (
-                  <Table.Tr
-                    key={i.companyId}
-                    onClick={() => setModalCompany(i.companyId)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' || e.key === ' ') {
-                        e.preventDefault();
-                        setModalCompany(i.companyId);
-                      }
-                    }}
-                    tabIndex={0}
-                    role='button'
-                    aria-label={`Ver los datos de internet de ${i.company}`}
-                    style={{ cursor: 'pointer' }}
-                  >
+    <Stack gap='xs'>
+      <Text size='sm' c='dimmed'>
+        {items.filter((i) => i.registered).length} de {items.length} empresas con datos registrados · haga clic en una para ver o editar.
+      </Text>
+      <ScrollArea.Autosize mah='55vh' type='auto'>
+        <Table striped highlightOnHover withTableBorder miw={700}>
+          <Table.Thead>
+            <Table.Tr>
+              <Table.Th>Empresa</Table.Th>
+              <Table.Th>Proveedor</Table.Th>
+              <Table.Th>IP pública</Table.Th>
+              <Table.Th>Ancho de banda</Table.Th>
+              <Table.Th>Canal</Table.Th>
+            </Table.Tr>
+          </Table.Thead>
+          <Table.Tbody>
+            {items.map((i) => (
+              <Table.Tr
+                key={i.companyId}
+                onClick={() => setPicked(i.companyId)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    setPicked(i.companyId);
+                  }
+                }}
+                tabIndex={0}
+                role='button'
+                aria-label={`Ver los datos de internet de ${i.company}`}
+                style={{ cursor: 'pointer' }}
+              >
+                <Table.Td>
+                  <Text size='sm' fw={500} c='blue' td='underline'>
+                    {i.company}
+                  </Text>
+                </Table.Td>
+                {i.registered ? (
+                  <>
+                    <Table.Td>{text(i.provider)}</Table.Td>
+                    <Table.Td>{text(i.publicIp)}</Table.Td>
+                    <Table.Td>{text(i.bandwidth)}</Table.Td>
                     <Table.Td>
-                      <Text size='sm' fw={500} c='blue' td='underline'>
-                        {i.company}
-                      </Text>
+                      <ChannelBadges item={i} />
                     </Table.Td>
-                    {i.registered ? (
-                      <>
-                        <Table.Td>{text(i.provider)}</Table.Td>
-                        <Table.Td>{text(i.publicIp)}</Table.Td>
-                        <Table.Td>{text(i.bandwidth)}</Table.Td>
-                        <Table.Td>
-                          <ChannelBadges item={i} />
-                        </Table.Td>
-                      </>
-                    ) : (
-                      <Table.Td colSpan={4}>
-                        <Text size='sm' c='dimmed'>
-                          Sin registrar
-                        </Text>
-                      </Table.Td>
-                    )}
-                  </Table.Tr>
-                ))}
-              </Table.Tbody>
-            </Table>
-          </ScrollArea.Autosize>
-        )}
-      </Modal>
-    </>
+                  </>
+                ) : (
+                  <Table.Td colSpan={4}>
+                    <Text size='sm' c='dimmed'>
+                      Sin registrar
+                    </Text>
+                  </Table.Td>
+                )}
+              </Table.Tr>
+            ))}
+          </Table.Tbody>
+        </Table>
+      </ScrollArea.Autosize>
+    </Stack>
   );
 }
