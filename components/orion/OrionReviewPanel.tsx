@@ -26,6 +26,7 @@ import {
   IconSend,
 } from '@tabler/icons-react';
 import toast from 'react-hot-toast';
+import { MAX_ORION_CORRECTION_PDF_BYTES } from '../../lib/attachments/uploadRules';
 import type { OrionReviewState, OrionSignatureState } from '../../lib/orion/types';
 import {
   ORION_REVIEW_STATUS_LABEL,
@@ -251,6 +252,14 @@ export default function OrionReviewPanel({
   const submitCorrection = async () => {
     if (!uploadFile) {
       toast.error('Seleccione el PDF corregido');
+      return;
+    }
+    if (uploadFile.size > MAX_ORION_CORRECTION_PDF_BYTES) {
+      // Más grande, el cuerpo en base64 pasa de 30 MB y Next lo corta en silencio.
+      const mb = (bytes: number) => (bytes / (1024 * 1024)).toFixed(1).replace('.', ',');
+      toast.error(
+        `El PDF corregido pesa ${mb(uploadFile.size)} MB y el máximo es ${mb(MAX_ORION_CORRECTION_PDF_BYTES)} MB. Comprímalo y vuelva a subirlo.`
+      );
       return;
     }
     if (info?.hasValidators && !info.skipValidation && validatorIds.length === 0) {

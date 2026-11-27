@@ -2,6 +2,7 @@ import { getServerSession } from 'next-auth';
 import { NextResponse } from 'next/server';
 import { authOptions } from '../../../auth/[...nextauth]/route';
 import { withMssqlPool } from '@/lib/mssqlPool';
+import { MAX_ORION_CORRECTION_PDF_BASE64_LENGTH } from '@/lib/attachments/uploadRules';
 import {
   decideOrionReview,
   getOrionReviewInfo,
@@ -10,8 +11,6 @@ import {
   submitOrionReview,
   type OrionReviewActor,
 } from '@/lib/orion/review';
-
-const MAX_PDF_BASE64_LENGTH = 40 * 1024 * 1024;
 
 function sessionActor(session: {
   user?: { id?: unknown; email?: string | null; name?: string | null } | null;
@@ -108,7 +107,7 @@ export async function POST(req: Request) {
           if (!pdfBase64) {
             throw Object.assign(new Error('Adjunte el PDF corregido'), { status: 400 });
           }
-          if (pdfBase64.length > MAX_PDF_BASE64_LENGTH) {
+          if (pdfBase64.length > MAX_ORION_CORRECTION_PDF_BASE64_LENGTH) {
             throw Object.assign(new Error('El PDF supera el tamaño permitido'), { status: 413 });
           }
           return resubmitOrionReview(pool, {

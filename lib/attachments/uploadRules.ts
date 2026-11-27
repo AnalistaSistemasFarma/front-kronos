@@ -26,6 +26,18 @@ export const IIS_MAX_REQUEST_BYTES = 30_000_000;
 /** Tope por petición que se valida en el navegador (margen para el multipart). */
 export const MAX_UPLOAD_REQUEST_BYTES = 28 * 1024 * 1024;
 
+/**
+ * Tope del PDF corregido que se sube a Orion desde el panel de validación.
+ * Esa subida va en JSON con el PDF en base64 (pesa un 33 % más) y pasa por
+ * `middlewareClientMaxBodySize` (30 MB) y por IIS (`IIS_MAX_REQUEST_BYTES`): pasado
+ * ese tope Next trunca el cuerpo en silencio y la ruta respondía un 400 confuso.
+ * 21 MB en base64 son 29.360.128 bytes, por debajo de los 30.000.000 de IIS.
+ */
+export const MAX_ORION_CORRECTION_PDF_BYTES = 21 * 1024 * 1024;
+
+/** Longitud máxima del base64 de ese PDF (lo valida el servidor). */
+export const MAX_ORION_CORRECTION_PDF_BASE64_LENGTH = Math.ceil(MAX_ORION_CORRECTION_PDF_BYTES / 3) * 4;
+
 /** Extensiones permitidas en los adjuntos de solicitudes y tickets. */
 export const REQUEST_ATTACHMENT_EXTENSIONS: readonly string[] = [
   'pdf',

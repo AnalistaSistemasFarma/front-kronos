@@ -2,6 +2,7 @@ import { getServerSession } from 'next-auth';
 import { NextResponse } from 'next/server';
 import { authOptions } from '../../../auth/[...nextauth]/route';
 import { withMssqlPool } from '@/lib/mssqlPool';
+import { MAX_ORION_CORRECTION_PDF_BASE64_LENGTH } from '@/lib/attachments/uploadRules';
 import { getOrionConfig } from '@/lib/orion/config';
 import {
   applyOrionWebhookToRequest,
@@ -505,6 +506,9 @@ export async function POST(req: Request) {
       typeof body.pdfBase64 === 'string' && body.pdfBase64.trim()
         ? body.pdfBase64.trim()
         : undefined;
+    if (pdfBase64 && pdfBase64.length > MAX_ORION_CORRECTION_PDF_BASE64_LENGTH) {
+      return NextResponse.json({ error: 'El PDF supera el tamaño permitido' }, { status: 413 });
+    }
 
     const result = await withMssqlPool(async (pool) => {
       const actorId = await resolveOrionActorUserId(pool, {
