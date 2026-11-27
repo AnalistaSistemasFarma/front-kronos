@@ -106,7 +106,7 @@ export function mergeSales(rows: Record<string, unknown>[]): Map<string, SalesIn
 async function companySales(sap: SapSession, codes: string[], today: string): Promise<Map<string, SalesInfo>> {
   const from = monthsBefore(today, SALES_MONTHS);
   const out = new Map<string, SalesInfo>();
-  for (const part of chunks([...new Set(codes)].sort(), 20)) {
+  for (const part of chunks([...new Set(codes)].sort(), 30)) {
     const f = part.map((c) => `Invoices/DocumentLines/ItemCode eq ${q(c)}`).join(' or ');
     const path =
       `$crossjoin(Invoices,Invoices/DocumentLines)?$expand=Invoices($select=DocEntry,DocDate),Invoices/DocumentLines($select=ItemCode,UnitPrice)` +
