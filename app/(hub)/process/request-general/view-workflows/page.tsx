@@ -1491,6 +1491,9 @@ if (session?.user?.id) return session.user.id as unknown as number;
 
   const getBreadcrumbHref = (from: string) => {
     switch (from) {
+      // Administración de flujos: vuelve a su lista, que conserva filtros y búsqueda.
+      case 'admin-workflow':
+        return '/process/request-general/admin-workflow';
       case 'workflows':
         return '/process/request-general/workflows';
       default:
@@ -1536,7 +1539,7 @@ if (session?.user?.id) return session.user.id as unknown as number;
           </Alert>
           <Button
             fullWidth
-            onClick={() => router.push('/process/request-general/workflows')}
+            onClick={() => router.push(getBreadcrumbHref(from))}
             leftSection={<IconArrowLeft size={16} />}
           >
             Volver a Flujos de Trabajo
@@ -1555,7 +1558,7 @@ if (session?.user?.id) return session.user.id as unknown as number;
           </Text>
           <Button
             fullWidth
-            onClick={() => router.push('/process/request-general/workflows')}
+            onClick={() => router.push(getBreadcrumbHref(from))}
             leftSection={<IconArrowLeft size={16} />}
           >
             Volver a Flujos de Trabajo
@@ -2923,7 +2926,7 @@ if (session?.user?.id) return session.user.id as unknown as number;
 
             <Button
               variant='outline'
-              onClick={() => router.push('/process/request-general/workflows')}
+              onClick={() => router.push(getBreadcrumbHref(from))}
               leftSection={<IconArrowLeft size={16} />}
             >
               Volver a Flujos de Trabajo
