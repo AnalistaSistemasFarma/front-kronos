@@ -145,6 +145,8 @@ export interface SimulacionModalProps {
   etiquetarHabilitado?: boolean;
   /** Responder desde SynerLink (CORREO_ENVIO_HABILITADO): sin él no hay acuse en el hilo. */
   envioHabilitado?: boolean;
+  /** The user's company is read-only (CORREO_<K>_ENVIO=false): explains why there is no reply in the thread. */
+  soloLectura?: boolean;
   /** Nombre de quien crea (firma del acuse en la vista previa). */
   nombreOperador?: string;
   onClose: (huboCreadas: boolean) => void;
@@ -158,6 +160,7 @@ export default function SimulacionModal({
   idOperador,
   etiquetarHabilitado = true,
   envioHabilitado = true,
+  soloLectura = false,
   nombreOperador = '',
   onClose,
 }: SimulacionModalProps) {
@@ -711,7 +714,9 @@ export default function SimulacionModal({
               </Card>
             ) : (
               <Text size='xs' c='dimmed' data-testid='correo-sim-acuse-deshabilitado'>
-                La respuesta automática en el hilo no está habilitada en este ambiente.
+                {soloLectura
+                  ? 'Su empresa tiene el Correo en modo solo lectura: la solicitud se crea igual, pero no se responderá en el hilo.'
+                  : 'La respuesta automática en el hilo no está habilitada en este ambiente.'}
               </Text>
             )}
             <Group justify='space-between' wrap='wrap' gap='sm'>

@@ -400,6 +400,26 @@ describe('Correo · buzón de la sesión con la app de aplicación (modo graph)'
     expect((await new MockMailProvider(yo.email).mensaje('mock-msg-0001AAAA')).categorias).toEqual([]);
   });
 
+  it('read-only tenant (CORREO_GSS_ENVIO=false): no reply (403 «solo lectura»); tagging still works', async () => {
+    const env = {
+      CORREO_MODO: 'mock',
+      CORREO_INQUILINOS: 'gss',
+      CORREO_GSS_TENANT_ID: '3409fd29-f351-4a98-8ef4-d98c8874a836',
+      CORREO_GSS_CLIENT_ID: '28c47cc5-342a-4781-909e-d234db1bb993',
+      CORREO_GSS_CLIENT_SECRET: 'x',
+      CORREO_GSS_DOMINIOS: 'gsslatam.com',
+      CORREO_GSS_ENVIO: 'false',
+    };
+    const d = deps({ cfg: readCorreoConfig(env) });
+    expect(estadoConexion(d, yo)).toMatchObject({ envioHabilitado: false, envioRestringidoInquilino: true, etiquetarHabilitado: true });
+    await expect(responder(d, yo, { mensajeId: 'mock-msg-0001AAAA', texto: 'x', todos: false, adjuntos: [], ip: null })).rejects.toMatchObject({ status: 403, message: expect.stringMatching(/solo lectura/) });
+    expect(enviadosSimulados(yo.email)).toEqual([]);
+    const r = await crearDesdeFila(d, yo, filaBase, null);
+    expect(r.etiquetado).toBe(true);
+    // Another tenant (or no tenant flag) keeps sending.
+    expect(estadoConexion(deps({ cfg: readCorreoConfig({ ...env, CORREO_GSS_ENVIO: '' }) }), yo).envioHabilitado).toBe(true);
+  });
+
   it('auditoría de lectura: usuario, buzón de la sesión, acción y mensaje', async () => {
     await auditarLectura(deps(), yo, { accion: 'DESCARGAR_ADJUNTO', mensajeId: 'M1', detalle: 'Adjunto A1' }, '10.0.0.1');
     expect(db.auditar).toHaveBeenCalledWith(expect.anything(), { idUser: 'op1', mailbox: 'laura@gsslatam.com', accion: 'DESCARGAR_ADJUNTO', mensajeId: 'M1', detalle: 'Adjunto A1', ip: '10.0.0.1' });

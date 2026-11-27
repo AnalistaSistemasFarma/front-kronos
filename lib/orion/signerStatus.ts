@@ -77,6 +77,34 @@ export function allSlotsCompletedForEmail(
   return mine.length > 0 && mine.every((s) => isSignerSlotCompleted(s));
 }
 
+export type SignerSlotProgress = {
+  /** Firmas (slots) de esa persona en el documento. */
+  total: number;
+  /** Cuántas ya firmó. */
+  done: number;
+  /** Posición (1..total) del slot indicado o, sin slot, de su primera firma pendiente; 0 si no aplica. */
+  position: number;
+};
+
+/**
+ * Avance de una persona que firma varias veces el mismo documento («firma 2 de 3»).
+ * `slot` identifica la firma concreta (por orden); sin él se toma la primera pendiente.
+ */
+export function signerSlotProgress(
+  signers: OrionSignerState[] | null | undefined,
+  email?: string | null,
+  slot?: Pick<OrionSignerState, 'order'> | null
+): SignerSlotProgress {
+  const mine = signersForEmail(signers, email);
+  const done = mine.filter((s) => isSignerSlotCompleted(s)).length;
+  const slotOrder = Number(slot?.order);
+  const index =
+    slot && Number.isFinite(slotOrder) && slotOrder > 0
+      ? mine.findIndex((s) => Number(s.order) === slotOrder)
+      : mine.findIndex((s) => !isSignerSlotCompleted(s));
+  return { total: mine.length, done, position: index >= 0 ? index + 1 : 0 };
+}
+
 export function getCurrentPendingSigner(signers?: OrionSignerState[] | null): OrionSignerState | null {
   for (const signer of orderedSigners(signers)) {
     if (!isSignerSlotCompleted(signer) && !isSignerRejected(signer.status)) {

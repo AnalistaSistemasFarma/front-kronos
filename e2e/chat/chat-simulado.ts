@@ -269,6 +269,22 @@ export async function simularChat(
 export const hilo = (page: Page) => page.locator('.chat-thread').first();
 export const caja = (page: Page) => page.locator('textarea.chat-composer__input').first();
 
+/**
+ * Opens the Emoji | Stickers | GIF panel. Since the Gemini-style pill
+ * (2026-11-24) it lives in the «+» menu, on the left of the pill.
+ */
+export async function abrirExpresiones(page: Page, { tocar = false }: { tocar?: boolean } = {}) {
+  const mas = page.getByTestId('chat-composer-pill').getByRole('button', { name: 'Más opciones' });
+  const item = page.getByRole('menuitem', { name: 'Emojis, stickers y GIF' });
+  if (tocar) {
+    await mas.tap();
+    await item.tap();
+  } else {
+    await mas.click();
+    await item.click();
+  }
+}
+
 export async function capturar(page: Page, nombre: string) {
   if (!CAPTURAS) return;
   await page.waitForTimeout(400);

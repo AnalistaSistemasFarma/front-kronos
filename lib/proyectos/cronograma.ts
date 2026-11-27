@@ -45,7 +45,7 @@ export async function registrarEvento(
   db: Db,
   e: {
     idProject: number;
-    entity: 'tarea' | 'solicitud' | 'propuesta' | 'concesion';
+    entity: 'tarea' | 'solicitud' | 'propuesta' | 'concesion' | 'reunion';
     idEntity: number | null;
     action: string;
     detail: string;

@@ -189,11 +189,24 @@ async function searchSapOptions(companyId: number, q: string): Promise<PartnerOp
 }
 
 /**
+ * El usuario de la sesión (activo, no proveedor) pertenece a la empresa (`company_user`).
+ * Los usuarios del portal de proveedores no asignan firmantes ni deben listar socios SAP.
+ */
+async function userBelongsToCompany(email: string, companyId: number): Promise<boolean> {
+  const count = await prisma.companyUser.count({
+    where: { id_company: companyId, user: { email, isActive: true, NOT: { role: 'supplier' } } },
+  });
+  return count > 0;
+}
+
+/**
  * Búsqueda de socios para firmantes Orion: socios de negocio SAP de la empresa y usuarios
  * activos de SynerLink.
  * GET ?companyId=&q=
  * Devuelve { options: [{ value, label, cardCode, cardName, email, cardType, source }], sapError? };
  * `email` vacío = socio sin correo en SAP (el preparador lo escribe al asignarlo).
+ * 403 si el usuario de la sesión no pertenece a `companyId`: sin esto cualquiera con sesión
+ * podía consultar los socios SAP de otra empresa cambiando el parámetro.
  */
 export async function GET(request: NextRequest) {
   try {
@@ -206,8 +219,11 @@ export async function GET(request: NextRequest) {
     const companyId = Number(searchParams.get('companyId'));
     const q = (searchParams.get('q') ?? '').trim();
 
-    if (!companyId) {
+    if (!Number.isInteger(companyId) || companyId <= 0) {
       return NextResponse.json({ error: 'Falta companyId' }, { status: 400 });
+    }
+    if (!(await userBelongsToCompany(session.user.email, companyId))) {
+      return NextResponse.json({ error: 'No tiene acceso a esta empresa.' }, { status: 403 });
     }
     if (q.length < 2) {
       return NextResponse.json({ options: [] });

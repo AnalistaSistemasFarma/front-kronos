@@ -15,6 +15,7 @@ import {
   Modal,
   ScrollArea,
   SegmentedControl,
+  SimpleGrid,
   Stack,
   Text,
   TextInput,
@@ -22,7 +23,24 @@ import {
 } from '@mantine/core';
 import { useDebouncedValue, useMediaQuery } from '@mantine/hooks';
 import { IconAlertTriangle, IconSearch, IconX } from '@tabler/icons-react';
-import { OT_LIMITS, OT_TURNO_HORARIO, OT_TURNO_LABEL, OT_TURNO_NOMBRE, OT_TURNOS, type OtTurno } from '../../lib/bitacora-proceso/constants';
+import {
+  isOtTipoPersonal,
+  OT_LIMITS,
+  OT_PLANTA_COLOR,
+  OT_PLANTA_LABEL,
+  OT_PLANTAS,
+  OT_TIPO_PERSONAL_COLOR,
+  OT_TIPO_PERSONAL_LABEL,
+  OT_TIPO_PERSONAL_PLURAL,
+  OT_TIPOS_PERSONAL,
+  OT_TURNO_HORARIO,
+  OT_TURNO_LABEL,
+  OT_TURNO_NOMBRE,
+  OT_TURNOS,
+  type OtPlanta,
+  type OtTipoPersonal,
+  type OtTurno,
+} from '../../lib/bitacora-proceso/constants';
 import { OT_SAP_OP_ESTADO_LABEL, opPorNumero, type SapOpSnapshot } from '../../lib/bitacora-proceso/rules';
 import { fmtFecha, otSend, useOtFetch } from './otClient';
 
@@ -30,8 +48,8 @@ import { fmtFecha, otSend, useOtFetch } from './otClient';
  * «Nueva bitácora» (solo supervisor, «desde afuera»). Hora inicio = la del servidor al abrir.
  * Reunión con Farmalógica del 2026-10-14: los OPERARIOS no tienen usuario (A1: se
  * eligen del maestro de la empresa), el ÁREA sale del catálogo (A5: precargada si
- * hay una sola). B1 (2026-10-15): se designan, por separado, el INSPECTOR y el JEFE DE
- * PRODUCCIÓN (usuarios de SynerLink, distintos entre sí y de quien abre). B5: la OP
+ * hay una sola). B1 (2026-10-15): se designa el JEFE DE PRODUCCIÓN (usuario de SynerLink).
+ * El INSPECTOR salió del flujo el 2026-11-24 (reunión de mejoras con Farmalógica). B5: la OP
  * (opcional) se busca entre las PLANIFICADAS y LIBERADAS; al escribir su número exacto
  * se elige sola y completa producto, código y lote.
  * Diseño para CELULAR primero: modal a pantalla completa en el celular, campos de
@@ -49,7 +67,11 @@ interface OperadorMaestro {
   id_operador: number;
   nombre: string;
   documento: string | null;
+  /** OPERARIO | MANTENIMIENTO | INSPECTOR (2026-11-26). */
+  tipo?: string;
 }
+
+const tipoDe = (u: OperadorMaestro): OtTipoPersonal => (isOtTipoPersonal(u.tipo) ? u.tipo : 'OPERARIO');
 
 interface AreaCatalogo {
   id_area: number;
@@ -69,7 +91,6 @@ export default function NuevaOrdenModal({
 }) {
   const mobile = useMediaQuery('(max-width: 48em)') ?? false;
   // Solo los ASIGNADOS a cada rol en la empresa (Catálogo → Responsables, 2026-10-16).
-  const inspectores = useOtFetch<{ responsables: Usuario[] }>(opened ? `/api/bitacora-proceso/responsables?company=${idCompany}&rol=INSPECTOR` : null);
   const jefes = useOtFetch<{ responsables: Usuario[] }>(opened ? `/api/bitacora-proceso/responsables?company=${idCompany}&rol=JEFE_PROD` : null);
   const maestro = useOtFetch<{ operadores: OperadorMaestro[] }>(opened ? `/api/bitacora-proceso/operadores?company=${idCompany}` : null);
   const areasCat = useOtFetch<{ areas: AreaCatalogo[] }>(opened ? `/api/bitacora-proceso/areas?company=${idCompany}` : null);
@@ -88,7 +109,8 @@ export default function NuevaOrdenModal({
   const [idArea, setIdArea] = useState<string | null>(null);
   const [operarios, setOperarios] = useState<string[]>([]);
   const [filtroOp, setFiltroOp] = useState('');
-  const [inspector, setInspector] = useState<string | null>(null);
+  const [tipoFiltro, setTipoFiltro] = useState<OtTipoPersonal | 'TODOS'>('TODOS');
+  const [planta, setPlanta] = useState<OtPlanta | null>(null);
   const [jefe, setJefe] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -103,10 +125,11 @@ export default function NuevaOrdenModal({
     setItemCode(null);
     setLote('');
     setTurno('');
+    setPlanta(null);
+    setTipoFiltro('TODOS');
     setIdArea(null);
     setOperarios([]);
     setFiltroOp('');
-    setInspector(null);
     setJefe(null);
     setError(null);
   }, [opened]);
@@ -162,19 +185,20 @@ export default function NuevaOrdenModal({
   const lista = useMemo(() => {
     const all = maestro.data?.operadores ?? [];
     const f = filtroOp.trim().toLowerCase();
-    const filtrados = f ? all.filter((u) => u.nombre.toLowerCase().includes(f) || (u.documento ?? '').toLowerCase().includes(f)) : all;
+    const porTipo = tipoFiltro === 'TODOS' ? all : all.filter((u) => tipoDe(u) === tipoFiltro);
+    const filtrados = f ? porTipo.filter((u) => u.nombre.toLowerCase().includes(f) || (u.documento ?? '').toLowerCase().includes(f)) : porTipo;
     // Los ya elegidos siempre arriba, para verlos sin buscar.
     const elegido = (u: OperadorMaestro) => operarios.includes(String(u.id_operador));
     return [...filtrados.filter(elegido), ...filtrados.filter((u) => !elegido(u))];
-  }, [maestro.data, filtroOp, operarios]);
+  }, [maestro.data, filtroOp, operarios, tipoFiltro]);
 
   const faltantes = [
     !producto.trim() && 'producto',
     !lote.trim() && 'lote',
+    !planta && 'planta',
     !turno && 'turno',
     areas.length > 0 && !idArea && 'área',
     operarios.length === 0 && 'al menos un operario',
-    !inspector && 'inspector',
     !jefe && 'jefe de producción',
   ].filter(Boolean);
 
@@ -192,9 +216,9 @@ export default function NuevaOrdenModal({
         itemCode,
         lote,
         turno,
+        planta,
         idArea: idArea ? Number(idArea) : null,
         operadores: operarios.map(Number),
-        inspector,
         jefeProduccion: jefe,
         sapOp,
       });
@@ -308,6 +332,28 @@ export default function NuevaOrdenModal({
         />
         <Box>
           <Text fw={500} size='md' mb={4}>
+            Planta <Text span c='red'>*</Text>
+          </Text>
+          <Text size='xs' c='dimmed' mb={6}>Con color, para no registrar en la bitácora de la otra planta.</Text>
+          <SimpleGrid cols={2} spacing='sm' data-testid='ot-planta'>
+            {OT_PLANTAS.map((p) => (
+              <Button
+                key={p}
+                size='lg'
+                h={56}
+                color={OT_PLANTA_COLOR[p]}
+                variant={planta === p ? 'filled' : 'light'}
+                onClick={() => setPlanta(p)}
+                data-testid={`ot-planta-${p}`}
+                aria-pressed={planta === p}
+              >
+                {OT_PLANTA_LABEL[p]}
+              </Button>
+            ))}
+          </SimpleGrid>
+        </Box>
+        <Box>
+          <Text fw={500} size='md' mb={4}>
             Turno <Text span c='red'>*</Text>
           </Text>
           <SegmentedControl
@@ -356,13 +402,22 @@ export default function NuevaOrdenModal({
         <Box>
           <Group justify='space-between' mb={4}>
             <Text fw={500} size='md'>
-              Operarios <Text span c='red'>*</Text>
+              Personal del turno <Text span c='red'>*</Text>
             </Text>
             <Badge variant='light' size='lg'>{operarios.length === 1 ? '1 seleccionado' : `${operarios.length} seleccionados`}</Badge>
           </Group>
           <Text size='xs' c='dimmed' mb={6}>
-            Los operarios no tienen usuario: en la tablet cada uno toca su nombre y la actividad. Se administran en el catálogo (Operarios).
+            Operarios, mantenimiento e inspectores de calidad. No tienen usuario: en la tablet cada uno toca su nombre y la actividad. Se administran en el catálogo (Operarios).
           </Text>
+          <SegmentedControl
+            fullWidth
+            size='sm'
+            mb={6}
+            value={tipoFiltro}
+            onChange={(v) => setTipoFiltro(v as OtTipoPersonal | 'TODOS')}
+            data={[{ value: 'TODOS', label: 'Todos' }, ...OT_TIPOS_PERSONAL.map((t) => ({ value: t, label: OT_TIPO_PERSONAL_PLURAL[t] }))]}
+            data-testid='ot-operarios-tipo'
+          />
           <TextInput
             size='md'
             placeholder='Buscar operario'
@@ -389,7 +444,14 @@ export default function NuevaOrdenModal({
                       <Group wrap='nowrap' gap='sm' mih={40}>
                         <Checkbox.Indicator size='md' />
                         <div style={{ minWidth: 0 }}>
-                          <Text fw={500} truncate>{u.nombre}</Text>
+                          <Group gap={6} wrap='nowrap'>
+                            <Text fw={500} truncate>{u.nombre}</Text>
+                            {tipoDe(u) !== 'OPERARIO' && (
+                              <Badge size='sm' variant='light' color={OT_TIPO_PERSONAL_COLOR[tipoDe(u)]} style={{ flexShrink: 0 }}>
+                                {OT_TIPO_PERSONAL_LABEL[tipoDe(u)]}
+                              </Badge>
+                            )}
+                          </Group>
                           {u.documento && <Text size='xs' c='dimmed' truncate>Doc. {u.documento}</Text>}
                         </div>
                       </Group>
@@ -403,24 +465,12 @@ export default function NuevaOrdenModal({
         </Box>
 
         <PersonaPicker
-          titulo='Inspector'
-          descripcion='Da su visto bueno después del cierre. Debe ser distinto de quien abre y del jefe.'
-          usuarios={inspectores.data?.responsables ?? null}
-          vacio='No hay inspectores asignados en esta empresa. Asígnelos en Catálogo → Responsables.'
-          value={inspector}
-          onChange={setInspector}
-          excluir={jefe}
-          mobile={mobile}
-          testId='ot-inspector'
-        />
-        <PersonaPicker
           titulo='Jefe de producción'
           descripcion='Puede ser usted mismo. El jefe designado también puede cerrar; si cierra el supervisor, el jefe da el último visto bueno.'
           usuarios={jefes.data?.responsables ?? null}
           vacio='No hay jefes de producción asignados en esta empresa. Asígnelos en Catálogo → Responsables.'
           value={jefe}
           onChange={setJefe}
-          excluir={inspector}
           mobile={mobile}
           testId='ot-jefe'
         />
@@ -467,8 +517,8 @@ function PersonaPicker({
   vacio: string;
   value: string | null;
   onChange: (v: string | null) => void;
-  /** La otra persona ya elegida (inspector y jefe son distintos). */
-  excluir: string | null;
+  /** Persona que no se ofrece (opcional). */
+  excluir?: string | null;
   mobile: boolean;
   testId: string;
 }) {

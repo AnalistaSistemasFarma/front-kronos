@@ -281,3 +281,68 @@ describe('robustez ante inyección SQL', () => {
     expect(res.isError ?? false).toBe(true);
   });
 });
+
+describe('requester / responsible filters', () => {
+  function requestsQuery() {
+    return mock.capturedRaw.find((q) => q.text.includes('requests_general'))!;
+  }
+  function ticketsQuery() {
+    return mock.capturedRaw.find((q) => q.text.toLowerCase().includes('from [case]'))!;
+  }
+
+  it('kronos_list_requests requesterId filters by rg.id_requester as a parameter, keeping company scope', async () => {
+    const client = await connectClient(buildServer());
+    await callJson(client, 'kronos_list_requests', { requesterId: "u1' OR 1=1 --" });
+    const q = requestsQuery();
+    expect(q.text).toContain('rg.id_requester =');
+    expect(q.text).toContain('rg.id_company IN');
+    expect(q.text).not.toContain('OR 1=1');
+    expect(q.values).toContain("u1' OR 1=1 --");
+    expect(q.values).toContain(1);
+  });
+
+  it('kronos_list_requests requesterEmail is normalized and parameterized', async () => {
+    const client = await connectClient(buildServer());
+    await callJson(client, 'kronos_list_requests', { requesterEmail: '  Mauricio.Duque@OneLatamPharma.com ' });
+    const q = requestsQuery();
+    expect(q.text).toContain('rq.id = rg.id_requester');
+    expect(q.values).toContain('mauricio.duque@onelatampharma.com');
+    expect(q.text).not.toContain('mauricio.duque');
+  });
+
+  it('kronos_list_requests rejects a malformed requesterEmail', async () => {
+    const client = await connectClient(buildServer());
+    const { isError } = await callJson(client, 'kronos_list_requests', { requesterEmail: "x' OR 1=1" });
+    expect(isError).toBe(true);
+    expect(mock.capturedRaw.find((q) => q.text.includes('requests_general'))).toBeUndefined();
+  });
+
+  it('kronos_list_requests responsibleEmail joins the responsible user by e-mail', async () => {
+    const client = await connectClient(buildServer());
+    await callJson(client, 'kronos_list_requests', { responsibleEmail: 'Ana@Example.com' });
+    const q = requestsQuery();
+    expect(q.text).toContain('upcrg.id_user');
+    expect(q.text).toContain('LOWER(LTRIM(RTRIM(ru.email)))');
+    expect(q.values).toContain('ana@example.com');
+  });
+
+  it('kronos_list_requests combines requester and company filters with AND (empty intersection stays empty)', async () => {
+    const client = await connectClient(buildServer());
+    await callJson(client, 'kronos_list_requests', { companyId: 2, requesterId: 'u1' });
+    const q = requestsQuery();
+    expect(q.text).toContain('1 = 0');
+    expect(q.values).not.toContain(2);
+  });
+
+  it('kronos_list_tickets requesterId and requesterEmail are parameterized and scoped', async () => {
+    const client = await connectClient(buildServer());
+    await callJson(client, 'kronos_list_tickets', { requesterId: 'u9', requesterEmail: 'Pedro@Example.com' });
+    const q = ticketsQuery();
+    expect(q.text).toContain('c.company IN');
+    expect(q.text).toContain('rqcu.id_company_user');
+    expect(q.text).toContain('LOWER(LTRIM(RTRIM(c.email)))');
+    expect(q.values).toContain('u9');
+    expect(q.values).toContain('pedro@example.com');
+    expect(q.values).toContain(1);
+  });
+});

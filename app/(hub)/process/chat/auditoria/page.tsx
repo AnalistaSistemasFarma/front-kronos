@@ -436,6 +436,16 @@ export default function AuditoriaAgentesPage() {
             ·
           </Text>
           <Link
+            href='/process/chat/auditoria/adopcion'
+            className='chat-text-muted'
+            style={{ fontSize: 13 }}
+          >
+            Ver adopción de IA vs plantilla
+          </Link>
+          <Text size='xs' c='dimmed'>
+            ·
+          </Text>
+          <Link
             href='/process/chat/auditoria/respaldos'
             className='chat-text-muted'
             style={{ fontSize: 13 }}

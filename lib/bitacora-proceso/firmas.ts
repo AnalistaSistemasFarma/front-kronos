@@ -31,6 +31,7 @@ import { OtError, type OtCompanyAccess } from './rules';
 import {
   OT_CONFIRMACION_TEXTO,
   OT_FIRMA_SIGNIFICADO,
+  OT_INSPECTOR_EN_FLUJO,
   OT_LIMITS,
   OT_METODO_CONFIRMACION,
   OT_PIN_LONGITUD,
@@ -105,7 +106,8 @@ export function vistosRequeridos(o: Pick<OrdenActores, 'inspector' | 'jefe' | 'o
   const cerroElJefe = esCierreDelJefe(vistosDados(firmas).SUPERVISOR);
   return OT_VISTOS_BUENOS.filter((r) => {
     if (r === 'OPERARIO') return false;
-    if (r === 'INSPECTOR') return Boolean(o.inspector);
+    // 2026-11-24: el inspector salió del flujo; tampoco se exige en las bitácoras abiertas que lo tenían.
+    if (r === 'INSPECTOR') return OT_INSPECTOR_EN_FLUJO && Boolean(o.inspector);
     if (r === 'JEFE_PROD') return Boolean(o.jefe) && !cerroElJefe;
     return true;
   });
@@ -173,6 +175,9 @@ export function assertPuedeConfirmar(o: OrdenActores, firmas: readonly FirmaFila
     }
     case 'INSPECTOR':
     case 'JEFE_PROD': {
+      if (c.rol === 'INSPECTOR' && !OT_INSPECTOR_EN_FLUJO) {
+        throw new OtError('El inspector ya no forma parte de la bitácora: el flujo es operario, supervisor y jefe de producción.', 409);
+      }
       const designado = c.rol === 'INSPECTOR' ? o.inspector : o.jefe;
       if (!designado) throw new OtError(`Esta bitácora no tiene ${label.toLowerCase()} designado.`, 409);
       if (c.idUser !== designado) throw new OtError(`Solo el ${label.toLowerCase()} designado en esta bitácora puede dar este visto bueno.`, 403);

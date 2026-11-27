@@ -17,12 +17,16 @@ export function usePdfBlobPreview(sourceUrl: string | null | undefined, enabled 
       return;
     }
 
-    if (sourceUrl.startsWith('blob:') || sourceUrl.startsWith('data:application/pdf')) {
+    if (sourceUrl.startsWith('blob:')) {
       setBlobUrl(sourceUrl);
       setFailed(false);
       setLoading(false);
       return;
     }
+
+    // `data:` también pasa a blob: un PDF grande como data URL (~12 MB de texto en el src del
+    // iframe) dejaba la vista previa en gris en Firefox; el blob se muestra al instante.
+    const isDataUrl = sourceUrl.startsWith('data:application/pdf');
 
     let cancelled = false;
     let objectUrl: string | null = null;
@@ -31,7 +35,9 @@ export function usePdfBlobPreview(sourceUrl: string | null | undefined, enabled 
 
     void (async () => {
       try {
-        const buffer = await fetchPdfArrayBuffer(sourceUrl);
+        const buffer = isDataUrl
+          ? await (await fetch(sourceUrl)).arrayBuffer()
+          : await fetchPdfArrayBuffer(sourceUrl);
         if (cancelled) return;
 
         // Forzar application/pdf para que el iframe muestre y no descargue.
@@ -41,8 +47,9 @@ export function usePdfBlobPreview(sourceUrl: string | null | undefined, enabled 
         setFailed(false);
       } catch {
         if (!cancelled) {
-          setBlobUrl(null);
-          setFailed(true);
+          // Si el data URL no se pudo convertir, se usa tal cual (comportamiento anterior).
+          setBlobUrl(isDataUrl ? sourceUrl : null);
+          setFailed(!isDataUrl);
         }
       } finally {
         if (!cancelled) setLoading(false);

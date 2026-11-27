@@ -23,7 +23,7 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import type { AuditLogger } from '../audit.js';
 import type { AuthScope } from '../auth.js';
-import { CorreoMcpError, decodificarAdjunto, lectorDeConcesion, type LectorCorreo } from '../correo/graph.js';
+import { CorreoMcpError, decodificarAdjunto, envioPermitido, lectorDeConcesion, type LectorCorreo } from '../correo/graph.js';
 import {
   auditarFuera,
   citar,
@@ -64,7 +64,16 @@ export interface CorreoAgenteCtx {
   audit: AuditLogger;
   /** Lector del buzón de la concesión (pruebas: uno simulado). */
   lector?: (mailbox: string) => LectorCorreo;
+  /** Send capability of the concession mailbox (tests: injected; default: CORREO_* env). */
+  envio?: (mailbox: string) => boolean;
 }
+
+function envioDe(ctx: CorreoAgenteCtx, mailbox: string): boolean {
+  return ctx.envio ? ctx.envio(mailbox) : envioPermitido(mailbox);
+}
+
+const SIN_ENVIO =
+  'La empresa de esta persona tiene el Correo de SynerLink en modo solo lectura: no se pueden enviar ni proponer respuestas. Puede analizar el hilo y proponer una solicitud (correo_crear_solicitud_desde_hilo) o una nota (correo_agregar_nota).'
 
 function lectorDe(ctx: CorreoAgenteCtx, mailbox: string): LectorCorreo {
   return ctx.lector ? ctx.lector(mailbox) : lectorDeConcesion(mailbox);
@@ -130,8 +139,9 @@ export function registerCorreoAgenteTools(server: McpServer, ctx: CorreoAgenteCt
           total_mensajes: mensajes.length,
           ...(h.recortados ? { aviso: `${h.recortados} mensaje(s) se recortaron por tamaño.` } : {}),
           mensajes: h.mensajes,
-          como_actuar:
-            'Para ayudar use correo_proponer_respuesta, correo_crear_solicitud_desde_hilo o correo_agregar_nota: son PROPUESTAS que la persona confirma. Usted no puede enviar ni crear nada por su cuenta.',
+          como_actuar: envioDe(ctx, concesion.mailbox)
+            ? 'Para ayudar use correo_proponer_respuesta, correo_crear_solicitud_desde_hilo o correo_agregar_nota: son PROPUESTAS que la persona confirma. Usted no puede enviar ni crear nada por su cuenta.'
+            : `${SIN_ENVIO} Son PROPUESTAS que la persona confirma; usted no puede crear nada por su cuenta.`,
         });
       })
   );
@@ -183,6 +193,7 @@ export function registerCorreoAgenteTools(server: McpServer, ctx: CorreoAgenteCt
       ejecutar(ctx, 'correo_proponer_respuesta', args, async () => {
         // El hilo se lee ANTES (fuera de la transacción) para saber a quién le llegaría.
         const previa = await resolverConcesion(ctx.scope, args.share_id);
+        if (!envioDe(ctx, previa.concesion.mailbox)) throw new CorreoAgenteRechazo(SIN_ENVIO);
         const hilo = await lectorDe(ctx, previa.concesion.mailbox).hilo(previa.concesion.conversationId);
         const ultimo = hilo[hilo.length - 1];
         if (!ultimo) throw new CorreoMcpError('El hilo ya no está en el buzón de la persona.');

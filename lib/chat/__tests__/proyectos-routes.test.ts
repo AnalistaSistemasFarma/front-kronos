@@ -170,7 +170,7 @@ describe('el DUEÑO', () => {
     eligible.mockResolvedValue([{ id: 'u2' }]);
     const r = await invitar(req('/api/proyectos/7/miembros', json('POST', { idUsers: ['u2', 'u-sin-permiso'], role: 'reader' })), params());
     expect(r.status).toBe(409);
-    expect(eligible).toHaveBeenCalledWith(3, ['u2', 'u-sin-permiso']);
+    expect(eligible).toHaveBeenCalledWith(3, ['u2', 'u-sin-permiso'], 7);
     expect(createMembers).not.toHaveBeenCalled();
   });
 
