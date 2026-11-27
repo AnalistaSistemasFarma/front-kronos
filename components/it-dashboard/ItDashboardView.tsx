@@ -47,6 +47,16 @@ import { iconForAssetType } from './assetTypeIcons';
 
 const ALL = 'all';
 
+/** Short money value for the KPI card so it never overflows: «$ 263,1 M». */
+function formatMoneyShort(n: number): string {
+  const abs = Math.abs(n);
+  const fmt = (v: number, suffix: string) =>
+    `$ ${new Intl.NumberFormat('es-CO', { maximumFractionDigits: 1 }).format(v)} ${suffix}`;
+  if (abs >= 1e9) return fmt(n / 1e9, 'mil M');
+  if (abs >= 1e6) return fmt(n / 1e6, 'M');
+  return formatMoney(n);
+}
+
 /* ------------------------------------------------------------------ */
 /* Left panel: companies                                               */
 /* ------------------------------------------------------------------ */
@@ -124,33 +134,33 @@ function AssetTypeTile({
         aria-pressed={selected}
         aria-label={`${label}: ${item.total} activos`}
         style={{
-          display: 'block',
-          width: '100%',
+          display: 'inline-block',
           borderRadius: 'var(--mantine-radius-md)',
           cursor: empty ? 'default' : 'pointer',
         }}
       >
+        {/* Compact tile: its width follows the text inside (requested 2026-11-27). */}
         <Card
           radius='md'
-          padding='md'
+          px='sm'
+          py={8}
           withBorder
           style={{
             background: `color-mix(in srgb, ${color} ${empty ? 6 : 16}%, var(--mantine-color-body))`,
             borderColor: selected ? color : `color-mix(in srgb, ${color} 35%, transparent)`,
             borderWidth: selected ? 2 : 1,
             opacity: empty ? 0.7 : 1,
-            minHeight: 112,
           }}
         >
-          <Group justify='space-between' align='flex-start' wrap='nowrap'>
-            <Title order={2} style={{ color, lineHeight: 1.1, fontSize: 'clamp(1.5rem, 3vw, 2rem)' }}>
+          <Group gap='xs' wrap='nowrap'>
+            <Icon size={22} stroke={1.7} color={color} />
+            <Text fw={800} size='lg' style={{ color, lineHeight: 1 }}>
               {formatNumber(item.total)}
-            </Title>
-            <Icon size={34} stroke={1.6} color={color} />
+            </Text>
+            <Text size='sm' fw={600} style={{ color, whiteSpace: 'nowrap' }}>
+              {label}
+            </Text>
           </Group>
-          <Text size='sm' fw={600} mt='sm' style={{ color }} lineClamp={2}>
-            {label}
-          </Text>
         </Card>
       </UnstyledButton>
     </Tooltip>
@@ -359,8 +369,8 @@ export default function ItDashboardView() {
               />
               <KpiStatCard
                 label='Valor del inventario'
-                value={kpis ? formatMoney(kpis.totalCost) : '—'}
-                hint='Suma del costo registrado de cada equipo'
+                value={kpis ? formatMoneyShort(kpis.totalCost) : '—'}
+                hint={kpis ? `${formatMoney(kpis.totalCost)} · suma del costo de cada equipo` : ''}
                 color={projectColors.secondary}
                 icon={IconCoin}
                 loading={firstLoad}
@@ -377,18 +387,18 @@ export default function ItDashboardView() {
               description={`${companyName} · haga clic en un tipo para ver sus activos.`}
             >
               {firstLoad ? (
-                <SimpleGrid cols={{ base: 2, sm: 3, xl: 4 }} spacing='md'>
+                <Group gap='sm'>
                   {Array.from({ length: 8 }).map((_, i) => (
-                    <Skeleton key={i} height={112} radius='md' />
+                    <Skeleton key={i} height={40} width={150} radius='md' />
                   ))}
-                </SimpleGrid>
+                </Group>
               ) : (data?.types.length ?? 0) === 0 ? (
                 <Text c='dimmed' ta='center' py='md' size='sm'>
                   No hay tipos de activo registrados
                 </Text>
               ) : (
                 <Box pos='relative'>
-                  <SimpleGrid cols={{ base: 2, sm: 3, xl: 4 }} spacing='md'>
+                  <Group gap='sm' wrap='wrap'>
                     {data!.types.map((t) => (
                       <AssetTypeTile
                         key={t.id}
@@ -398,7 +408,7 @@ export default function ItDashboardView() {
                         onClick={() => setSelectedType(t.id)}
                       />
                     ))}
-                  </SimpleGrid>
+                  </Group>
                 </Box>
               )}
             </ActividadesSection>
