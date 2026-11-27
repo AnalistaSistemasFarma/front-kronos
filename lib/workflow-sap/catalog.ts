@@ -237,6 +237,20 @@ export const SAP_ACTIONS: SapActionDef[] = [
       { source: 'Estado del pedido', target: 'U_SEND_State = A', editable: false },
     ],
   },
+  // ── Sales · customer price lists (2026-11-27). Executor in lib/prices/service.ts ──
+  {
+    key: 'prices.apply',
+    label: 'Aplicar precios autorizados en SAP',
+    domain: 'Ventas · Listas de precios',
+    endpoint: 'PATCH Items(n) · ItemPrices  /  POST o PATCH SpecialPrices',
+    triggers: ['on_execute'],
+    taskKinds: ['sap_executor'],
+    resultingState: null,
+    mapping: [
+      { source: 'Precio nuevo (lista propia del cliente)', target: 'Items.ItemPrices[PriceList del cliente].Price', editable: false },
+      { source: 'Precio nuevo (lista compartida o sin asignar)', target: 'SpecialPrices(CardCode, ItemCode).Price', editable: false },
+    ],
+  },
 ];
 
 /** Acciones que se pueden configurar hoy en un tipo de tarea y disparador. */

@@ -7,6 +7,7 @@ import { closeRequestGeneral } from '../workflow/closeRequestGeneral.js';
 import { orionInternalTaskSql } from '../orion/internalTasks';
 import { getSapAction } from './catalog';
 import { createOrder, evaluateRules, moveToStage, reevaluateCredit, salesLinkOf } from '../sales/flow';
+import { applyPrices } from '../prices/service';
 import { processActions } from './config';
 import { finishStep, startStep, type TriggeredBy } from './executionLog';
 
@@ -167,6 +168,9 @@ async function runAction(
       if (link.status === 'reject_error') return { ok: false, error: 'No se pudo aplicar el rechazo en SAP.' };
       return { ok: false, wait: true, error: 'Esperando que se aplique el rechazo en SAP.' };
     }
+    // ── Sales · customer price list updates (lib/prices/service.ts) ──
+    case 'prices.apply':
+      return applyPrices(idRequest, triggeredBy);
     default:
       return { ok: false, error: `La acción ${actionKey} no tiene ejecutor automático.` };
   }
