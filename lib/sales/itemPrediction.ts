@@ -99,8 +99,8 @@ export function priceFactorAny(poPrice: number | null, refPrices: (number | null
 
 const refPricesOf = (h: HistoryInfo | undefined): (number | null)[] => (h ? (h.prices?.length ? h.prices : [h.lastPrice]) : []);
 
-/** Tolerance between the PO price and the reference price (gross vs net price, small list updates). */
-export const PRICE_TOLERANCE = 0.12;
+/** Tolerance between the PO price and the reference price (gross vs net, customer discounts of 12-14 % seen on Coopidrogas invoices). Pack factors are 2x apart or more, so this never confuses unit and box prices. */
+export const PRICE_TOLERANCE = 0.15;
 
 /**
  * Does the PO price match the reference unit price, directly (factor 1) or as a box price (factor = pack)?
