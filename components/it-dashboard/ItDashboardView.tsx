@@ -11,6 +11,7 @@ import {
   Flex,
   Grid,
   Group,
+  Modal,
   Paper,
   ScrollArea,
   SimpleGrid,
@@ -30,8 +31,11 @@ import {
   IconBuildingSkyscraper,
   IconCheck,
   IconCoin,
+  IconDeviceDesktop,
+  IconLicense,
   IconPackage,
   IconRefresh,
+  IconWorld,
 } from '@tabler/icons-react';
 import { buildPieChart } from '../../lib/charts/builders';
 import { formatTypeName, type CountedItem, type ItDashboardData } from '../../lib/it-dashboard/aggregate';
@@ -41,7 +45,8 @@ import DashboardPageShell from '../dashboard/DashboardPageShell';
 import { useDashboardChartPalette } from '../dashboard/useDashboardChartPalette';
 import { useProjectColors } from '../dashboard/useProjectColors';
 import AssetListModal from './AssetListModal';
-import InternetCard from './InternetCard';
+import InternetPanel from './InternetPanel';
+import SoftwareModal from './SoftwareModal';
 import { formatMoney, formatNumber } from './assetFormat';
 import { iconForAssetType } from './assetTypeIcons';
 
@@ -168,6 +173,61 @@ function AssetTypeTile({
 }
 
 /* ------------------------------------------------------------------ */
+/* Section buttons: Activos, Software, Proveedores                     */
+/* ------------------------------------------------------------------ */
+
+function SectionButton({
+  label,
+  hint,
+  color,
+  icon: Icon,
+  onClick,
+  loading,
+}: {
+  label: string;
+  hint: string;
+  color: string;
+  icon: typeof IconPackage;
+  onClick: () => void;
+  loading?: boolean;
+}) {
+  return (
+    <UnstyledButton
+      onClick={onClick}
+      aria-label={`Abrir ${label}`}
+      style={{ display: 'block', width: '100%', borderRadius: 'var(--mantine-radius-md)' }}
+    >
+      <Card
+        radius='md'
+        padding='lg'
+        withBorder
+        style={{
+          background: `color-mix(in srgb, ${color} 14%, var(--mantine-color-body))`,
+          borderColor: `color-mix(in srgb, ${color} 45%, transparent)`,
+          minHeight: 120,
+        }}
+      >
+        <Group justify='space-between' align='flex-start' wrap='nowrap'>
+          <Stack gap={4} style={{ minWidth: 0 }}>
+            <Title order={2} style={{ color, lineHeight: 1.1, fontSize: 'clamp(1.4rem, 2.6vw, 2rem)' }}>
+              {label}
+            </Title>
+            {loading ? (
+              <Skeleton height={12} width={120} mt={4} />
+            ) : (
+              <Text size='sm' c='dimmed'>
+                {hint}
+              </Text>
+            )}
+          </Stack>
+          <Icon size={36} stroke={1.6} color={color} />
+        </Group>
+      </Card>
+    </UnstyledButton>
+  );
+}
+
+/* ------------------------------------------------------------------ */
 /* Page                                                                */
 /* ------------------------------------------------------------------ */
 
@@ -183,6 +243,8 @@ export default function ItDashboardView() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [forbidden, setForbidden] = useState(false);
+  const [section, setSection] = useState<'assets' | 'software' | 'providers' | null>(null);
+  const [softwareCount, setSoftwareCount] = useState<number | null>(null);
 
   const filterQuery = useMemo(() => {
     const params = new URLSearchParams();
@@ -213,6 +275,24 @@ export default function ItDashboardView() {
   useEffect(() => {
     if (sessionStatus === 'authenticated') void load();
   }, [sessionStatus, load]);
+
+  const companyId = company === ALL || company === '0' ? null : Number(company);
+
+  const loadSoftwareCount = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/it-dashboard/software${companyId == null ? '' : `?company=${companyId}`}`, {
+        cache: 'no-store',
+      });
+      const json = await res.json().catch(() => ({}));
+      setSoftwareCount(res.ok ? ((json.items ?? []) as unknown[]).length : null);
+    } catch {
+      setSoftwareCount(null);
+    }
+  }, [companyId]);
+
+  useEffect(() => {
+    if (sessionStatus === 'authenticated') void loadSoftwareCount();
+  }, [sessionStatus, loadSoftwareCount]);
 
   const companyName =
     company === ALL
@@ -333,7 +413,7 @@ export default function ItDashboardView() {
         {/* Right: indicators and asset types */}
         <Grid.Col span={{ base: 12, md: 8, lg: 9 }}>
           <Stack gap='lg'>
-            <SimpleGrid cols={{ base: 1, xs: 2, lg: 3, xl: 5 }} spacing={{ base: 'sm', sm: 'md' }}>
+            <SimpleGrid cols={{ base: 1, xs: 2, xl: 4 }} spacing={{ base: 'sm', sm: 'md' }}>
               <KpiStatCard
                 label='Total de activos'
                 value={kpis ? formatNumber(kpis.total) : '—'}
@@ -375,12 +455,58 @@ export default function ItDashboardView() {
                 icon={IconCoin}
                 loading={firstLoad}
               />
-              <InternetCard
-                companyId={company === ALL || company === '0' ? null : Number(company)}
-                color={projectColors.primary}
-              />
             </SimpleGrid>
 
+            <SimpleGrid cols={{ base: 1, sm: 3 }} spacing='md'>
+              <SectionButton
+                label='Activos'
+                hint={kpis ? `${formatNumber(kpis.total)} activos · ${data?.types.filter((t) => t.total > 0).length ?? 0} tipos` : ''}
+                color={categoricalPalette[1 % categoricalPalette.length]}
+                icon={IconDeviceDesktop}
+                loading={firstLoad}
+                onClick={() => setSection('assets')}
+              />
+              <SectionButton
+                label='Software'
+                hint={softwareCount == null ? 'Licencias y certificados' : `${formatNumber(softwareCount)} registros · licencias y certificados`}
+                color={categoricalPalette[6 % categoricalPalette.length]}
+                icon={IconLicense}
+                onClick={() => setSection('software')}
+              />
+              <SectionButton
+                label='Proveedores'
+                hint='Internet y servicios contratados'
+                color={categoricalPalette[4 % categoricalPalette.length]}
+                icon={IconWorld}
+                onClick={() => setSection('providers')}
+              />
+            </SimpleGrid>
+          </Stack>
+        </Grid.Col>
+      </Grid>
+
+      {/* Activos: types and status of the selected company */}
+      <Modal
+        opened={section === 'assets'}
+        onClose={() => setSection(null)}
+        size='80rem'
+        radius='md'
+        centered
+        title={
+          <Group gap='sm' wrap='nowrap'>
+            <ThemeIcon variant='light' radius='md' size='lg'>
+              <IconDeviceDesktop size={20} />
+            </ThemeIcon>
+            <Stack gap={0}>
+              <Text fw={700}>Activos</Text>
+              <Text size='xs' c='dimmed'>
+                {companyName}
+              </Text>
+            </Stack>
+          </Group>
+        }
+      >
+        <Stack gap='lg'>
             <ActividadesSection
               priority={1}
               title='Activos por tipo'
@@ -426,9 +552,47 @@ export default function ItDashboardView() {
                 </Flex>
               )}
             </ChartCard>
-          </Stack>
-        </Grid.Col>
-      </Grid>
+        </Stack>
+      </Modal>
+
+      <SoftwareModal
+        opened={section === 'software'}
+        onClose={() => setSection(null)}
+        companyId={companyId}
+        companyName={companyName}
+        companies={(data?.companies ?? []).filter((c) => c.id !== 0).map((c) => ({ id: c.id, name: c.name }))}
+        onChanged={() => void loadSoftwareCount()}
+      />
+
+      {/* Proveedores: internet channel (more providers can be added here later) */}
+      <Modal
+        opened={section === 'providers'}
+        onClose={() => setSection(null)}
+        size='xl'
+        radius='md'
+        centered
+        title={
+          <Group gap='sm' wrap='nowrap'>
+            <ThemeIcon variant='light' radius='md' size='lg'>
+              <IconWorld size={20} />
+            </ThemeIcon>
+            <Stack gap={0}>
+              <Text fw={700}>Proveedores</Text>
+              <Text size='xs' c='dimmed'>
+                {companyName}
+              </Text>
+            </Stack>
+          </Group>
+        }
+      >
+        <Stack gap='sm'>
+          <Group gap='xs'>
+            <IconWorld size={18} />
+            <Title order={5}>Internet</Title>
+          </Group>
+          {section === 'providers' ? <InternetPanel companyId={companyId} /> : null}
+        </Stack>
+      </Modal>
 
       <AssetListModal
         opened={selectedType != null && selectedTypeItem != null}

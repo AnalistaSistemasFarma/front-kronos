@@ -112,6 +112,7 @@ export default function AssetListModal({
         onClose={onClose}
         size='90rem'
         radius='md'
+        zIndex={300}
         centered
         title={
           <Stack gap={0}>
