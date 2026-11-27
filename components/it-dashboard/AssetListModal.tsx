@@ -19,6 +19,8 @@ import { IconAlertCircle, IconFilterOff, IconSearch } from '@tabler/icons-react'
 import type { ItAssetListItem } from '../../lib/it-dashboard/db';
 import {
   EMPTY_COLUMN_FILTERS,
+  MONTH_OPTIONS,
+  purchaseYearOptions,
   columnOptions,
   filterAssetRows,
   hasActiveFilters,
@@ -81,6 +83,7 @@ export default function AssetListModal({
   const filtered = useMemo(() => filterAssetRows(rows, filters), [rows, filters]);
   const categoryOptions = useMemo(() => columnOptions(rows, 'subtype'), [rows]);
   const statusOptions = useMemo(() => columnOptions(rows, 'status'), [rows]);
+  const yearOptions = useMemo(() => purchaseYearOptions(rows), [rows]);
   const filtering = hasActiveFilters(filters);
 
   const set = (key: keyof AssetColumnFilters) => (value: string | null) =>
@@ -148,7 +151,7 @@ export default function AssetListModal({
               </Group>
             ) : null}
             <ScrollArea.Autosize mah='65vh' type='auto'>
-              <Table striped highlightOnHover withTableBorder stickyHeader miw={1100}>
+              <Table striped highlightOnHover withTableBorder stickyHeader miw={1200}>
                 <Table.Thead>
                   <Table.Tr>
                     <Table.Th>Nombre</Table.Th>
@@ -193,7 +196,34 @@ export default function AssetListModal({
                         comboboxProps={{ zIndex: 500, withinPortal: true }}
                       />
                     </Table.Th>
-                    <Table.Th />
+                    <Table.Th>
+                      {/* Purchase date filter: year + month (requested 2026-11-27). */}
+                      <Group gap={4} wrap='nowrap'>
+                        <Select
+                          size='xs'
+                          placeholder='Año'
+                          aria-label='Filtrar por año de compra'
+                          data={yearOptions}
+                          value={filters.purchaseYear || null}
+                          onChange={set('purchaseYear')}
+                          clearable
+                          w={92}
+                          comboboxProps={{ zIndex: 500, withinPortal: true }}
+                        />
+                        <Select
+                          size='xs'
+                          placeholder='Mes'
+                          aria-label='Filtrar por mes de compra'
+                          data={MONTH_OPTIONS}
+                          value={filters.purchaseMonth || null}
+                          onChange={set('purchaseMonth')}
+                          clearable
+                          disabled={filters.purchaseYear === '__empty__'}
+                          w={118}
+                          comboboxProps={{ zIndex: 500, withinPortal: true }}
+                        />
+                      </Group>
+                    </Table.Th>
                   </Table.Tr>
                 </Table.Thead>
                 <Table.Tbody>
