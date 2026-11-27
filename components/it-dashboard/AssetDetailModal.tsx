@@ -7,6 +7,8 @@ import type { ItAssetListItem } from '../../lib/it-dashboard/db';
 import { isServerType } from '../../lib/it-dashboard/server';
 import ServerPanel from './ServerPanel';
 import AssetPhoto from './AssetPhoto';
+import DvrCamerasPanel from './DvrCamerasPanel';
+import { isDvrType } from '../../lib/it-dashboard/cameras';
 import { formatDate, formatMoney, isHttpUrl, statusColor, text } from './assetFormat';
 import { iconForAssetType } from './assetTypeIcons';
 
@@ -63,12 +65,13 @@ export default function AssetDetailModal({
   const TypeIcon = iconForAssetType(asset?.type ?? '');
   const cost = asset?.cost == null ? null : Number(asset.cost);
   const isServer = isServerType(asset?.type);
+  const isDvr = isDvrType(asset?.type);
 
   return (
     <Modal
       opened={asset != null}
       onClose={onClose}
-      size={isServer ? '80rem' : 'xl'}
+      size={isServer ? '80rem' : isDvr ? '60rem' : 'xl'}
       radius='md'
       zIndex={400}
       centered
@@ -146,6 +149,9 @@ export default function AssetDetailModal({
             <Field label='Sistema operativo'>{text(asset.os)}</Field>
             <Field label='SIM'>{text(asset.sim)}</Field>
           </Section>
+
+          {/* Cameras registered in the DVR (requested 2026-11-27). */}
+          {isDvr ? <DvrCamerasPanel dvrId={asset.id} /> : null}
         </Stack>
         </Grid.Col>
         {isServer ? (
