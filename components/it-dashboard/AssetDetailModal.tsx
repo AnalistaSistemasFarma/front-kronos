@@ -1,9 +1,11 @@
 'use client';
 
 import type { ReactNode } from 'react';
-import { Anchor, Badge, Divider, Group, Modal, SimpleGrid, Stack, Text, ThemeIcon, Title } from '@mantine/core';
+import { Anchor, Badge, Divider, Grid, Group, Modal, SimpleGrid, Stack, Text, ThemeIcon, Title } from '@mantine/core';
 import { IconCpu, IconFileInvoice, IconUser } from '@tabler/icons-react';
 import type { ItAssetListItem } from '../../lib/it-dashboard/db';
+import { isServerType } from '../../lib/it-dashboard/server';
+import ServerPanel from './ServerPanel';
 import { formatDate, formatMoney, isHttpUrl, statusColor, text } from './assetFormat';
 import { iconForAssetType } from './assetTypeIcons';
 
@@ -59,12 +61,13 @@ export default function AssetDetailModal({
 }) {
   const TypeIcon = iconForAssetType(asset?.type ?? '');
   const cost = asset?.cost == null ? null : Number(asset.cost);
+  const isServer = isServerType(asset?.type);
 
   return (
     <Modal
       opened={asset != null}
       onClose={onClose}
-      size='xl'
+      size={isServer ? '80rem' : 'xl'}
       radius='md'
       zIndex={400}
       centered
@@ -87,6 +90,8 @@ export default function AssetDetailModal({
       }
     >
       {asset ? (
+        <Grid gutter='lg' align='stretch'>
+        <Grid.Col span={{ base: 12, md: isServer ? 7 : 12 }}>
         <Stack gap='lg'>
           <Group gap='xs'>
             <Badge variant='light' color={statusColor(asset.status)}>
@@ -137,6 +142,13 @@ export default function AssetDetailModal({
             <Field label='SIM'>{text(asset.sim)}</Field>
           </Section>
         </Stack>
+        </Grid.Col>
+        {isServer ? (
+          <Grid.Col span={{ base: 12, md: 5 }}>
+            <ServerPanel asset={asset} />
+          </Grid.Col>
+        ) : null}
+        </Grid>
       ) : null}
     </Modal>
   );

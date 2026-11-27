@@ -41,6 +41,7 @@ import DashboardPageShell from '../dashboard/DashboardPageShell';
 import { useDashboardChartPalette } from '../dashboard/useDashboardChartPalette';
 import { useProjectColors } from '../dashboard/useProjectColors';
 import AssetListModal from './AssetListModal';
+import InternetCard from './InternetCard';
 import { formatMoney, formatNumber } from './assetFormat';
 import { iconForAssetType } from './assetTypeIcons';
 
@@ -322,7 +323,7 @@ export default function ItDashboardView() {
         {/* Right: indicators and asset types */}
         <Grid.Col span={{ base: 12, md: 8, lg: 9 }}>
           <Stack gap='lg'>
-            <SimpleGrid cols={{ base: 1, xs: 2, xl: 4 }} spacing={{ base: 'sm', sm: 'md' }}>
+            <SimpleGrid cols={{ base: 1, xs: 2, lg: 3, xl: 5 }} spacing={{ base: 'sm', sm: 'md' }}>
               <KpiStatCard
                 label='Total de activos'
                 value={kpis ? formatNumber(kpis.total) : '—'}
@@ -363,6 +364,10 @@ export default function ItDashboardView() {
                 color={projectColors.secondary}
                 icon={IconCoin}
                 loading={firstLoad}
+              />
+              <InternetCard
+                companyId={company === ALL || company === '0' ? null : Number(company)}
+                color={projectColors.primary}
               />
             </SimpleGrid>
 
