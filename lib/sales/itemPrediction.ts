@@ -191,24 +191,29 @@ export function rankLine(
     const descSim = desc ? Math.max(similarity(desc, it.ItemName), h ? similarity(desc, h.ItemName) : 0) : 0;
     if (descSim > 0) raw += W.desc * descSim;
     const strong = isExact || isBarcode || isCatalog;
-    // Description model: only for candidates found by description (no strong key, not bought by the customer).
+    // Description model: candidates found by description, and the customer's own history (ingredient and strength
+    // only, so that what the customer already buys stays ahead of a best seller found by description).
     const byDescription = !strong && !h && signals.clientRef !== code;
     let dm: DescriptionMatch | undefined;
     let sold = 0;
     let salesFactor: number | null = null;
-    if (byDescription && po?.ingredients.length) {
+    if (!strong && signals.clientRef !== code && po?.ingredients.length) {
       dm = matchDescription(po, it.ItemName, it.ItemCode);
-      if (!dm.ingredientOk) continue; // the active ingredient is required
-      raw += WD.ingredient * dm.ingredientShare;
-      if (dm.strengthOk) { raw += WD.strength; reasons.push('Coincide principio activo y concentración'); }
-      else { reasons.push('Coincide principio activo'); if (dm.strengthClash) { raw += WD.strengthClash; reasons.push('Concentración distinta'); } }
-      if (dm.formOk) raw += WD.form;
-      if (dm.exportVariant) { raw += WD.exportVariant; reasons.push('Variante de exportación'); }
-      if (it.rawMaterial) { raw += WD.rawMaterial; reasons.push('Materia prima o insumo'); }
-      if (it.stock != null && it.stock <= 0) { raw += WD.noStock; reasons.push('Sin existencias'); }
+      if (byDescription && !dm.ingredientOk) continue; // the active ingredient is required
+      if (dm.ingredientOk) {
+        raw += WD.ingredient * dm.ingredientShare;
+        if (dm.strengthOk) { raw += WD.strength; reasons.push('Coincide principio activo y concentración'); }
+        else { reasons.push('Coincide principio activo'); if (dm.strengthClash) { raw += WD.strengthClash; reasons.push('Concentración distinta'); } }
+        if (dm.formOk) raw += WD.form;
+      }
+      if (byDescription) {
+        if (dm.exportVariant) { raw += WD.exportVariant; reasons.push('Variante de exportación'); }
+        if (it.rawMaterial) { raw += WD.rawMaterial; reasons.push('Materia prima o insumo'); }
+        if (it.stock != null && it.stock <= 0) { raw += WD.noStock; reasons.push('Sin existencias'); }
+      }
       const s = sales.get(code);
       sold = s?.docs ?? 0;
-      if (s && sold > 0) {
+      if (byDescription && s && sold > 0) {
         const pd = priceDistance(line.UnitPrice, s.prices, it.pack);
         if (pd && pd.diff <= PRICE_TOLERANCE) { raw += WD.priceClose; reasons.push('Precio cercano'); salesFactor = pd.factor; }
         else if (pd && pd.diff <= 0.35) { raw += WD.priceNear; reasons.push('Precio parecido'); salesFactor = pd.factor; }
@@ -271,7 +276,7 @@ export function rankLine(
   const uniqueStrong = top.strong && (strongActive.length === 1 || (top.inHistory && strongActive.filter((c) => c.inHistory).length === 1));
   const strictHistory = top.inHistory && top.descSim >= HISTORY_STRICT_SIM && top.priceOk && (!second || top.raw - second.raw >= 0.25);
   if (signals.exact === top.ItemCode || ((uniqueStrong || strictHistory) && !replaced.length)) confidence = 'alta';
-  else if (top.dm) {
+  else if (top.dm && !top.inHistory) {
     // Found by description only: at most «media», and only with ingredient + strength + market evidence and a clear lead.
     const evidence = top.sold > 0 || top.reason.includes('Precio cercano');
     const clean = top.dm.strengthOk && !top.dm.exportVariant && !items.get(top.ItemCode)?.rawMaterial;

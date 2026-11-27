@@ -152,6 +152,20 @@ describe('item prediction: Farmalogica PO 11619', () => {
     expect(salesQ).toContain("Invoices/DocDate ge '2026-05-27'");
   });
 
+  it('what the customer already buys stays ahead of the company best seller found by description', async () => {
+    const { rankLine } = await import('./itemPrediction');
+    const { toItemInfo } = await import('./itemResolver');
+    const items = new Map(ITEMS.map((x) => [x.ItemCode, toItemInfo(x, new Set([151]))]));
+    const master = ITEMS.filter((x) => x.Frozen === 'tNO' && x.SalesItem === 'tYES' && x.ItemName.includes('CEFAZOLINA')).map((x) => x.ItemCode);
+    const history = new Map([['PTCZ0111', { ItemCode: 'PTCZ0111', ItemName: 'CEFAZOLINA 1g (10 UNID. X PLEGADIZA)', lastDate: '2026-10-09', lastPrice: 1450, times: 1, source: 'pedido' as const }]]);
+    const sales = new Map([['PTCZ0121', { docs: 40, prices: [1500], lastDate: '2026-11-20' }], ['PTZB0110A', { docs: 2, prices: [1450], lastDate: '2026-10-01' }]]);
+    const p = rankLine({ ItemDescription: 'CEFAZOLINA 1G POLVO PARA SOLUCION INYECTABLE VIAL', Quantity: 6000, UnitPrice: 1450 }, { barcode: [], catalog: [], master }, items, history, sales);
+    expect(p.candidates[0].ItemCode).toBe('PTCZ0111');
+    expect(p.candidates[0].reason).toMatch(/Pedido anterior del cliente 2026-10-09 · Coincide principio activo y concentración/);
+    expect(p.candidates[1].ItemCode).toBe('PTCZ0121');
+    expect(p.confidence).toBe('media');
+  });
+
   it('without any sales or price evidence the description still yields top-3 with confidence Baja', async () => {
     const { rankLine } = await import('./itemPrediction');
     const { toItemInfo } = await import('./itemResolver');
