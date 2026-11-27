@@ -253,7 +253,7 @@ export function alertBody(input: { kind: SgcAlertKind; offsetDays: number; code:
       ? `vence en ${input.offsetDays} día${input.offsetDays === 1 ? '' : 's'} (${input.dueDate})`
       : input.kind === 'vencimiento'
         ? `vence hoy (${input.dueDate})`
-        : `está vencido desde el ${input.dueDate} (${input.offsetDays} días); sigue vigente y queda vencido — en revisión`;
+        : `está vencido desde el ${input.dueDate} (${input.offsetDays} días); sigue vigente y queda «vencido — en revisión»`;
   const next = input.openRequestId ? ` Ya tiene la solicitud #${input.openRequestId} en curso.` : ' Inicie la solicitud de nueva versión o confirme su revisión.';
   return `${doc}: la revisión ${when}.${next}`.slice(0, 300);
 }

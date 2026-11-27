@@ -31,4 +31,4 @@ export function sgcViewerError(status: number | null, apiMessage: string | null 
 
 /** Texto del aviso de la protección del visor (ventana inactiva): no es un problema de permisos. */
 export const SGC_VIEWER_VEIL_TEXT =
-  'Protección del visor: el documento se oculta mientras esta ventana no está activa (por ejemplo, al compartir pantalla en Teams o al cambiar de programa). No es un problema de permisos: vuelva a esta ventana o use Mostrar el documento.';
+  'Protección del visor: el documento se oculta mientras esta ventana no está activa (por ejemplo, al compartir pantalla en Teams o al cambiar de programa). No es un problema de permisos: vuelva a esta ventana o use «Mostrar el documento».';

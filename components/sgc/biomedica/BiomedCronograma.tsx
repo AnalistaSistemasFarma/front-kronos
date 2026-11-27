@@ -53,7 +53,7 @@ export default function BiomedCronograma({ idCompany }: { idCompany: number }) {
       {!r.data && !r.error && <Loader />}
       {r.data && items.length === 0 && (
         <Alert color='blue' variant='light'>
-          Ningún equipo tiene periodicidad de mantenimiento. Escríbala en la hoja de vida de cada equipo (Mantenimiento preventivo cada (meses)).
+          Ningún equipo tiene periodicidad de mantenimiento. Escríbala en la hoja de vida de cada equipo («Mantenimiento preventivo cada (meses)»).
         </Alert>
       )}
       {vencidos.length > 0 && (

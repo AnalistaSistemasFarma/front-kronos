@@ -39,7 +39,7 @@ if (!from || !out) {
   process.exit(2);
 }
 if (restoreTo && !/^SGC-RESTAURACION-PRUEBA\//.test(restoreTo) && !process.argv.includes('--confirmo-restaurar-en-otra-carpeta')) {
-  console.error('Por seguridad, la prueba de restauración solo escribe bajo SGC-RESTAURACION-PRUEBA/....');
+  console.error('Por seguridad, la prueba de restauración solo escribe bajo «SGC-RESTAURACION-PRUEBA/...».');
   process.exit(2);
 }
 

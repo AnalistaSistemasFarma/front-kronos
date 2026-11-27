@@ -497,7 +497,7 @@ export async function runReviewAlerts(
             entity: 'document',
             entityId: doc.id_document,
             after: { key: it.key, quality: resp.quality },
-            detail: `${doc.code} V${version.version_number} ${it.kind === 'vencimiento' ? 'vence hoy' : `lleva ${it.offsetDays} días vencido`}: sigue vigente, marcado vencido — en revisión y escalado a Calidad (${resp.quality.join(', ') || 'sin personas con permiso de Calidad'}).`.slice(0, 1000),
+            detail: `${doc.code} V${version.version_number} ${it.kind === 'vencimiento' ? 'vence hoy' : `lleva ${it.offsetDays} días vencido`}: sigue vigente, marcado «vencido — en revisión» y escalado a Calidad (${resp.quality.join(', ') || 'sin personas con permiso de Calidad'}).`.slice(0, 1000),
           });
         }
       });
@@ -548,7 +548,7 @@ export async function runReadingReminders(db: SgcDb, notifier: SgcNotifier, opts
         await tx.sgcInteraction.create({ data: { id_request: idRequest, id_task: g.idTask, kind: 'estado', author_email: SYSTEM_ACTOR, body: `Recordatorio automático de lectura (cada ${every} días) a ${g.emails.length} persona(s): ${g.emails.join(', ')}.`.slice(0, 8000) } });
         await writeSgcAudit(tx, { idCompany, actorEmail: SYSTEM_ACTOR, action: SGC_AUDIT_ACTIONS.lecturaRecordatorioAutomatico, entity: 'task', entityId: g.idTask, after: { idRequest, emails: g.emails, everyDays: every }, detail: `Recordatorio automático de lectura a ${g.emails.join(', ')} por campana/push.`.slice(0, 1000) });
       });
-      await notifier([{ emails: g.emails, payload: { title: SGC_NOTIFICATION_TITLES.lecturaRecordatorio, body: `#${idRequest} · Tiene pendiente leer y firmar Leído — ${g.subject}`.slice(0, 300), url: taskUrl(g.idTask), tag: `sgc-task-${g.idTask}` } }]).catch((e) => console.error('[sgc/notificaciones]', e));
+      await notifier([{ emails: g.emails, payload: { title: SGC_NOTIFICATION_TITLES.lecturaRecordatorio, body: `#${idRequest} · Tiene pendiente leer y firmar «Leído» — ${g.subject}`.slice(0, 300), url: taskUrl(g.idTask), tag: `sgc-task-${g.idTask}` } }]).catch((e) => console.error('[sgc/notificaciones]', e));
       total += g.emails.length;
     }
   }

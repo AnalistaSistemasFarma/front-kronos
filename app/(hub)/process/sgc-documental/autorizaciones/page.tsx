@@ -87,7 +87,7 @@ function TypesAdmin({ company }: { company: SgcCompanyAccess }) {
         </Alert>
       )}
       <Text size='sm' c='dimmed'>
-        Tipos de Autorización SGC y el GRUPO de cada tipo (quién puede tomar una autorización de grupo). Tablas propias del SGC; no se usa el tipo Autorización de documento de SynerLink general. Cada
+        Tipos de Autorización SGC y el GRUPO de cada tipo (quién puede tomar una autorización de grupo). Tablas propias del SGC; no se usa el tipo «Autorización de documento» de SynerLink general. Cada
         cambio pide motivo y queda en el registro de cambios.
       </Text>
       {(types.data?.types ?? []).map((t) => (

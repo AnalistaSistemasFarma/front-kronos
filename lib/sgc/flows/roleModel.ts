@@ -75,13 +75,13 @@ function departmentsLabel(ctx: SgcDepartmentContext): string {
  */
 export function departmentSignerDenial(email: string, kind: SgcSignerStepKind, stepName: string, ctx: SgcDepartmentContext): string | null {
   if (ctx.elaboratorDepartments.size === 0) {
-    return `Quien elabora no tiene departamento asignado en SynerLink: sin él no se pueden asignar firmantes de ${stepName}. Pídale a TI que le asigne su departamento (R40).`;
+    return `Quien elabora no tiene departamento asignado en SynerLink: sin él no se pueden asignar firmantes de «${stepName}». Pídale a TI que le asigne su departamento (R40).`;
   }
   if (sharesDepartment(email, ctx)) return null;
   if (kind === 'revision' && ctx.quality.has(low(email))) return null;
   return kind === 'revision'
     ? `${email} no es del departamento de quien elabora (${departmentsLabel(ctx)}) ni de Aseguramiento de Calidad: no puede revisar este documento.`
-    : `${email} no es del departamento de quien elabora (${departmentsLabel(ctx)}): no puede quedar en ${stepName}.`;
+    : `${email} no es del departamento de quien elabora (${departmentsLabel(ctx)}): no puede quedar en «${stepName}».`;
 }
 
 /** Personas que la pantalla OFRECE en cada paso (filtradas por departamento). */
@@ -128,10 +128,10 @@ export function departmentLeaderDenial(
 ): string | null {
   const rows = list.filter((r) => r.id_department !== null && elaboratorDepartments.has(r.id_department));
   const label = [...elaboratorDepartments].map((d) => names?.get(d) ?? `#${d}`).join(', ') || 'sin departamento';
-  if (rows.length === 0) return `El departamento de quien elabora (${label}) no tiene líderes aprobadores cargados: Aseguramiento de Calidad debe registrarlos en Configuración → Aprobadores autorizados antes de asignar ${stepName}.`;
+  if (rows.length === 0) return `El departamento de quien elabora (${label}) no tiene líderes aprobadores cargados: Aseguramiento de Calidad debe registrarlos en Configuración → Aprobadores autorizados antes de asignar «${stepName}».`;
   const bad = emails.map(low).filter((e) => !rows.some((r) => low(r.user_email) === e && activeOn(r, bogotaDayMs)));
   if (bad.length === 0) return null;
-  return `${bad.join(', ')} no ${bad.length === 1 ? 'es líder aprobador vigente' : 'son líderes aprobadores vigentes'} del departamento de quien elabora (${label}): no ${bad.length === 1 ? 'puede' : 'pueden'} quedar en ${stepName}.`;
+  return `${bad.join(', ')} no ${bad.length === 1 ? 'es líder aprobador vigente' : 'son líderes aprobadores vigentes'} del departamento de quien elabora (${label}): no ${bad.length === 1 ? 'puede' : 'pueden'} quedar en «${stepName}».`;
 }
 
 /**

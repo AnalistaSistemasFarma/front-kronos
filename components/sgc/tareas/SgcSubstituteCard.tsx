@@ -75,7 +75,7 @@ export default function SgcSubstituteCard({ tasks, substitutions, canSubstitute,
       {canSubstitute && (
         <Stack gap='xs' mb='md'>
           <Text size='sm' c='dimmed'>
-            Si quien debe firmar está ausente, asigne un sustituto para su firma pendiente. El sustituto cumple las mismas reglas (y, en aprobación, debe ser aprobador autorizado). Su firma quedará en sustitución de el titular.
+            Si quien debe firmar está ausente, asigne un sustituto para su firma pendiente. El sustituto cumple las mismas reglas (y, en aprobación, debe ser aprobador autorizado). Su firma quedará «en sustitución de» el titular.
           </Text>
           {slots.length === 0 ? (
             <Text size='sm' c='dimmed'>

@@ -573,7 +573,7 @@ export default function SgcRequestView({ mode, id }: SgcRequestViewProps) {
                       )}
                       {myAction?.kind === 'leer' && (
                         <Alert color='blue' icon={<IconLock size={16} />} mb='md'>
-                          Esta es una lectura obligatoria: lea el documento arriba hasta el final y use Leído.
+                          Esta es una lectura obligatoria: lea el documento arriba hasta el final y use «Leído».
                         </Alert>
                       )}
                       <Group justify='space-between'>
@@ -791,7 +791,7 @@ export default function SgcRequestView({ mode, id }: SgcRequestViewProps) {
                 ? { required: true, summary: `Del alcance: ${data.training.upload.summary.failed} reprobaron y ${data.training.upload.summary.missing.length} no tienen resultado.` }
                 : null
             }
-            submitLabel={myAction.kind === 'enviar' ? 'Firmar y enviar a revisión' : myAction.signatureMeaning === 'capacito' ? 'Firmar Capacitó y cerrar' : undefined}
+            submitLabel={myAction.kind === 'enviar' ? 'Firmar y enviar a revisión' : myAction.signatureMeaning === 'capacito' ? 'Firmar «Capacitó» y cerrar' : undefined}
             onSign={async (payload) => {
               const res = await sgcSend<{ controlledPdf?: { status: string | null; error?: string }; published?: { code: string; versionNumber: number; obsolete: { versionNumber: number } | null } | null }>(`/api/sgc/tasks/${focus.id}/sign`, 'POST', { ...payload, comment: payload.comment || resolution, idAssignee: myAction.idAssignee }).catch((e: unknown) => {
                 // S14 (R29): si lo firmado cambió (otra persona cargó otros resultados o un borrador nuevo), se recarga

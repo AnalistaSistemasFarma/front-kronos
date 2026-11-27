@@ -200,7 +200,7 @@ export default function SgcDocumentLayoutModal({ opened, onClose, layout, onSave
               )}
               {usedSuggestions && (
                 <Alert color='blue' variant='light' mb={narrow ? 'xs' : 'md'} p={narrow ? 'xs' : undefined} styles={narrow ? { message: { fontSize: 'var(--mantine-font-size-xs)' } } : undefined} data-testid='sgc-ubicar-sugeridas'>
-                  Las firmas sin ubicar se pusieron en los recuadros Firma del encabezado institucional. Puede moverlas o redimensionarlas; se guardan al presionar Guardar ubicaciones.
+                  Las firmas sin ubicar se pusieron en los recuadros «Firma» del encabezado institucional. Puede moverlas o redimensionarlas; se guardan al presionar «Guardar ubicaciones».
                 </Alert>
               )}
               <Box

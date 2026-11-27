@@ -196,17 +196,17 @@ export function normalizeTemplateFields(detected: readonly SgcGeneratorField[], 
     if (!item || typeof item !== 'object') continue;
     const r = item as Record<string, unknown>;
     const key = typeof r.key === 'string' ? r.key : '';
-    if (!detected.some((d) => d.key === key)) throw new SgcError(`El campo ${key || '(sin clave)'} no existe en el contenido de la plantilla.`);
+    if (!detected.some((d) => d.key === key)) throw new SgcError(`El campo «${key || '(sin clave)'}» no existe en el contenido de la plantilla.`);
     byKey.set(key, r);
   }
   return detected.map((d) => {
     const r = byKey.get(d.key);
     if (!r) return { ...d };
     const type = r.type === undefined ? d.type : (SGC_GENERATOR_FIELD_TYPES as readonly string[]).includes(String(r.type)) ? (r.type as SgcGeneratorFieldType) : null;
-    if (!type) throw new SgcError(`Tipo inválido para el campo ${d.label}.`);
+    if (!type) throw new SgcError(`Tipo inválido para el campo «${d.label}».`);
     const cap = SGC_GENERATOR_MAX_LENGTH[type];
     const maxLength = r.maxLength === undefined || r.maxLength === null || r.maxLength === '' ? cap : Number(r.maxLength);
-    if (!Number.isInteger(maxLength) || maxLength < 1 || maxLength > cap) throw new SgcError(`El largo máximo del campo ${d.label} debe estar entre 1 y ${cap}.`);
+    if (!Number.isInteger(maxLength) || maxLength < 1 || maxLength > cap) throw new SgcError(`El largo máximo del campo «${d.label}» debe estar entre 1 y ${cap}.`);
     const help = typeof r.help === 'string' && r.help.trim() ? r.help.trim().slice(0, 300) : null;
     return { key: d.key, label: d.label, type, required: r.required === undefined ? true : r.required === true, maxLength, help };
   });
@@ -244,22 +244,22 @@ export function validateGeneratorValues(fields: readonly SgcGeneratorField[], ra
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new SgcError('Envíe los valores de los campos de la plantilla.');
   const input = raw as Record<string, unknown>;
   for (const key of Object.keys(input)) {
-    if (!fields.some((f) => f.key === key)) throw new SgcError(`${key} no es un campo editable de esta plantilla: solo se modifican los campos que permitió Calidad.`);
+    if (!fields.some((f) => f.key === key)) throw new SgcError(`«${key}» no es un campo editable de esta plantilla: solo se modifican los campos que permitió Calidad.`);
   }
   const out: Record<string, string> = {};
   for (const f of fields) {
     const value = input[f.key];
-    if (value !== undefined && value !== null && typeof value !== 'string' && typeof value !== 'number') throw new SgcError(`Valor inválido en ${f.label}.`);
+    if (value !== undefined && value !== null && typeof value !== 'string' && typeof value !== 'number') throw new SgcError(`Valor inválido en «${f.label}».`);
     let v = String(value ?? '').replace(CONTROL, '').replace(/\r\n?/g, '\n');
     v = f.type === 'parrafo' ? v.trim() : v.replace(/\s+/g, ' ').trim();
     if (!v) {
-      if (f.required) throw new SgcError(`Complete el campo ${f.label}.`);
+      if (f.required) throw new SgcError(`Complete el campo «${f.label}».`);
       out[f.key] = '';
       continue;
     }
-    if (v.length > f.maxLength) throw new SgcError(`${f.label} admite máximo ${f.maxLength} caracteres.`);
-    if (f.type === 'fecha' && !isValidDate(v)) throw new SgcError(`${f.label} debe ser una fecha válida (AAAA-MM-DD).`);
-    if (f.type === 'numero' && !/^-?\d{1,20}$/.test(v) && !/^-?\d{1,20}[.,]\d{1,8}$/.test(v)) throw new SgcError(`${f.label} debe ser un número.`);
+    if (v.length > f.maxLength) throw new SgcError(`«${f.label}» admite máximo ${f.maxLength} caracteres.`);
+    if (f.type === 'fecha' && !isValidDate(v)) throw new SgcError(`«${f.label}» debe ser una fecha válida (AAAA-MM-DD).`);
+    if (f.type === 'numero' && !/^-?\d{1,20}$/.test(v) && !/^-?\d{1,20}[.,]\d{1,8}$/.test(v)) throw new SgcError(`«${f.label}» debe ser un número.`);
     out[f.key] = v;
   }
   return out;
@@ -324,7 +324,7 @@ export function templateStateMessage(state: SgcTemplateState): string {
 }
 
 /** S19 (R34): por qué un documento codificado no puede ser origen del Generador. */
-export const SGC_GENERATOR_CODED_MESSAGE = 'El Generador es solo para documentos sin codificación: el tipo documental del origen no está marcado como plantilla guía. Los documentos codificados van por solicitud.';
+export const SGC_GENERATOR_CODED_MESSAGE = 'El Generador es solo para documentos sin codificación: el tipo documental del origen no está marcado como «plantilla guía». Los documentos codificados van por solicitud.';
 
 /** S19 (R34): texto que reemplaza al código documental en lo que se genera. */
 export const SGC_GENERATOR_NO_CODE = 'Sin codificación';

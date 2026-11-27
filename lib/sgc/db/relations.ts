@@ -81,7 +81,7 @@ export async function getParentOptions(db: SgcDb, accessByCompany: readonly SgcC
 }
 
 export const SGC_PARENT_VIA = ['arrastre', 'boton'] as const;
-const VIA_LABEL: Record<(typeof SGC_PARENT_VIA)[number], string> = { arrastre: 'arrastre en el mapa', boton: 'Relacionar con padre' };
+const VIA_LABEL: Record<(typeof SGC_PARENT_VIA)[number], string> = { arrastre: 'arrastre en el mapa', boton: '«Relacionar con padre»' };
 
 /**
  * «RELACIONAR CON PADRE» (arrastrar un hijo sobre su padre en el mapa o el
@@ -387,7 +387,7 @@ export async function proposeDocumentRelations(db: SgcDb, access: SgcCompanyAcce
       entity: 'document_relation',
       entityId: null,
       after: { proposals: proposals.length, listado: proposals.filter((p) => p.origin === 'listado').length, codigo: proposals.filter((p) => p.origin === 'codigo').length },
-      detail: `Relacionar documentos: ${proposals.length} relación(es) propuesta(s) por el código y el listado maestro, pendientes de confirmar.`,
+      detail: `«Relacionar documentos»: ${proposals.length} relación(es) propuesta(s) por el código y el listado maestro, pendientes de confirmar.`,
       ip: actor.ip,
       userAgent: actor.userAgent,
     });

@@ -153,7 +153,7 @@ async function addReaders(tx: Tx, request: { id_request: number }, idTask: numbe
 function pushReaderNotifications(out: SgcNotification[], emails: readonly string[], request: { id_request: number; subject: string }, idTask: number, actorEmail: string) {
   const people = recipients(emails, actorEmail);
   if (people.length) {
-    out.push({ emails: people, payload: { title: SGC_NOTIFICATION_TITLES.lecturaAsignada, body: `#${request.id_request} · Lea el documento hasta el final y firme Leído — ${request.subject}`.slice(0, 300), url: taskUrl(idTask), tag: `sgc-task-${idTask}` } });
+    out.push({ emails: people, payload: { title: SGC_NOTIFICATION_TITLES.lecturaAsignada, body: `#${request.id_request} · Lea el documento hasta el final y firme «Leído» — ${request.subject}`.slice(0, 300), url: taskUrl(idTask), tag: `sgc-task-${idTask}` } });
   }
 }
 
@@ -368,7 +368,7 @@ export async function sendReadingReminders(db: SgcDb, notifier: SgcNotifier, acc
     await tx.sgcInteraction.create({ data: { id_request: idRequest, id_task: openDissemination.id_task, kind: 'estado', author_email: lower(actor.email), body: `Envió recordatorio de lectura a ${emails.length} persona(s): ${emails.join(', ')}.`.slice(0, 8000) } });
     await writeSgcAudit(tx, { idCompany: request.id_company, actorEmail: actor.email, action: SGC_AUDIT_ACTIONS.divulgacionRecordatorio, entity: 'task', entityId: openDissemination.id_task, after: { idRequest, emails }, ip: actor.ip, userAgent: actor.userAgent });
   });
-  await notifier([{ emails: recipients(emails, actor.email), payload: { title: SGC_NOTIFICATION_TITLES.lecturaRecordatorio, body: `#${idRequest} · Tiene pendiente leer y firmar Leído — ${request.subject}`.slice(0, 300), url: taskUrl(openDissemination.id_task), tag: `sgc-task-${openDissemination.id_task}` } }]).catch((e) => console.error('[sgc/notificaciones]', e));
+  await notifier([{ emails: recipients(emails, actor.email), payload: { title: SGC_NOTIFICATION_TITLES.lecturaRecordatorio, body: `#${idRequest} · Tiene pendiente leer y firmar «Leído» — ${request.subject}`.slice(0, 300), url: taskUrl(openDissemination.id_task), tag: `sgc-task-${openDissemination.id_task}` } }]).catch((e) => console.error('[sgc/notificaciones]', e));
   return { sent: emails.length };
 }
 
@@ -584,12 +584,12 @@ export async function recordReadingDoubt(db: SgcDb, notifier: SgcNotifier, idAss
   const pool = def?.pool_authorization_type_code ? await getPoolMembers(db, rec.request.id_company, def.pool_authorization_type_code) : [];
   const people = recipients([rec.request.requester_email, rec.request.elaborator_email, ...pool], viewer.email);
   const created = await db.$transaction(async (tx) => {
-    const row = await tx.sgcInteraction.create({ data: { id_request: rec.id_request, id_task: rec.id_task, kind: 'duda', author_email: lower(viewer.email), body: `No entendí ${docLabel}.\n${body.slice(0, 2000)}`, meta_json: JSON.stringify({ idReadRecord: rec.id_read_record, noEntendi: true }) } });
+    const row = await tx.sgcInteraction.create({ data: { id_request: rec.id_request, id_task: rec.id_task, kind: 'duda', author_email: lower(viewer.email), body: `No entendí «${docLabel}».\n${body.slice(0, 2000)}`, meta_json: JSON.stringify({ idReadRecord: rec.id_read_record, noEntendi: true }) } });
     await writeSgcAudit(tx, { idCompany: rec.request.id_company, actorEmail: viewer.email, action: SGC_AUDIT_ACTIONS.lecturaNoEntendi, entity: 'read_record', entityId: rec.id_read_record, after: { idRequest: rec.id_request, idInteraction: row.id_interaction.toString(), recipients: people }, detail: body.slice(0, 1000), ip: actor.ip, userAgent: actor.userAgent });
     return row;
   });
   if (people.length) {
-    await notifier([{ emails: people, payload: { title: SGC_NOTIFICATION_TITLES.lecturaNoEntendi, body: `#${rec.id_request} · ${viewer.email} no entendió ${docLabel}: ${body}`.slice(0, 300), url: requestUrl(rec.id_request), tag: `sgc-request-${rec.id_request}` } }]).catch((e) => console.error('[sgc/no-entendi] aviso', e));
+    await notifier([{ emails: people, payload: { title: SGC_NOTIFICATION_TITLES.lecturaNoEntendi, body: `#${rec.id_request} · ${viewer.email} no entendió «${docLabel}»: ${body}`.slice(0, 300), url: requestUrl(rec.id_request), tag: `sgc-request-${rec.id_request}` } }]).catch((e) => console.error('[sgc/no-entendi] aviso', e));
   }
   return { ok: true, idInteraction: created.id_interaction.toString(), notified: people.length };
 }

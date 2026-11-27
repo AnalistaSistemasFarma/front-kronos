@@ -14,7 +14,7 @@ import { expect, test } from '@playwright/test';
 const OLP = 3;
 
 test.describe('SGC · Sprint 9 (con sesión)', () => {
-  test('[SGC-REQ-120] la entrada del SGC muestra Mis pendientes del SGC con sus grupos', async ({ page }) => {
+  test('[SGC-REQ-120] la entrada del SGC muestra «Mis pendientes del SGC» con sus grupos', async ({ page }) => {
     await page.goto(`/process/sgc-documental?empresa=${OLP}`);
     const board = page.getByTestId('sgc-mis-pendientes');
     await expect(board).toBeVisible({ timeout: 30_000 });
@@ -44,7 +44,7 @@ test.describe('SGC · Sprint 9 (con sesión)', () => {
     expect(body.files.map((f: { status: string }) => f.status)).toEqual(['error', 'error']);
   });
 
-  test('[SGC-REQ-118] Calidad ve Relacionar documentos sobre el mapa de relaciones', async ({ page }) => {
+  test('[SGC-REQ-118] Calidad ve «Relacionar documentos» sobre el mapa de relaciones', async ({ page }) => {
     await page.goto(`/process/sgc-documental/relaciones?empresa=${OLP}`);
     await expect(page.getByTestId('sgc-relacionar')).toBeVisible({ timeout: 30_000 });
     await expect(page.getByTestId('sgc-relacionar-proponer')).toBeEnabled();

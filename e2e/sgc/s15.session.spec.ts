@@ -17,7 +17,7 @@ import { OLP, flowRoleModel } from './flujo-v7';
  * del S15). Requiere qa.sgc2 en el grupo SGC-VERIF-CALIDAD.
  */
 test.describe('SGC · Sprint 15 (con sesión)', () => {
-  test('[SGC-REQ-158] Nueva solicitud avisa que quien pide elabora y Calidad autoriza la creación', async ({ page }) => {
+  test('[SGC-REQ-158] «Nueva solicitud» avisa que quien pide elabora y Calidad autoriza la creación', async ({ page }) => {
     test.skip((await flowRoleModel(page.request)) !== 'solicitante_elabora', 'El flujo DOC vigente de PRUEBAS aún no es el v7.');
     await page.goto(`/process/sgc-documental/solicitudes/nueva?empresa=${OLP}`);
     await expect(page.getByTestId('sgc-nueva-modelo-v7')).toContainText('Usted elaborará el documento', { timeout: 45_000 });

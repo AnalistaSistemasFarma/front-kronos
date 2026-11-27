@@ -52,15 +52,15 @@ describe('SGC · S9 · carga masiva de PDF por código', () => {
   it('[SGC-REQ-117] en una misma tanda un documento recibe un solo archivo', () => {
     const r = matchBulkFiles(['OLP-GCC-02 a.pdf', 'OLP-GCC-02 b.pdf', 'X.pdf'], docs);
     expect(r.map((m) => m.status)).toEqual(['cargable', 'error', 'error']);
-    expect(r[1].error).toContain('ya recibe el archivo OLP-GCC-02 a.pdf');
+    expect(r[1].error).toContain('ya recibe el archivo «OLP-GCC-02 a.pdf»');
   });
 });
 
-describe('SGC · S9 · Relacionar documentos por código', () => {
+describe('SGC · S9 · «Relacionar documentos» por código', () => {
   const d = (id: number, code: string, type: string, extra: Partial<SgcProposalDoc> = {}): SgcProposalDoc => ({ id, code, status: 'vigente', documentTypeCode: type, processCode: 'GCC', processTypeCode: 'M', ...extra });
   const guide = { prefix: 'OLP', pattern: '{PREFIJO}-{PROCESO}-{CONSECUTIVO}', sequenceDigits: 2, childPattern: '{CODIGO_PADRE}-{TIPO}{CONSECUTIVO}', childTypeCodes: ['FO', 'IN'], childSequenceDigits: 2 };
 
-  it('[SGC-REQ-118] propone formato → procedimiento y procedimiento padre → instructivo por la guía; el formato es formato de y el instructivo cuelga del padre', () => {
+  it('[SGC-REQ-118] propone formato → procedimiento y procedimiento padre → instructivo por la guía; el formato «es formato de» y el instructivo cuelga del padre', () => {
     const list = [d(1, 'OLP-GCC-02', 'PR'), d(2, 'OLP-GCC-02-FO01', 'FO'), d(3, 'OLP-GCC-02-IN01', 'IN'), d(4, 'OLP-GCC-03', 'PR')];
     const p = proposeRelations(list, { guide, listParents: new Map(), related: new Set() });
     expect(p).toEqual([
@@ -69,7 +69,7 @@ describe('SGC · S9 · Relacionar documentos por código', () => {
     ]);
   });
 
-  it('[SGC-REQ-118] sin guía de herencia propone por el prefijo del código (padre inmediato) y por el documento padre del listado; nunca repite lo ya relacionado ni usa anulados', () => {
+  it('[SGC-REQ-118] sin guía de herencia propone por el prefijo del código (padre inmediato) y por el «documento padre» del listado; nunca repite lo ya relacionado ni usa anulados', () => {
     const list = [
       d(1, 'GCC-PR-02', 'PR'),
       d(2, 'GCC-PR-02-F1', 'FO'),
@@ -103,7 +103,7 @@ describe('SGC · S9 · Relacionar documentos por código', () => {
   });
 });
 
-describe('SGC · S9 · Mis pendientes y política de correo', () => {
+describe('SGC · S9 · «Mis pendientes» y política de correo', () => {
   it('[SGC-REQ-120] agrupa los pendientes de la persona: tareas, lecturas, autorizaciones, capacitaciones (y copias desde el S11)', () => {
     expect(pendingGroupOf({ role: 'alcance', taskKey: 'divulgacion', isAuthorization: false })).toBe('lecturas');
     expect(pendingGroupOf({ role: 'x', taskKey: 'divulgacion', isAuthorization: false })).toBe('lecturas');
@@ -122,7 +122,7 @@ describe('SGC · S9 · Mis pendientes y política de correo', () => {
     expect(c).toEqual({ tareas: 1, lecturas: 1, autorizaciones: 1, capacitaciones: 0, copias: 2, total: 5 });
   });
 
-  it('[SGC-REQ-121] el correo está apagado por defecto; solo vencimientos deja salir los avisos por correo; el resumen diario solo a quien tiene pendientes', () => {
+  it('[SGC-REQ-121] el correo está apagado por defecto; solo «vencimientos» deja salir los avisos por correo; el resumen diario solo a quien tiene pendientes', () => {
     expect(SGC_DEFAULT_EMAIL_MODE).toBe('nunca');
     expect(SGC_EMAIL_MODES).toEqual(['nunca', 'vencimientos', 'resumen_diario']);
     expect(isSgcEmailMode('resumen_diario')).toBe(true);

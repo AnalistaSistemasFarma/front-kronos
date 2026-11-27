@@ -89,9 +89,9 @@ export function normalizeHeaderTemplateConfig(raw: unknown): SgcHeaderTemplateCo
     titleLabel: label(r.titleLabel, 'El rótulo del nombre', d.titleLabel),
     codeLabel: label(r.codeLabel, 'El rótulo del código', d.codeLabel),
     versionLabel: label(r.versionLabel, 'El rótulo de la versión', d.versionLabel),
-    elaboroLabel: label(r.elaboroLabel, 'El rótulo de Elaboró', d.elaboroLabel),
-    revisoLabel: label(r.revisoLabel, 'El rótulo de Revisó', d.revisoLabel),
-    aproboLabel: label(r.aproboLabel, 'El rótulo de Aprobó', d.aproboLabel),
+    elaboroLabel: label(r.elaboroLabel, 'El rótulo de «Elaboró»', d.elaboroLabel),
+    revisoLabel: label(r.revisoLabel, 'El rótulo de «Revisó»', d.revisoLabel),
+    aproboLabel: label(r.aproboLabel, 'El rótulo de «Aprobó»', d.aproboLabel),
     emissionLabel: label(r.emissionLabel, 'El rótulo de la fecha de emisión', d.emissionLabel),
     bottomRow: bottomRow as SgcHeaderBottomRow,
     legend: legendRaw || null,
@@ -137,10 +137,10 @@ export function describeHeaderTemplateChanges(before: SgcHeaderTemplateConfig | 
   for (const k of Object.keys(after) as (keyof SgcHeaderTemplateConfig)[]) {
     if (k === 'grid') {
       const describe = (g: SgcHeaderGrid | null | undefined) => (g ? `${g.rows.length} fila(s) × ${g.columns.length} columna(s), ${g.cells.length} celda(s)` : 'tabla institucional');
-      if (JSON.stringify(before.grid ?? null) !== JSON.stringify(after.grid ?? null)) out.push(`grilla: ${describe(before.grid)} → ${describe(after.grid)}${before.grid && after.grid && describe(before.grid) === describe(after.grid) ? ' (cambió el contenido de las celdas)' : ''}`);
+      if (JSON.stringify(before.grid ?? null) !== JSON.stringify(after.grid ?? null)) out.push(`grilla: «${describe(before.grid)}» → «${describe(after.grid)}»${before.grid && after.grid && describe(before.grid) === describe(after.grid) ? ' (cambió el contenido de las celdas)' : ''}`);
       continue;
     }
-    if (before[k] !== after[k]) out.push(`${k}: ${before[k] ?? ''} → ${after[k] ?? ''}`);
+    if (before[k] !== after[k]) out.push(`${k}: «${before[k] ?? ''}» → «${after[k] ?? ''}»`);
   }
   return out.length ? out : ['Sin cambios en la plantilla.'];
 }

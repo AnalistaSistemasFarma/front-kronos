@@ -94,7 +94,7 @@ describe('SGC · S3 · validación de la firma (reautenticación, significado, m
   });
 
   it('[SGC-REQ-039] el significado lo fija la tarea (Elaboró/Revisó/Aprobó/Leyó), no el cliente', () => {
-    expect(() => validateSignInput({ ...ok, meaning: 'aprobo' }, 'reviso')).toThrow(/Revisó/);
+    expect(() => validateSignInput({ ...ok, meaning: 'aprobo' }, 'reviso')).toThrow(/«Revisó»/);
     expect(() => validateSignInput(ok, null)).toThrow(expect.objectContaining({ status: 409 }));
     expect(() => validateSignInput({ ...ok, meaning: 'otro' }, 'otro' as never)).toThrow(/inválido/);
     expect(SGC_SIGNATURE_REASONS.aprobo.length).toBeGreaterThan(0);
@@ -177,7 +177,7 @@ describe('SGC · S3 · reautenticación con la contraseña de SynerLink', () => 
 describe('SGC · S3 · lista de chequeo de estructura documental de Calidad (configurable en el flujo)', () => {
   const fields = SGC_QUALITY_CHECKLIST_OLP;
 
-  it('[SGC-REQ-044] los puntos se configuran como campos Chequeo Calidad de la tarea con grupo de verificación', () => {
+  it('[SGC-REQ-044] los puntos se configuran como campos «Chequeo Calidad» de la tarea con grupo de verificación', () => {
     expect(checklistFieldsFor(SGC_DOCUMENT_FLOW_V2.formFields, 'aprobacion').map((f) => f.key)).toEqual(['chk_codificacion', 'chk_formato', 'chk_anexos']);
     expect(checklistFieldsFor(SGC_DOCUMENT_FLOW_V1.formFields, 'aprobacion')).toEqual([]);
     const v2 = normalizeFlowDefinition(JSON.parse(JSON.stringify(SGC_DOCUMENT_FLOW_V2)));
@@ -190,7 +190,7 @@ describe('SGC · S3 · lista de chequeo de estructura documental de Calidad (con
     expect(normalizeFlowDefinition(typed).formFields.find((f) => f.key === 'chk_y')).toMatchObject({ type: 'si_no', options: [], qualityCheck: true });
   });
 
-  it('[SGC-REQ-044] todas las preguntas contestadas; No aplica no vale en las obligatorias; No cumple exige observación y da no conforme', () => {
+  it('[SGC-REQ-044] todas las preguntas contestadas; «No aplica» no vale en las obligatorias; «No cumple» exige observación y da «no conforme»', () => {
     const answers = { chk_codificacion: { answer: 'cumple' }, chk_formato: 'cumple', chk_anexos: { answer: 'no_aplica', observation: '  ' } };
     expect(normalizeChecklist(fields, answers)).toEqual({
       result: 'conforme',
@@ -200,7 +200,7 @@ describe('SGC · S3 · lista de chequeo de estructura documental de Calidad (con
         { key: 'chk_anexos', label: fields[2].label, required: false, answer: 'no_aplica', answerLabel: 'No aplica', observation: null },
       ],
     });
-    expect(() => normalizeChecklist(fields, { ...answers, chk_formato: undefined })).toThrow(/responda Formato/);
+    expect(() => normalizeChecklist(fields, { ...answers, chk_formato: undefined })).toThrow(/responda «Formato/);
     expect(() => normalizeChecklist(fields, null)).toThrow(/responda/);
     expect(() => normalizeChecklist(fields, [])).toThrow(/responda/);
     expect(() => normalizeChecklist(fields, { ...answers, chk_codificacion: 'no_aplica' })).toThrow(/obligatorio/);

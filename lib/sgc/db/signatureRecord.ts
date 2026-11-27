@@ -69,7 +69,7 @@ export async function signedContentInTx(tx: Tx, idRequest: number, idTask: numbe
     }
     const rec = await tx.sgcReadRecord.findUnique({ where: { id_task_assignee: idTaskAssignee } });
     if (!rec || rec.status !== 'pendiente') throw new SgcError('Su lectura no está pendiente: no se firma de nuevo.', 409);
-    if (!rec.reached_end_at) throw new SgcError('Aún no llega al final del documento: Leído se habilita al terminar de leerlo.', 409);
+    if (!rec.reached_end_at) throw new SgcError('Aún no llega al final del documento: «Leído» se habilita al terminar de leerlo.', 409);
     return { kind: 'pdf_controlado', ref: expected.ref, name: version.pdf_file_name, sha256: version.pdf_sha256.trim() };
   }
   if (expected.kind === 'resultados_capacitacion') {

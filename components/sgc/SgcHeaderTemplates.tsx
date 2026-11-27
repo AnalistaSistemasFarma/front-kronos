@@ -40,9 +40,9 @@ const LABEL_FIELDS: { key: keyof SgcHeaderTemplateConfig; label: string }[] = [
   { key: 'titleLabel', label: 'Rótulo del nombre' },
   { key: 'codeLabel', label: 'Rótulo del código' },
   { key: 'versionLabel', label: 'Rótulo de la versión' },
-  { key: 'elaboroLabel', label: 'Rótulo Elaboró' },
-  { key: 'revisoLabel', label: 'Rótulo Revisó' },
-  { key: 'aproboLabel', label: 'Rótulo Aprobó' },
+  { key: 'elaboroLabel', label: 'Rótulo «Elaboró»' },
+  { key: 'revisoLabel', label: 'Rótulo «Revisó»' },
+  { key: 'aproboLabel', label: 'Rótulo «Aprobó»' },
   { key: 'emissionLabel', label: 'Rótulo de la fecha de emisión' },
 ];
 
@@ -230,7 +230,7 @@ export default function SgcHeaderTemplates({ idCompany }: { idCompany: number })
                 allowDeselect={false}
                 data-testid='sgc-encabezado-fila-inferior'
               />
-              <TextInput label='Leyenda (opcional)' description='Si la fila inferior es Una leyenda propia, es obligatoria.' value={editing.config.legend ?? ''} onChange={(e) => setCfg('legend', e.currentTarget.value)} autoComplete='off' data-testid='sgc-encabezado-leyenda' />
+              <TextInput label='Leyenda (opcional)' description='Si la fila inferior es «Una leyenda propia», es obligatoria.' value={editing.config.legend ?? ''} onChange={(e) => setCfg('legend', e.currentTarget.value)} autoComplete='off' data-testid='sgc-encabezado-leyenda' />
             </Group>
             <SgcHeaderGridEditor config={editing.config} onChange={(grid) => setEditing({ ...editing, config: { ...editing.config, grid } })} />
             <Group>

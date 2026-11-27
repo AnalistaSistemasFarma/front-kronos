@@ -77,7 +77,7 @@ test.describe.serial('SGC documental · Sprint 5 · vencimientos, mapa y accesos
     idConf = docs.documents.find((x) => x.code === CONF)?.idDocument ?? 0;
   });
 
-  test('[SGC-REQ-067][SGC-REQ-079] el calendario muestra la fecha correcta (mensual y agenda), el estado y Mis vencimientos; desde él se abre la ficha y se inicia la nueva versión en un clic', async ({ page }) => {
+  test('[SGC-REQ-067][SGC-REQ-079] el calendario muestra la fecha correcta (mensual y agenda), el estado y «Mis vencimientos»; desde él se abre la ficha y se inicia la nueva versión en un clic', async ({ page }) => {
     await page.goto(`/process/sgc-documental/vencimientos?empresa=${OLP}&mes=${due.slice(0, 7)}`);
     const chip = page.locator(`[data-testid="sgc-cal-dia"][data-date="${due}"] [data-testid="sgc-cal-item"][data-code="${code}"]`);
     await expect(chip).toBeVisible({ timeout: 30_000 });
@@ -112,7 +112,7 @@ test.describe.serial('SGC documental · Sprint 5 · vencimientos, mapa y accesos
     await expect(page.getByTestId('sgc-ficha-nueva-version')).toBeVisible();
   });
 
-  test('[SGC-REQ-068][SGC-REQ-070][SGC-REQ-074] Ejecutar ahora registra el aviso anticipado UNA sola vez (con destinatarios y canal) y el registro de Calidad lo muestra', async ({ page }) => {
+  test('[SGC-REQ-068][SGC-REQ-070][SGC-REQ-074] «Ejecutar ahora» registra el aviso anticipado UNA sola vez (con destinatarios y canal) y el registro de Calidad lo muestra', async ({ page }) => {
     const first = await ok<{ summary: { runDate: string } }>(await page.request.post('/api/sgc/review-alerts/run', { data: { company: OLP } }));
     expect(first.summary.runDate).toBe(colombiaToday());
     await ok(await page.request.post('/api/sgc/review-alerts/run', { data: { company: OLP } }));

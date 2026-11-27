@@ -226,7 +226,7 @@ export async function uploadBulkFile(
         entityId: doc.id_document,
         before: { status: 'pendiente_archivo' },
         after: { status: 'vigente', version, idVersion: v.id_document_version, file: fileName, sha256: sha, ...(original ? { original: original.ext, pdfSha256: pdfSha } : {}), ...(sheetSettings ? { sheetSettings } : {}) },
-        detail: `Carga masiva (tanda ${idBulkUpload}): ${doc.code} V${version} desde ${fileName} (SHA-256 ${sha})${original ? `; PDF para el visor SHA-256 ${pdfSha}` : ''}${sheetSettings ? `; ajustes de presentación: ${describeSheetSettings(sheetSettings)}` : ''}.${match.warning ? ` Aviso: ${match.warning}` : ''}`.slice(0, 1000),
+        detail: `Carga masiva (tanda ${idBulkUpload}): ${doc.code} V${version} desde «${fileName}» (SHA-256 ${sha})${original ? `; PDF para el visor SHA-256 ${pdfSha}` : ''}${sheetSettings ? `; ajustes de presentación: ${describeSheetSettings(sheetSettings)}` : ''}.${match.warning ? ` Aviso: ${match.warning}` : ''}`.slice(0, 1000),
         ip: actor.ip,
         userAgent: actor.userAgent,
       });

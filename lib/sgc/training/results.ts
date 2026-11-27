@@ -183,7 +183,7 @@ export interface SgcResultColumns {
 /** S14 (R29): plantilla estándar de resultados (la que se enlaza en los errores y en la tarjeta de capacitación). */
 export const SGC_TRAINING_RESULTS_TEMPLATE_NAME = 'plantilla-resultados-capacitacion-sgc.csv';
 export const SGC_TRAINING_RESULTS_TEMPLATE_CSV = '\uFEFFCorreo electrónico;Nombre;Total de puntos;Hora de finalización\r\npersona@empresa.com;Nombre Apellido;8;2026-10-14 10:30\r\n';
-const TEMPLATE_HINT = 'Use la exportación de Forms sin cambiar los encabezados o la Plantilla estándar de resultados de la tarjeta de capacitación (columnas Correo electrónico, Nombre, Total de puntos y Hora de finalización).';
+const TEMPLATE_HINT = 'Use la exportación de Forms sin cambiar los encabezados o la «Plantilla estándar de resultados» de la tarjeta de capacitación (columnas «Correo electrónico», «Nombre», «Total de puntos» y «Hora de finalización»).';
 
 // S14 (R29): «Puntos: Pregunta 1» / «Puntos - Pregunta 1» (Forms en español) y «Points: …» / «Points - …» (inglés).
 const QUESTION_POINTS_RE = /^(puntos|points|puntuacion|puntaje)\s*[:\-–]\s*\S/;
@@ -204,8 +204,8 @@ export function detectResultColumns(headers: readonly unknown[]): SgcResultColum
   // puntos de cada pregunta: se suman.
   const questionPoints = score < 0 ? norm.map((h, i) => (QUESTION_POINTS_RE.test(h) ? i : -1)).filter((i) => i >= 0) : [];
   const missing = [
-    email < 0 ? 'Correo electrónico (o Email; si el formulario es anónimo, active en Forms Registrar nombre)' : null,
-    score < 0 && questionPoints.length === 0 ? 'Total de puntos (o Total points, Puntaje, Nota, o los Puntos: <pregunta> de cada pregunta)' : null,
+    email < 0 ? '«Correo electrónico» (o «Email»; si el formulario es anónimo, active en Forms «Registrar nombre»)' : null,
+    score < 0 && questionPoints.length === 0 ? '«Total de puntos» (o «Total points», «Puntaje», «Nota», o los «Puntos: <pregunta>» de cada pregunta)' : null,
   ].filter(Boolean);
   if (missing.length) throw new SgcError(`El archivo no tiene la(s) columna(s) ${missing.join(' y ')}. ${TEMPLATE_HINT}`);
   const name = find(NAME_HEADERS);
@@ -371,10 +371,10 @@ export function evaluateTrainingResults(
   // S14 (R29): si NINGUNA fila trae puntaje es una evaluación con calificación manual aún sin publicar (o un formulario
   // sin puntos): se explica qué hacer en vez de mostrar «0 aprobaron».
   if (attempts.size === 0 && rejected.length === dataRows && rejected.every((x) => x.reason === 'puntaje vacío o inválido')) {
-    throw new SgcError(`Ninguna fila trae puntaje (${cols.score >= 0 ? cellText(rows[headerRow][cols.score]) : 'Puntos'} está vacío). Si la evaluación tiene preguntas de calificación manual, califíquelas y publique las puntuaciones en Forms antes de exportar; si el formulario no es un cuestionario con puntos, conviértalo en cuestionario. ${TEMPLATE_HINT}`);
+    throw new SgcError(`Ninguna fila trae puntaje («${cols.score >= 0 ? cellText(rows[headerRow][cols.score]) : 'Puntos'}» está vacío). Si la evaluación tiene preguntas de calificación manual, califíquelas y publique las puntuaciones en Forms antes de exportar; si el formulario no es un cuestionario con puntos, conviértalo en cuestionario. ${TEMPLATE_HINT}`);
   }
   if (attempts.size === 0 && rejected.length === dataRows && rejected.every((x) => x.reason === 'correo vacío o inválido')) {
-    throw new SgcError(`Ninguna fila trae un correo válido: el formulario parece anónimo. En Forms active Registrar nombre (o Recopilar correos electrónicos en Google Forms) para saber quién respondió. ${TEMPLATE_HINT}`);
+    throw new SgcError(`Ninguna fila trae un correo válido: el formulario parece anónimo. En Forms active «Registrar nombre» (o «Recopilar correos electrónicos» en Google Forms) para saber quién respondió. ${TEMPLATE_HINT}`);
   }
   const results: SgcTrainingResultRow[] = [];
   for (const [email, list] of attempts) {
@@ -432,5 +432,5 @@ export function trainingNeedsJustification(summary: SgcTrainingEvaluation['summa
  */
 export function trainingResultsChangedMessage(up: { fileName: string; uploadedBy: string; uploadedAt: Date; passed: number; failed: number; missing: number }): string {
   const at = new Date(up.uploadedAt.getTime() - 5 * 60 * 60 * 1000).toISOString().slice(0, 16).replace('T', ' ');
-  return `Los resultados cambiaron desde que abrió la tarea: ${up.uploadedBy} cargó ${up.fileName} el ${at} (hora Colombia) — del alcance, ${up.passed} aprobaron, ${up.failed} reprobaron y ${up.missing} sin resultado. La tarea se recargó con esos resultados: revíselos y firme de nuevo.`;
+  return `Los resultados cambiaron desde que abrió la tarea: ${up.uploadedBy} cargó «${up.fileName}» el ${at} (hora Colombia) — del alcance, ${up.passed} aprobaron, ${up.failed} reprobaron y ${up.missing} sin resultado. La tarea se recargó con esos resultados: revíselos y firme de nuevo.`;
 }

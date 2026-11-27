@@ -23,14 +23,14 @@ describe('SGC · correcciones · divulgación solo a la empresa del documento', 
   });
   const empresa: SgcScopeEntry = { kind: 'empresa', idDepartment: null, idCargo: null, userEmail: null };
 
-  it('[SGC-REQ-098] toda la empresa solo incluye correos de la empresa del documento: nunca GSS ni otra empresa del grupo', () => {
+  it('[SGC-REQ-098] «toda la empresa» solo incluye correos de la empresa del documento: nunca GSS ni otra empresa del grupo', () => {
     const r = resolveReaders([empresa], dir(['onelatampharma.com']));
     expect(r.readers.map((x) => x.email)).toEqual(['ana@onelatampharma.com', 'luis@onelatampharma.com']);
     expect(r.outsideCompany.map((x) => x.email)).toEqual(['externo@farmalogica.com', 'nicolas.rivera@gsslatam.com']);
     expect(r.withoutAccess).toEqual([]);
   });
 
-  it('[SGC-REQ-098] departamento y cargo también se filtran por empresa; a otra persona solo se le asigna lectura eligiéndola a mano como Persona', () => {
+  it('[SGC-REQ-098] departamento y cargo también se filtran por empresa; a otra persona solo se le asigna lectura eligiéndola a mano como «Persona»', () => {
     const r = resolveReaders(
       [
         { kind: 'departamento', idDepartment: 3, idCargo: null, userEmail: null },
@@ -80,7 +80,7 @@ describe('SGC · correcciones · navegación por área → tipo documental', () 
   const calidad = { id: 3, name: 'Garantía de Calidad' };
   const items = [item(1, 'OLP-CO-PR-010', compras, PR), item(2, 'OLP-CO-PR-002', compras, PR), item(3, 'OLP-CO-MA-001', compras, MA), item(4, 'OLP-GC-IN-001', calidad, IN), item(5, 'OLP-X-PR-001', null, PR)];
 
-  it('[SGC-REQ-101] agrupa por área (alfabético, sin área al final) y dentro por tipo documental, con sus conteos', () => {
+  it('[SGC-REQ-101] agrupa por área (alfabético, «sin área» al final) y dentro por tipo documental, con sus conteos', () => {
     const g = groupByAreaAndType(items);
     expect(g.map((a) => [a.name, a.count])).toEqual([
       ['Compras', 3],
@@ -130,12 +130,12 @@ describe('SGC · correcciones · imágenes incrustadas (el logo ya no se pierde)
   });
 });
 
-describe('SGC · correcciones · No entendí en el historial', () => {
-  it('[SGC-REQ-100] el No entendí se lee en el historial de la solicitud con lo que la persona escribió', () => {
-    const v = presentInteraction({ id: '1', kind: 'duda', authorEmail: 'lector@onelatampharma.com', author: 'Lector', body: 'No entendí OLP-GC-PR-007 V1 — Procedimiento.\nEl paso 3 no dice qué formato usar.\nNi quién lo firma.', createdAt: '2026-10-03T15:00:00Z' }, (e) => e);
-    expect(v.action).toBe('marcó No entendí en la lectura del documento');
-    expect(v.note).toBe('No entendí OLP-GC-PR-007 V1 — Procedimiento.');
+describe('SGC · correcciones · «No entendí» en el historial', () => {
+  it('[SGC-REQ-100] el «No entendí» se lee en el historial de la solicitud con lo que la persona escribió', () => {
+    const v = presentInteraction({ id: '1', kind: 'duda', authorEmail: 'lector@onelatampharma.com', author: 'Lector', body: 'No entendí «OLP-GC-PR-007 V1 — Procedimiento».\nEl paso 3 no dice qué formato usar.\nNi quién lo firma.', createdAt: '2026-10-03T15:00:00Z' }, (e) => e);
+    expect(v.action).toBe('marcó «No entendí» en la lectura del documento');
+    expect(v.note).toBe('No entendí «OLP-GC-PR-007 V1 — Procedimiento».');
     expect(v.observation).toBe('El paso 3 no dice qué formato usar.\nNi quién lo firma.');
-    expect(presentInteraction({ id: '2', kind: 'duda', authorEmail: 'x', author: null, body: 'No entendí X.', createdAt: '2026-10-03T15:00:00Z' }, (e) => e).observation).toBeNull();
+    expect(presentInteraction({ id: '2', kind: 'duda', authorEmail: 'x', author: null, body: 'No entendí «X».', createdAt: '2026-10-03T15:00:00Z' }, (e) => e).observation).toBeNull();
   });
 });

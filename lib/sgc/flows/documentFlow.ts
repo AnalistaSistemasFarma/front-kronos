@@ -243,7 +243,7 @@ export const SGC_QUALITY_CHECKLIST_OLP: SgcFlowDefinition['formFields'] = [
     type: 'si_no',
     required: false,
     options: [],
-    helpText: 'Si el documento no tiene anexos, marque No aplica.',
+    helpText: 'Si el documento no tiene anexos, marque «No aplica».',
     sortOrder: 12,
     qualityCheck: true,
   },
@@ -288,14 +288,14 @@ export const SGC_DOCUMENT_FLOW_V3: SgcFlowDefinition = {
         ...t,
         assignment: 'alcance' as const,
         isEnabled: true,
-        description: 'Lectura obligatoria del PDF controlado hasta el final y firma Leyó de cada persona del alcance (departamentos, cargos, personas o toda la empresa). La administra Aseguramiento de Calidad.',
+        description: 'Lectura obligatoria del PDF controlado hasta el final y firma «Leyó» de cada persona del alcance (departamentos, cargos, personas o toda la empresa). La administra Aseguramiento de Calidad.',
       };
     }
     if (t.key === 'capacitacion') {
       return {
         ...t,
         isEnabled: true,
-        description: 'Sesión o video y evaluación en Microsoft Forms; Calidad carga el Excel de resultados (nota mínima configurable) y firma Capacitó. Obligatoria para todos los tipos documentales.',
+        description: 'Sesión o video y evaluación en Microsoft Forms; Calidad carga el Excel de resultados (nota mínima configurable) y firma «Capacitó». Obligatoria para todos los tipos documentales.',
       };
     }
     return t;
@@ -326,9 +326,9 @@ export const SGC_DOCUMENT_FLOW_V3: SgcFlowDefinition = {
 export const SGC_DOCUMENT_FLOW_TRAINING_FIRST: SgcFlowDefinition = {
   tasks: ([
     ...SGC_DOCUMENT_FLOW_V3.tasks.map((t): SgcTaskDefinition => {
-      if (t.key === 'divulgacion') return { ...t, stepOrder: 5, description: 'Lectura obligatoria del PDF controlado hasta el final y firma Leyó de cada persona del alcance; si la solicitud requiere capacitación, debajo del documento van el video y la evaluación.' };
+      if (t.key === 'divulgacion') return { ...t, stepOrder: 5, description: 'Lectura obligatoria del PDF controlado hasta el final y firma «Leyó» de cada persona del alcance; si la solicitud requiere capacitación, debajo del documento van el video y la evaluación.' };
       if (t.key === 'capacitacion') {
-        return { ...t, stepOrder: 6, conditionKey: 'requiere_capacitacion' as const, description: 'Calidad carga los resultados de la evaluación (Microsoft Forms o Google Forms; cuentan 2 intentos), registra la recapacitación de quien no aprobó y firma Capacitó. Solo si la solicitud requiere capacitación.' };
+        return { ...t, stepOrder: 6, conditionKey: 'requiere_capacitacion' as const, description: 'Calidad carga los resultados de la evaluación (Microsoft Forms o Google Forms; cuentan 2 intentos), registra la recapacitación de quien no aprobó y firma «Capacitó». Solo si la solicitud requiere capacitación.' };
       }
       return t;
     }),
@@ -403,7 +403,7 @@ export const SGC_DOCUMENT_FLOW_V7: SgcFlowDefinition = {
         return { ...t, stepOrder, assignment: 'creador', poolAuthorizationTypeCode: null, description: 'Antes de la divulgación, el creador del documento registra el material de la capacitación: video o sesión, quién dicta y la evaluación. Solo si la solicitud requiere capacitación.' };
       }
       if (t.key === 'capacitacion') {
-        return { ...t, stepOrder, assignment: 'creador', description: 'El creador del documento dicta la capacitación, carga los resultados de la evaluación y firma Capacitó; Aseguramiento de Calidad la cierra si la empresa lo mantiene. Solo si la solicitud requiere capacitación.' };
+        return { ...t, stepOrder, assignment: 'creador', description: 'El creador del documento dicta la capacitación, carga los resultados de la evaluación y firma «Capacitó»; Aseguramiento de Calidad la cierra si la empresa lo mantiene. Solo si la solicitud requiere capacitación.' };
       }
       return { ...t, stepOrder };
     }),

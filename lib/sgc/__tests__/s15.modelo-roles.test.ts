@@ -88,7 +88,7 @@ describe('SGC · S15 · flujo DOC v7 (definición)', () => {
     expect(resolveNextStep(SGC_DOCUMENT_FLOW_V7, 'aprobacion', 'aprobar', { ...ctxCond, requiresTraining: true })).toMatchObject({ kind: 'task', task: { key: 'preparacion_capacitacion' } });
   });
 
-  it('[SGC-REQ-158] rechazar solo cierra, solo desde una autorización; creador solo con el modelo v7; el modelo se valida y queda en el registro de cambios', () => {
+  it('[SGC-REQ-158] «rechazar» solo cierra, solo desde una autorización; «creador» solo con el modelo v7; el modelo se valida y queda en el registro de cambios', () => {
     const base = clone(SGC_DOCUMENT_FLOW_V7);
     expect(() => normalizeFlowDefinition({ ...base, transitions: base.transitions.map((t) => (t.action === 'rechazar' ? { ...t, terminalStatus: null, to: 'elaboracion' } : t)) })).toThrow(/rechazar.*cierra/);
     expect(() => normalizeFlowDefinition({ ...base, transitions: [...base.transitions, { from: 'revision', action: 'rechazar', to: null, terminalStatus: 'cancelada' }] })).toThrow(/autorización/);
@@ -129,7 +129,7 @@ describe('SGC · S15 · quién asigna y quién firma (R16 a R19)', () => {
     expect(departmentSignerDenial('calidad@olp.co', 'revision', 'Revisión', c)).toBeNull();
     expect(departmentSignerDenial('otro@olp.co', 'revision', 'Revisión', c)).toMatch(/no es del departamento de quien elabora \(Producción\) ni de Aseguramiento de Calidad/);
     expect(departmentSignerDenial('jefe@olp.co', 'aprobacion', 'Aprobación', c)).toBeNull();
-    expect(departmentSignerDenial('calidad@olp.co', 'aprobacion', 'Aprobación', c)).toMatch(/no puede quedar en Aprobación/);
+    expect(departmentSignerDenial('calidad@olp.co', 'aprobacion', 'Aprobación', c)).toMatch(/no puede quedar en «Aprobación»/);
     expect(departmentSignerDenial('sin.depto@olp.co', 'aprobacion', 'Aprobación', c)).toMatch(/no es del departamento/);
     expect(departmentSignerDenial('jefe@olp.co', 'revision', 'Revisión', ctx({ elaboratorDepartments: new Set() }))).toMatch(/no tiene departamento asignado.*R40/);
     expect(departmentSignerOptions(['elab@olp.co', 'par@olp.co', 'jefe@olp.co', 'otro@olp.co', 'calidad@olp.co'], c)).toEqual({
@@ -184,7 +184,7 @@ describe('SGC · S15 · ajustes por empresa y capacitación del creador (D16, D1
     expect(parseCompanyFlag('{"otro":false}', SGC_COMPANY_FLAGS.trainingClosedByQuality)).toBe(true);
   });
 
-  it('[SGC-REQ-162] R27: Quién dicta se elige entre las personas o Externo con su nombre (se guarda como texto legible)', () => {
+  it('[SGC-REQ-162] R27: «Quién dicta» se elige entre las personas o «Externo» con su nombre (se guarda como texto legible)', () => {
     const users = [{ value: 'ana@olp.co', label: 'ANA GÓMEZ (ana@olp.co)' }];
     expect(instructorValueOf('ana@olp.co', '', users)).toBe('ANA GÓMEZ (ana@olp.co)');
     expect(instructorValueOf('__externo__', ' Laboratorio Asesor ', users)).toBe('Externo: Laboratorio Asesor');

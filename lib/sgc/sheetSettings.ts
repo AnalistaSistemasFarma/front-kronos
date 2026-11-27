@@ -91,9 +91,9 @@ export function normalizePrintArea(value: unknown, sheet: string): string | null
   const v = text(value);
   if (!v) return null;
   const m = RANGE.exec(v);
-  if (!m) throw new SgcError(`Área de impresión inválida en la hoja ${sheet}: escríbala como A1:H40.`);
+  if (!m) throw new SgcError(`Área de impresión inválida en la hoja «${sheet}»: escríbala como A1:H40.`);
   const [c1, r1, c2, r2] = [columnIndex(m[1]), Number(m[2]), columnIndex(m[3]), Number(m[4])];
-  if (c1 > 16384 || c2 > 16384) throw new SgcError(`Área de impresión inválida en la hoja ${sheet}: la columna no existe.`);
+  if (c1 > 16384 || c2 > 16384) throw new SgcError(`Área de impresión inválida en la hoja «${sheet}»: la columna no existe.`);
   return `${columnLetter(Math.min(c1, c2))}${Math.min(r1, r2)}:${columnLetter(Math.max(c1, c2))}${Math.max(r1, r2)}`;
 }
 
@@ -103,10 +103,10 @@ export function normalizeTitleRows(value: unknown, sheet: string): string | null
   if (!v) return null;
   const single = /^[1-9]\d{0,6}$/.test(v) ? `${v}:${v}` : v;
   const m = ROWS.exec(single);
-  if (!m) throw new SgcError(`Filas de título inválidas en la hoja ${sheet}: escríbalas como 1:3.`);
+  if (!m) throw new SgcError(`Filas de título inválidas en la hoja «${sheet}»: escríbalas como 1:3.`);
   const a = Math.min(Number(m[1]), Number(m[2]));
   const b = Math.max(Number(m[1]), Number(m[2]));
-  if (b - a >= 30) throw new SgcError(`Filas de título inválidas en la hoja ${sheet}: máximo 30 filas.`);
+  if (b - a >= 30) throw new SgcError(`Filas de título inválidas en la hoja «${sheet}»: máximo 30 filas.`);
   return `${a}:${b}`;
 }
 
@@ -142,12 +142,12 @@ export function normalizeSheetSettings(input: unknown): SgcSheetSettings {
     const r = s as Record<string, unknown>;
     const name = typeof r.name === 'string' ? r.name.trim().slice(0, 100) : '';
     if (!name) throw new SgcError('Falta el nombre de una hoja.');
-    if (seen.has(name)) throw new SgcError(`La hoja ${name} está repetida en los ajustes.`);
+    if (seen.has(name)) throw new SgcError(`La hoja «${name}» está repetida en los ajustes.`);
     seen.add(name);
     const cols = r.hiddenColumns === undefined || r.hiddenColumns === null ? [] : r.hiddenColumns;
-    if (!Array.isArray(cols) || cols.length > 200) throw new SgcError(`Columnas ocultas inválidas en la hoja ${name}.`);
+    if (!Array.isArray(cols) || cols.length > 200) throw new SgcError(`Columnas ocultas inválidas en la hoja «${name}».`);
     const hiddenColumns = [...new Set(cols.map((c) => text(c)))].filter(Boolean);
-    if (hiddenColumns.some((c) => !COLUMN.test(c))) throw new SgcError(`Columnas ocultas inválidas en la hoja ${name}: use letras (A, B, AB).`);
+    if (hiddenColumns.some((c) => !COLUMN.test(c))) throw new SgcError(`Columnas ocultas inválidas en la hoja «${name}»: use letras (A, B, AB).`);
     hiddenColumns.sort((a, b) => columnIndex(a) - columnIndex(b));
     return { name, include: r.include !== false, printArea: normalizePrintArea(r.printArea, name), titleRows: normalizeTitleRows(r.titleRows, name), hiddenColumns };
   });
@@ -168,14 +168,14 @@ export function describeSheetSettings(s: SgcSheetSettings): string {
   if (s.fit === 'escala') parts.push(`escala ${s.scalePct} %`);
   for (const x of s.sheets) {
     if (!x.include) {
-      parts.push(`sin la hoja ${x.name}`);
+      parts.push(`sin la hoja «${x.name}»`);
       continue;
     }
     const d: string[] = [];
     if (x.printArea) d.push(`área ${x.printArea}`);
     if (x.titleRows) d.push(`títulos ${x.titleRows}`);
     if (x.hiddenColumns.length) d.push(`sin columnas ${x.hiddenColumns.join(', ')}`);
-    if (d.length) parts.push(`${x.name}: ${d.join(', ')}`);
+    if (d.length) parts.push(`«${x.name}»: ${d.join(', ')}`);
   }
   return parts.join('; ') || 'ajuste automático';
 }

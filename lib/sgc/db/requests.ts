@@ -235,13 +235,13 @@ async function activateTask(ctx: EngineCtx, taskDef: SgcTaskDefinition, round: n
   else if (taskDef.assignment === 'elaborador' || taskDef.assignment === 'creador') slots.push({ userEmail: lower(request.elaborator_email), poolTypeCode: null, order: 1 });
   else if (taskDef.assignment === 'firmantes') {
     const signers = await tx.sgcRequestSigner.findMany({ where: { id_request: request.id_request, step_key: taskDef.key, is_active: true }, orderBy: { sign_order: 'asc' } });
-    if (signers.length === 0) throw new SgcError(`Falta asignar los firmantes de ${taskDef.name}.`, 409);
+    if (signers.length === 0) throw new SgcError(`Falta asignar los firmantes de «${taskDef.name}».`, 409);
     signers.forEach((s, i) => slots.push({ userEmail: lower(s.user_email), poolTypeCode: null, order: i + 1 }));
   }
   // S15 (D18): en la capacitación del creador, el cierre de Calidad (cupo del grupo) es un ajuste de la empresa (encendido por defecto).
   const skipPool = taskDef.assignment === 'creador' && taskDef.role === 'capacitacion' && !(await isTrainingClosedByQuality(tx, request.id_company));
   if (taskDef.poolAuthorizationTypeCode && !skipPool) slots.push({ userEmail: null, poolTypeCode: taskDef.poolAuthorizationTypeCode, order: slots.length + 1 });
-  if (slots.length === 0) throw new SgcError(`La tarea ${taskDef.name} no tiene responsables.`, 500);
+  if (slots.length === 0) throw new SgcError(`La tarea «${taskDef.name}» no tiene responsables.`, 500);
   // S15: una tarea de un responsable con cupo de grupo (la capacitación del creador que cierra Calidad) va EN ORDEN: primero la persona, luego el grupo.
   const effectiveMode = mode ?? (slots.length > 1 && !taskDef.multiAssignee ? ('orden' as const) : null);
 
@@ -373,26 +373,26 @@ export interface SgcCreateRequestInput {
 
 function validateFieldValue(field: SgcFlowDefinition['formFields'][number], raw: unknown): string | null {
   if (raw === null || raw === undefined || (typeof raw === 'string' && raw.trim() === '')) {
-    if (field.required) throw new SgcError(`${field.label} es obligatorio.`);
+    if (field.required) throw new SgcError(`«${field.label}» es obligatorio.`);
     return null;
   }
   const value = String(raw).trim();
-  if (value.length > 4000) throw new SgcError(`${field.label} admite máximo 4000 caracteres.`);
+  if (value.length > 4000) throw new SgcError(`«${field.label}» admite máximo 4000 caracteres.`);
   switch (field.type) {
     case 'numero':
-      if (!Number.isFinite(Number(value))) throw new SgcError(`${field.label} debe ser un número.`);
+      if (!Number.isFinite(Number(value))) throw new SgcError(`«${field.label}» debe ser un número.`);
       break;
     case 'fecha':
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) throw new SgcError(`${field.label} debe ser una fecha AAAA-MM-DD.`);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) throw new SgcError(`«${field.label}» debe ser una fecha AAAA-MM-DD.`);
       break;
     case 'seleccion':
-      if (!field.options.includes(value)) throw new SgcError(`${field.label}: opción no permitida.`);
+      if (!field.options.includes(value)) throw new SgcError(`«${field.label}»: opción no permitida.`);
       break;
     case 'si_no':
-      if (value !== 'si' && value !== 'no') throw new SgcError(`${field.label} debe ser sí o no.`);
+      if (value !== 'si' && value !== 'no') throw new SgcError(`«${field.label}» debe ser sí o no.`);
       break;
     case 'texto':
-      if (value.length > 300) throw new SgcError(`${field.label} admite máximo 300 caracteres.`);
+      if (value.length > 300) throw new SgcError(`«${field.label}» admite máximo 300 caracteres.`);
       break;
   }
   return value;
@@ -487,7 +487,7 @@ export async function createRequest(db: SgcDb, notifier: SgcNotifier, access: Sg
   }
   const elaborator = resolved.choice.email;
   const elaboratorNote = v7
-    ? `Quien hace la solicitud elabora el documento (flujo ${process.name} v${version.version_number}, RN 2026-10-13): ${elaborator}. Aseguramiento de Calidad autoriza primero la creación; solo Calidad puede redirigir la elaboración, con motivo.`
+    ? `Quien hace la solicitud elabora el documento (flujo «${process.name}» v${version.version_number}, RN 2026-10-13): ${elaborator}. Aseguramiento de Calidad autoriza primero la creación; solo Calidad puede redirigir la elaboración, con motivo.`
     : describeElaboratorChoice(resolved.choice as Parameters<typeof describeElaboratorChoice>[0], resolved.matrixLabel);
   const requestFields = def.formFields.filter((f) => f.taskKey === null);
   for (const f of requestFields) validateFieldValue(f, input.formValues?.[f.key]);
@@ -707,7 +707,7 @@ export async function createRedissemination(db: SgcDb, notifier: SgcNotifier, ac
     const repeatNote = alreadyRead.length
       ? `\n${alreadyRead.length} persona(s) ya habían leído y firmado la versión ${version.version_number} y la vuelven a tener pendiente (confirmado por ${me}).`
       : '';
-    await addInteraction(tx, request.id_request, 'estado', me, `Redivulgación de ${doc.code} V${version.version_number} (versión vigente, sin versión nueva). Flujo ${process.name} versión ${flowVersion.version_number}.\nMotivo: ${reason}${repeatNote}`, {
+    await addInteraction(tx, request.id_request, 'estado', me, `Redivulgación de ${doc.code} V${version.version_number} (versión vigente, sin versión nueva). Flujo «${process.name}» versión ${flowVersion.version_number}.\nMotivo: ${reason}${repeatNote}`, {
       idTask: startTask.id_task,
       meta: { idVersion: version.id_document_version, scope: entries.map(scopeKey), readers: res.readers.length, alreadyRead: alreadyRead.length },
     });
@@ -772,14 +772,14 @@ async function assertReadyToSubmit(tx: Tx, request: RequestRow, def: SgcFlowDefi
   if (draftError) throw new SgcError(draftError, 409);
   for (const t of def.tasks.filter((x) => x.assignment === 'firmantes' && x.isEnabled)) {
     const n = await tx.sgcRequestSigner.count({ where: { id_request: request.id_request, step_key: t.key, is_active: true } });
-    if (n === 0) throw new SgcError(requesterElaborates(def) ? `Asigne los firmantes de ${t.name} (personas de su departamento) antes de enviar el documento.` : `Aseguramiento de Calidad debe asignar los firmantes de ${t.name} antes de enviar el documento.`, 409);
+    if (n === 0) throw new SgcError(requesterElaborates(def) ? `Asigne los firmantes de «${t.name}» (personas de su departamento) antes de enviar el documento.` : `Aseguramiento de Calidad debe asignar los firmantes de «${t.name}» antes de enviar el documento.`, 409);
   }
   const fields = def.formFields.filter((f) => f.taskKey === taskKey && f.required);
   if (fields.length) {
     const values = await tx.sgcFormValue.findMany({ where: { id_request: request.id_request, field: { task_key: taskKey } }, include: { field: true } });
     const have = new Set(values.filter((v) => v.value_text).map((v) => v.field.field_key));
     const missing = fields.filter((f) => !have.has(f.key));
-    if (missing.length) throw new SgcError(`Complete: ${missing.map((f) => `${f.label}`).join(', ')}.`, 409);
+    if (missing.length) throw new SgcError(`Complete: ${missing.map((f) => `«${f.label}»`).join(', ')}.`, 409);
   }
 }
 
@@ -788,18 +788,18 @@ export async function assertAssignmentComplete(tx: Tx, request: RequestRow, def:
   const signers = await tx.sgcRequestSigner.groupBy({ by: ['step_key'], where: { id_request: request.id_request, is_active: true }, _count: { _all: true } });
   // El alcance no se exige: si nadie lo define se toma el departamento dueño del proceso (SGC-REQ-053).
   const gaps = assignmentGaps(def, new Map(signers.map((g) => [g.step_key, g._count._all])), 0);
-  if (gaps.length) throw new SgcError(`Antes de completar ${taskName} falta seleccionar ${gaps.join(' y ')}.`, 409);
+  if (gaps.length) throw new SgcError(`Antes de completar «${taskName}» falta seleccionar ${gaps.join(' y ')}.`, 409);
   // 2026-10-05: lo SUGERIDO por el solicitante no cuenta hasta que se confirme (o se reasigne).
   const pendingSigners = await tx.sgcRequestSigner.count({ where: { id_request: request.id_request, ...SGC_PENDING_SUGGESTION } });
   const pendingScope = await tx.sgcDisseminationScope.count({ where: { id_request: request.id_request, ...SGC_PENDING_SUGGESTION } });
-  if (pendingSigners || pendingScope) throw new SgcError(`Hay firmantes o alcance SUGERIDOS sin confirmar: confírmelos o reasígnelos antes de completar ${taskName}.`, 409);
+  if (pendingSigners || pendingScope) throw new SgcError(`Hay firmantes o alcance SUGERIDOS sin confirmar: confírmelos o reasígnelos antes de completar «${taskName}».`, 409);
   // Al menos un aprobador de Calidad (PIC/S 6.6.4, 21 CFR 211.22): si la aprobación no trae el cupo fijo del grupo de Calidad, uno de los aprobadores debe ser de Calidad.
   for (const step of approvalStepsWithoutQualityPool(def)) {
     const emails = (await tx.sgcRequestSigner.findMany({ where: { id_request: request.id_request, step_key: step.key, is_active: true }, select: { user_email: true } })).map((x) => lower(x.user_email));
     const quality = emails.length
       ? await tx.subprocessUserCompany.count({ where: { subprocess: { subprocess_url: SGC_SUBPROCESS_URLS.calidad }, companyUser: { company: { id_company: request.id_company }, user: { isActive: true, email: { in: emails } } } } })
       : 0;
-    if (quality === 0) throw new SgcError(`${step.name} necesita al menos un aprobador de Aseguramiento de Calidad.`, 409);
+    if (quality === 0) throw new SgcError(`«${step.name}» necesita al menos un aprobador de Aseguramiento de Calidad.`, 409);
   }
 }
 
@@ -895,7 +895,7 @@ export async function decideTask(db: SgcDb, notifier: SgcNotifier, idTask: numbe
     // Sprint 3 — FIRMA ELECTRÓNICA PROPIA: aprobar (o enviar) un paso con firma exige firmar.
     const needsSignature = decision === 'aprobar' && Boolean(assignee.signature_meaning);
     if (needsSignature && !input.signature) {
-      throw new SgcError('Este paso se aprueba con firma electrónica: use Firmar (contraseña de SynerLink y motivo).', 409);
+      throw new SgcError('Este paso se aprueba con firma electrónica: use «Firmar» (contraseña de SynerLink y motivo).', 409);
     }
     if (!needsSignature && input.signature) throw new SgcError('Esta decisión no lleva firma electrónica.', 409);
     // Lista de chequeo de Calidad: la responde el cupo del GRUPO de verificación de la tarea.
@@ -1085,7 +1085,7 @@ export async function setSigners(db: SgcDb, notifier: SgcNotifier, idRequest: nu
     const stepDef = def.tasks.find((t) => t.key === stepKey && t.assignment === 'firmantes');
     if (!stepDef) throw new SgcError('Ese paso no admite firmantes asignados.');
     if (suggesting && (await tx.sgcRequestSigner.count({ where: { id_request: idRequest, step_key: stepKey, is_active: true } }))) {
-      throw new SgcError(`Los firmantes de ${stepDef.name} ya están confirmados. ${denial}`, 403);
+      throw new SgcError(`Los firmantes de «${stepDef.name}» ya están confirmados. ${denial}`, 403);
     }
     const eligible = new Set((await listEligibleUsers(tx, request.id_company)).map((u) => u.email));
     const desired = normalizeSigners(input.signers, { stepName: stepDef.name, elaboratorEmail: request.elaborator_email, requesterEmail: request.requester_email, eligibleEmails: eligible, kind: signerStepKind(stepDef), segregation: await segregationOf(tx, request) });
@@ -1226,7 +1226,7 @@ async function suggestSigners(
     await tx.sgcRequest.update({ where: { id_request: idRequest }, data: { signing_modes_json: JSON.stringify({ ...modes, [stepDef.key]: newMode }) } });
   }
   const lines = desired.map((d) => `+ ${d.email} (orden ${d.order})`);
-  await addInteraction(tx, idRequest, 'firmantes', me, `Sugirió los firmantes de ${stepDef.name} (SUGERIDO: queda pendiente de que lo confirme quien ejecuta la primera tarea y/o Aseguramiento de Calidad).\n${lines.join('\n')}${newMode ? `\nModo de firma sugerido: ${newMode === 'orden' ? 'en orden' : 'en paralelo'}` : ''}`, {
+  await addInteraction(tx, idRequest, 'firmantes', me, `Sugirió los firmantes de «${stepDef.name}» (SUGERIDO: queda pendiente de que lo confirme quien ejecuta la primera tarea y/o Aseguramiento de Calidad).\n${lines.join('\n')}${newMode ? `\nModo de firma sugerido: ${newMode === 'orden' ? 'en orden' : 'en paralelo'}` : ''}`, {
     meta: { stepKey: stepDef.key, suggested: desired, mode: newMode, replaced: pending.map((p) => lower(p.user_email)) },
   });
   await writeSgcAudit(tx, {
@@ -1274,7 +1274,7 @@ export async function confirmSuggestions(db: SgcDb, notifier: SgcNotifier, idReq
     for (const [stepKey, list] of finalByStep) {
       const stepDef = def.tasks.find((t) => t.key === stepKey && t.assignment === 'firmantes');
       if (!stepDef) throw new SgcError(`El paso ${stepKey} no admite firmantes.`, 409);
-      if (await tx.sgcTask.findFirst({ where: { id_request: idRequest, task_key: stepKey, status: 'abierta' } })) throw new SgcError(`${stepDef.name} ya está en curso: reasigne a las personas en lugar de confirmar.`, 409);
+      if (await tx.sgcTask.findFirst({ where: { id_request: idRequest, task_key: stepKey, status: 'abierta' } })) throw new SgcError(`«${stepDef.name}» ya está en curso: reasigne a las personas en lugar de confirmar.`, 409);
       normalizeSigners(list.map((x) => x.email), { stepName: stepDef.name, elaboratorEmail: request.elaborator_email, requesterEmail: request.requester_email, eligibleEmails: eligible, kind: signerStepKind(stepDef), segregation });
       // Sprint 12: lo sugerido para APROBACIÓN se confirma solo si son aprobadores autorizados (S15: o del departamento, DOC v7).
       await assertSignersAllowed(tx, request, def, stepDef, list.map((x) => x.email), new Date());
@@ -1425,7 +1425,7 @@ export async function assignSubstitute(db: SgcDb, notifier: SgcNotifier, idTask:
   const result = await db.$transaction(async (tx) => {
     const request = await lockRequest(tx, head.task.id_request);
     if (!(await isSubstituteAssigner(tx, request.id_company, me))) {
-      throw new SgcError('Solo el grupo exclusivo de Calidad Firmantes sustitutos (SGC-SUSTITUTOS) asigna un firmante sustituto.', 403);
+      throw new SgcError('Solo el grupo exclusivo de Calidad «Firmantes sustitutos» (SGC-SUSTITUTOS) asigna un firmante sustituto.', 403);
     }
     const slot = await tx.sgcTaskAssignee.findUniqueOrThrow({ where: { id_task_assignee: idTaskAssignee }, include: { task: { include: { assignees: true, taskDef: true } } } });
     const task = slot.task;
@@ -1479,7 +1479,7 @@ export async function assignSubstitute(db: SgcDb, notifier: SgcNotifier, idTask:
       },
     });
     const period = input.absenceFrom || input.absenceTo ? `\nAusencia: ${input.absenceFrom?.toISOString().slice(0, 10) ?? '¿?'} a ${input.absenceTo?.toISOString().slice(0, 10) ?? '¿?'}` : '';
-    await addInteraction(tx, request.id_request, 'reasignacion', me, `Asignó a ${input.toEmail} como SUSTITUTO de ${original} en ${task.name} (firmará en sustitución).${period}\nMotivo: ${input.reason}`, {
+    await addInteraction(tx, request.id_request, 'reasignacion', me, `Asignó a ${input.toEmail} como SUSTITUTO de ${original} en «${task.name}» (firmará en sustitución).${period}\nMotivo: ${input.reason}`, {
       idTask: task.id_task,
       meta: { substitution: { from: original, to: input.toEmail, absenceFrom: input.absenceFrom?.toISOString().slice(0, 10) ?? null, absenceTo: input.absenceTo?.toISOString().slice(0, 10) ?? null } },
     });

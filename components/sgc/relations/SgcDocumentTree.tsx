@@ -254,7 +254,7 @@ export default function SgcDocumentTree({ company, focusDocument }: { company: S
             Documentos sin padre ({orphans.length})
           </Text>
           <Text size='xs' c='dimmed' mb='xs'>
-            Formatos, instructivos y demás que aún no cuelgan de un procedimiento. Arrástrelos sobre su procedimiento o use Relacionar con padre.
+            Formatos, instructivos y demás que aún no cuelgan de un procedimiento. Arrástrelos sobre su procedimiento o use «Relacionar con padre».
           </Text>
           <Stack gap={6}>
             {orphans.map((d) => (

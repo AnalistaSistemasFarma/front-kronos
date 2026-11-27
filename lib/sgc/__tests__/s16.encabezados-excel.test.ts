@@ -99,7 +99,7 @@ describe('SGC · S16 · plantillas de encabezado por tipo (R31, D20)', () => {
     expect(headerBottomText({ bottomRow: 'tipo', legend: null }, { process: 'GC', documentType: 'Formato' })).toBe('TIPO DOCUMENTAL: Formato');
     expect(headerBottomText({ bottomRow: 'leyenda', legend: 'Copia controlada' }, { process: 'GC', documentType: 'Formato' })).toBe('Copia controlada');
     expect(describeHeaderTemplateChanges(null, c)).toEqual(['Plantilla creada.']);
-    expect(describeHeaderTemplateChanges(SGC_DEFAULT_HEADER_TEMPLATE, c)).toEqual(expect.arrayContaining(['titleLabel: NOMBRE DEL DOCUMENTO → NOMBRE DEL FORMATO']));
+    expect(describeHeaderTemplateChanges(SGC_DEFAULT_HEADER_TEMPLATE, c)).toEqual(expect.arrayContaining(['titleLabel: «NOMBRE DEL DOCUMENTO» → «NOMBRE DEL FORMATO»']));
     expect(describeHeaderTemplateChanges(c, c)).toEqual(['Sin cambios en la plantilla.']);
   });
 
@@ -140,7 +140,7 @@ describe('SGC · S16 · plantillas de encabezado por tipo (R31, D20)', () => {
 });
 
 describe('SGC · S16 · formatos en Excel (R32, D17)', () => {
-  it('[SGC-REQ-164] formatos del borrador por tipo: por defecto solo Word; Formato con Excel; el PDF solo sin encabezado obligatorio', () => {
+  it('[SGC-REQ-164] formatos del borrador por tipo: por defecto solo Word; «Formato» con Excel; el PDF solo sin encabezado obligatorio', () => {
     expect(parseDraftExtensions(null)).toEqual(['docx']);
     expect(parseDraftExtensions('docx,xlsx')).toEqual(['docx', 'xlsx']);
     expect(parseDraftExtensions(' .XLSX ')).toEqual(['xlsx']);

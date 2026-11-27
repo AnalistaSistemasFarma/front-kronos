@@ -270,7 +270,7 @@ function Equipos({ idCompany, empresa, version, onCambio }: { idCompany: number;
           <Loader />
         </Group>
       ) : lista.data.total === 0 ? (
-        <Alert color='gray'>{r?.total === 0 ? 'El inventario está vacío. Cárguelo desde Cargue masivo con el formato OLP-GCC-04-FR-017.' : 'Ningún equipo coincide con el filtro.'}</Alert>
+        <Alert color='gray'>{r?.total === 0 ? 'El inventario está vacío. Cárguelo desde «Cargue masivo» con el formato OLP-GCC-04-FR-017.' : 'Ningún equipo coincide con el filtro.'}</Alert>
       ) : (
         <>
           <Table.ScrollContainer minWidth={1100}>
@@ -564,7 +564,7 @@ function EquipoModal({ idCompany, equipo, base, resumen, onClose, onDone }: { id
         </SimpleGrid>
         {cambiaSerie && (
           <Alert color='orange' icon={<IconAlertTriangle size={18} />}>
-            Va a cambiar la serie {equipo!.serie} por {v.serie.trim()}: queda como cambio de serial en el historial.
+            Va a cambiar la serie {equipo!.serie} por {v.serie.trim()}: queda como «cambio de serial» en el historial.
           </Alert>
         )}
         <Textarea label={equipo ? 'Justificación del cambio' : 'Observación (opcional)'} required={Boolean(equipo)} autosize minRows={2} maxLength={1000} value={justificacion} onChange={(e) => setJustificacion(e.currentTarget.value)} data-testid='biomed-inv-justificacion' />
@@ -676,7 +676,7 @@ function Cobros({ idCompany, version }: { idCompany: number; version: number }) 
         </Card>
         {d.sinValor > 0 && (
           <Alert color='orange' icon={<IconCurrencyDollar size={18} />} maw={520}>
-            {d.sinValor} equipo(s) sin valor unitario: asígnelo en Valores unitarios y el cobro se completa solo.
+            {d.sinValor} equipo(s) sin valor unitario: asígnelo en «Valores unitarios» y el cobro se completa solo.
           </Alert>
         )}
       </Group>
@@ -911,7 +911,7 @@ function CargueModal({ idCompany, empresa, resumen, onClose, onDone }: { idCompa
     <Modal opened onClose={onClose} title={<Text fw={700}>Cargue masivo del inventario (Excel)</Text>} size='90rem' closeOnClickOutside={false} data-testid='biomed-inv-cargue'>
     <Stack gap='sm'>
       <Text size='sm' c='dimmed'>
-        Descargue la plantilla (formato OLP-GCC-04-FR-017), llénela con uno o varios equipos y súbala. Basta la serie, el modelo y la ubicación: si el modelo ya está en el inventario, el equipo, el código, la marca y la clasificación se completan solos. Primero se SIMULA: no se escribe nada hasta Cargar. Si una serie ya existe, la fila actualiza ese equipo; lo que está en Bodega queda en bodega y lo demás, distribuido. Un faltante o dañado no lo cambia un archivo.
+        Descargue la plantilla (formato OLP-GCC-04-FR-017), llénela con uno o varios equipos y súbala. Basta la serie, el modelo y la ubicación: si el modelo ya está en el inventario, el equipo, el código, la marca y la clasificación se completan solos. Primero se SIMULA: no se escribe nada hasta «Cargar». Si una serie ya existe, la fila actualiza ese equipo; lo que está en «Bodega» queda en bodega y lo demás, distribuido. Un faltante o dañado no lo cambia un archivo.
       </Text>
       {error && (
         <Alert color='red' icon={<IconAlertTriangle size={18} />} withCloseButton onClose={() => setError(null)} data-testid='biomed-inv-cargue-error'>

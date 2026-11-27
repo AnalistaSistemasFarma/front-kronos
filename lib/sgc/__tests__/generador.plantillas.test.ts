@@ -111,7 +111,7 @@ describe('SGC · Generador · valores y llenado', () => {
     expect(validateGeneratorValues(fields, { fecha: '2026-10-10', nombre: '  Ana \t María\u0007 ', cuerpo: ' línea 1\r\nlínea 2 ', valor: 12.5 })).toEqual({ fecha: '2026-10-10', nombre: 'Ana María', cuerpo: 'línea 1\nlínea 2', valor: '12.5' });
     expect(validateGeneratorValues(fields, { fecha: '2026-02-28', nombre: 'X', cuerpo: null })).toEqual({ fecha: '2026-02-28', nombre: 'X', cuerpo: '', valor: '' });
     expect(() => validateGeneratorValues(fields, { fecha: '2026-10-10', nombre: 'X', titulo: 'cambio el título' })).toThrow(/no es un campo editable/);
-    expect(() => validateGeneratorValues(fields, { fecha: '2026-10-10' })).toThrow(/Complete el campo Nombre/);
+    expect(() => validateGeneratorValues(fields, { fecha: '2026-10-10' })).toThrow(/Complete el campo «Nombre»/);
     expect(() => validateGeneratorValues(fields, { fecha: '2026-10-10', nombre: 'x'.repeat(21) })).toThrow(/máximo 20/);
     expect(() => validateGeneratorValues(fields, { fecha: '2026-02-30', nombre: 'X' })).toThrow(/fecha válida/);
     expect(() => validateGeneratorValues(fields, { fecha: '10/10/2026', nombre: 'X' })).toThrow(/fecha válida/);
@@ -176,7 +176,7 @@ describe('SGC · Generador · estado de la plantilla y registro', () => {
 describe('SGC · Generador · S19 (R34): solo documentos sin codificación', () => {
   const ok = { templateStatus: 'activa', approvedVersion: { idDocumentVersion: 7 }, documentStatus: 'vigente', documentCurrentVersionId: 7 };
 
-  it('[SGC-REQ-179] una plantilla cuyo origen es de un tipo codificado (no plantilla guía) no genera; retirada sigue mandando', () => {
+  it('[SGC-REQ-179] una plantilla cuyo origen es de un tipo codificado (no «plantilla guía») no genera; retirada sigue mandando', () => {
     expect(templateState({ ...ok, guideType: false })).toBe('tipo_no_guia');
     expect(templateState({ ...ok, guideType: false, templateStatus: 'retirada' })).toBe('retirada');
     expect(templateStateMessage('tipo_no_guia')).toBe(SGC_GENERATOR_CODED_MESSAGE);

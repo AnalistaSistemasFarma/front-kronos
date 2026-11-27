@@ -175,7 +175,7 @@ const documentRefParams = {
     .min(1)
     .max(60)
     .optional()
-    .describe('Código documental exacto (p. ej. PR-GC-001). Si el código existe en varias empresas, indique también companyId.'),
+    .describe('Código documental exacto (p. ej. «PR-GC-001»). Si el código existe en varias empresas, indique también companyId.'),
   companyId: companyIdParam,
 };
 
@@ -223,11 +223,11 @@ export function registerSgcTools(server: McpServer, deps: SgcToolDeps): void {
   // -------------------------------------------------------------------------
   server.tool(
     'sgc_list_documents',
-    'SOLO LECTURA. Lista los documentos controlados del SGC documental de SynerLink (manuales, procedimientos, instructivos, formatos…) de las empresas del alcance que tengan el SGC activo. Por política, el asistente solo ve documentos VIGENTES de confidencialidad pública (los de área o confidenciales se consultan en SynerLink con el usuario de la persona). Filtros: texto (en el código o el título), tipo documental (código como PR, nombre o id), área (id o nombre), estado (solo vigente) y vigencia de la revisión (vencido, por_vencer, al_dia, sin_fecha). Paginado (limit/offset), ordenado por código. Devuelve id, código, título, empresa, tipo, proceso, área, versión vigente con su fecha de emisión, fecha de próxima revisión y la ruta del documento en SynerLink. Use sgc_get_document para el detalle y sgc_download_document para leer o descargar el PDF.',
+    'SOLO LECTURA. Lista los documentos controlados del SGC documental de SynerLink (manuales, procedimientos, instructivos, formatos…) de las empresas del alcance que tengan el SGC activo. Por política, el asistente solo ve documentos VIGENTES de confidencialidad «pública» (los de área o confidenciales se consultan en SynerLink con el usuario de la persona). Filtros: texto (en el código o el título), tipo documental (código como «PR», nombre o id), área (id o nombre), estado (solo «vigente») y vigencia de la revisión (vencido, por_vencer, al_dia, sin_fecha). Paginado (limit/offset), ordenado por código. Devuelve id, código, título, empresa, tipo, proceso, área, versión vigente con su fecha de emisión, fecha de próxima revisión y la ruta del documento en SynerLink. Use sgc_get_document para el detalle y sgc_download_document para leer o descargar el PDF.',
     {
       companyId: companyIdParam,
       texto: z.string().trim().min(1).max(200).optional().describe('Texto a buscar en el código o el título (contiene, sin distinguir mayúsculas).'),
-      tipo: z.string().trim().min(1).max(100).optional().describe('Tipo documental: código (PR, FO…), nombre o id numérico. Vea sgc_list_document_types.'),
+      tipo: z.string().trim().min(1).max(100).optional().describe('Tipo documental: código («PR», «FO»…), nombre o id numérico. Vea sgc_list_document_types.'),
       areaId: z.number().int().positive().optional().describe('Área dueña del documento (id_department).'),
       area: z.string().trim().min(1).max(150).optional().describe('Área dueña del documento por nombre (contiene).'),
       estado: z.enum(['vigente']).optional().describe('Estado del documento. El asistente solo accede a documentos vigentes (por defecto).'),
@@ -363,7 +363,7 @@ export function registerSgcTools(server: McpServer, deps: SgcToolDeps): void {
   // -------------------------------------------------------------------------
   server.tool(
     'sgc_download_document',
-    `SOLO LECTURA. Descarga el PDF controlado de la versión VIGENTE de un documento del SGC (por idDocument o código) desde OneDrive (MS Graph), verifica su huella SHA-256 registrada y devuelve: (1) el TEXTO extraído del PDF, página por página (por defecto hasta ${SGC_TEXT_DEFAULT_CHARS} caracteres; maxCaracteres hasta ${SGC_TEXT_MAX_CHARS}); y (2) si incluirPdf=true y pesa hasta 4 MB, el PDF en base64 marcado como copia controlada entregada al asistente (quién y cuándo). PDF de hasta 15 MB. Un PDF escaneado puede no tener texto (no hay OCR). Si indica "version", debe ser la vigente. Para abrirlo con su propio usuario, la persona puede usar synerlink_path en SynerLink. Solo documentos vigentes de confidencialidad pública de empresas del alcance.`,
+    `SOLO LECTURA. Descarga el PDF controlado de la versión VIGENTE de un documento del SGC (por idDocument o código) desde OneDrive (MS Graph), verifica su huella SHA-256 registrada y devuelve: (1) el TEXTO extraído del PDF, página por página (por defecto hasta ${SGC_TEXT_DEFAULT_CHARS} caracteres; maxCaracteres hasta ${SGC_TEXT_MAX_CHARS}); y (2) si incluirPdf=true y pesa hasta 4 MB, el PDF en base64 marcado como «copia controlada» entregada al asistente (quién y cuándo). PDF de hasta 15 MB. Un PDF escaneado puede no tener texto (no hay OCR). Si indica "version", debe ser la vigente. Para abrirlo con su propio usuario, la persona puede usar synerlink_path en SynerLink. Solo documentos vigentes de confidencialidad pública de empresas del alcance.`,
     {
       ...documentRefParams,
       version: z.number().int().positive().optional().describe('Número de versión (version_number). Solo se entrega la vigente; por defecto, la vigente.'),
@@ -470,7 +470,7 @@ export function registerSgcTools(server: McpServer, deps: SgcToolDeps): void {
   // -------------------------------------------------------------------------
   server.tool(
     'sgc_list_document_types',
-    'SOLO LECTURA. Lista los tipos documentales activos del SGC (código como PR, FO, nombre, meses de revisión y de alerta) de las empresas del alcance con el SGC activo, con cuántos documentos vigentes de confidencialidad pública tiene cada tipo.',
+    'SOLO LECTURA. Lista los tipos documentales activos del SGC (código como «PR», «FO», nombre, meses de revisión y de alerta) de las empresas del alcance con el SGC activo, con cuántos documentos vigentes de confidencialidad pública tiene cada tipo.',
     { companyId: companyIdParam },
     async (args) =>
       deps.withAudit('sgc_list_document_types', args, async () => {

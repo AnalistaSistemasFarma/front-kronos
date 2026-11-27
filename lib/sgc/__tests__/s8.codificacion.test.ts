@@ -33,7 +33,7 @@ const FO = { ...PR, documentTypeCode: 'FO' };
 const parent = { code: 'OLP-GCC-02', sequence: 2, parts: PR };
 
 describe('SGC · S8 · codificación con herencia del número del padre', () => {
-  it('[SGC-REQ-113] el procedimiento toma compañía + área + número y su formato hereda el número: OLP-GCC-02 → OLP-GCC-02-FO01', () => {
+  it('[SGC-REQ-113] el procedimiento toma «compañía + área + número» y su formato hereda el número: OLP-GCC-02 → OLP-GCC-02-FO01', () => {
     expect(buildDocumentCode(OLP, PR, 2)).toBe('OLP-GCC-02');
     expect(buildChildCodeRoot(OLP, FO, parent)).toBe('OLP-GCC-02-FO');
     expect(buildChildCode(OLP, FO, parent, 1)).toBe('OLP-GCC-02-FO01');
@@ -96,7 +96,7 @@ describe('SGC · S8 · codificación con herencia del número del padre', () => 
       'Herencia: indique qué tipos documentales heredan el número (por ejemplo FO, IN).',
       'Herencia: los dígitos del consecutivo deben estar entre 1 y 6.',
     ]);
-    expect(validateChildCoding({ childPattern: '{CODIGO_PADRE}{CONSECUTIVO}', childTypeCodes: ['FO-1'] })).toEqual(['Herencia, tipo FO-1: El código solo admite mayúsculas y números (máximo 10).']);
+    expect(validateChildCoding({ childPattern: '{CODIGO_PADRE}{CONSECUTIVO}', childTypeCodes: ['FO-1'] })).toEqual(['Herencia, tipo «FO-1»: El código solo admite mayúsculas y números (máximo 10).']);
     expect(validateCodingGuide({ ...OLP, childPattern: '{CODIGO_PADRE}' })).toContain('Herencia: el patrón debe tener exactamente una marca {CONSECUTIVO}.');
   });
 });

@@ -12,7 +12,7 @@ import { expect, test } from '@playwright/test';
 const OLP = 3;
 
 test.describe('SGC · Sprint 13 (con sesión)', () => {
-  test('[SGC-REQ-140][SGC-REQ-144] Mi firma respeta la bandera y nadie registra la firma de otro', async ({ page }) => {
+  test('[SGC-REQ-140][SGC-REQ-144] «Mi firma» respeta la bandera y nadie registra la firma de otro', async ({ page }) => {
     const own = await (await page.request.get(`/api/sgc/signature/own?company=${OLP}`)).json();
     await page.goto(`/process/sgc-documental/mi-firma?empresa=${OLP}`);
     if (!own.enabled) {

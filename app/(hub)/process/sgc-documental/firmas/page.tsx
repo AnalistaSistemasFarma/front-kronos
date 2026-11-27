@@ -96,7 +96,7 @@ function Masters({ company }: { company: SgcCompanyAccess }) {
 
       {selfSignature && (
         <Alert color='blue' icon={<IconAlertCircle size={16} />} data-testid='sgc-firmas-propia-activa'>
-          La firma propia está activa: cada persona registra la suya en Mi firma y queda pendiente. Aseguramiento de Calidad la valida (por ejemplo, comparándola con el documento de identidad) o la rechaza con motivo. Nadie valida su propia firma.
+          La firma propia está activa: cada persona registra la suya en «Mi firma» y queda pendiente. Aseguramiento de Calidad la valida (por ejemplo, comparándola con el documento de identidad) o la rechaza con motivo. Nadie valida su propia firma.
         </Alert>
       )}
 

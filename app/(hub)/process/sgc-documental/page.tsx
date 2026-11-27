@@ -96,7 +96,7 @@ function accesosDocumentos(company: SgcCompanyAccess, selfSignature = false, gen
     },
     {
       title: 'Calendario de vencimientos',
-      description: 'Próximos vencimientos de la vigencia, avisos anticipados y Mis vencimientos.',
+      description: 'Próximos vencimientos de la vigencia, avisos anticipados y «Mis vencimientos».',
       icon: <IconCalendarDue size={24} />,
       sprint: 'Sprint 5',
       href: sgcHref(`${SGC_BASE_URL}/vencimientos`, id),

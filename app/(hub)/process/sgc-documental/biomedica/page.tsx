@@ -134,7 +134,7 @@ function Biomedica({ company }: { company: SgcCompanyAccess }) {
 
         <Tabs.Panel value='formatos' pt='md'>
           {porActividad.size === 0 ? (
-            <Alert color='gray'>Aún no hay formatos habilitados. Aseguramiento de Calidad los elige en Formatos del módulo.</Alert>
+            <Alert color='gray'>Aún no hay formatos habilitados. Aseguramiento de Calidad los elige en «Formatos del módulo».</Alert>
           ) : (
             <Stack gap='sm'>
               {d.actividades

@@ -88,10 +88,10 @@ const html = `<!doctype html><html lang="es"><head><meta charset="utf-8"><title>
   .cerca{display:flex;gap:8px;flex-wrap:wrap} .chicos{display:flex;gap:8px;justify-content:center;align-items:center;margin-top:6px}
 </style></head><body>
 <h1>Cabezas-figura de los asistentes (Lorelei · DiceBear 9.4.3)</h1>
-<p>Opciones adicionales del selector Cabezas, después de Cabeza 1…4. Sobre cada figura se componen las partes de Lorelei: ojos, cejas, boca, nariz, gafas, aretes, pecas, barba, flores y pelo (o Ninguno). Relleno = color de piel; acentos = color de cabello. Por figura: <b>Lorelei Cabeza 1 (borde punteado, para comparar el trazo)</b> · sin pelo · con gafas y aretes · con pelo, pecas y colores. El contorno de las figuras usa el trazo de Lorelei: formas rellenas negras de grosor variable, con huecos y puntas afinadas, sin stroke ni degradados.</p>
+<p>Opciones adicionales del selector «Cabezas», después de Cabeza 1…4. Sobre cada figura se componen las partes de Lorelei: ojos, cejas, boca, nariz, gafas, aretes, pecas, barba, flores y pelo (o «Ninguno»). Relleno = color de piel; acentos = color de cabello. Por figura: <b>Lorelei Cabeza 1 (borde punteado, para comparar el trazo)</b> · sin pelo · con gafas y aretes · con pelo, pecas y colores. El contorno de las figuras usa el trazo de Lorelei: formas rellenas negras de grosor variable, con huecos y puntas afinadas, sin stroke ni degradados.</p>
 <h2>Trazo de cerca</h2><div class="cerca">${cerca}</div>
 <div class="grid">${figuras}</div>
-<h2>Selector Cabezas de un asistente (miniaturas del editor, en orden)</h2>
+<h2>Selector «Cabezas» de un asistente (miniaturas del editor, en orden)</h2>
 <div class="sel">${selector}</div>
 <h2>Asistentes de OLP: avatar actual (Lorelei, semilla = nombre) → con cabeza-figura temática</h2>
 <div class="olps">${olp}</div>

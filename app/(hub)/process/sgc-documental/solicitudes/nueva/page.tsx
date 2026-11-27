@@ -107,7 +107,7 @@ function NewRequestForm({ company }: { company: SgcCompanyAccess }) {
       </Title>
       {form.data && (
         <Text size='sm' c='dimmed' mb='md'>
-          Flujo {form.data.flow.name} versión {form.data.flow.version}: {form.data.steps.map((s) => s.name + (s.isEnabled ? '' : ' (Sprint 4)')).join(' → ')}.
+          Flujo «{form.data.flow.name}» versión {form.data.flow.version}: {form.data.steps.map((s) => s.name + (s.isEnabled ? '' : ' (Sprint 4)')).join(' → ')}.
         </Text>
       )}
       {form.data?.roleModel === 'solicitante_elabora' && (

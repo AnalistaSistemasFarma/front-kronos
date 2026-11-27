@@ -285,10 +285,10 @@ export function normalizeFlowDefinition(input: unknown): SgcFlowDefinition {
     if (def.assignment === 'alcance') {
       // Cada persona del alcance firma su propia lectura (en paralelo); el
       // grupo indicado es quien ADMINISTRA la divulgación (no es un cupo).
-      if (def.multiAssignee) throw new SgcError(`${label}: la divulgación toma a las personas del alcance (no marque varios responsables).`);
+      if (def.multiAssignee) throw new SgcError(`${label}: la divulgación toma a las personas del alcance (no marque «varios responsables»).`);
       if (def.isAuthorization) throw new SgcError(`${label}: la divulgación no es una tarea de autorización.`);
       if (!def.poolAuthorizationTypeCode) throw new SgcError(`${label}: indique el grupo que administra la divulgación (tipo de autorización del grupo de Calidad).`);
-      if (def.signatureMeaning !== 'leyo') throw new SgcError(`${label}: la divulgación se cierra con la firma de lectura Leyó.`);
+      if (def.signatureMeaning !== 'leyo') throw new SgcError(`${label}: la divulgación se cierra con la firma de lectura «Leyó».`);
       def.signingModeDefault = null;
     }
     if (def.assignment === 'calidad' && !def.poolAuthorizationTypeCode) {
@@ -407,10 +407,10 @@ export function normalizeFlowDefinition(input: unknown): SgcFlowDefinition {
   formFields.sort((a, b) => a.sortOrder - b.sortOrder);
 
   if (roleModel === 'solicitante_elabora') {
-    if (!tasks.some((t) => t.assignment === 'elaborador' && t.isEnabled)) throw new SgcError('El modelo el solicitante elabora necesita un paso de elaboración (asignación elaborador).');
+    if (!tasks.some((t) => t.assignment === 'elaborador' && t.isEnabled)) throw new SgcError('El modelo «el solicitante elabora» necesita un paso de elaboración (asignación «elaborador»).');
     return { tasks, transitions, formFields, roleModel };
   }
-  if (tasks.some((t) => t.assignment === 'creador')) throw new SgcError('La asignación el creador del documento solo se usa con el modelo el solicitante elabora (DOC v7).');
+  if (tasks.some((t) => t.assignment === 'creador')) throw new SgcError('La asignación «el creador del documento» solo se usa con el modelo «el solicitante elabora» (DOC v7).');
   return { tasks, transitions, formFields };
 }
 

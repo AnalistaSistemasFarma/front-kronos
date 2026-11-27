@@ -51,7 +51,7 @@ export default function SgcFlowFieldsCard({ definition, isEditing, originalField
         box='bg-indigo-500'
         title='Campos del formulario'
         titleClass='text-indigo-700'
-        subtitle='Campos de la solicitud y de cada tarea; los marcados Chequeo Calidad forman la lista de chequeo de estructura documental.'
+        subtitle='Campos de la solicitud y de cada tarea; los marcados «Chequeo Calidad» forman la lista de chequeo de estructura documental.'
         right={
           <>
             <Badge color='indigo' size='lg' variant='light'>

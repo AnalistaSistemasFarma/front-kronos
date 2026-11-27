@@ -129,7 +129,7 @@ describe('SGC · selección de firmantes y alcance (reglas puras)', () => {
   });
 
   it('la primera tarea no se completa sin firmantes; el alcance solo si se exige (SGC-REQ-053 da el departamento por defecto)', () => {
-    expect(assignmentGaps(V3, new Map(), 0)).toEqual(['los firmantes de Revisión', 'los firmantes de Aprobación']);
+    expect(assignmentGaps(V3, new Map(), 0)).toEqual(['los firmantes de «Revisión»', 'los firmantes de «Aprobación»']);
     expect(assignmentGaps(V3, new Map([['revision', 1], ['aprobacion', 2]]), 0)).toEqual([]);
     expect(assignmentGaps(V3, new Map([['revision', 1], ['aprobacion', 2]]), 0, { requireScope: true })).toEqual(['el alcance de divulgación']);
     expect(assignmentGaps(V3, new Map([['revision', 1], ['aprobacion', 2]]), 1, { requireScope: true })).toEqual([]);
@@ -221,7 +221,7 @@ describe('SGC · el solicitante solo SUGIERE; quien ejecuta la primera tarea y/o
     const f = signersDb();
     expect(await setSigners(f.db, notifier, 7, { stepKey: 'revision', signers: [REV], mode: 'paralelo' }, actor(SOL), access(true))).toEqual({ changed: true, suggested: true });
     expect(created(f, 'sgcRequestSigner')).toEqual([expect.objectContaining({ user_email: REV, is_active: false, added_by: SOL })]);
-    expect(created(f, 'sgcInteraction')[0]).toMatchObject({ kind: 'firmantes', body: expect.stringMatching(/^Sugirió los firmantes de Revisión \(SUGERIDO/) });
+    expect(created(f, 'sgcInteraction')[0]).toMatchObject({ kind: 'firmantes', body: expect.stringMatching(/^Sugirió los firmantes de «Revisión» \(SUGERIDO/) });
     expect(JSON.stringify(created(f, 'sgcAuditLog'))).toMatch(/sugerido/);
     expect(f.writes('sgcTaskAssignee')).toEqual([]);
   });
@@ -268,7 +268,7 @@ describe('SGC · el solicitante solo SUGIERE; quien ejecuta la primera tarea y/o
     await expect(setSigners(signersDb().db, notifier, 7, { stepKey: 'aprobacion', signers: [ELAB] }, actor(ELAB), access(true))).rejects.toThrow(/El elaborador no puede ser firmante/);
   });
 
-  describe('Aprobar sugerencia (un clic)', () => {
+  describe('«Aprobar sugerencia» (un clic)', () => {
     const pendingRows = [
       { id_request_signer: 61, step_key: 'revision', user_email: REV, sign_order: 1, is_active: false, removed_at: null, added_by: SOL },
       { id_request_signer: 62, step_key: 'aprobacion', user_email: APR, sign_order: 1, is_active: false, removed_at: null, added_by: SOL },
@@ -519,7 +519,7 @@ describe('SGC · segregación y aprobador de Calidad (revisor = aprobador permit
     expect(f.writes('sgcTaskAssignee')).toEqual([]);
   });
 
-  it('(2) el flujo documental ya garantiza un aprobador de Calidad: la aprobación trae el cupo fijo del grupo SGC-VERIF-CALIDAD con firma Aprobó', () => {
+  it('(2) el flujo documental ya garantiza un aprobador de Calidad: la aprobación trae el cupo fijo del grupo SGC-VERIF-CALIDAD con firma «Aprobó»', () => {
     const apr = V3.tasks.find((t) => t.key === 'aprobacion')!;
     expect(apr).toMatchObject({ assignment: 'firmantes', signatureMeaning: 'aprobo', poolAuthorizationTypeCode: SGC_AUTH_TYPE_QUALITY, isEnabled: true });
     expect(approvalStepsWithoutQualityPool(V3)).toEqual([]);
@@ -535,7 +535,7 @@ describe('SGC · segregación y aprobador de Calidad (revisor = aprobador permit
       });
     await expect(assertAssignmentComplete(withSigners(0).db, requestRow as never, def, 'Elaboración')).rejects.toThrow(/al menos un aprobador de Aseguramiento de Calidad/);
     await expect(assertAssignmentComplete(withSigners(1).db, requestRow as never, def, 'Elaboración')).resolves.toBeUndefined();
-    await expect(assertAssignmentComplete(fakeDb().db, requestRow as never, V3, 'Elaboración')).rejects.toThrow(/falta seleccionar los firmantes de Revisión y los firmantes de Aprobación/);
+    await expect(assertAssignmentComplete(fakeDb().db, requestRow as never, V3, 'Elaboración')).rejects.toThrow(/falta seleccionar los firmantes de «Revisión» y los firmantes de «Aprobación»/);
   });
 });
 
@@ -598,7 +598,7 @@ describe('[SGC-REQ-146][SGC-REQ-147] SGC · excepción de Calidad a la segregaci
     await expect(setSigners(db(r, true).db, notifier, 7, { stepKey: 'revision', signers: [REV] }, actor(CAL), access(true))).rejects.toThrow(/El elaborador no puede ser firmante/);
   });
 
-  it('(3) al decidir: el elaborador de Calidad firma Revisó solo con el ajuste encendido; la aprobación no cambia', async () => {
+  it('(3) al decidir: el elaborador de Calidad firma «Revisó» solo con el ajuste encendido; la aprobación no cambia', async () => {
     const reviewTask = { id_task: 21, task_key: 'revision', name: 'Revisión', status: 'abierta', signing_mode: 'paralelo', assignees: [{ id_task_assignee: 50, user_email: ELAB, pool_type_code: null, sign_order: 1, status: 'pendiente', signature_meaning: 'reviso', signature_status: 'pendiente_s3' }], taskDef: { assignment: 'firmantes' } };
     const approvalTask = { ...reviewTask, id_task: 22, task_key: 'aprobacion', name: 'Aprobación', assignees: [{ ...reviewTask.assignees[0], signature_meaning: 'aprobo' }] };
     const decide = (task: typeof reviewTask, on: boolean) => db(requestRow, on, { sgcTask: { findUnique: () => ({ id_request: 7 }), findUniqueOrThrow: () => task } }).db;

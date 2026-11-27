@@ -15,7 +15,7 @@ import { expect, test } from '@playwright/test';
 const OLP = 3;
 
 test.describe('SGC · Sprint 12 (con sesión)', () => {
-  test('[SGC-REQ-132][SGC-REQ-139] la pestaña Aprobadores autorizados muestra la lista y la selección se filtra según ella', async ({ page }) => {
+  test('[SGC-REQ-132][SGC-REQ-139] la pestaña «Aprobadores autorizados» muestra la lista y la selección se filtra según ella', async ({ page }) => {
     await page.goto(`/process/sgc-documental/configuracion?empresa=${OLP}`);
     const tab = page.getByRole('tab', { name: 'Aprobadores autorizados' });
     await expect(tab).toBeVisible({ timeout: 30_000 });

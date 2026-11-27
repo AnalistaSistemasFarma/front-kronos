@@ -20,7 +20,7 @@ describe('Historial de interacciones · presentación (no cambia lo guardado)', 
       'Aprobó en «Revisión».\nComentario: Todo en orden.\nFirma electrónica: Revisó (firmado electrónicamente). Motivo: Revisión técnica\nContenido firmado: borrador-v1.html · SHA-256 abc123';
     const v = presentInteraction(item(body, 'decision'), nameOf);
     expect(v.who).toBe('Ana López');
-    expect(v.action).toBe('aprobó Revisión y firmó como Revisó');
+    expect(v.action).toBe('aprobó «Revisión» y firmó como «Revisó»');
     expect(v.observation).toBe('Todo en orden.');
     expect(v.note).toContain('Motivo de la firma: Revisión técnica');
     expect(v.details.join('\n')).toContain('SHA-256 abc123');
@@ -30,27 +30,27 @@ describe('Historial de interacciones · presentación (no cambia lo guardado)', 
 
   it('devolución: «devolvió … a elaboración» con sus observaciones', () => {
     const v = presentInteraction(item('Devolvió a elaboración en «Revisión».\nObservaciones: Falta el anexo 2.', 'devolucion'), nameOf);
-    expect(v.action).toBe('devolvió el documento a elaboración desde Revisión');
+    expect(v.action).toBe('devolvió el documento a elaboración desde «Revisión»');
     expect(v.observation).toBe('Falta el anexo 2.');
   });
 
   it('asignación automática: nombres en vez de correos y grupos legibles', () => {
     const v = presentInteraction(item('Tarea «Revisión» asignada a: pedro@x.com, grupo CALIDAD_VERIF · firma en orden.'), nameOf);
     expect(v.automatic).toBe(true);
-    expect(v.action).toBe('Revisión quedó asignada a Pedro Ruiz, el grupo calidad verif');
+    expect(v.action).toBe('«Revisión» quedó asignada a Pedro Ruiz, el grupo calidad verif');
     expect(v.note).toBe('Firma en orden');
   });
 
   it('firmantes: quién entró y quién salió, sin símbolos ni correos', () => {
     const v = presentInteraction(item('Asignó los firmantes de «Revisión».\n+ pedro@x.com (orden 1)\n− luz@x.com\nModo de firma: en orden\nMotivo: Cambio de revisor.', 'firmantes'), nameOf);
-    expect(v.action).toBe('asignó los firmantes de Revisión: agregó a Pedro Ruiz; quitó a Luz Díaz');
+    expect(v.action).toBe('asignó los firmantes de «Revisión»: agregó a Pedro Ruiz; quitó a Luz Díaz');
     expect(v.observation).toBe('Cambio de revisor.');
     expect(v.note).toBe('Firma en orden.');
   });
 
   it('reasignación con motivo', () => {
     const v = presentInteraction(item('Reasignó «Aprobación» de pedro@x.com a luz@x.com.\nMotivo: Vacaciones.', 'reasignacion'), nameOf);
-    expect(v.action).toBe('reasignó Aprobación de Pedro Ruiz a Luz Díaz');
+    expect(v.action).toBe('reasignó «Aprobación» de Pedro Ruiz a Luz Díaz');
     expect(v.observation).toBe('Vacaciones.');
   });
 

@@ -112,7 +112,7 @@ export default function SgcTrainingCard({ view, onSave, onUpload, onRetrain, use
           ? view.byCreator
             ? 'Antes de la divulgación, el creador del documento registra el material: el video o la sesión, quién la dicta y la evaluación en Microsoft Forms o Google Forms. La lectura los muestra debajo del documento.'
             : 'Antes de la divulgación, Calidad registra el material: el video o la sesión y la evaluación en Microsoft Forms o Google Forms. La lectura los muestra debajo del documento.'
-          : 'Participan las personas del alcance de la divulgación. Cuentan los primeros intentos de la evaluación; quien no aprueba en ellos queda en recapacitación. Al cerrarla con la firma Capacitó, la versión pasa a vigente y la anterior a obsoleta.'}
+          : 'Participan las personas del alcance de la divulgación. Cuentan los primeros intentos de la evaluación; quien no aprueba en ellos queda en recapacitación. Al cerrarla con la firma «Capacitó», la versión pasa a vigente y la anterior a obsoleta.'}
       </Text>
 
       {t && !editing && (
@@ -334,7 +334,7 @@ export default function SgcTrainingCard({ view, onSave, onUpload, onRetrain, use
             </Alert>
           )}
           {up.needsJustification && view.open && (
-            <Alert color='yellow'>Hay personas que reprobaron o no presentaron: al cerrar la capacitación con la firma Capacitó, el mismo formulario le pide la justificación.</Alert>
+            <Alert color='yellow'>Hay personas que reprobaron o no presentaron: al cerrar la capacitación con la firma «Capacitó», el mismo formulario le pide la justificación.</Alert>
           )}
           <Table.ScrollContainer minWidth={560}>
             <Table striped data-testid='sgc-capacitacion-resultados'>

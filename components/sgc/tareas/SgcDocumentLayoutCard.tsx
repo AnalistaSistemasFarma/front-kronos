@@ -93,7 +93,7 @@ export default function SgcDocumentLayoutCard({ requestId, onMessage }: { reques
           Las firmas electrónicas (Elaboró, Revisó y Aprobó) quedan estampadas dentro del documento, en el lugar que ubique el elaborador. La firma sigue exigiendo la contraseña de SynerLink y el motivo.
         </Text>
         <Switch
-          label='Usar el encabezado institucional (logo, código, versión, página x de y, elaboró, revisó, aprobó con su recuadro Firma, fecha de emisión y proceso)'
+          label='Usar el encabezado institucional (logo, código, versión, página x de y, elaboró, revisó, aprobó con su recuadro «Firma», fecha de emisión y proceso)'
           description={
             isPdf
               ? 'No aplica a un borrador PDF: el PDF ya trae su propio formato.'
@@ -127,13 +127,13 @@ export default function SgcDocumentLayoutCard({ requestId, onMessage }: { reques
         {placed < total && (
           <Alert color='orange' variant='light' icon={<IconAlertTriangle size={16} />} data-testid='sgc-firmas-faltan'>
             {data.institutionalHeader
-              ? 'Las firmas sin ubicar irán en el recuadro Firma de su rol en el encabezado institucional.'
+              ? 'Las firmas sin ubicar irán en el recuadro «Firma» de su rol en el encabezado institucional.'
               : 'Las firmas sin ubicar irán en la portada de control del PDF (respaldo). Ubíquelas para que queden dentro del documento.'}
           </Alert>
         )}
         {inRegister > 0 && (
           <Text size='xs' c='dimmed' data-testid='sgc-firmas-registro'>
-            {inRegister} firma(s) más van al Registro de firmas al final del documento (3 o más firmantes del mismo rol).
+            {inRegister} firma(s) más van al «Registro de firmas» al final del documento (3 o más firmantes del mismo rol).
           </Text>
         )}
         <Group justify='space-between' wrap='wrap'>

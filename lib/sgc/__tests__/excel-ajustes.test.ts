@@ -88,7 +88,7 @@ describe('SGC · ajustes de presentación del Excel (2026-10-21)', () => {
     expect(describeSheetSettings(SGC_DEFAULT_SHEET_SETTINGS)).toBe('ajuste automático');
     const s = normalizeSheetSettings({ orientation: 'vertical', fit: 'real', sheets: [{ name: 'Registro', printArea: 'A1:C20', titleRows: '1:2', hiddenColumns: ['C'] }, { name: 'Ayuda', include: false }] });
     expect(isDefaultSheetSettings(s)).toBe(false);
-    expect(describeSheetSettings(s)).toBe('hoja vertical; tamaño real; Registro: área A1:C20, títulos 1:2, sin columnas C; sin la hoja Ayuda');
+    expect(describeSheetSettings(s)).toBe('hoja vertical; tamaño real; «Registro»: área A1:C20, títulos 1:2, sin columnas C; sin la hoja «Ayuda»');
   });
 
   it('[SGC-REQ-165] la inspección da la grilla de cada hoja visible (rango, columnas con su letra, primeras filas)', async () => {
@@ -142,7 +142,7 @@ describe('SGC · ajustes de presentación del Excel (2026-10-21)', () => {
     expect(wrapDraftForPdf({ title: 'F', code: 'C', contentHtml: '<p>x</p>', sheet: true, institutional: true, sheetLayout: { landscape: false, tables: [{ cls: 'sgc-t-0', widthPt: 1457 }], orientation: 'horizontal' } })).toContain('table.sgc-t-0{zoom:0.5}');
   });
 
-  it('[SGC-REQ-165] la vista previa lleva la marca VISTA PREVIA y quién la generó', async () => {
+  it('[SGC-REQ-165] la vista previa lleva la marca «VISTA PREVIA» y quién la generó', async () => {
     const lines = buildSheetPreviewLines({ fileName: 'OLP-GC-07-FO01.xlsx', viewerEmail: 'calidad@onelatampharma.com', at: new Date('2026-10-21T20:00:00Z') });
     expect(lines.diagonal).toBe('VISTA PREVIA');
     expect(lines.footer).toContain('NO ES UNA COPIA CONTROLADA');

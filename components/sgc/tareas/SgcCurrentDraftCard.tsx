@@ -91,7 +91,7 @@ export default function SgcCurrentDraftCard({ data, openTask, idTask, minorHref 
           <Stack gap={6}>
             {notice.fromStep && (
               <Text size='sm'>
-                Se devolvió desde {notice.fromStep} a elaboración.
+                Se devolvió desde «{notice.fromStep}» a elaboración.
               </Text>
             )}
             <div>

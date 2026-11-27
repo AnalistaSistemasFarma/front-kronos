@@ -124,7 +124,7 @@ export async function signTask(db: SgcDb, deps: SgcSignatureDeps, idTask: number
         action: SGC_AUDIT_ACTIONS.firmaReautenticacionFallida,
         entity: 'task',
         entityId: idTask,
-        detail: `Reautenticación fallida al firmar ${SGC_SIGNATURE_LABELS[input.meaning]} (solicitud #${idRequest}). No se firmó.`,
+        detail: `Reautenticación fallida al firmar «${SGC_SIGNATURE_LABELS[input.meaning]}» (solicitud #${idRequest}). No se firmó.`,
         ip: actor.ip,
         userAgent: actor.userAgent,
       });
@@ -728,13 +728,13 @@ export async function listSignatureMasters(db: SgcDb, idCompany: number) {
 
 export async function registerSignatureMaster(db: SgcDb, idCompany: number, input: { email: unknown; imagePng: unknown; reason: unknown }, actor: SgcActor) {
   // Sprint 13 (D10): con la firma propia encendida, Calidad ya no registra firmas de otros: solo valida o revoca.
-  if (await isSelfSignatureEnabled(db, idCompany)) throw new SgcError('Con la firma propia activa, cada persona registra la suya en Mi firma; Aseguramiento de Calidad solo la valida o la revoca.', 409);
+  if (await isSelfSignatureEnabled(db, idCompany)) throw new SgcError('Con la firma propia activa, cada persona registra la suya en «Mi firma»; Aseguramiento de Calidad solo la valida o la revoca.', 409);
   const email = lower(typeof input.email === 'string' ? input.email : '');
   if (!email.includes('@')) throw new SgcError('Indique el correo de la persona.');
   const imgError = getMasterImageError(input.imagePng);
   if (imgError) throw new SgcError(imgError);
   const reason = typeof input.reason === 'string' ? input.reason.trim().slice(0, 1000) : '';
-  if (reason.length < 5) throw new SgcError('Escriba el motivo (p. ej. Inducción del 2026-10-01), mínimo 5 caracteres.');
+  if (reason.length < 5) throw new SgcError('Escriba el motivo (p. ej. «Inducción del 2026-10-01»), mínimo 5 caracteres.');
   const eligible = await db.subprocessUserCompany.count({
     where: { subprocess: { subprocess_url: { in: Object.values(SGC_SUBPROCESS_URLS) } }, companyUser: { company: { id_company: idCompany }, user: { email, isActive: true } } },
   });
@@ -829,7 +829,7 @@ export async function registerOwnSignature(db: SgcDb, idCompany: number, raw: un
 export async function validateSignatureMaster(db: SgcDb, idCompany: number, idMaster: number, input: { reason?: unknown }, actor: SgcActor) {
   const me = lower(actor.email);
   const reason = typeof input?.reason === 'string' ? input.reason.trim().slice(0, 1000) : '';
-  if (reason.length < 5) throw new SgcError('Escriba cómo la validó (p. ej. Comparada con la cédula en la inducción), mínimo 5 caracteres.');
+  if (reason.length < 5) throw new SgcError('Escriba cómo la validó (p. ej. «Comparada con la cédula en la inducción»), mínimo 5 caracteres.');
   const row = await db.sgcSignatureMaster.findUnique({ where: { id_signature_master: idMaster } });
   if (!row || row.id_company !== idCompany) throw new SgcError('Firma registrada no encontrada.', 404);
   const denial = validationDenial(row, me);

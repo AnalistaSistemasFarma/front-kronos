@@ -38,8 +38,8 @@ export async function buildMasterListTemplate(catalogs: SgcTemplateCatalogs): Pr
 
   const help = wb.addWorksheet('Instrucciones');
   help.addRow([`Listado maestro de documentos internos · ${catalogs.company}`]).font = { bold: true, size: 13 };
-  help.addRow(['Llene la hoja Listado maestro: una fila por documento vigente. La fila 1 son los encabezados y no se cambia.']);
-  help.addRow(['Cada documento queda pendiente de archivo con su código; el PDF se carga después. El código no se puede cambiar una vez cargado.']);
+  help.addRow(['Llene la hoja «Listado maestro»: una fila por documento vigente. La fila 1 son los encabezados y no se cambia.']);
+  help.addRow(['Cada documento queda «pendiente de archivo» con su código; el PDF se carga después. El código no se puede cambiar una vez cargado.']);
   help.addRow([]);
   help.addRow(['Columna', 'Obligatoria', 'Qué escribir']).font = { bold: true };
   for (const c of SGC_MASTER_LIST_COLUMNS) help.addRow([c.header, c.required ? 'Sí' : 'No', c.help]);

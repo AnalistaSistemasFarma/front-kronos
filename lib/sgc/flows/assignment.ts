@@ -86,12 +86,12 @@ export function assignmentDenial(def: SgcFlowDefinition, input: SgcAssignerInput
   const first = firstWorkTask(def);
   const who =
     policy === 'tarea'
-      ? `quien ejecuta la tarea ${first?.name ?? 'primera tarea'}`
+      ? `quien ejecuta la tarea «${first?.name ?? 'primera tarea'}»`
       : policy === 'calidad'
         ? 'Aseguramiento de Calidad'
         : policy === 'tarea_o_calidad'
-          ? `quien ejecuta la tarea ${first?.name ?? 'primera tarea'} o Aseguramiento de Calidad`
-          : `quien ejecuta la tarea ${first?.name ?? 'primera tarea'} con el permiso de Aseguramiento de Calidad`;
+          ? `quien ejecuta la tarea «${first?.name ?? 'primera tarea'}» o Aseguramiento de Calidad`
+          : `quien ejecuta la tarea «${first?.name ?? 'primera tarea'}» con el permiso de Aseguramiento de Calidad`;
   return `Solo ${who} confirma o reasigna a los revisores, los aprobadores y la divulgación.`;
 }
 
@@ -114,7 +114,7 @@ export function assertCanAssignParticipants(def: SgcFlowDefinition, input: SgcAs
 export function assignmentGaps(def: SgcFlowDefinition, signersByStep: ReadonlyMap<string, number>, activeScopeEntries: number, opts: { requireScope?: boolean } = {}): string[] {
   const gaps: string[] = [];
   for (const t of def.tasks.filter((x) => x.assignment === 'firmantes' && x.isEnabled).sort((a, b) => a.stepOrder - b.stepOrder)) {
-    if (!signersByStep.get(t.key)) gaps.push(`los firmantes de ${t.name}`);
+    if (!signersByStep.get(t.key)) gaps.push(`los firmantes de «${t.name}»`);
   }
   if (opts.requireScope && def.tasks.some((t) => t.assignment === 'alcance' && t.isEnabled) && activeScopeEntries === 0) gaps.push('el alcance de divulgación');
   return gaps;

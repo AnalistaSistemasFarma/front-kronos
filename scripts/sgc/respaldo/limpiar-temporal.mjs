@@ -13,7 +13,7 @@ import { assertSchemaName, databaseUrlFromEnv, mssqlConfigFromUrl } from './lib.
 const i = process.argv.indexOf('--schema');
 const schema = assertSchemaName(i > 0 ? process.argv[i + 1] : '');
 if (!/^sgc_/.test(schema)) {
-  console.error('Solo se limpian esquemas temporales que empiecen por sgc_ (nunca sgc ni dbo).');
+  console.error('Solo se limpian esquemas temporales que empiecen por «sgc_» (nunca sgc ni dbo).');
   process.exit(2);
 }
 const pool = await sql.connect(mssqlConfigFromUrl(databaseUrlFromEnv(fs)));

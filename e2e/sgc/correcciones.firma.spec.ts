@@ -145,7 +145,7 @@ test.describe.serial('SGC documental · correcciones de Calidad OLP', () => {
     await p3.context().close();
   });
 
-  test('[SGC-REQ-099][SGC-REQ-100] la lectura avisa al llegar al umbral (una vez) y No entendí queda en el historial', async ({ browser, page }) => {
+  test('[SGC-REQ-099][SGC-REQ-100] la lectura avisa al llegar al umbral (una vez) y «No entendí» queda en el historial', async ({ browser, page }) => {
     const before = await ok<{ readThresholdPct: number }>(await page.request.get(`/api/sgc/company-settings?company=${OLP}`));
     await ok(await page.request.put('/api/sgc/company-settings', { data: { company: OLP, readThresholdPct: 50, reason: 'Umbral temporal de la e2e de las correcciones (se restaura al terminar).' } }));
     try {
@@ -184,7 +184,7 @@ test.describe.serial('SGC documental · correcciones de Calidad OLP', () => {
     }
   });
 
-  test('[SGC-REQ-098] toda la empresa solo incluye correos de la empresa: los QA (@gsslatam.com) quedan por fuera del alcance automático', async ({ browser, page }) => {
+  test('[SGC-REQ-098] «toda la empresa» solo incluye correos de la empresa: los QA (@gsslatam.com) quedan por fuera del alcance automático', async ({ browser, page }) => {
     const id = await newRequest(browser, page.request, 'E2E Calidad · alcance por empresa');
     try {
       await ok(await page.request.post(`/api/sgc/requests/${id}/dissemination`, { data: { action: 'agregar', entry: { kind: 'empresa' }, reason: 'Prueba del alcance por empresa (no se aprueba)' } }), [201]);

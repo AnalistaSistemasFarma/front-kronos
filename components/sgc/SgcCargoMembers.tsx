@@ -45,7 +45,7 @@ export default function SgcCargoMembers({ idCompany }: { idCompany: number }) {
     <Card withBorder radius='md' p='lg' shadow='xs' data-testid='sgc-cargos'>
       <Stack>
         <Text size='sm' c='dimmed'>
-          Para divulgar un documento por cargo, registre aquí quién ocupa cada cargo en la empresa. Los cargos vienen del organigrama de SynerLink. Cada cambio pide motivo y queda en la auditoría.
+          Para divulgar un documento «por cargo», registre aquí quién ocupa cada cargo en la empresa. Los cargos vienen del organigrama de SynerLink. Cada cambio pide motivo y queda en la auditoría.
         </Text>
         {msg && <Alert color={msg.ok ? 'green' : 'red'}>{msg.text}</Alert>}
         <Group align='flex-end' wrap='wrap'>

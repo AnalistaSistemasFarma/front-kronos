@@ -94,8 +94,8 @@ export async function saveQuestionBank(db: SgcDb, access: SgcCompanyAccess, idRe
   if (access.idCompany !== request.id_company) throw new SgcError('Solicitud no encontrada.', 404);
   assertManager(access, task, actor.email);
   if (request.status !== 'abierta' || !task || task.status !== 'abierta') throw new SgcError('La solicitud no está en la preparación ni en la capacitación.', 409);
-  if (!training) throw new SgcError('Registre primero la capacitación (eligiendo Evaluación en SynerLink).', 409);
-  if (training.evaluation_provider !== 'synerlink') throw new SgcError('Esta capacitación evalúa con Microsoft Forms o Google Forms: elija Evaluación en SynerLink para armar las preguntas aquí.', 409);
+  if (!training) throw new SgcError('Registre primero la capacitación (eligiendo «Evaluación en SynerLink»).', 409);
+  if (training.evaluation_provider !== 'synerlink') throw new SgcError('Esta capacitación evalúa con Microsoft Forms o Google Forms: elija «Evaluación en SynerLink» para armar las preguntas aquí.', 409);
   const me = lower(actor.email);
   const now = new Date();
   return db.$transaction(async (tx) => {
@@ -160,7 +160,7 @@ export async function getReaderEvaluation(db: SgcDb, idAssignee: number, viewer:
   const attempts = await db.sgcTrainingAttempt.findMany({ where: { id_training: training.id_training, user_email: lower(viewer.email) }, orderBy: { attempt_number: 'asc' } });
   const next = nextAttempt(attempts.map((a) => ({ attemptNumber: a.attempt_number, passed: a.passed })), training.max_attempts);
   let reason: string | null = next.allowed ? null : next.reason;
-  if (rec.status !== 'leido') reason = 'Primero lea el documento hasta el final y firme Leído: la evaluación se presenta después de la lectura.';
+  if (rec.status !== 'leido') reason = 'Primero lea el documento hasta el final y firme «Leído»: la evaluación se presenta después de la lectura.';
   else if (closed) reason = 'La capacitación ya se cerró: la evaluación no admite más intentos.';
   else if (!bank.length) reason = 'La evaluación aún no tiene preguntas.';
   return {
@@ -186,7 +186,7 @@ export async function submitEvaluationAttempt(db: SgcDb, idAssignee: number, raw
   const pre = await readerContext(db, idAssignee, me);
   return withSgcAppLock(db, `sgc-evaluacion-${pre.training.id_training}-${me}`, { waitMs: 0, busyMessage: 'Ya hay un envío suyo en curso: espere el resultado.', holdMs: 60_000 }, async (tx) => {
     const { rec, training, closed } = await readerContext(tx, idAssignee, me);
-    if (rec.status !== 'leido') throw new SgcError('Primero lea el documento hasta el final y firme Leído: la evaluación se presenta después de la lectura.', 409);
+    if (rec.status !== 'leido') throw new SgcError('Primero lea el documento hasta el final y firme «Leído»: la evaluación se presenta después de la lectura.', 409);
     if (closed) throw new SgcError('La capacitación ya se cerró: la evaluación no admite más intentos.', 409);
     const bank = await loadBank(tx, training.id_training);
     if (!bank.length) throw new SgcError('La evaluación aún no tiene preguntas.', 409);

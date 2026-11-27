@@ -71,7 +71,7 @@ export default function SgcDisseminationCard({ idCompany, view, users, onAction 
         )}
       </Group>
       <Text size='sm' c='dimmed' mb='md'>
-        Al aprobarse el documento, cada persona del alcance lo lee hasta el final y firma Leído. Mientras tanto, la versión anterior sigue vigente. Si nadie define el alcance, se toma el departamento dueño del proceso.
+        Al aprobarse el documento, cada persona del alcance lo lee hasta el final y firma «Leído». Mientras tanto, la versión anterior sigue vigente. Si nadie define el alcance, se toma el departamento dueño del proceso.
       </Text>
 
       <Text fw={600} size='sm' mb={4}>
@@ -112,12 +112,12 @@ export default function SgcDisseminationCard({ idCompany, view, users, onAction 
       )}
       {view.companyDomains && (
         <Text size='xs' c='dimmed' mb='sm' data-testid='sgc-alcance-dominios'>
-          Toda la empresa, departamentos y cargos solo incluyen correos de la empresa ({view.companyDomains.map((d) => `@${d}`).join(', ')}). A una persona de otra empresa se le asigna lectura solo eligiéndola como Persona.
+          «Toda la empresa», departamentos y cargos solo incluyen correos de la empresa ({view.companyDomains.map((d) => `@${d}`).join(', ')}). A una persona de otra empresa se le asigna lectura solo eligiéndola como «Persona».
         </Text>
       )}
       {view.outsideCompany.length > 0 && (
         <Alert color='gray' mb='sm' data-testid='sgc-alcance-otra-empresa'>
-          {view.outsideCompany.length} persona(s) de otra empresa quedan por fuera del alcance automático: {view.outsideCompany.join(', ')}. Si alguna debe leer el documento, agréguela como Persona.
+          {view.outsideCompany.length} persona(s) de otra empresa quedan por fuera del alcance automático: {view.outsideCompany.join(', ')}. Si alguna debe leer el documento, agréguela como «Persona».
         </Alert>
       )}
 
@@ -147,7 +147,7 @@ export default function SgcDisseminationCard({ idCompany, view, users, onAction 
           </Group>
           {kind === 'cargo' && (
             <Text size='xs' c='dimmed' mt='xs'>
-              Las personas de cada cargo las registra Calidad en Configuración → Personas por cargo.
+              Las personas de cada cargo las registra Calidad en «Configuración → Personas por cargo».
             </Text>
           )}
         </Card>
@@ -169,7 +169,7 @@ export default function SgcDisseminationCard({ idCompany, view, users, onAction 
             {view.threshold.notifiedAt ? ` · avisado el ${formatDateCO(view.threshold.notifiedAt)}` : ' · aún no se ha alcanzado'}.
           </Text>
           {view.doubts.length > 0 && (
-            <Alert color='orange' variant='light' mb='md' title={`No entendí (${view.doubts.length})`} data-testid='sgc-no-entendi-lista'>
+            <Alert color='orange' variant='light' mb='md' title={`«No entendí» (${view.doubts.length})`} data-testid='sgc-no-entendi-lista'>
               <Stack gap={4}>
                 {view.doubts.map((d, i) => (
                   <Text key={i} size='sm'>
@@ -187,7 +187,7 @@ export default function SgcDisseminationCard({ idCompany, view, users, onAction 
                   <Table.Th>Estado</Table.Th>
                   <Table.Th>Abrió</Table.Th>
                   <Table.Th>Llegó al final</Table.Th>
-                  <Table.Th>Firmó Leído</Table.Th>
+                  <Table.Th>Firmó «Leído»</Table.Th>
                   <Table.Th>Recordatorios</Table.Th>
                   {view.canManage && <Table.Th />}
                 </Table.Tr>

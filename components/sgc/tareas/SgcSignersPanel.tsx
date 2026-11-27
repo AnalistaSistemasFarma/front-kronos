@@ -204,7 +204,7 @@ export default function SgcSignersPanel(props: SgcSignersPanelProps) {
       </Title>
       <Text size='sm' c='dimmed' mb='md'>
         {props.suggestOnly
-          ? 'Usted sugiere quién revisa y quién aprueba, y si firman en orden o en paralelo. Lo que elija queda Sugerido hasta que lo confirme o lo reasigne quien crea el documento (Aseguramiento de Calidad).'
+          ? 'Usted sugiere quién revisa y quién aprueba, y si firman en orden o en paralelo. Lo que elija queda «Sugerido» hasta que lo confirme o lo reasigne quien crea el documento (Aseguramiento de Calidad).'
           : props.canEdit
             ? 'Usted confirma o asigna quién revisa y quién aprueba, y elige si firman en orden o en paralelo. Puede cambiarlos durante el proceso; cada cambio queda en el historial con su motivo.'
             : props.requesterElaborates
@@ -219,7 +219,7 @@ export default function SgcSignersPanel(props: SgcSignersPanelProps) {
       {props.canConfirm && props.onConfirm && (
         <Alert color='orange' variant='light' icon={<IconBulb size={16} />} mb='md' title='Hay firmantes o alcance sugeridos por el solicitante' data-testid='sgc-sugerencia-pendiente'>
           <Group justify='space-between' gap='xs'>
-            <Text size='sm'>Revise lo marcado como Sugerido. Puede aprobar la sugerencia completa (firmantes y alcance) o reasignar cada paso.</Text>
+            <Text size='sm'>Revise lo marcado como «Sugerido». Puede aprobar la sugerencia completa (firmantes y alcance) o reasignar cada paso.</Text>
             <ConfirmButton onConfirm={props.onConfirm} />
           </Group>
         </Alert>
