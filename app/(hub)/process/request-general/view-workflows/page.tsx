@@ -74,6 +74,7 @@ import { ProcessSlaCard } from '../../../../../components/request-general/sla/Pr
 import { ProcessAccessCard } from '../../../../../components/request-general/flow-access/ProcessAccessCard';
 import { OptionRulesCard } from '../../../../../components/request-general/flow-access/OptionRulesCard';
 import { LinkedTasksCard } from '../../../../../components/request-general/flow-access/LinkedTasksCard';
+import { FollowupsCard } from '../../../../../components/request-general/flow-access/FollowupsCard';
 import { FlowConnector } from '../../../../../components/ui/flow/FlowConnector';
 import { SapTaskActionPicker, SapTaskCardInfo } from '../../../../../components/workflow-sap/SapTaskObject';
 import {
@@ -1817,6 +1818,8 @@ if (session?.user?.id) return session.user.id as unknown as number;
                   <OptionRulesCard processId={workflow.id} />
 
                   <LinkedTasksCard processId={workflow.id} />
+
+                  <FollowupsCard processId={workflow.id} />
 
                   {/* Formulario externo: expone este flujo en una página pública SIN login. */}
                   <Card withBorder radius='md' p='md'>
