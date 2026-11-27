@@ -1,6 +1,7 @@
 /**
- * Dashboard TI - «Internet» card: internet channel of each company, typed in
- * by hand (table company_internet, one row per company). Pure helpers.
+ * Dashboard TI - Proveedores → Internet: internet channels of each company,
+ * typed in by hand (table company_internet, SEVERAL rows per company since
+ * 2026-11-27). Pure helpers.
  */
 import { CIDR, IPV4, isIpAddress } from './server';
 
@@ -18,13 +19,15 @@ export type ChannelType = (typeof CHANNEL_TYPES)[number]['value'];
 export type ConnectionType = (typeof CONNECTION_TYPES)[number]['value'];
 
 export interface CompanyInternetInput {
+  /** Name shown on the button, e.g. «Canal principal» (optional; falls back to the provider). */
+  label: string;
   provider: string;
   publicIp: string;
   subnetMask: string;
   gateway: string;
   /** DNS 1 (column dns_servers). */
   dnsServers: string;
-  /** DNS 2 (column dns_secondary, 2026-11-27). */
+  /** DNS 2 (column dns_secondary). */
   dns2: string;
   bandwidth: string;
   channelType: ChannelType | '';
@@ -33,15 +36,15 @@ export interface CompanyInternetInput {
 }
 
 export interface CompanyInternet extends CompanyInternetInput {
+  id: number;
   companyId: number;
   company: string;
-  /** False when nothing was registered yet for the company. */
-  registered: boolean;
   updatedAt: string | null;
   updatedBy: string | null;
 }
 
 export const EMPTY_INTERNET_INPUT: CompanyInternetInput = {
+  label: '',
   provider: '',
   publicIp: '',
   subnetMask: '',
@@ -55,6 +58,7 @@ export const EMPTY_INTERNET_INPUT: CompanyInternetInput = {
 };
 
 export const INTERNET_FIELD_LIMITS: Record<keyof CompanyInternetInput, number> = {
+  label: 100,
   provider: 100,
   publicIp: 45,
   subnetMask: 45,
@@ -67,10 +71,15 @@ export const INTERNET_FIELD_LIMITS: Record<keyof CompanyInternetInput, number> =
   notes: 1000,
 };
 
-export const channelLabel = (v: string | null | undefined) =>
-  CHANNEL_TYPES.find((c) => c.value === v)?.label ?? '';
+export const channelLabel = (v: string | null | undefined) => CHANNEL_TYPES.find((c) => c.value === v)?.label ?? '';
 export const connectionLabel = (v: string | null | undefined) =>
   CONNECTION_TYPES.find((c) => c.value === v)?.label ?? '';
+
+/** Text of the button of a channel. */
+export function internetButtonLabel(item: Pick<CompanyInternetInput, 'label' | 'provider' | 'bandwidth'>, index: number): string {
+  const name = item.label.trim() || item.provider.trim() || `Canal ${index + 1}`;
+  return item.bandwidth.trim() && !item.label.trim() ? `${name} · ${item.bandwidth.trim()}` : name;
+}
 
 export type InternetValidation =
   | { ok: true; value: CompanyInternetInput }
@@ -78,10 +87,11 @@ export type InternetValidation =
 
 const asText = (v: unknown) => (typeof v === 'string' ? v.trim() : v == null ? '' : String(v).trim());
 
-/** Validates the body of PUT /api/it-dashboard/internet/[companyId]. Empty fields are allowed. */
+/** Validates the body of POST / PUT internet. At least the name or the provider is required. */
 export function validateInternetInput(body: unknown): InternetValidation {
   const src = (body && typeof body === 'object' ? body : {}) as Record<string, unknown>;
   const raw = {
+    label: asText(src.label),
     provider: asText(src.provider),
     publicIp: asText(src.publicIp),
     subnetMask: asText(src.subnetMask),
@@ -98,6 +108,7 @@ export function validateInternetInput(body: unknown): InternetValidation {
   for (const key of Object.keys(INTERNET_FIELD_LIMITS) as Array<keyof CompanyInternetInput>) {
     if (raw[key].length > INTERNET_FIELD_LIMITS[key]) errors[key] = `Máximo ${INTERNET_FIELD_LIMITS[key]} caracteres`;
   }
+  if (!raw.label && !raw.provider) errors.provider = 'Escriba el proveedor o un nombre para el canal';
   if (raw.publicIp && !errors.publicIp && !isIpAddress(raw.publicIp)) errors.publicIp = 'Dirección IP no válida';
   if (raw.subnetMask && !errors.subnetMask && !IPV4.test(raw.subnetMask) && !CIDR.test(raw.subnetMask)) {
     errors.subnetMask = 'Use 255.255.255.248 o /29';

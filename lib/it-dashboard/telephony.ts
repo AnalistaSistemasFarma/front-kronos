@@ -13,6 +13,8 @@ export const TELEPHONY_SERVICES = [
 export type TelephonyService = (typeof TELEPHONY_SERVICES)[number]['value'];
 
 export interface CompanyTelephonyInput {
+  /** Name shown on the button (optional; falls back to the provider). */
+  label: string;
   provider: string;
   serviceType: TelephonyService | '';
   mainNumber: string;
@@ -26,14 +28,15 @@ export interface CompanyTelephonyInput {
 }
 
 export interface CompanyTelephony extends CompanyTelephonyInput {
+  id: number;
   companyId: number;
   company: string;
-  registered: boolean;
   updatedAt: string | null;
   updatedBy: string | null;
 }
 
 export const EMPTY_TELEPHONY_INPUT: CompanyTelephonyInput = {
+  label: '',
   provider: '',
   serviceType: '',
   mainNumber: '',
@@ -47,6 +50,7 @@ export const EMPTY_TELEPHONY_INPUT: CompanyTelephonyInput = {
 };
 
 export const TELEPHONY_TEXT_LIMITS = {
+  label: 100,
   provider: 100,
   mainNumber: 50,
   plan: 100,
@@ -57,6 +61,14 @@ export const TELEPHONY_TEXT_LIMITS = {
 
 export const telephonyServiceLabel = (v: string | null | undefined) =>
   TELEPHONY_SERVICES.find((s) => s.value === v)?.label ?? '';
+
+/** Text of the button of a telephone service. */
+export function telephonyButtonLabel(item: Pick<CompanyTelephonyInput, 'label' | 'provider' | 'serviceType'>, index: number): string {
+  if (item.label.trim()) return item.label.trim();
+  const name = item.provider.trim() || `Servicio ${index + 1}`;
+  const kind = telephonyServiceLabel(item.serviceType);
+  return kind ? `${name} · ${kind}` : name;
+}
 
 export type TelephonyValidation =
   | { ok: true; value: CompanyTelephonyInput }
@@ -76,6 +88,7 @@ export function validateTelephonyInput(body: unknown): TelephonyValidation {
   const errors: Partial<Record<keyof CompanyTelephonyInput, string>> = {};
 
   const text = {
+    label: asText(src.label),
     provider: asText(src.provider),
     mainNumber: asText(src.mainNumber),
     plan: asText(src.plan),
@@ -86,6 +99,7 @@ export function validateTelephonyInput(body: unknown): TelephonyValidation {
   for (const key of Object.keys(TELEPHONY_TEXT_LIMITS) as Array<keyof typeof TELEPHONY_TEXT_LIMITS>) {
     if (text[key].length > TELEPHONY_TEXT_LIMITS[key]) errors[key] = `Máximo ${TELEPHONY_TEXT_LIMITS[key]} caracteres`;
   }
+  if (!text.label && !text.provider) errors.provider = 'Escriba el proveedor o un nombre para el servicio';
   if (text.mainNumber && !errors.mainNumber && !/^[0-9+()\-\s.ext]+$/i.test(text.mainNumber)) {
     errors.mainNumber = 'Solo números, espacios, +, guiones y paréntesis';
   }
