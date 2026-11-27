@@ -66,6 +66,7 @@ import {
   getCaseContactEmail,
 } from '../../../../../lib/help-desk/contactEmail';
 import { syncTicketContactEmailInSession } from '../../../../../lib/help-desk/ticketsBoardStorage';
+import { formatTicketDateTime, ticketNowIso } from '../../../../../lib/help-desk/dates';
 import FileUpload, { UploadedFile } from '../../../../../components/ui/FileUpload';
 import TestAttachmentDeleteButton from '../../../../../components/attachments/TestAttachmentDeleteButton';
 
@@ -139,24 +140,6 @@ function parseTicketDate(value: string | Date | null | undefined): Date | null {
   if (!trimmed) return null;
   const parsed = new Date(trimmed.includes('T') ? trimmed : `${trimmed}T00:00:00`);
   return Number.isNaN(parsed.getTime()) ? null : parsed;
-}
-
-function formatTicketDateIso(
-  value: string | Date | null | undefined,
-  fallback = '—'
-): string {
-  const parsed = parseTicketDate(value);
-  if (!parsed) return fallback;
-  return parsed.toISOString().split('T')[0];
-}
-
-function formatTicketDateLocale(
-  value: string | Date | null | undefined,
-  fallback = '—'
-): string {
-  const parsed = parseTicketDate(value);
-  if (!parsed) return fallback;
-  return parsed.toLocaleDateString('es-CO');
 }
 
 function normalizeTicketPayload(data: unknown, ticketId?: string): Ticket | null {
@@ -836,7 +819,7 @@ function ViewTicketPage() {
           Articulo: ticket?.activity,
           Departamento: ticket?.department,
           Empresa: ticket?.company,
-          'Fecha de Creación': formatTicketDateIso(ticket?.creation_date, 'N/A'),
+          'Fecha de Creación': formatTicketDateTime(ticket?.creation_date, 'N/A'),
         },
       ];
 
@@ -885,7 +868,7 @@ function ViewTicketPage() {
           Asunto: ticket?.subject_case,
           Nota: newNote,
           'Creado por': userName,
-          'Fecha de Creación': formatTicketDateIso(ticket?.creation_date, 'N/A'),
+          'Fecha de Creación': formatTicketDateTime(ticket?.creation_date, 'N/A'),
         },
       ];
 
@@ -999,7 +982,7 @@ function ViewTicketPage() {
             status: statusText,
             id_status_case: statusId,
             end_date: isClosing
-              ? prev.end_date ?? new Date().toISOString()
+              ? prev.end_date ?? ticketNowIso()
               : isReopening
                 ? undefined
                 : prev.end_date,
@@ -1429,7 +1412,7 @@ function ViewTicketPage() {
                         </Text>
                         {ticket.end_date && (
                           <Text size='xs'>
-                            Fecha de resolución: {formatTicketDateLocale(ticket.end_date)}
+                            Fecha de resolución: {formatTicketDateTime(ticket.end_date)}
                           </Text>
                         )}
                       </Stack>
@@ -1543,9 +1526,18 @@ function ViewTicketPage() {
                       Fecha de Creación
                     </Text>
                     <Text fw={500}>
-                      {formatTicketDateIso(ticket.creation_date)}
+                      {formatTicketDateTime(ticket.creation_date)}
                     </Text>
                   </div>
+
+                  {ticket.end_date && (
+                    <div>
+                      <Text size='sm' color='gray.6'>
+                        Fecha de Cierre
+                      </Text>
+                      <Text fw={500}>{formatTicketDateTime(ticket.end_date)}</Text>
+                    </div>
+                  )}
 
                   <div>
                     <Text size='sm' color='gray.6'>

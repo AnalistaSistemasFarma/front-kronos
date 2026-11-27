@@ -116,7 +116,8 @@ export async function GET(req) {
     } else if (technician) {
       query += ` AND ${TECHNICIAN_PERSON_FILTER_SQL}`;
     }
-    if (date_from && date_to) query += ` AND c.creation_date BETWEEN @date_from AND @date_to`;
+    // Por día: creation_date ya trae hora y BETWEEN dejaba por fuera el último día.
+    if (date_from && date_to) query += ` AND CAST(c.creation_date AS DATE) BETWEEN @date_from AND @date_to`;
 
     query += ` ORDER BY c.id_case DESC`;
 

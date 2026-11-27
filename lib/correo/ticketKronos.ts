@@ -85,7 +85,6 @@ export async function crearCaso(p: CasoNuevo): Promise<number> {
       const r = await new sql.Request(tx)
         .input('description', sql.Text, p.descripcion)
         .input('asunto', sql.NVarChar(1000), p.asunto)
-        .input('creation_date', sql.Date, new Date().toISOString().split('T')[0])
         .input('technician', sql.Int, p.tecnico)
         .input('requester', sql.Int, p.requester)
         .input('site', sql.NVarChar(1000), p.sitio)
@@ -97,7 +96,7 @@ export async function crearCaso(p: CasoNuevo): Promise<number> {
         .query<{ id_case: number }>(`
           INSERT INTO [case] ([description], subject_case, creation_date, id_technical, requester, place, id_department, case_type, [priority], company, id_status_case, email)
           OUTPUT INSERTED.id_case
-          VALUES (@description, @asunto, @creation_date, @technician, @requester, @site, @department, @requestType, @priority, @company, 1, @email);
+          VALUES (@description, @asunto, SYSDATETIME(),@technician, @requester, @site, @department, @requestType, @priority, @company, 1, @email);
         `);
       const idCase = r.recordset[0].id_case;
       await new sql.Request(tx)

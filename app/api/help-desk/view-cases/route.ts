@@ -82,7 +82,8 @@ export async function GET(req: Request) {
       query += ` AND nombreTecnico = @technician`;
     }
     if (date_from && date_to) {
-      query += ` AND creation_date BETWEEN @date_from AND @date_to`;
+      // Por día: creation_date ya trae hora y BETWEEN dejaba por fuera el último día.
+      query += ` AND CAST(creation_date AS DATE) BETWEEN @date_from AND @date_to`;
     }
 
     // Order by most recent cases first

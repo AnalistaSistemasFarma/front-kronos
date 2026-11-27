@@ -37,7 +37,6 @@ export async function POST(req) {
 
     const pool = await sql.connect(sqlConfig);
     const transaction = new sql.Transaction(pool);
-    const creation_date = new Date().toISOString().split('T')[0];
     // Sin técnico elegido → NULL explícito (así el filtro "Sin asignar" los encuentra).
     const technicianId = normalizeHelpDeskTechnicianId(technician);
 
@@ -62,7 +61,9 @@ export async function POST(req) {
         VALUES (
           @description,
           @asunto,
-          @creation_date,
+          -- Fecha y hora del servidor, como end_date al cerrar (antes solo el día, y en UTC:
+          -- después de las 7 p. m. quedaba con la fecha de mañana).
+          SYSDATETIME(),
           @technician,
           @requester,
           @site,
@@ -75,7 +76,6 @@ export async function POST(req) {
       `;
 
       const request = new sql.Request(transaction);
-      request.input('creation_date', sql.Date, creation_date);
       request.input('description', sql.Text, description);
       request.input('asunto', sql.NVarChar(1000), asunto);
       request.input('technician', sql.Int, technicianId);
