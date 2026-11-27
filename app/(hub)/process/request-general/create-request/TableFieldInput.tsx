@@ -28,6 +28,7 @@ import {
   parseTableExcelFile,
 } from '../../../../../lib/requests-general/tableExcel';
 import SapOptionSelect from './SapOptionSelect';
+import UserCellSelect from './UserCellSelect';
 
 interface TableFieldInputProps {
   label: string;
@@ -196,6 +197,8 @@ export default function TableFieldInput({
             onChange={(e) => updateCell(rowIndex, col.key, e.currentTarget.value)}
           />
         );
+      case 'user':
+        return <UserCellSelect value={typeof raw === 'string' ? raw : null} onChange={(v) => updateCell(rowIndex, col.key, v ?? undefined)} />;
       case 'sap_items':
       case 'sap_business_partners':
         return isSapColumn(col.type) ? (
