@@ -139,6 +139,16 @@ describe('item prediction: Coopidrogas PO 7500347986-3', () => {
     expect(calls.length).toBeLessThanOrEqual(8);
   });
 
+  it('old agent answer (customer reference as SAP code): inactive codes point to their active twin by barcode', async () => {
+    const { resolveItems } = await import('./itemResolver');
+    const lines = parsePdfOrder(agentJsonFromFixture()).lineas.map((l) => ({ ...l, ItemCode: l.ClientCode || l.Barcode || '', Barcode: undefined, ClientCode: undefined }));
+    const out = await resolveItems({} as never, { cardCode: '860026123', input: lines, today: '2026-11-27' });
+    out.forEach((o, i) => expect(o.prediction.candidates[0]?.ItemCode, EXPECTED[i][0]).toBe(EXPECTED[i][1]));
+    expect(out[4].prediction.confidence).toBe('media');
+    expect(out[4].prediction.reason).toMatch(/10005 \(inactivo\)/);
+    expect(out[5].prediction.confidence).toBe('media');
+  });
+
   it('history filter is bounded by date (12 months)', async () => {
     const { resolveItems } = await import('./itemResolver');
     await resolveItems({} as never, { cardCode: '860026123', input: parsePdfOrder(agentJsonFromFixture()).lineas.slice(0, 1), today: '2026-11-27' });
@@ -165,6 +175,11 @@ describe('item prediction: rules', () => {
     const p = rankLine({ ItemDescription: 'ACETAMINOFEN 500MG', Quantity: 5, UnitPrice: null }, { barcode: [], catalog: [], master: ['A', 'B'] }, items, new Map());
     expect(p.autoSelected).toBe(false);
     expect(['media', 'baja']).toContain(p.confidence);
+  });
+  it('a recent discounted invoice does not hide the box price of an older order', () => {
+    const h: HistoryInfo = { ...hist('A', 75), prices: [75, 100] };
+    const p = rankLine({ ItemDescription: '', Quantity: 2, UnitPrice: 10000 }, { barcode: ['A'], catalog: [], master: [] }, items, new Map([['A', h]]));
+    expect(p.candidates[0].factor).toBe(100);
   });
   it('nothing found', () => {
     const p = rankLine({ ItemDescription: '', Quantity: 1, UnitPrice: null }, { barcode: [], catalog: [], master: [] }, items, new Map());

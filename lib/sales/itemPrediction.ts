@@ -18,6 +18,8 @@ export interface ItemInfo {
   active: boolean;
   /** Units per sales package (SalesQtyPerPackUnit, or the «CAJA X N» of the name). */
   pack: number;
+  /** Main barcode (OITM.CodeBars): links an inactive item to its active twin. */
+  barcode?: string;
 }
 
 export interface HistoryInfo {
@@ -26,6 +28,8 @@ export interface HistoryInfo {
   lastDate: string;
   /** Highest unit price of the most recent document (lines at $1 are free goods). */
   lastPrice: number | null;
+  /** Recent distinct unit prices, newest first (orders and invoices may differ: discounts, price changes). */
+  prices?: number[];
   /** Number of distinct documents (orders + invoices) with the item. */
   times: number;
   /** Source of the most recent document. */
@@ -84,6 +88,17 @@ export function packFromName(name: string): number {
   return m ? Number(m[1]) : 1;
 }
 
+/** First factor that matches any of the reference prices (newest first). PURE. */
+export function priceFactorAny(poPrice: number | null, refPrices: (number | null)[], pack: number): number | null {
+  for (const r of refPrices) {
+    const f = priceFactor(poPrice, r, pack);
+    if (f != null) return f;
+  }
+  return null;
+}
+
+const refPricesOf = (h: HistoryInfo | undefined): (number | null)[] => (h ? (h.prices?.length ? h.prices : [h.lastPrice]) : []);
+
 /** Tolerance between the PO price and the reference price (gross vs net price, small list updates). */
 export const PRICE_TOLERANCE = 0.12;
 
@@ -130,7 +145,7 @@ export function rankLine(line: PredictionLine, signals: LineSignals, items: Map<
     const it = items.get(h.ItemCode);
     if (desc) {
       if (similarity(desc, h.ItemName) >= 0.34) codes.add(h.ItemCode);
-    } else if (!codes.size && it && priceFactor(line.UnitPrice, h.lastPrice, it.pack) != null) {
+    } else if (!codes.size && it && priceFactorAny(line.UnitPrice, refPricesOf(h), it.pack) != null) {
       codes.add(h.ItemCode);
     }
   }
@@ -139,6 +154,7 @@ export function rankLine(line: PredictionLine, signals: LineSignals, items: Map<
   // whether the PO price is per unit or per box for the active twin.
   const isStrongKey = (c: string) => signals.exact === c || signals.barcode.includes(c) || signals.catalog.includes(c) || signals.clientRef === c;
   const replacedHist = [...codes].filter((c) => items.get(c) && !items.get(c)!.active && history.has(c) && isStrongKey(c)).map((c) => history.get(c)!);
+  const replacedPrices = replacedHist.flatMap(refPricesOf);
 
   const all: Scored[] = [];
   for (const code of codes) {
@@ -161,8 +177,8 @@ export function rankLine(line: PredictionLine, signals: LineSignals, items: Map<
     const descSim = desc ? Math.max(similarity(desc, it.ItemName), h ? similarity(desc, h.ItemName) : 0) : 0;
     if (descSim > 0) raw += W.desc * descSim;
     if (!isExact && !isBarcode && !isCatalog && !h && descSim >= 0.34) reasons.push('Parecido por descripción');
-    const refPrice = h?.lastPrice ?? (isExact || isBarcode || isCatalog ? replacedHist[0]?.lastPrice ?? null : null);
-    const factor = refPrice != null ? priceFactor(line.UnitPrice, refPrice, it.pack) : null;
+    const refs = h ? refPricesOf(h) : isExact || isBarcode || isCatalog ? replacedPrices : [];
+    const factor = priceFactorAny(line.UnitPrice, refs, it.pack);
     if (factor != null) {
       raw += W.price;
       reasons.push(factor === 1 ? 'Precio igual al anterior' : `Precio por caja x ${factor}`);
@@ -177,15 +193,21 @@ export function rankLine(line: PredictionLine, signals: LineSignals, items: Map<
   const inactive = all.filter((c) => !items.get(c.ItemCode)?.active);
   const active = all.filter((c) => items.get(c.ItemCode)?.active).sort((a, b) => b.raw - a.raw || Number(b.inHistory) - Number(a.inHistory));
   // The customer bought an item that is now inactive and shares the barcode/reference: point to it.
-  const replaced = inactive.filter((c) => c.inHistory && (c.strong || signals.clientRef === c.ItemCode));
+  // Inactive item the customer bought, or the inactive code written on the PO itself.
+  const replaced = inactive.filter((c) => (c.inHistory && (c.strong || signals.clientRef === c.ItemCode)) || signals.exact === c.ItemCode || signals.clientRef === c.ItemCode);
   for (const c of active) {
-    if (c.strong && replaced.length) c.reason += ` · El cliente compraba ${replaced.map((r) => r.ItemCode).join(', ')} (inactivo)`;
+    if (c.strong && replaced.length) {
+      const bought = replaced.filter((r) => r.inHistory).map((r) => r.ItemCode);
+      const written = replaced.filter((r) => !r.inHistory).map((r) => r.ItemCode);
+      if (bought.length) c.reason += ` · El cliente compraba ${bought.join(', ')} (inactivo)`;
+      if (written.length) c.reason += ` · La OC trae ${written.join(', ')} (inactivo)`;
+    }
     c.score = Math.min(1, Math.round((c.raw / FULL) * 100) / 100);
   }
   const top = active[0];
   if (!top || top.raw < 0.2) {
     const why = replaced.length
-      ? `El cliente compraba ${replaced.map((r) => `${r.ItemCode} ${r.ItemName}`).join(', ')}, hoy inactivo; elija el artículo.`
+      ? `${replaced.map((r) => `${r.ItemCode} ${r.ItemName}`).join(', ')} está inactivo; elija el artículo.`
       : 'No se encontró en SAP; búsquelo.';
     return { confidence: 'ninguna', reason: why, candidates: [], autoSelected: false };
   }
