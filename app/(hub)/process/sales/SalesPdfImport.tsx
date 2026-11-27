@@ -1,9 +1,11 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Alert, Badge, Button, Checkbox, Group, Menu, Modal, Progress, ScrollArea, Stack, Table, Text, Tooltip } from '@mantine/core';
-import { IconAlertCircle, IconCircleCheck, IconLoader2, IconRobot, IconSparkles } from '@tabler/icons-react';
+import { Alert, Badge, Button, Checkbox, Group, Menu, Modal, Progress, ScrollArea, Select, Stack, Table, Text, Tooltip } from '@mantine/core';
+import { IconAlertCircle, IconCircleCheck, IconLoader2, IconRobot, IconSearch, IconSparkles } from '@tabler/icons-react';
 import toast from 'react-hot-toast';
+import SalesSearchModal from './SalesSearchModal';
+import { CONFIDENCE_LABEL, type Confidence } from '../../../../lib/sales/itemPrediction';
 import { agentOrderInstruction, assembleAgentReply, chunkOrderText, isJsonAttachment, rawLineCount, mergePdfOrders, PDF_ORDER_SCHEMA, PDF_ORDER_SYSTEM_PROMPT, parsePdfOrder, pdfOrderChunkPrompt, tableHeaderRow, type PdfOrderResult } from '../../../../lib/sales/pdfOrder';
 
 /**
@@ -26,6 +28,21 @@ const AGENT_BUSY_HINT_MS = 2 * 60 * 1000;
 const AGENT_PARTS_GRACE_MS = 45 * 1000;
 type ReplyMessage = { id: number; role: string; body: string; attachments?: { fileName: string; contentType: string | null; downloadUrl: string }[] };
 const money = (v: unknown) => (v == null || v === '' ? '—' : `$ ${Number(v).toLocaleString('es-CO')}`);
+
+/** Item prediction of a PO line (server side, see lib/sales/itemPrediction.ts). */
+type MatchCandidate = { ItemCode: string; ItemName: string; score: number; reason: string; factor: number; line: Line };
+type Match = {
+  confidence: Confidence;
+  reason: string;
+  autoSelected: boolean;
+  confirmed: boolean;
+  source: { barcode: string; clientCode: string; description: string; quantity: number; price: number | null };
+  candidates: MatchCandidate[];
+};
+const CONFIDENCE_COLOR: Record<Confidence, string> = { alta: 'green', media: 'yellow', baja: 'red', ninguna: 'gray' };
+const matchOf = (l: Line) => (l.match ?? null) as Match | null;
+/** A line can go to the offer: it has an item and, if the prediction was not high, the user confirmed it. */
+const lineReady = (l: Line) => Boolean(l.ItemCode) && (!matchOf(l) || matchOf(l)!.confirmed);
 
 export interface PdfOffer {
   customer: { CardCode: string; CardName: string };
@@ -238,7 +255,7 @@ export default function SalesPdfImport({ companyId, companyName, cardCode, onLoa
       if (!(d.lines ?? []).length) throw new Error(`Se identificó el cliente ${d.customer.CardName}, pero ninguna línea del PDF se encontró en SAP. ${(d.avisos ?? []).join(' ')}`);
       setSimShown(100);
       setSim({
-        customer: d.customer, lines: (d.lines as Line[]).map((l) => ({ ...l, include: true })), numeroOrdenCompra: r.numeroOrdenCompra,
+        customer: d.customer, lines: (d.lines as Line[]).map((l) => ({ ...l, include: Boolean(l.ItemCode) })), numeroOrdenCompra: r.numeroOrdenCompra,
         fechaEntrega: r.fechaEntrega, avisos: [...avisosPrevios, ...(d.avisos ?? [])], leidas: r.lineas.length,
       });
       setPhase('simulacion');
@@ -341,10 +358,56 @@ export default function SalesPdfImport({ companyId, companyName, cardCode, onLoa
 
   const working = phase !== 'idle' && phase !== 'error' && phase !== 'simulacion';
 
-  /** Agrega a la oferta lo simulado (solo las líneas marcadas). */
+  /** Line whose item is being searched by hand (index in sim.lines). */
+  const [pickFor, setPickFor] = useState<number | null>(null);
+  const setLine = (i: number, f: (l: Line & { include: boolean }) => Line & { include: boolean }) =>
+    setSim((prev) => (prev ? { ...prev, lines: prev.lines.map((x, j) => (j === i ? f(x) : x)) } : prev));
+  /** The user picks one of the suggested candidates: that is the confirmation. */
+  const chooseCandidate = (i: number, code: string | null) => {
+    setLine(i, (l) => {
+      const m = matchOf(l);
+      const c = m?.candidates.find((x) => x.ItemCode === code);
+      if (!m || !c) return l;
+      return { ...l, ...c.line, include: true, match: { ...m, confirmed: true, reason: c.reason } };
+    });
+  };
+  /** The user searched an item in SAP: it is validated (price list, warehouse) with the PO quantity and price. */
+  const chooseSearched = async (i: number, row: Record<string, unknown>) => {
+    if (!sim) return;
+    const l = sim.lines[i];
+    const m = matchOf(l);
+    const qty = Number(m?.source.quantity ?? l.Quantity);
+    const price = m ? m.source.price : (l.UnitPrice as number | null);
+    try {
+      const res = await fetch('/api/sales/lines-validate', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ companyId: Number(companyId), cardCode: sim.customer.CardCode, lines: [{ row: 1, ItemCode: String(row.ItemCode), Quantity: qty, UnitPrice: price, WarehouseCode: '', ItemDescription: '' }] }),
+      });
+      const d = await res.json().catch(() => ({}));
+      const v = (d.lines ?? [])[0] as Line | undefined;
+      if (!res.ok || !v) throw new Error(d.error || (d.errors ?? [])[0]?.error || 'No se pudo validar el artículo en SAP.');
+      setLine(i, (x) => {
+        const mm = matchOf(x);
+        const cand: MatchCandidate = { ItemCode: String(v.ItemCode), ItemName: String(v.ItemDescription ?? ''), score: 0, reason: 'Elegido por el usuario', factor: 1, line: { ...v, row: x.row } };
+        return {
+          ...x, ...v, row: x.row, include: true,
+          match: mm ? { ...mm, confirmed: true, reason: cand.reason, candidates: [cand, ...mm.candidates.filter((c) => c.ItemCode !== cand.ItemCode)] } : undefined,
+        };
+      });
+    } catch (e) {
+      toast.error((e as Error).message);
+    }
+  };
+
+  /** Agrega a la oferta lo simulado (solo las líneas marcadas y confirmadas). */
   const apply = () => {
     if (!sim) return;
-    const lines = sim.lines.filter((l) => l.include).map(({ include: _i, ...l }) => l);
+    if (sim.lines.some((l) => l.include && !lineReady(l))) return;
+    const lines = sim.lines.filter((l) => l.include).map(({ include: _i, match, ...l }) => {
+      const m = match as Match | undefined;
+      if (!m) return l;
+      return { ...l, aiNote: `${m.autoSelected && m.confirmed ? CONFIDENCE_LABEL[m.confidence] : 'Confirmado'}: ${m.reason}` };
+    });
     if (!lines.length) return;
     onLoaded({ ...sim, lines });
     setSim(null);
@@ -471,8 +534,48 @@ export default function SalesPdfImport({ companyId, companyName, cardCode, onLoa
                       <Table.Td><Checkbox checked={l.include} onChange={(e) => { const c = e.currentTarget.checked; setSim({ ...sim, lines: sim.lines.map((x, j) => (j === i ? { ...x, include: c } : x)) }); }} /></Table.Td>
                       <Table.Td><Text size="xs" c="dimmed">{String(l.row ?? i + 1)}</Text></Table.Td>
                       <Table.Td>
-                        <Text size="sm">{String(l.ItemCode)} · {String(l.ItemDescription ?? '')}</Text>
-                        {l.aiNote ? <Badge size="xs" variant="light" color={String(l.aiNote).startsWith('Revisar') ? 'orange' : 'violet'} style={{ whiteSpace: 'normal', height: 'auto' }}>✨ {String(l.aiNote)}</Badge> : null}
+                        {(() => {
+                          const m = matchOf(l);
+                          if (!m) {
+                            return (
+                              <>
+                                <Text size="sm">{String(l.ItemCode)} · {String(l.ItemDescription ?? '')}</Text>
+                                {l.aiNote ? <Badge size="xs" variant="light" color={String(l.aiNote).startsWith('Revisar') ? 'orange' : 'violet'} style={{ whiteSpace: 'normal', height: 'auto' }}>✨ {String(l.aiNote)}</Badge> : null}
+                              </>
+                            );
+                          }
+                          const fuente = [m.source.barcode && `EAN ${m.source.barcode}`, m.source.clientCode && `Ref. cliente ${m.source.clientCode}`, m.source.description, `${Number(m.source.quantity).toLocaleString('es-CO')} a ${money(m.source.price)}`].filter(Boolean).join(' · ');
+                          const pendiente = Boolean(l.ItemCode) && !m.confirmed;
+                          return (
+                            <Stack gap={2}>
+                              <Text size="xs" c="dimmed">En la OC: {fuente || 'sin datos del artículo'}</Text>
+                              <Group gap={6} wrap="nowrap" align="center">
+                                <Badge size="sm" color={CONFIDENCE_COLOR[m.confidence]} variant={m.confirmed ? 'filled' : 'light'} style={{ flexShrink: 0 }}>
+                                  {CONFIDENCE_LABEL[m.confidence]}
+                                </Badge>
+                                {m.candidates.length > 0 ? (
+                                  <Select
+                                    size="xs" style={{ flex: 1, minWidth: 220 }} comboboxProps={{ zIndex: 1400, withinPortal: true }} allowDeselect={false}
+                                    aria-label="Artículo sugerido"
+                                    value={String(l.ItemCode || '') || null}
+                                    data={m.candidates.map((c) => ({ value: c.ItemCode, label: `${c.ItemCode} · ${c.ItemName}${c.score ? ` (${Math.round(c.score * 100)} %)` : ''}` }))}
+                                    onChange={(v) => chooseCandidate(i, v)}
+                                  />
+                                ) : (
+                                  <Text size="sm" c="dimmed" style={{ flex: 1 }}>Sin artículo sugerido</Text>
+                                )}
+                                <Tooltip label="Buscar otro artículo en SAP" withinPortal zIndex={1400}>
+                                  <Button size="compact-xs" variant="subtle" onClick={() => setPickFor(i)} aria-label="Buscar artículo"><IconSearch size={14} /></Button>
+                                </Tooltip>
+                              </Group>
+                              <Text size="xs" c={m.confidence === 'ninguna' ? 'red' : 'dimmed'}>{m.reason}</Text>
+                              {pendiente && (
+                                <Checkbox size="xs" color="yellow" label="Confirmo este artículo" checked={false}
+                                  onChange={() => setLine(i, (x) => ({ ...x, include: true, match: { ...m, confirmed: true } }))} />
+                              )}
+                            </Stack>
+                          );
+                        })()}
                       </Table.Td>
                       <Table.Td style={{ textAlign: 'right' }}>{Number(l.Quantity).toLocaleString('es-CO')}</Table.Td>
                       <Table.Td style={{ textAlign: 'right' }}>{money(l.UnitPrice)}</Table.Td>
@@ -496,10 +599,17 @@ export default function SalesPdfImport({ companyId, companyName, cardCode, onLoa
               </Text>
             </Group>
             <Group justify="space-between">
-              <Text size="xs" c="dimmed">Desmarque las líneas que no correspondan. Lo marcado «Revisar» se eligió por la descripción.</Text>
+              {(() => {
+                const porConfirmar = sim.lines.filter((l) => l.include && !lineReady(l)).length;
+                return porConfirmar ? (
+                  <Text size="xs" c="orange" fw={600}>Faltan {porConfirmar} línea(s) por confirmar o sin artículo: confírmelas, elija el artículo o desmárquelas.</Text>
+                ) : (
+                  <Text size="xs" c="dimmed">Desmarque las líneas que no correspondan. Confianza Alta: código de barras, código o catálogo del cliente, o historial claro.</Text>
+                );
+              })()}
               <Group gap="xs">
                 <Button variant="default" onClick={() => { setSim(null); setPhase('idle'); }}>Cancelar</Button>
-                <Button color="violet" disabled={!sim.lines.some((l) => l.include)} onClick={apply}>
+                <Button color="violet" disabled={!sim.lines.some((l) => l.include) || sim.lines.some((l) => l.include && !lineReady(l))} onClick={apply}>
                   Agregar a la oferta ({sim.lines.filter((l) => l.include).length})
                 </Button>
               </Group>
@@ -507,6 +617,18 @@ export default function SalesPdfImport({ companyId, companyName, cardCode, onLoa
           </Stack>
         )}
       </Modal>
+      {pickFor != null && sim && (
+        <SalesSearchModal
+          opened
+          onClose={() => setPickFor(null)}
+          companyId={companyId}
+          kind="item"
+          cardCode={sim.customer.CardCode}
+          initialQuery={String(matchOf(sim.lines[pickFor])?.source.description ?? '').split(/\s+/).slice(0, 1).join(' ')}
+          zIndex={1400}
+          onSelect={(row) => { const i = pickFor; setPickFor(null); void chooseSearched(i, row); }}
+        />
+      )}
     </>
   );
 }
