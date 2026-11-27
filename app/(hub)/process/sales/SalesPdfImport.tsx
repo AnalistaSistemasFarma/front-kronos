@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Alert, Badge, Button, Checkbox, Group, Menu, Modal, Progress, ScrollArea, Select, Stack, Table, Text, Tooltip } from '@mantine/core';
 import { useMediaQuery } from '@mantine/hooks';
 import { IconAlertCircle, IconCircleCheck, IconHistory, IconLoader2, IconRobot, IconSearch, IconSparkles } from '@tabler/icons-react';
@@ -8,6 +8,7 @@ import toast from 'react-hot-toast';
 import SalesSearchModal from './SalesSearchModal';
 import CustomerOrdersModal, { type PoLineRef } from './CustomerOrdersModal';
 import { CONFIDENCE_LABEL, type Confidence } from '../../../../lib/sales/itemPrediction';
+import { blockingLines, canApply, lowConfidenceIndexes, offerAiNote } from '../../../../lib/sales/pdfReview';
 import { agentOrderInstruction, assembleAgentReply, chunkOrderText, isJsonAttachment, rawLineCount, mergePdfOrders, PDF_ORDER_SCHEMA, PDF_ORDER_SYSTEM_PROMPT, parsePdfOrder, pdfOrderChunkPrompt, tableHeaderRow, type PdfOrderResult } from '../../../../lib/sales/pdfOrder';
 
 /**
@@ -37,14 +38,13 @@ type Match = {
   confidence: Confidence;
   reason: string;
   autoSelected: boolean;
+  /** The user picked the item by hand (candidate, SAP search or previous order). */
   confirmed: boolean;
   source: { barcode: string; clientCode: string; description: string; quantity: number; price: number | null };
   candidates: MatchCandidate[];
 };
 const CONFIDENCE_COLOR: Record<Confidence, string> = { alta: 'green', media: 'yellow', baja: 'red', ninguna: 'gray' };
 const matchOf = (l: Line) => (l.match ?? null) as Match | null;
-/** A line can go to the offer: it has an item and, if the prediction was not high, the user confirmed it. */
-const lineReady = (l: Line) => Boolean(l.ItemCode) && (!matchOf(l) || matchOf(l)!.confirmed);
 
 export interface PdfOffer {
   customer: { CardCode: string; CardName: string };
@@ -119,6 +119,15 @@ export default function SalesPdfImport({ companyId, companyName, cardCode, onLoa
   const [sim, setSim] = useState<(Omit<PdfOffer, 'lines'> & { lines: (Line & { include: boolean })[] }) | null>(null);
   /** Filas visibles de la simulación: se dibujan de a 100 (una OC de 360 líneas colgaba el navegador). */
   const [simShown, setSimShown] = useState(100);
+  /** Rows of the simulation table, to jump to the next Baja line. */
+  const rowRefs = useRef<(HTMLTableRowElement | null)[]>([]);
+  const lowCursor = useRef(-1);
+  const jumpToLow = (bajas: number[]) => {
+    const next = bajas.find((i) => i > lowCursor.current) ?? bajas[0];
+    lowCursor.current = next;
+    if (next >= simShown) setSimShown(next + 1);
+    setTimeout(() => rowRefs.current[next]?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 50);
+  };
   /** Avance de la lectura por fragmentos (OC de varias hojas). */
   const [step, setStep] = useState<{ k: number; n: number } | null>(null);
   /** Agentes del chat asignados al usuario, de CUALQUIER empresa («Montar con agente»; Nicolás Rivera, 2026-11-24:
@@ -371,7 +380,7 @@ export default function SalesPdfImport({ companyId, companyName, cardCode, onLoa
   });
   const setLine = (i: number, f: (l: Line & { include: boolean }) => Line & { include: boolean }) =>
     setSim((prev) => (prev ? { ...prev, lines: prev.lines.map((x, j) => (j === i ? f(x) : x)) } : prev));
-  /** The user picks one of the suggested candidates: that is the confirmation. */
+  /** The user picks one of the suggested candidates. */
   const chooseCandidate = (i: number, code: string | null) => {
     setLine(i, (l) => {
       const m = matchOf(l);
@@ -408,18 +417,16 @@ export default function SalesPdfImport({ companyId, companyName, cardCode, onLoa
     }
   };
 
-  /** Agrega a la oferta lo simulado (solo las líneas marcadas y confirmadas). */
+  /** Agrega a la oferta lo simulado (las líneas marcadas; solo bloquean las que no tienen artículo). */
   const apply = () => {
-    if (!sim) return;
-    if (sim.lines.some((l) => l.include && !lineReady(l))) return;
+    if (!sim || !canApply(sim.lines)) return;
     const lines = sim.lines.filter((l) => l.include).map(({ include: _i, match, ...l }) => {
       const m = match as Match | undefined;
-      if (!m) return l;
-      return { ...l, aiNote: `${m.autoSelected && m.confirmed ? CONFIDENCE_LABEL[m.confidence] : 'Confirmado'}: ${m.reason}` };
+      return m ? { ...l, aiNote: offerAiNote(m) } : l;
     });
     if (!lines.length) return;
-    // The confirmation notices of the simulation no longer apply: every line that goes to the offer is confirmed.
-    const avisos = sim.avisos.filter((a) => !/por confirmar: revise|sin artículo en SAP: búsquelo/.test(a));
+    // The review notices of the simulation no longer apply once the lines go to the offer.
+    const avisos = sim.avisos.filter((a) => !/por confirmar: revise|confianza Baja: rev|sin artículo en SAP: búsquelo/.test(a));
     onLoaded({ ...sim, avisos, lines });
     setSim(null);
     setPhase('idle');
@@ -526,7 +533,7 @@ export default function SalesPdfImport({ companyId, companyName, cardCode, onLoa
         )}
         {phase === 'simulacion' && sim && (
           <Stack gap="sm" style={{ flex: 1, minHeight: 0 }}>
-            <Text size="sm" c="dimmed">Simulación: así quedaría la oferta con lo que la IA leyó del PDF. Nada se agrega hasta que confirme.</Text>
+            <Text size="sm" c="dimmed">Simulación: así quedaría la oferta con lo que la IA leyó del PDF. Nada se agrega hasta que pulse Agregar a la oferta.</Text>
             <Group gap="lg" wrap="wrap">
               <Text size="sm"><Text span c="dimmed">Cliente: </Text><b>{sim.customer.CardName}</b> ({sim.customer.CardCode})</Text>
               <Text size="sm"><Text span c="dimmed">OC: </Text>{sim.numeroOrdenCompra || '—'}</Text>
@@ -550,7 +557,8 @@ export default function SalesPdfImport({ companyId, companyName, cardCode, onLoa
                 </Table.Thead>
                 <Table.Tbody>
                   {sim.lines.slice(0, simShown).map((l, i) => (
-                    <Table.Tr key={i}>
+                    <Table.Tr key={i} ref={(el) => { rowRefs.current[i] = el; }} data-confianza={matchOf(l)?.confidence}
+                      style={matchOf(l)?.confidence === 'baja' && l.ItemCode ? { background: 'var(--mantine-color-red-light)', boxShadow: 'inset 3px 0 0 var(--mantine-color-red-filled)' } : undefined}>
                       <Table.Td><Checkbox checked={l.include} onChange={(e) => { const c = e.currentTarget.checked; setSim({ ...sim, lines: sim.lines.map((x, j) => (j === i ? { ...x, include: c } : x)) }); }} /></Table.Td>
                       <Table.Td><Text size="xs" c="dimmed">{String(l.row ?? i + 1)}</Text></Table.Td>
                       <Table.Td>
@@ -565,12 +573,11 @@ export default function SalesPdfImport({ companyId, companyName, cardCode, onLoa
                             );
                           }
                           const fuente = [m.source.barcode && `EAN ${m.source.barcode}`, m.source.clientCode && `Ref. cliente ${m.source.clientCode}`, m.source.description, `${Number(m.source.quantity).toLocaleString('es-CO')} a ${money(m.source.price)}`].filter(Boolean).join(' · ');
-                          const pendiente = Boolean(l.ItemCode) && !m.confirmed;
                           return (
                             <Stack gap={2}>
                               <Text size="xs" c="dimmed">En la OC: {fuente || 'sin datos del artículo'}</Text>
                               <Group gap={6} wrap="nowrap" align="center">
-                                <Badge size="sm" color={CONFIDENCE_COLOR[m.confidence]} variant={m.confirmed ? 'filled' : 'light'} style={{ flexShrink: 0 }}>
+                                <Badge size="sm" color={CONFIDENCE_COLOR[m.confidence]} variant={m.confidence === 'alta' ? 'filled' : 'light'} style={{ flexShrink: 0 }}>
                                   {CONFIDENCE_LABEL[m.confidence]}
                                 </Badge>
                                 {m.candidates.length > 0 ? (
@@ -593,10 +600,6 @@ export default function SalesPdfImport({ companyId, companyName, cardCode, onLoa
                                 </Tooltip>
                               </Group>
                               <Text size="xs" c={m.confidence === 'ninguna' ? 'red' : 'dimmed'}>{m.reason}</Text>
-                              {pendiente && (
-                                <Checkbox size="xs" color="yellow" label="Confirmo este artículo" checked={false}
-                                  onChange={() => setLine(i, (x) => ({ ...x, include: true, match: { ...m, confirmed: true } }))} />
-                              )}
                             </Stack>
                           );
                         })()}
@@ -624,16 +627,27 @@ export default function SalesPdfImport({ companyId, companyName, cardCode, onLoa
             </Group>
             <Group justify="space-between">
               {(() => {
-                const porConfirmar = sim.lines.filter((l) => l.include && !lineReady(l)).length;
-                return porConfirmar ? (
-                  <Text size="xs" c="orange" fw={600}>Faltan {porConfirmar} línea(s) por confirmar o sin artículo: confírmelas, elija el artículo o desmárquelas.</Text>
-                ) : (
-                  <Text size="xs" c="dimmed">Desmarque las líneas que no correspondan. Confianza Alta: código de barras, código o catálogo del cliente, o historial claro.</Text>
+                const sinArticulo = blockingLines(sim.lines);
+                const bajas = lowConfidenceIndexes(sim.lines);
+                return (
+                  <Stack gap={2}>
+                    {sinArticulo > 0 ? (
+                      <Text size="xs" c="orange" fw={600}>Faltan {sinArticulo} línea(s) sin artículo: elija el artículo o desmárquelas.</Text>
+                    ) : (
+                      <Text size="xs" c="dimmed">Desmarque las líneas que no correspondan. Confianza Alta: código de barras, código o catálogo del cliente, o historial claro.</Text>
+                    )}
+                    {bajas.length > 0 && (
+                      <Group gap={6}>
+                        <Text size="xs" c="red">{bajas.length} {bajas.length === 1 ? 'línea' : 'líneas'} con confianza Baja: revíselas.</Text>
+                        <Button size="compact-xs" variant="subtle" color="red" onClick={() => jumpToLow(bajas)}>Ir a la siguiente</Button>
+                      </Group>
+                    )}
+                  </Stack>
                 );
               })()}
               <Group gap="xs">
                 <Button variant="default" onClick={() => { setSim(null); setPhase('idle'); }}>Cancelar</Button>
-                <Button color="violet" disabled={!sim.lines.some((l) => l.include) || sim.lines.some((l) => l.include && !lineReady(l))} onClick={apply}>
+                <Button color="violet" disabled={!canApply(sim.lines)} onClick={apply}>
                   Agregar a la oferta ({sim.lines.filter((l) => l.include).length})
                 </Button>
               </Group>
