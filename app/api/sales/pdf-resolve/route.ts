@@ -17,7 +17,7 @@ import { sapGet, sapLogin, sapLogout, SapError } from '../../../../lib/sap/servi
  *  1) identifica el CLIENTE en SAP por el NIT (CardCode o FederalTaxID) — o usa el que ya eligió el usuario;
  *  2) valida las líneas. Empresas de productos: predicción del artículo en el servidor (código de SAP, código de
  *     barras, catálogo del cliente, historial de pedidos y facturas del cliente, descripción), con hasta 3
- *     candidatos y nivel de confianza; solo la confianza alta queda elegida sin confirmar (2026-11-27).
+ *     candidatos y nivel de confianza; toda línea con artículo sugerido va a la oferta sin confirmación por línea; la confianza baja solo se resalta (2026-11-27).
  *     Empresas de servicios: emparejamiento por descripción (como antes).
  * POST { companyId, nit?, cardCode?, lines } -> { customer, customerCandidates, lines, avisos }
  */
@@ -87,8 +87,6 @@ export async function POST(request: NextRequest) {
       // Mismo orden del PDF, de arriba abajo.
       lines.sort((x, y) => Number(x.row ?? 0) - Number(y.row ?? 0));
       const n = (c: string) => lines.filter((l) => confidenceOf(l) === c).length;
-      const porConfirmar = n('media') + n('baja');
-      if (porConfirmar) avisos.push(`${porConfirmar} línea(s) por confirmar: revise el artículo sugerido antes de agregarlas.`);
       if (n('ninguna')) avisos.push(`${n('ninguna')} línea(s) sin artículo en SAP: búsquelo o desmárquelas.`);
       return NextResponse.json({ customer, customerCandidates, lines, avisos });
     } finally {
