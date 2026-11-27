@@ -29,6 +29,8 @@ export type TableColumnType =
   | 'select'
   | 'yesno'
   | 'url'
+  /** 2026-11-26: persona de SynerLink (p. ej. el grupo auditor), elegida de los usuarios activos. */
+  | 'user'
   | 'sap_items'
   | 'sap_business_partners';
 
@@ -41,6 +43,7 @@ export const TABLE_COLUMN_TYPES: { value: TableColumnType; label: string }[] = [
   { value: 'select', label: 'Lista (opciones)' },
   { value: 'yesno', label: 'Sí / No' },
   { value: 'url', label: 'URL' },
+  { value: 'user', label: 'Persona (usuario de SynerLink)' },
   { value: 'sap_items', label: 'Artículo (SAP)' },
   { value: 'sap_business_partners', label: 'Socio de negocio (SAP)' },
 ];
