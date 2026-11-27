@@ -97,7 +97,7 @@ function ficha(puedeConfigurar: boolean) {
       { id: 1, occurredAt: '2026-09-30T15:00:00.000Z', kind: 'alta', title: 'Alta en SynerLink', detail: 'Galileo quedó registrado como agente del chat.', createdBy: null },
     ],
     hallazgos: {
-      abiertos: [{ id: 9, severity: 'bajo', title: 'MCP «synerlink-solicitud-galileo» tiene herramientas de escritura', detail: null, firstSeenAt: '2026-10-02T07:30:00.000Z', resolvedAt: null }],
+      abiertos: [{ id: 9, severity: 'bajo', title: 'MCP synerlink-solicitud-galileo tiene herramientas de escritura', detail: null, firstSeenAt: '2026-10-02T07:30:00.000Z', resolvedAt: null }],
       cerrados: [{ id: 8, severity: 'alto', title: 'Ejecuta comandos del sistema sin pedir aprobación', detail: null, firstSeenAt: '2026-10-02T07:30:00.000Z', resolvedAt: '2026-10-20T07:30:00.000Z' }],
     },
     resumenes: [
@@ -123,7 +123,7 @@ function ficha(puedeConfigurar: boolean) {
             author: 'horus',
             caseRef: 6212,
             file: 'AGENTS.md',
-            text: '## Herramientas y límites (Gobierno IA, caso #6212)\n- Puede: buscar en internet, leer y escribir archivos de su espacio de trabajo y radicar en SynerLink una «Solicitud de conectores para agentes IA».\n- Usted NO ejecuta comandos, NO tiene acceso a SAP, SharePoint, correo ni Teams.',
+            text: '## Herramientas y límites (Gobierno IA, caso #6212)\n- Puede: buscar en internet, leer y escribir archivos de su espacio de trabajo y radicar en SynerLink una Solicitud de conectores para agentes IA.\n- Usted NO ejecuta comandos, NO tiene acceso a SAP, SharePoint, correo ni Teams.',
           },
         ],
         usageHook: null,
@@ -133,7 +133,7 @@ function ficha(puedeConfigurar: boolean) {
         directorEmail: null,
         privilegeTemplate: 'Plantilla A — sin SAP',
         privilegeAppliedOn: '2026-10-19',
-        notes: 'Solo radica «Solicitud de conectores para agentes IA». Cron permitido.',
+        notes: 'Solo radica Solicitud de conectores para agentes IA. Cron permitido.',
         updatedBy: 'seed 2026-10-20 (actas Gobierno IA)',
         updatedAt: '2026-10-20T12:00:00.000Z',
       },
@@ -158,7 +158,7 @@ function ficha(puedeConfigurar: boolean) {
         },
       ],
       eventosCasos: [
-        { occurredAt: '2026-10-19T21:10:00.000Z', kind: 'caso', title: 'Caso #6212: se resolvió «Instalación de conector»', detail: 'Responsable: Administrador de Prueba' },
+        { occurredAt: '2026-10-19T21:10:00.000Z', kind: 'caso', title: 'Caso #6212: se resolvió Instalación de conector', detail: 'Responsable: Administrador de Prueba' },
         { occurredAt: '2026-10-16T21:00:00.000Z', kind: 'caso', title: 'Se radicó el caso #6212', detail: 'Solicitud de conectores para agentes IA' },
       ],
       hallazgosExternos: [],

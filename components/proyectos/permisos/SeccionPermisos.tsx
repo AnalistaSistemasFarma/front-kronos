@@ -132,7 +132,7 @@ export default function SeccionPermisos({ proyecto, version, avisar }: { proyect
 
           {!datos.canEdit && (
             <Alert color='gray' radius='md' icon={<IconInfoCircle size={18} />} py={8} data-testid='permisos-solo-lectura'>
-              Los cambia la administración de SynerLink o quien tenga el permiso «Permisos de agentes en Proyectos» en {proyecto.company.companyName}.
+              Los cambia la administración de SynerLink o quien tenga el permiso Permisos de agentes en Proyectos en {proyecto.company.companyName}.
             </Alert>
           )}
         </Stack>

@@ -66,7 +66,7 @@ test.describe('Portal TH · Políticas y reglamentos · VISUALIZAR', () => {
     await expect(visor).toBeHidden();
   });
 
-  test('el botón «POLÍTICAS Y REGLAMENTOS» del panel abre la misma ventana que VISUALIZAR (Cristian, 2026-10-14)', async ({ page }) => {
+  test('el botón POLÍTICAS Y REGLAMENTOS del panel abre la misma ventana que VISUALIZAR (Cristian, 2026-10-14)', async ({ page }) => {
     await simular(page);
     await page.goto('/portal');
     const visor = page.getByTestId('politicas-visor');

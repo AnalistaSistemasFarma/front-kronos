@@ -51,7 +51,7 @@ describe('clasificador HTTP', () => {
     expect(clasificarHttp(401, 'envio').sugerencia).toMatch(/token nuevo/);
   });
   it('400 muestra el mensaje de Nabuco tal cual; 404 ruta; 405 método; 5xx Nabuco', () => {
-    expect(clasificarHttp(400, 'envio', 'codigoProducto es obligatorio').mensaje).toContain('«codigoProducto es obligatorio»');
+    expect(clasificarHttp(400, 'envio', 'codigoProducto es obligatorio').mensaje).toContain('codigoProducto es obligatorio');
     expect(clasificarHttp(404, 'envio').sugerencia).toMatch(/Ruta mal configurada/);
     expect(clasificarHttp(405, 'autenticacion').sugerencia).toMatch(/POST/);
     expect(clasificarHttp(503, 'envio').mensaje).toMatch(/Error interno de Nabuco/);

@@ -1,6 +1,10 @@
 import {
   isOtIcono,
+  isOtPlanta,
   isOtResponsableRol,
+  isOtTipoPersonal,
+  OT_NOTA_MAX,
+  OT_NOTA_MIN,
   OT_INSPECTOR_EN_FLUJO,
   OT_LIMITS,
   OT_RESPONSABLE_ROLES_ASIGNABLES,
@@ -8,6 +12,8 @@ import {
   OT_TURNOS,
   otPermissionFromUrl,
   type OtIcono,
+  type OtPlanta,
+  type OtTipoPersonal,
   type OtEstado,
   type OtResponsableRol,
   type OtTurno,
@@ -184,6 +190,8 @@ export interface NuevaOrdenInput {
   inspector: string | null;
   /** Jefe de producción (usuario de SynerLink, columna id_jefe_produccion; B1). */
   jefeProduccion: string;
+  /** Planta 1 o 2 (2026-11-26), obligatoria al abrir. */
+  planta: OtPlanta;
   sapOp: SapOpSnapshot | null;
 }
 
@@ -234,6 +242,8 @@ export function parseNuevaOrden(body: Record<string, unknown> | null): NuevaOrde
   if (inspector.length > 50) throw new OtError('Inspector no válido.', 400);
   const jefeProduccion = str(body.jefeProduccion);
   if (!jefeProduccion) throw new OtError('Seleccione el jefe de producción.', 400);
+  const planta = Number(body.planta);
+  if (!isOtPlanta(planta)) throw new OtError('Seleccione la planta (Planta 1 o Planta 2).', 400);
   if (jefeProduccion.length > 50) throw new OtError('Jefe de producción no válido.', 400);
   return {
     idCompany,
@@ -245,6 +255,7 @@ export function parseNuevaOrden(body: Record<string, unknown> | null): NuevaOrde
     operadores,
     inspector: inspector || null,
     jefeProduccion,
+    planta,
     sapOp: parseSapOp(body.sapOp),
   };
 }
@@ -308,12 +319,12 @@ export function parseNuevoRegistro(body: Record<string, unknown> | null): NuevoR
 export function textoDelRegistro(actividad: { texto_libre: boolean; nombre: string }, input: Pick<NuevoRegistroInput, 'observacion' | 'texto'>): { observacion: string | null; esTextoLibre: boolean } {
   if (actividad.texto_libre) {
     const t = input.texto ?? '';
-    if (t.length < OT_LIMITS.textoLibreMin) throw new OtError(`«${actividad.nombre}» es de texto libre: escriba qué pasó (mínimo ${OT_LIMITS.textoLibreMin} caracteres).`, 400);
+    if (t.length < OT_LIMITS.textoLibreMin) throw new OtError(`${actividad.nombre} es de texto libre: escriba qué pasó (mínimo ${OT_LIMITS.textoLibreMin} caracteres).`, 400);
     if (t.length > OT_LIMITS.textoLibre) throw new OtError(`El texto libre: máximo ${OT_LIMITS.textoLibre} caracteres.`, 400);
     if (input.observacion) throw new OtError('En una actividad de texto libre escriba todo en el texto (sin observación aparte).', 400);
     return { observacion: t, esTextoLibre: true };
   }
-  if (input.texto) throw new OtError(`«${actividad.nombre}» no es de texto libre: use la observación opcional.`, 400);
+  if (input.texto) throw new OtError(`${actividad.nombre} no es de texto libre: use la observación opcional.`, 400);
   return { observacion: input.observacion, esTextoLibre: false };
 }
 
@@ -406,6 +417,13 @@ export interface NuevoOperadorInput {
   idCompany: number;
   nombre: string;
   documento: string | null;
+  /** 2026-11-26: OPERARIO por defecto. */
+  tipo?: OtTipoPersonal;
+}
+
+function parseTipoPersonal(v: unknown): OtTipoPersonal {
+  if (!isOtTipoPersonal(v)) throw new OtError('Tipo de personal no válido: operario, mantenimiento o inspector de calidad.', 400);
+  return v;
 }
 
 export function parseNuevoOperador(body: Record<string, unknown> | null): NuevoOperadorInput {
@@ -416,6 +434,7 @@ export function parseNuevoOperador(body: Record<string, unknown> | null): NuevoO
     idCompany,
     nombre: reqStr(body.nombre, OT_LIMITS.operadorNombre, 'El nombre del operario').replace(/\s+/g, ' '),
     documento: optStr(body.documento, OT_LIMITS.operadorDocumento, 'El documento'),
+    tipo: body.tipo === undefined || body.tipo === null || body.tipo === '' ? 'OPERARIO' : parseTipoPersonal(body.tipo),
   };
 }
 
@@ -425,6 +444,7 @@ export interface CambioOperadorInput {
   nombre?: string;
   documento?: string | null;
   activo?: boolean;
+  tipo?: OtTipoPersonal;
 }
 
 /** PATCH del maestro: nombre, documento y activo (los operarios no se borran: se desactivan). */
@@ -437,8 +457,9 @@ export function parseCambioOperador(body: Record<string, unknown> | null): Cambi
   if (body.nombre !== undefined) out.nombre = reqStr(body.nombre, OT_LIMITS.operadorNombre, 'El nombre del operario').replace(/\s+/g, ' ');
   if (body.documento !== undefined) out.documento = optStr(body.documento, OT_LIMITS.operadorDocumento, 'El documento');
   if (typeof body.activo === 'boolean') out.activo = body.activo;
-  if (out.nombre === undefined && out.documento === undefined && out.activo === undefined) {
-    throw new OtError('No hay cambios: solo se puede cambiar el nombre, el documento y si está activo.', 400);
+  if (body.tipo !== undefined) out.tipo = parseTipoPersonal(body.tipo);
+  if (out.nombre === undefined && out.documento === undefined && out.activo === undefined && out.tipo === undefined) {
+    throw new OtError('No hay cambios: solo se puede cambiar el nombre, el documento, el tipo y si está activo.', 400);
   }
   return out;
 }
@@ -636,9 +657,9 @@ export function parseCambioResponsable(body: Record<string, unknown> | null): Ca
  * además, el permiso de Gestión (es quien cierra). Lanza 400 con el motivo.
  */
 export function assertPuedeSerResponsable(rol: OtResponsableRol, access: OtCompanyAccess | null, nombre: string): void {
-  if (!access?.canOperate) throw new OtError(`${nombre} no tiene el permiso «Bitácora de Proceso» en esta empresa.`, 400);
+  if (!access?.canOperate) throw new OtError(`${nombre} no tiene el permiso Bitácora de Proceso en esta empresa.`, 400);
   if (rol === 'SUPERVISOR' && !access.canManage) {
-    throw new OtError(`${nombre} no tiene el permiso «Bitácora de Proceso: Gestión»: sin él no puede ser supervisor.`, 400);
+    throw new OtError(`${nombre} no tiene el permiso Bitácora de Proceso: Gestión: sin él no puede ser supervisor.`, 400);
   }
 }
 
@@ -668,17 +689,17 @@ export function motivoSinRol(rol: OtResponsableRol, e: EstadoRolPersona): string
   if (e.asignado === null) return `${e.nombre} no está asignado como ${label} en ${e.empresa}: asígnelo en Catálogo → Responsables.`;
   if (e.asignado === false) return `${e.nombre} está desactivado como ${label} en ${e.empresa}: actívelo en Catálogo → Responsables.`;
   if (!e.access?.canOperate) {
-    return `${e.nombre} está asignado como ${label}, pero le falta el permiso «Bitácora de Proceso» en ${e.empresa} (Administración → Usuarios).`;
+    return `${e.nombre} está asignado como ${label}, pero le falta el permiso Bitácora de Proceso en ${e.empresa} (Administración → Usuarios).`;
   }
   if (rol === 'SUPERVISOR' && !e.access.canManage) {
-    return `${e.nombre} está asignado como supervisor, pero le falta el permiso «Bitácora de Proceso: Gestión» en ${e.empresa} (Administración → Usuarios).`;
+    return `${e.nombre} está asignado como supervisor, pero le falta el permiso Bitácora de Proceso: Gestión en ${e.empresa} (Administración → Usuarios).`;
   }
   return null;
 }
 
 /** Mensaje de la sesión SIN ningún permiso del módulo (dice cuál pedir y dónde). */
 export const OT_MSG_SIN_MODULO =
-  'No tiene acceso a Bitácora de Proceso: le falta el permiso «Bitácora de Proceso» (o «Bitácora de Proceso: Gestión») en alguna empresa. Lo asigna un administrador en Administración → Usuarios.';
+  'No tiene acceso a Bitácora de Proceso: le falta el permiso Bitácora de Proceso (o Bitácora de Proceso: Gestión) en alguna empresa. Lo asigna un administrador en Administración → Usuarios.';
 
 /** Mensaje de la sesión con usuario inactivo. */
 export const OT_MSG_USUARIO_INACTIVO = 'Su usuario de SynerLink está inactivo. Pida a un administrador que lo active.';
@@ -689,15 +710,46 @@ export const OT_MSG_USUARIO_INACTIVO = 'Su usuario de SynerLink está inactivo. 
  */
 export function mensajeFaltaAcceso(need: 'canOperate' | 'canManage', entry: OtCompanyAccess | null, idCompany: number): string {
   if (!entry) {
-    return `Le falta el permiso «Bitácora de Proceso» en la empresa seleccionada (id ${idCompany}). Lo asigna un administrador en Administración → Usuarios.`;
+    return `Le falta el permiso Bitácora de Proceso en la empresa seleccionada (id ${idCompany}). Lo asigna un administrador en Administración → Usuarios.`;
   }
   if (need === 'canManage' && !entry.canManage) {
-    return `Le falta el permiso «Bitácora de Proceso: Gestión» en ${entry.companyName.trim()}: esto solo lo hace el supervisor. Lo asigna un administrador en Administración → Usuarios.`;
+    return `Le falta el permiso Bitácora de Proceso: Gestión en ${entry.companyName.trim()}: esto solo lo hace el supervisor. Lo asigna un administrador en Administración → Usuarios.`;
   }
-  return `Le falta el permiso «Bitácora de Proceso» en ${entry.companyName.trim()}.`;
+  return `Le falta el permiso Bitácora de Proceso en ${entry.companyName.trim()}.`;
 }
 
 /** Mensaje cuando no puede ABRIR (R3): ni Gestión ni jefe de producción asignado. */
 export function mensajeNoPuedeAbrir(entry: OtCompanyAccess): string {
-  return `Para abrir una bitácora en ${entry.companyName.trim()} le falta el permiso «Bitácora de Proceso: Gestión» (supervisor) o estar asignado como jefe de producción en Catálogo → Responsables.`;
+  return `Para abrir una bitácora en ${entry.companyName.trim()} le falta el permiso Bitácora de Proceso: Gestión (supervisor) o estar asignado como jefe de producción en Catálogo → Responsables.`;
+}
+
+/**
+ * NOTA DE CORRECCIÓN (2026-11-26): texto obligatorio (3 a 500 caracteres, sin saltos ni caracteres de
+ * control). El registro corregido no cambia; la nota queda con la hora del servidor y quién la escribió.
+ */
+export function parseNotaRegistro(body: Record<string, unknown> | null): { texto: string } {
+  if (!body) throw new OtError('Se esperaba un JSON con la nota.', 400);
+  const raw = typeof body.texto === 'string' ? body.texto : '';
+  const texto = raw.normalize('NFC').replace(/[\u0000-\u001f\u007f]+/g, ' ').replace(/\s+/g, ' ').trim();
+  if (texto.length < OT_NOTA_MIN) throw new OtError(`Escriba la nota (mínimo ${OT_NOTA_MIN} caracteres).`, 400);
+  if (texto.length > OT_NOTA_MAX) throw new OtError(`La nota admite máximo ${OT_NOTA_MAX} caracteres.`, 400);
+  return { texto };
+}
+
+/** PATCH { planta }: asignar o corregir la planta de una bitácora ABIERTA (2026-11-26). */
+export function parseCambioPlanta(body: Record<string, unknown> | null): { planta: OtPlanta } {
+  if (!body) throw new OtError('Se esperaba un JSON con la planta.', 400);
+  const planta = Number(body.planta);
+  if (!isOtPlanta(planta)) throw new OtError('Seleccione la planta (Planta 1 o Planta 2).', 400);
+  return { planta };
+}
+
+/**
+ * ¿Puede asignar o corregir la planta? Solo con la bitácora ABIERTA, y quien tiene Gestión
+ * (supervisor), el jefe de producción designado o quien la abrió.
+ */
+export function assertPuedeCambiarPlanta(o: { estado: string; abiertaPor: string; jefe: string | null }, idUser: string, access: OtCompanyAccess): void {
+  if (o.estado !== 'ABIERTA') throw new OtError('La bitácora ya está cerrada: la planta no se puede cambiar.', 409);
+  if (access.canManage || idUser === o.jefe || idUser === o.abiertaPor) return;
+  throw new OtError('Solo el supervisor (permiso de Gestión), el jefe de producción de la bitácora o quien la abrió pueden asignar la planta.', 403);
 }

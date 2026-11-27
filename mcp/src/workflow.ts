@@ -93,10 +93,22 @@ export async function instantiateInitialTasks(
 ): Promise<CreatedTask[]> {
   const rows = await tx.$queryRaw<TaskTemplateRow[]>(Prisma.sql`
     SELECT tpc.id AS id_task, tpc.task, tpc.is_sequential, tpc.display_order,
-           tpc.is_authorization, utrg.id_user, u.email, u.name
+           tpc.is_authorization, COALESCE(dlg.id_user, utrg.id_user) AS id_user, u.email, u.name
     FROM task_process_category tpc
     LEFT JOIN user_task_request_general utrg ON utrg.id_task = tpc.id
-    LEFT JOIN [user] u ON u.id = utrg.id_user
+    OUTER APPLY (
+      SELECT TOP 1 dlg_d.users_after AS id_user
+      FROM workflow_task_reassignment_detail dlg_d
+      INNER JOIN workflow_task_reassignment dlg_w ON dlg_w.id = dlg_d.id_reassignment
+      INNER JOIN [user] dlg_u ON dlg_u.id = dlg_d.users_after AND dlg_u.isActive = 1
+      WHERE dlg_d.item_type = 'template_task'
+        AND dlg_d.id_item = tpc.id
+        AND dlg_d.users_before = utrg.id_user
+        AND dlg_d.returned = 0
+        AND dlg_w.active = 1 AND dlg_w.returned_at IS NULL
+      ORDER BY dlg_d.id_reassignment DESC
+    ) dlg
+    LEFT JOIN [user] u ON u.id = COALESCE(dlg.id_user, utrg.id_user)
     WHERE tpc.id_process_category = ${processId}
       AND tpc.active = 1
     ORDER BY tpc.display_order, tpc.id

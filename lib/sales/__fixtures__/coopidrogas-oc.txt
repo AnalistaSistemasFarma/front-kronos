@@ -1,0 +1,18 @@
+Orden de Compra (texto sanitizado para pruebas: sin direcciones, teléfonos ni datos de contacto)
+N° de documento: 7500347986-3   Fecha del documento: 24-11-2026
+Emisor: Coopidrogas  Nº Identificación 860026123     Receptor: One Latam Pharma S.A.S.
+Punto de venta: Copidrogas Antioquia - BELLO
+
+Producto | PLU/SKU | Cantidad pedida | U.medida | Precio bruto | Precio neto | Subtotal sin impuestos
+7707234231363 | VITAMINA C 500 MG 5 ML AMPOLLA RY 10 AMP | Código Interno / Referencia: 10959 | 21.0 | NAR | $49,000.00 | $46,060.00 | $967,260.00
+7707234232926 | Código Interno / Referencia: | 172.0 | NAR | $9,500.00 | $8,930.00 | $1,535,960.00
+7707234234807 | Código Interno / Referencia: | 30.0 | NAR | $12,085.00 | $11,360.00 | $340,800.00
+7707234230670 | Código Interno / Referencia: | 3.0 | NAR | $28,000.00 | $26,320.00 | $78,960.00
+7707234230717 | BETAMETASONA ACETATO 3MG+BET.FOS 25AMP | Código Interno / Referencia: 10005 | 3.0 | NAR | $280,800.00 | $263,952.00 | $791,856.00
+7707234230922 | DEXAMETASONA INY 4 MG/ML 100 AMP | Código Interno / Referencia: 10014 | 3.0 | NAR | $150,000.00 | $141,000.00 | $423,000.00
+7501125132117 | CLORURO DE SODIO CS PISA 0.9% 100 ML | Código Interno / Referencia: 10208 | 900.0 | NAR | $2,150.00 | $2,021.00 | $1,818,900.00
+7501125132056 | CLORURO DE SODIO CS PISA 0.9% 500 ML | Código Interno / Referencia: 10209 | 528.0 | NAR | $2,650.00 | $2,491.00 | $1,315,248.00
+7501125188039 | METFORMINA 850 MG 30 TABS | Código Interno / Referencia: 10234 | 462.0 | NAR | $8,900.00 | $8,366.00 | $3,865,092.00
+7707234237891 | Código Interno / Referencia: | 72.0 | NAR | $6,334.00 | $5,954.00 | $428,688.00
+7707234237624 | Código Interno / Referencia: | 10.0 | NAR | $11,665.00 | $10,965.00 | $109,650.00
+Total unidades 2204   Total items 11   Valor total del documento: $11,675,414.00

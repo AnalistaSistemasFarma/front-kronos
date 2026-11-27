@@ -558,7 +558,7 @@ export default function FacturasIaPage() {
                     <Table.Tr>
                       <Table.Td colSpan={9}>
                         <Text size="xs" c="dimmed">
-                          No hay facturas. Use «Subir factura».
+                          No hay facturas. Use Subir factura.
                         </Text>
                       </Table.Td>
                     </Table.Tr>

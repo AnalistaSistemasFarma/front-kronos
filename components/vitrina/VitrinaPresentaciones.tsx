@@ -118,17 +118,17 @@ export default function VitrinaPresentaciones({ company, version, avisar, onMedi
                       </Button>
                     )}
                     {p.estado !== 'VALIDADA' && p.estado !== 'RETIRADA' && (
-                      <Button size='sm' leftSection={<IconCheck size={16} />} loading={busy === `v${p.id}`} onClick={() => accion(`v${p.id}`, () => patchPresentacion(p, { estado: 'VALIDADA' }), `«${nombrePresentacion(p)}» validada.`)}>
+                      <Button size='sm' leftSection={<IconCheck size={16} />} loading={busy === `v${p.id}`} onClick={() => accion(`v${p.id}`, () => patchPresentacion(p, { estado: 'VALIDADA' }), `${nombrePresentacion(p)} validada.`)}>
                         Validar
                       </Button>
                     )}
                     {p.estado !== 'PENDIENTE' && (
-                      <Button size='sm' variant='default' leftSection={<IconArrowBackUp size={16} />} loading={busy === `p${p.id}`} onClick={() => accion(`p${p.id}`, () => patchPresentacion(p, { estado: 'PENDIENTE' }), `«${nombrePresentacion(p)}» volvió a pendiente de validar.`)}>
+                      <Button size='sm' variant='default' leftSection={<IconArrowBackUp size={16} />} loading={busy === `p${p.id}`} onClick={() => accion(`p${p.id}`, () => patchPresentacion(p, { estado: 'PENDIENTE' }), `${nombrePresentacion(p)} volvió a pendiente de validar.`)}>
                         Volver a pendiente
                       </Button>
                     )}
                     {p.estado !== 'RETIRADA' && (
-                      <Button size='sm' variant='light' color='red' leftSection={<IconArchive size={16} />} loading={busy === `r${p.id}`} onClick={() => accion(`r${p.id}`, () => patchPresentacion(p, { estado: 'RETIRADA' }), `«${nombrePresentacion(p)}» retirada; sus códigos quedaron desactivados.`)}>
+                      <Button size='sm' variant='light' color='red' leftSection={<IconArchive size={16} />} loading={busy === `r${p.id}`} onClick={() => accion(`r${p.id}`, () => patchPresentacion(p, { estado: 'RETIRADA' }), `${nombrePresentacion(p)} retirada; sus códigos quedaron desactivados.`)}>
                         Retirar
                       </Button>
                     )}
@@ -299,7 +299,7 @@ function CodigoModal({ idCompany, presentacion, codigo, onClose, onSaved }: { id
             </Text>
             <SegmentedControl fullWidth size='md' data={OPCIONES_VISIBILIDAD} value={terceros ? 'INTERNA' : visCanal} onChange={setVisCanal} disabled={terceros} />
             <Text size='xs' c='dimmed' mt={4}>
-              Los canales empiezan en «Interna». El código nunca supera la visibilidad de la presentación.
+              Los canales empiezan en Interna. El código nunca supera la visibilidad de la presentación.
             </Text>
           </div>
         )}

@@ -34,7 +34,7 @@ describe('validarPropuesta', () => {
   });
   it('resumen legible', () => {
     const v = validarPropuesta({ kind: 'tarea_editar', idTask: 5, tarea: { status: 'en_curso', progress: 40 } });
-    expect(v.ok && resumenPropuesta(v.value, { tituloTarea: 'Radicar DIM' })).toBe('Tarea «Radicar DIM» → estado: En curso, avance: 40 %');
+    expect(v.ok && resumenPropuesta(v.value, { tituloTarea: 'Radicar DIM' })).toBe('Tarea Radicar DIM → estado: En curso, avance: 40 %');
   });
 });
 

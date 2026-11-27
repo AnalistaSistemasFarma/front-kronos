@@ -97,29 +97,29 @@ test('acumularEvento: último texto del hilo PRINCIPAL y archivos tocados por Wr
   assert.equal(acc.ultimaHerramienta, 'Edit');
 });
 
-test('textos: aviso breve con una línea de avance, corte útil sin «pregunta más acotada»', () => {
+test('textos: aviso breve con una línea de avance, corte útil sin pregunta más acotada', () => {
   assert.equal(duracionLegible(10 * 60000), '10 min');
   assert.equal(duracionLegible(65 * 60000), '1 h 5 min');
   assert.equal(lineaCorta('Primero.\n\nAhora `armo` el **informe** de compras.'), 'Ahora armo el informe de compras.');
 
   const aviso = textoAvisoProgreso({ transcurridoMs: 10 * 60000, topeMs: 60 * 60000, actividad: 'Consultando SAP…', ultimoTexto: 'Cruzo las órdenes con las facturas.' });
   assert.match(aviso, /^⏳ Sigo trabajando en su pedido \(lleva 10 min; el máximo por turno es 1 h\)\. Le aviso al terminar\./);
-  assert.match(aviso, /_Lo último: «Cruzo las órdenes con las facturas\.»_/);
+  assert.match(aviso, /_Lo último: Cruzo las órdenes con las facturas\._/);
   assert.match(textoAvisoProgreso({ transcurridoMs: 20 * 60000, actividad: 'Consultando SAP…' }), /_Ahora: Consultando SAP…_/);
   assert.equal(textoAvisoProgreso({ transcurridoMs: 60000, actividad: 'Pensando…' }).split('\n').length, 1);
 
   const corte = textoCorte({ motivo: 'tiempo', transcurridoMs: 60 * 60000, topeMs: 60 * 60000, ultimoTexto: 'Ya armé el borrador.', archivos: ['trabajo/a.md', 'trabajo/b.csv'] });
   assert.match(corte, /Se cumplió el tiempo máximo de este turno \(1 h\)/);
-  assert.match(corte, /Último avance: «Ya armé el borrador\.»/);
+  assert.match(corte, /Último avance: Ya armé el borrador\./);
   assert.match(corte, /`trabajo\/a\.md`, `trabajo\/b\.csv`/);
   assert.match(corte, /la sesión de esta conversación lo conserva/);
-  assert.match(corte, /\*\*«continúa»\*\*/);
+  assert.match(corte, /\*\*continúa\*\*/);
   assert.doesNotMatch(corte, /acotada/);
   assert.match(textoCorte({ motivo: 'tiempo', transcurridoMs: 1, topeMs: 60000 }), /No alcancé a dejar texto ni archivos visibles/);
   assert.match(textoCorte({ motivo: 'gasto', transcurridoMs: 120000, presupuestoUsd: 3 }), /tope de gasto de este pedido \(3 USD\)/);
   const muchos = textoCorte({ motivo: 'tiempo', transcurridoMs: 1, topeMs: 1, archivos: Array.from({ length: 13 }, (_, i) => `trabajo/f${i}.md`) });
   assert.match(muchos, /y 3 más/);
-  assert.match(textoTiempoTurno({ topeMs: 3600000, avisoMs: 600000 }), /máximo de 1 h[\s\S]*cada 10 min[\s\S]*«continúa»/);
+  assert.match(textoTiempoTurno({ topeMs: 3600000, avisoMs: 600000 }), /máximo de 1 h[\s\S]*cada 10 min[\s\S]*continúa/);
 });
 
 test('archivos del turno: solo lo modificado desde el inicio, sin ocultos ni propuestas, y lo tocado dentro del hilo', () => {
@@ -230,7 +230,7 @@ test('turno largo: aviso de progreso a los 10 y 20 min SIN apagar el indicador; 
   assert.equal(avisos.length, 2);
   assert.equal(avisos[0][1], 129);
   assert.match(avisos[0][2], /Sigo trabajando en su pedido \(lleva 10 min; el máximo por turno es 1 h\)/);
-  assert.match(avisos[0][2], /Lo último: «Reviso las 40 solicitudes de compra\.»/);
+  assert.match(avisos[0][2], /Lo último: Reviso las 40 solicitudes de compra\./);
   assert.match(avisos[1][2], /lleva 20 min/);
   // El aviso deja el indicador «trabajando» (nunca idle) con la etiqueta del momento.
   assert.equal(avisos[0][3], 'tool');
@@ -254,7 +254,7 @@ test('turno largo: aviso de progreso a los 10 y 20 min SIN apagar el indicador; 
   assert.equal(s.llamadas.length, n);
 });
 
-test('tiempo agotado: mensaje con lo que alcanzó a hacer y «continúa»; la sesión queda para --resume', async () => {
+test('tiempo agotado: mensaje con lo que alcanzó a hacer y continúa; la sesión queda para --resume', async () => {
   const dir = tmp('puente-corte-');
   const s = synerlinkFalso();
   const estado = new Estado(dir);
@@ -275,9 +275,9 @@ test('tiempo agotado: mensaje con lo que alcanzó a hacer y «continúa»; la se
   await puente.cola.vacia();
   const cuerpo = s.llamadas.find((l) => l[0] === 'responder')[2];
   assert.match(cuerpo, /Se cumplió el tiempo máximo de este turno \(1 h\)/);
-  assert.match(cuerpo, /Último avance: «Ya tengo el borrador de la matriz; sigo con los anexos\.»/);
+  assert.match(cuerpo, /Último avance: Ya tengo el borrador de la matriz; sigo con los anexos\./);
   assert.match(cuerpo, /`trabajo\/borrador-sgd\.md`/);
-  assert.match(cuerpo, /«continúa»/);
+  assert.match(cuerpo, /continúa/);
   assert.doesNotMatch(cuerpo, /acotada/);
   // Era la PRIMERA vez del hilo (--session-id): igual queda marcada para retomar con --resume.
   assert.ok(corridas[0].args.includes('--session-id'));
@@ -324,7 +324,7 @@ test('continuación automática (HILOS_CONTINUAR_AL_AGOTAR=si): una sola vez, so
   p2.recibir([{ id: 1, idConversation: 8, body: 'x', conversation: { kind: 'project' } }]);
   await p2.cola.vacia();
   assert.equal(c2.length, 2);
-  assert.match(s2.llamadas.find((l) => l[0] === 'responder')[2], /también en la continuación automática[\s\S]*«continúa»/);
+  assert.match(s2.llamadas.find((l) => l[0] === 'responder')[2], /también en la continuación automática[\s\S]*continúa/);
 });
 
 test('sin continuación automática por defecto, y tope de gasto (si se configura) con el mensaje útil', async () => {
@@ -345,6 +345,6 @@ test('sin continuación automática por defecto, y tope de gasto (si se configur
   assert.equal(corridas.length, 1);
   assert.equal(corridas[0].args[corridas[0].args.indexOf('--max-budget-usd') + 1], '2');
   const cuerpo = s.llamadas.find((l) => l[0] === 'responder')[2];
-  assert.match(cuerpo, /tope de gasto de este pedido \(2 USD\)[\s\S]*«continúa»/);
+  assert.match(cuerpo, /tope de gasto de este pedido \(2 USD\)[\s\S]*continúa/);
   assert.doesNotMatch(cuerpo, /acotada/);
 });

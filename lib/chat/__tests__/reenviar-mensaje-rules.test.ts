@@ -27,7 +27,7 @@ describe('Reenviar un mensaje · reglas', () => {
 
   it('aviso para persona, grupo y proyecto', () => {
     expect(avisoMensajeReenviado({ titulo: 'Ana', tipo: 'persona' })).toBe('Mensaje reenviado a Ana.');
-    expect(avisoMensajeReenviado({ titulo: 'TI', tipo: 'grupo' })).toBe('Mensaje reenviado al grupo «TI».');
-    expect(avisoMensajeReenviado({ titulo: 'Mejoras', tipo: 'proyecto' })).toBe('Mensaje reenviado al proyecto «Mejoras».');
+    expect(avisoMensajeReenviado({ titulo: 'TI', tipo: 'grupo' })).toBe('Mensaje reenviado al grupo TI.');
+    expect(avisoMensajeReenviado({ titulo: 'Mejoras', tipo: 'proyecto' })).toBe('Mensaje reenviado al proyecto Mejoras.');
   });
 });

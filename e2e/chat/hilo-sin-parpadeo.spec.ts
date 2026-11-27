@@ -257,7 +257,7 @@ for (const pantalla of [
       await page.waitForTimeout(800);
       const aMark = await medir(page);
       expect(aMark.cuadrosMezclados, 'cuadros con el encabezado de Mark y mensajes de Orus').toEqual([]);
-      expect(aMark.nuevas, 'burbujas del historial que entran como «nuevas»').toEqual([]);
+      expect(aMark.nuevas, 'burbujas del historial que entran como nuevas').toEqual([]);
       expect(aMark.esqueletos).toBe(0);
       await expect(hilo(page).locator('.chat-bubble--nueva')).toHaveCount(0);
 
@@ -285,7 +285,7 @@ for (const pantalla of [
         await expect(hilo(page).getByText('Mark mensaje 12')).toBeVisible();
         await page.waitForTimeout(800);
         const aMark = await medir(page);
-        expect(aMark.nuevas, 'burbujas del historial que entran como «nuevas»').toEqual([]);
+        expect(aMark.nuevas, 'burbujas del historial que entran como nuevas').toEqual([]);
         await expect(hilo(page).locator('.chat-bubble--nueva')).toHaveCount(0);
       });
     }

@@ -29,6 +29,7 @@ import AgentMetricsBar from './AgentMetricsBar';
 import ChatComposer, { type ChatComposerHandle } from './ChatComposer';
 import { EsqueletoHilo } from './ChatSkeletons';
 import ChatMarkdown from './ChatMarkdown';
+import ChatVoiceNotePlayer from './ChatVoiceNotePlayer';
 import TarjetaAccionCorreo from '../correo/TarjetaAccionCorreo';
 import { useAccionesCorreo } from '../correo/useAccionesCorreo';
 import { useChatConversation, type ChatTarget } from './useChatConversation';
@@ -44,6 +45,7 @@ import {
   type ChatParticipantDto,
 } from '../../lib/chat/client';
 import { esImagenAdjunta, formatBytes } from '../../lib/chat/attachments';
+import { isVoiceNoteMessage } from '../../lib/chat/voice-note';
 import { ChatImageThumb } from './ChatImageViewer';
 import IconoAdjunto from './IconoAdjunto';
 import type { AdjuntoVisor } from './ChatAttachmentViewer';
@@ -489,12 +491,20 @@ const MessageBubble = memo(function MessageBubble({
           </UnstyledButton>
         )}
 
-        {message.media ? (
-          <MediaDelMensaje message={message} />
+        {isVoiceNoteMessage(message) ? (
+          // Voice note (2026-11-26): player + transcript instead of the
+          // descriptive body and the attachment card.
+          <ChatVoiceNotePlayer message={message} />
         ) : (
-          message.body.trim().length > 0 && <ChatMarkdown content={message.body} />
+          <>
+            {message.media ? (
+              <MediaDelMensaje message={message} />
+            ) : (
+              message.body.trim().length > 0 && <ChatMarkdown content={message.body} />
+            )}
+            <MessageAttachments message={message} />
+          </>
         )}
-        <MessageAttachments message={message} />
 
         <FilaReacciones
           reactions={message.reactions}
@@ -1294,7 +1304,7 @@ export default function ChatThread({
   // render del hilo, o sea en cada vuelta del sondeo.
   const enviarHilo = thread.send;
   const alEnviar = useCallback(
-    async (body: string, files: File[]) => {
+    async (body: string, files: File[], opciones?: { voiceDurationMs?: number }) => {
       // Al ENVIAR se vuelve al fondo aunque el usuario hubiera subido a
       // leer: quiere ver lo que acaba de escribir y la respuesta. Se
       // olvida la interacción previa para que el scroll animado hacia el
@@ -1306,7 +1316,7 @@ export default function ChatThread({
       setStickToBottom(true);
       const vp = viewportRef.current;
       if (vp) vp.scrollTop = vp.scrollHeight;
-      const enviado = await enviarHilo(body, files, cita);
+      const enviado = await enviarHilo(body, files, cita, opciones);
       // La cita se limpia solo si el mensaje SALIÓ: si falló, el usuario
       // reintenta y la cita tiene que seguir puesta.
       if (enviado) setCita(null);
@@ -1508,7 +1518,7 @@ export default function ChatThread({
                     : enPersonas
                       ? `Escríbale a ${person?.name ?? 'esta persona'}. Solo ustedes dos ven esta conversación, además de la auditoría del área de Sistemas.`
                       : enProyecto
-                        ? `Escríbale a ${agent?.displayName ?? 'el asistente'}. En este hilo trabaja solo con las instrucciones y los archivos de «${project?.name ?? 'el proyecto'}», aparte de sus demás conversaciones. Los miembros del proyecto ven todo lo que se escriba aquí.`
+                        ? `Escríbale a ${agent?.displayName ?? 'el asistente'}. En este hilo trabaja solo con las instrucciones y los archivos de ${project?.name ?? 'el proyecto'}, aparte de sus demás conversaciones. Los miembros del proyecto ven todo lo que se escriba aquí.`
                         : agent?.description ||
                       `Escríbale a ${agent?.displayName ?? 'el asistente'} para empezar la conversación.`}
                 </Text>

@@ -16,6 +16,10 @@ import { getPool, sql } from '../../../../lib/mssqlPool';
 import { prisma } from '../../../../lib/prisma';
 import { PAYMENT_RUN_PROCESS_NAME } from '../../../../lib/payment-assistant/paymentRun';
 import { fireAndForgetNotification, notifyNewRequest } from '../../../../lib/notificationEvents.js';
+import {
+  delegatedAssigneeApply,
+  effectiveAssigneeSql,
+} from '../../../../lib/requests-general/reassignmentDelegation';
 
 // notificationEvents.js infiere los tipos por JSDoc (taskEmails default [] -> never[]); se tipa
 // aquí explícitamente para poder pasarle string[] desde TypeScript.
@@ -194,10 +198,11 @@ export async function POST(request: NextRequest) {
         .input('process', sql.Int, idProcessCategory)
         .query(`
           SELECT tpc.id AS id_task, tpc.is_sequential, tpc.display_order, tpc.is_authorization,
-                 utrg.id_user, u.email
+                 ${effectiveAssigneeSql('utrg.id_user')} AS id_user, u.email
           FROM task_process_category tpc
           LEFT JOIN user_task_request_general utrg ON utrg.id_task = tpc.id
-          LEFT JOIN [user] u ON u.id = utrg.id_user
+          ${delegatedAssigneeApply('tpc.id', 'utrg.id_user')}
+          LEFT JOIN [user] u ON u.id = ${effectiveAssigneeSql('utrg.id_user')}
           WHERE tpc.id_process_category = @process AND tpc.active = 1
           ORDER BY tpc.display_order, tpc.id;
         `);

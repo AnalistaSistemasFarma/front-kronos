@@ -142,7 +142,7 @@ test.describe('Correo · con sesión y Graph simulado', () => {
     await sesion(context, baseURL!);
   });
 
-  test('empresa sin app habilitada: «Correo disponible próximamente para su empresa»', async ({ page }) => {
+  test('empresa sin app habilitada: Correo disponible próximamente para su empresa', async ({ page }) => {
     await simular(page, { disponible: false });
     await page.goto('/process/correo');
     await expect(page.getByTestId('correo-no-disponible')).toContainText('Correo disponible próximamente para su empresa');
@@ -253,7 +253,7 @@ test.describe('Correo · con sesión y Graph simulado', () => {
     if (CAPTURAS) await page.screenshot({ path: `${CAPTURAS}/04-resultado.png` });
   });
 
-  test('acuse en el hilo: casilla global «a todos», vista previa, externos incluidos y «Reintentar respuesta»', async ({ page }) => {
+  test('acuse en el hilo: casilla global a todos, vista previa, externos incluidos y Reintentar respuesta', async ({ page }) => {
     await page.setViewportSize({ width: 1366, height: 900 });
     await simular(page);
     // Fila 2 de un remitente EXTERNO ya completa (sin solicitante sería excluida de todos modos).
@@ -324,7 +324,7 @@ test.describe('Correo · con sesión y Graph simulado', () => {
     expect(reintentos).toEqual([{ conversationId: 'CONV-01AAAA', todos: true, confirmarExterno: true }]);
   });
 
-  test('«Informar en el hilo» en una solicitud ya creada: vista previa, envío a todos y luego «Informado el …»', async ({ page }) => {
+  test('Informar en el hilo en una solicitud ya creada: vista previa, envío a todos y luego Informado el …', async ({ page }) => {
     await page.setViewportSize({ width: 1366, height: 900 });
     await simular(page);
     let enviado: string | null = null;
@@ -439,7 +439,7 @@ test.describe('Correo · con sesión y Graph simulado', () => {
     await page.getByTestId('correo-buscar').fill('contrato');
     await page.getByTestId('correo-buscar').press('Enter');
     await expect.poll(() => consultas.at(-1)?.get('buscar')).toBe('contrato');
-    await expect(page.getByTestId('correo-chip-activo')).toContainText('«contrato»');
+    await expect(page.getByTestId('correo-chip-activo')).toContainText('contrato');
     // Opciones de búsqueda (De / fechas) en el desplegable del buscador.
     await page.getByTestId('correo-mas-filtros').click();
     await page.getByTestId('correo-filtros').getByLabel('De', { exact: true }).fill('uno@gsslatam.com');
@@ -549,7 +549,7 @@ test.describe('Correo · con sesión y Graph simulado', () => {
     expect(desborde).toBeLessThanOrEqual(1);
   });
 
-  test('throttling de Microsoft (2026-10-16): esqueleto mientras el servidor reintenta, «Reintentar» si se agota, marcado silencioso y una sola consulta', async ({ page }) => {
+  test('throttling de Microsoft (2026-10-16): esqueleto mientras el servidor reintenta, Reintentar si se agota, marcado silencioso y una sola consulta', async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 900 });
     await simular(page);
     // El servidor reintenta solo (429 → 200 de Graph): para la página es una respuesta lenta. La primera apertura
@@ -605,7 +605,7 @@ test.describe('Correo · con sesión y Graph simulado', () => {
     expect(pedidas).toHaveLength(2);
   });
 
-  test('leído masivo: selección, «Seleccionar los N de esta carpeta», «Marcar todo» por lotes con avance, contadores optimistas y reversión', async ({ page }) => {
+  test('leído masivo: selección, Seleccionar los N de esta carpeta, Marcar todo por lotes con avance, contadores optimistas y reversión', async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 900 });
     await simular(page);
     // Buzón simulado con estado: la carpeta y el icono de la cabecera reflejan lo que se marca.
@@ -792,7 +792,7 @@ test.describe('Correo · con sesión y Graph simulado', () => {
     await expect(drawer.getByTestId('correo-hilo-esqueleto')).toHaveCount(0);
   });
 
-  test('carga en el celular: esqueletos en forma de tarjeta y sin brillo con «reducir movimiento»', async ({ page }) => {
+  test('carga en el celular: esqueletos en forma de tarjeta y sin brillo con reducir movimiento', async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await page.emulateMedia({ reducedMotion: 'reduce' });
     await simular(page);

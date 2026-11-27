@@ -160,6 +160,7 @@ test.describe('Bitácora de Proceso · con sesión, base y SAP simulados', () =>
     await expect(page.getByTestId('ot-op-elegida')).toContainText('Planificada');
     await expect(page.getByTestId('ot-producto')).toHaveValue(OP_PLANIFICADA.ProductDescription);
     await expect(page.getByTestId('ot-lote')).toHaveValue('1455326');
+    await page.getByTestId('ot-planta-1').click();
     await page.getByTestId('ot-turno').getByText('Mañana').click();
     await page.getByTestId('ot-operarios').getByText('Pepito Pérez').click();
     // 2026-11-24: el inspector salió del flujo: ya no se elige al abrir.
@@ -169,7 +170,7 @@ test.describe('Bitácora de Proceso · con sesión, base y SAP simulados', () =>
     await page.getByTestId('ot-abrir').click();
     expect(Object.keys(estado.enviados.find((e) => e.ruta === '/')?.body ?? {})).not.toContain('inspector');
     await expect.poll(() => estado.enviados.find((e) => e.ruta === '/')?.body).toMatchObject({
-      jefeProduccion: 'u-jefe', lote: '1455326', itemCode: 'PTCF015501', operadores: [7], sapOp: { DocumentNumber: 14022, ProductionOrderStatus: 'boposPlanned' },
+      planta: 1, jefeProduccion: 'u-jefe', lote: '1455326', itemCode: 'PTCF015501', operadores: [7], sapOp: { DocumentNumber: 14022, ProductionOrderStatus: 'boposPlanned' },
     });
   });
 
@@ -248,7 +249,7 @@ test.describe('Bitácora de Proceso · con sesión, base y SAP simulados', () =>
     await expect(page.getByTestId('ot-firma-supervisor')).toContainText('PIN en tablet');
   });
 
-  test('jefe en SU PROPIA sesión: «Sí, confirmo» sin PIN; informe con los cuatro vistos buenos', async ({ page, context, baseURL }) => {
+  test('jefe en SU PROPIA sesión: Sí, confirmo sin PIN; informe con los cuatro vistos buenos', async ({ page, context, baseURL }) => {
     await sesion(context, baseURL!, 'u-jefe', 'jefe@farmalogica.com');
     const dados = { OPERARIO: firma('OPERARIO', 'Ana Gómez', 'operario_tablet'), SUPERVISOR: firma('SUPERVISOR', 'Sandra Supervisora', 'pin_tablet'), INSPECTOR: firma('INSPECTOR', 'Iván Inspector', 'pin_tablet') };
     const estado: Estado = { orden: detalle({ estado: 'CERRADA', dados, sesion: 'u-jefe' }), enviados: [] };

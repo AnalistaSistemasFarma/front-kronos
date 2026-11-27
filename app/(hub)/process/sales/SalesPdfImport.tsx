@@ -1,9 +1,14 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { Alert, Badge, Button, Checkbox, Group, Menu, Modal, Progress, ScrollArea, Stack, Table, Text, Tooltip } from '@mantine/core';
-import { IconAlertCircle, IconCircleCheck, IconLoader2, IconRobot, IconSparkles } from '@tabler/icons-react';
+import { useEffect, useRef, useState } from 'react';
+import { Alert, Badge, Button, Checkbox, Group, Menu, Modal, Progress, ScrollArea, Select, Stack, Table, Text, Tooltip } from '@mantine/core';
+import { useMediaQuery } from '@mantine/hooks';
+import { IconAlertCircle, IconCircleCheck, IconHistory, IconLoader2, IconRobot, IconSearch, IconSparkles } from '@tabler/icons-react';
 import toast from 'react-hot-toast';
+import SalesSearchModal from './SalesSearchModal';
+import CustomerOrdersModal, { type PoLineRef } from './CustomerOrdersModal';
+import { CONFIDENCE_LABEL, type Confidence } from '../../../../lib/sales/itemPrediction';
+import { blockingLines, canApply, lowConfidenceIndexes, offerAiNote } from '../../../../lib/sales/pdfReview';
 import { agentOrderInstruction, assembleAgentReply, chunkOrderText, isJsonAttachment, rawLineCount, mergePdfOrders, PDF_ORDER_SCHEMA, PDF_ORDER_SYSTEM_PROMPT, parsePdfOrder, pdfOrderChunkPrompt, tableHeaderRow, type PdfOrderResult } from '../../../../lib/sales/pdfOrder';
 
 /**
@@ -26,6 +31,20 @@ const AGENT_BUSY_HINT_MS = 2 * 60 * 1000;
 const AGENT_PARTS_GRACE_MS = 45 * 1000;
 type ReplyMessage = { id: number; role: string; body: string; attachments?: { fileName: string; contentType: string | null; downloadUrl: string }[] };
 const money = (v: unknown) => (v == null || v === '' ? '—' : `$ ${Number(v).toLocaleString('es-CO')}`);
+
+/** Item prediction of a PO line (server side, see lib/sales/itemPrediction.ts). */
+type MatchCandidate = { ItemCode: string; ItemName: string; score: number; reason: string; factor: number; line: Line };
+type Match = {
+  confidence: Confidence;
+  reason: string;
+  autoSelected: boolean;
+  /** The user picked the item by hand (candidate, SAP search or previous order). */
+  confirmed: boolean;
+  source: { barcode: string; clientCode: string; description: string; quantity: number; price: number | null };
+  candidates: MatchCandidate[];
+};
+const CONFIDENCE_COLOR: Record<Confidence, string> = { alta: 'green', media: 'yellow', baja: 'red', ninguna: 'gray' };
+const matchOf = (l: Line) => (l.match ?? null) as Match | null;
 
 export interface PdfOffer {
   customer: { CardCode: string; CardName: string };
@@ -93,12 +112,22 @@ async function readPdf(file: File): Promise<{ pages: string[]; images: Blob[] }>
 export default function SalesPdfImport({ companyId, companyName, cardCode, onLoaded }: Props) {
   const [support, setSupport] = useState<Support>('checking');
   const [phase, setPhase] = useState<Phase>('idle');
+  const isMobile = useMediaQuery('(max-width: 48em)');
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState('');
   /** Simulación: lo que se montaría, antes de agregarlo a la oferta (Nicolás Rivera, 2026-11-09). */
   const [sim, setSim] = useState<(Omit<PdfOffer, 'lines'> & { lines: (Line & { include: boolean })[] }) | null>(null);
   /** Filas visibles de la simulación: se dibujan de a 100 (una OC de 360 líneas colgaba el navegador). */
   const [simShown, setSimShown] = useState(100);
+  /** Rows of the simulation table, to jump to the next Baja line. */
+  const rowRefs = useRef<(HTMLTableRowElement | null)[]>([]);
+  const lowCursor = useRef(-1);
+  const jumpToLow = (bajas: number[]) => {
+    const next = bajas.find((i) => i > lowCursor.current) ?? bajas[0];
+    lowCursor.current = next;
+    if (next >= simShown) setSimShown(next + 1);
+    setTimeout(() => rowRefs.current[next]?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 50);
+  };
   /** Avance de la lectura por fragmentos (OC de varias hojas). */
   const [step, setStep] = useState<{ k: number; n: number } | null>(null);
   /** Agentes del chat asignados al usuario, de CUALQUIER empresa («Montar con agente»; Nicolás Rivera, 2026-11-24:
@@ -238,7 +267,7 @@ export default function SalesPdfImport({ companyId, companyName, cardCode, onLoa
       if (!(d.lines ?? []).length) throw new Error(`Se identificó el cliente ${d.customer.CardName}, pero ninguna línea del PDF se encontró en SAP. ${(d.avisos ?? []).join(' ')}`);
       setSimShown(100);
       setSim({
-        customer: d.customer, lines: (d.lines as Line[]).map((l) => ({ ...l, include: true })), numeroOrdenCompra: r.numeroOrdenCompra,
+        customer: d.customer, lines: (d.lines as Line[]).map((l) => ({ ...l, include: Boolean(l.ItemCode) })), numeroOrdenCompra: r.numeroOrdenCompra,
         fechaEntrega: r.fechaEntrega, avisos: [...avisosPrevios, ...(d.avisos ?? [])], leidas: r.lineas.length,
       });
       setPhase('simulacion');
@@ -341,12 +370,64 @@ export default function SalesPdfImport({ companyId, companyName, cardCode, onLoa
 
   const working = phase !== 'idle' && phase !== 'error' && phase !== 'simulacion';
 
-  /** Agrega a la oferta lo simulado (solo las líneas marcadas). */
-  const apply = () => {
+  /** Line whose item is being searched by hand (index in sim.lines). */
+  const [pickFor, setPickFor] = useState<number | null>(null);
+  /** Customer's previous documents: undefined = closed, null = whole PO, number = one line (index in sim.lines). */
+  const [ordersFor, setOrdersFor] = useState<number | null | undefined>(undefined);
+  const poLineRefs: PoLineRef[] = (sim?.lines ?? []).map((l, i) => {
+    const m = matchOf(l);
+    return { index: i, row: String(l.row ?? i + 1), codes: [...new Set([String(l.ItemCode || ''), ...(m?.candidates.map((c) => c.ItemCode) ?? [])].filter(Boolean))] };
+  });
+  const setLine = (i: number, f: (l: Line & { include: boolean }) => Line & { include: boolean }) =>
+    setSim((prev) => (prev ? { ...prev, lines: prev.lines.map((x, j) => (j === i ? f(x) : x)) } : prev));
+  /** The user picks one of the suggested candidates. */
+  const chooseCandidate = (i: number, code: string | null) => {
+    setLine(i, (l) => {
+      const m = matchOf(l);
+      const c = m?.candidates.find((x) => x.ItemCode === code);
+      if (!m || !c) return l;
+      return { ...l, ...c.line, include: true, match: { ...m, confirmed: true, reason: c.reason } };
+    });
+  };
+  /** The user searched an item in SAP: it is validated (price list, warehouse) with the PO quantity and price. */
+  const chooseSearched = async (i: number, row: Record<string, unknown>, reason = 'Elegido por el usuario') => {
     if (!sim) return;
-    const lines = sim.lines.filter((l) => l.include).map(({ include: _i, ...l }) => l);
+    const l = sim.lines[i];
+    const m = matchOf(l);
+    const qty = Number(m?.source.quantity ?? l.Quantity);
+    const price = m ? m.source.price : (l.UnitPrice as number | null);
+    try {
+      const res = await fetch('/api/sales/lines-validate', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ companyId: Number(companyId), cardCode: sim.customer.CardCode, lines: [{ row: 1, ItemCode: String(row.ItemCode), Quantity: qty, UnitPrice: price, WarehouseCode: '', ItemDescription: '' }] }),
+      });
+      const d = await res.json().catch(() => ({}));
+      const v = (d.lines ?? [])[0] as Line | undefined;
+      if (!res.ok || !v) throw new Error(d.error || (d.errors ?? [])[0]?.error || 'No se pudo validar el artículo en SAP.');
+      setLine(i, (x) => {
+        const mm = matchOf(x);
+        const cand: MatchCandidate = { ItemCode: String(v.ItemCode), ItemName: String(v.ItemDescription ?? ''), score: 0, reason, factor: 1, line: { ...v, row: x.row } };
+        return {
+          ...x, ...v, row: x.row, include: true,
+          match: mm ? { ...mm, confirmed: true, reason: cand.reason, candidates: [cand, ...mm.candidates.filter((c) => c.ItemCode !== cand.ItemCode)] } : undefined,
+        };
+      });
+    } catch (e) {
+      toast.error((e as Error).message);
+    }
+  };
+
+  /** Agrega a la oferta lo simulado (las líneas marcadas; solo bloquean las que no tienen artículo). */
+  const apply = () => {
+    if (!sim || !canApply(sim.lines)) return;
+    const lines = sim.lines.filter((l) => l.include).map(({ include: _i, match, ...l }) => {
+      const m = match as Match | undefined;
+      return m ? { ...l, aiNote: offerAiNote(m) } : l;
+    });
     if (!lines.length) return;
-    onLoaded({ ...sim, lines });
+    // The review notices of the simulation no longer apply once the lines go to the offer.
+    const avisos = sim.avisos.filter((a) => !/por confirmar: revise|confianza Baja: rev|sin artículo en SAP: búsquelo/.test(a));
+    onLoaded({ ...sim, avisos, lines });
     setSim(null);
     setPhase('idle');
   };
@@ -397,7 +478,13 @@ export default function SalesPdfImport({ companyId, companyName, cardCode, onLoa
         </>
       )}
 
-      <Modal opened={phase !== 'idle' && !(phase === 'agente' && minimized)} onClose={() => (phase === 'agente' ? setMinimized(true) : !working && setPhase('idle'))} size={phase === 'simulacion' ? 'xl' : 'md'} title={<Group gap={6}><IconSparkles size={18} /><Text fw={700}>{agent && (phase === 'agente' || conversationId) ? `Oferta desde el PDF (con ${agent.displayName})` : 'Oferta desde el PDF (IA local)'}</Text></Group>}
+      <Modal opened={phase !== 'idle' && !(phase === 'agente' && minimized)} onClose={() => (phase === 'agente' ? setMinimized(true) : !working && setPhase('idle'))} size={phase === 'simulacion' ? '95vw' : 'md'} fullScreen={phase === 'simulacion' && Boolean(isMobile)}
+        styles={phase === 'simulacion' ? {
+          // Large review layout: the lines table fills the height; summary, warnings, total and buttons stay visible.
+          content: { maxWidth: isMobile ? undefined : 1600, height: isMobile ? undefined : '90vh', display: 'flex', flexDirection: 'column' },
+          body: { flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' },
+        } : undefined}
+        title={<Group gap={6}><IconSparkles size={18} /><Text fw={700}>{agent && (phase === 'agente' || conversationId) ? `Oferta desde el PDF (con ${agent.displayName})` : 'Oferta desde el PDF (IA local)'}</Text></Group>}
         closeOnClickOutside={!working || phase === 'agente'} withCloseButton={!working || phase === 'agente'} zIndex={1300}>
         {phase === 'agente' && live && (
           <Stack gap={6} mb="sm">
@@ -445,34 +532,77 @@ export default function SalesPdfImport({ companyId, companyName, cardCode, onLoa
           <Text size="xs" c="dimmed" mt="xs">La conversación queda en su chat con {agent?.displayName}: <a href={`/process/chat?agent=${encodeURIComponent(agent?.code ?? "")}`} target="_blank" rel="noreferrer">abrirla</a>.</Text>
         )}
         {phase === 'simulacion' && sim && (
-          <Stack gap="sm">
-            <Text size="sm" c="dimmed">Simulación: así quedaría la oferta con lo que la IA leyó del PDF. Nada se agrega hasta que confirme.</Text>
+          <Stack gap="sm" style={{ flex: 1, minHeight: 0 }}>
+            <Text size="sm" c="dimmed">Simulación: así quedaría la oferta con lo que la IA leyó del PDF. Nada se agrega hasta que pulse Agregar a la oferta.</Text>
             <Group gap="lg" wrap="wrap">
               <Text size="sm"><Text span c="dimmed">Cliente: </Text><b>{sim.customer.CardName}</b> ({sim.customer.CardCode})</Text>
               <Text size="sm"><Text span c="dimmed">OC: </Text>{sim.numeroOrdenCompra || '—'}</Text>
               <Text size="sm"><Text span c="dimmed">Entrega: </Text>{sim.fechaEntrega || '— (indíquela)'}</Text>
               <Text size="sm"><Text span c="dimmed">Líneas: </Text>{sim.lines.length}{sim.leidas && sim.leidas !== sim.lines.length ? ` de ${sim.leidas} leídas en el PDF` : ''}</Text>
+              <Button size="compact-xs" variant="light" color="violet" leftSection={<IconHistory size={14} />} onClick={() => setOrdersFor(null)}>
+                Pedidos anteriores del cliente
+              </Button>
             </Group>
             {sim.avisos.length > 0 && <Alert color="orange" variant="light">{sim.avisos.map((a, i) => <Text key={i} size="xs">{a}</Text>)}</Alert>}
-            <ScrollArea.Autosize mah={420}>
-              <Table striped withTableBorder verticalSpacing={4}>
+            <ScrollArea style={{ flex: 1, minHeight: 200 }} type="auto" offsetScrollbars>
+              <Table striped withTableBorder stickyHeader verticalSpacing={4} miw={900}>
                 <Table.Thead>
                   <Table.Tr>
                     <Table.Th><Checkbox checked={sim.lines.every((l) => l.include)} indeterminate={sim.lines.some((l) => l.include) && !sim.lines.every((l) => l.include)}
                       onChange={(e) => { const c = e.currentTarget.checked; setSim({ ...sim, lines: sim.lines.map((l) => ({ ...l, include: c })) }); }} /></Table.Th>
-                    <Table.Th title="Renglón de la OC">#</Table.Th><Table.Th>Artículo en SAP</Table.Th><Table.Th style={{ textAlign: 'right' }}>Cantidad</Table.Th>
+                    <Table.Th title="Renglón de la OC">#</Table.Th><Table.Th style={{ minWidth: 480, width: '55%' }}>Artículo en SAP</Table.Th><Table.Th style={{ textAlign: 'right' }}>Cantidad</Table.Th>
                     <Table.Th style={{ textAlign: 'right' }}>Precio OC</Table.Th><Table.Th style={{ textAlign: 'right' }}>Precio lista</Table.Th>
                     <Table.Th style={{ textAlign: 'right' }}>Total línea</Table.Th>
                   </Table.Tr>
                 </Table.Thead>
                 <Table.Tbody>
                   {sim.lines.slice(0, simShown).map((l, i) => (
-                    <Table.Tr key={i}>
+                    <Table.Tr key={i} ref={(el) => { rowRefs.current[i] = el; }} data-confianza={matchOf(l)?.confidence}
+                      style={matchOf(l)?.confidence === 'baja' && l.ItemCode ? { background: 'var(--mantine-color-red-light)', boxShadow: 'inset 3px 0 0 var(--mantine-color-red-filled)' } : undefined}>
                       <Table.Td><Checkbox checked={l.include} onChange={(e) => { const c = e.currentTarget.checked; setSim({ ...sim, lines: sim.lines.map((x, j) => (j === i ? { ...x, include: c } : x)) }); }} /></Table.Td>
                       <Table.Td><Text size="xs" c="dimmed">{String(l.row ?? i + 1)}</Text></Table.Td>
                       <Table.Td>
-                        <Text size="sm">{String(l.ItemCode)} · {String(l.ItemDescription ?? '')}</Text>
-                        {l.aiNote ? <Badge size="xs" variant="light" color={String(l.aiNote).startsWith('Revisar') ? 'orange' : 'violet'} style={{ whiteSpace: 'normal', height: 'auto' }}>✨ {String(l.aiNote)}</Badge> : null}
+                        {(() => {
+                          const m = matchOf(l);
+                          if (!m) {
+                            return (
+                              <>
+                                <Text size="sm">{String(l.ItemCode)} · {String(l.ItemDescription ?? '')}</Text>
+                                {l.aiNote ? <Badge size="xs" variant="light" color={String(l.aiNote).startsWith('Revisar') ? 'orange' : 'violet'} style={{ whiteSpace: 'normal', height: 'auto' }}>✨ {String(l.aiNote)}</Badge> : null}
+                              </>
+                            );
+                          }
+                          const fuente = [m.source.barcode && `EAN ${m.source.barcode}`, m.source.clientCode && `Ref. cliente ${m.source.clientCode}`, m.source.description, `${Number(m.source.quantity).toLocaleString('es-CO')} a ${money(m.source.price)}`].filter(Boolean).join(' · ');
+                          return (
+                            <Stack gap={2}>
+                              <Text size="xs" c="dimmed">En la OC: {fuente || 'sin datos del artículo'}</Text>
+                              <Group gap={6} wrap="nowrap" align="center">
+                                <Badge size="sm" color={CONFIDENCE_COLOR[m.confidence]} variant={m.confidence === 'alta' ? 'filled' : 'light'} style={{ flexShrink: 0 }}>
+                                  {CONFIDENCE_LABEL[m.confidence]}
+                                </Badge>
+                                {m.candidates.length > 0 ? (
+                                  <Select
+                                    size="xs" style={{ flex: 1, minWidth: 320 }} comboboxProps={{ zIndex: 1400, withinPortal: true, width: 'max-content', position: 'bottom-start' }} allowDeselect={false}
+                                    aria-label="Artículo sugerido"
+                                    title={(() => { const c = m.candidates.find((x) => x.ItemCode === String(l.ItemCode || '')); return c ? `${c.ItemCode} · ${c.ItemName}` : undefined; })()}
+                                    value={String(l.ItemCode || '') || null}
+                                    data={m.candidates.map((c) => ({ value: c.ItemCode, label: `${c.ItemCode} · ${c.ItemName}${c.score ? ` (${Math.round(c.score * 100)} %)` : ''}` }))}
+                                    onChange={(v) => chooseCandidate(i, v)}
+                                  />
+                                ) : (
+                                  <Text size="sm" c="dimmed" style={{ flex: 1 }}>Sin artículo sugerido</Text>
+                                )}
+                                <Tooltip label="Buscar otro artículo en SAP" withinPortal zIndex={1400}>
+                                  <Button size="compact-xs" variant="subtle" onClick={() => setPickFor(i)} aria-label="Buscar artículo"><IconSearch size={14} /></Button>
+                                </Tooltip>
+                                <Tooltip label="Ver pedidos anteriores" withinPortal zIndex={1400}>
+                                  <Button size="compact-xs" variant="subtle" color="violet" onClick={() => setOrdersFor(i)} aria-label="Ver pedidos anteriores"><IconHistory size={14} /></Button>
+                                </Tooltip>
+                              </Group>
+                              <Text size="xs" c={m.confidence === 'ninguna' ? 'red' : 'dimmed'}>{m.reason}</Text>
+                            </Stack>
+                          );
+                        })()}
                       </Table.Td>
                       <Table.Td style={{ textAlign: 'right' }}>{Number(l.Quantity).toLocaleString('es-CO')}</Table.Td>
                       <Table.Td style={{ textAlign: 'right' }}>{money(l.UnitPrice)}</Table.Td>
@@ -489,17 +619,35 @@ export default function SalesPdfImport({ companyId, companyName, cardCode, onLoa
                   </Button>
                 </Group>
               )}
-            </ScrollArea.Autosize>
+            </ScrollArea>
             <Group justify="flex-end">
               <Text fw={700}>
                 Total del documento (antes de impuestos): {money(sim.lines.filter((l) => l.include).reduce((a, l) => a + Number(l.Quantity ?? 0) * Number(l.UnitPrice ?? 0), 0))}
               </Text>
             </Group>
             <Group justify="space-between">
-              <Text size="xs" c="dimmed">Desmarque las líneas que no correspondan. Lo marcado «Revisar» se eligió por la descripción.</Text>
+              {(() => {
+                const sinArticulo = blockingLines(sim.lines);
+                const bajas = lowConfidenceIndexes(sim.lines);
+                return (
+                  <Stack gap={2}>
+                    {sinArticulo > 0 ? (
+                      <Text size="xs" c="orange" fw={600}>Faltan {sinArticulo} línea(s) sin artículo: elija el artículo o desmárquelas.</Text>
+                    ) : (
+                      <Text size="xs" c="dimmed">Desmarque las líneas que no correspondan. Confianza Alta: código de barras, código o catálogo del cliente, o historial claro.</Text>
+                    )}
+                    {bajas.length > 0 && (
+                      <Group gap={6}>
+                        <Text size="xs" c="red">{bajas.length} {bajas.length === 1 ? 'línea' : 'líneas'} con confianza Baja: revíselas.</Text>
+                        <Button size="compact-xs" variant="subtle" color="red" onClick={() => jumpToLow(bajas)}>Ir a la siguiente</Button>
+                      </Group>
+                    )}
+                  </Stack>
+                );
+              })()}
               <Group gap="xs">
                 <Button variant="default" onClick={() => { setSim(null); setPhase('idle'); }}>Cancelar</Button>
-                <Button color="violet" disabled={!sim.lines.some((l) => l.include)} onClick={apply}>
+                <Button color="violet" disabled={!canApply(sim.lines)} onClick={apply}>
                   Agregar a la oferta ({sim.lines.filter((l) => l.include).length})
                 </Button>
               </Group>
@@ -507,6 +655,30 @@ export default function SalesPdfImport({ companyId, companyName, cardCode, onLoa
           </Stack>
         )}
       </Modal>
+      {ordersFor !== undefined && sim && (
+        <CustomerOrdersModal
+          opened
+          onClose={() => setOrdersFor(undefined)}
+          companyId={companyId}
+          cardCode={sim.customer.CardCode}
+          customerName={sim.customer.CardName}
+          poLines={poLineRefs}
+          forLine={ordersFor}
+          onUse={(i, code) => { setOrdersFor(undefined); void chooseSearched(i, { ItemCode: code }, 'Elegido de un pedido anterior del cliente'); }}
+        />
+      )}
+      {pickFor != null && sim && (
+        <SalesSearchModal
+          opened
+          onClose={() => setPickFor(null)}
+          companyId={companyId}
+          kind="item"
+          cardCode={sim.customer.CardCode}
+          initialQuery={String(matchOf(sim.lines[pickFor])?.source.description ?? '').split(/\s+/).slice(0, 1).join(' ')}
+          zIndex={1400}
+          onSelect={(row) => { const i = pickFor; setPickFor(null); void chooseSearched(i, row); }}
+        />
+      )}
     </>
   );
 }

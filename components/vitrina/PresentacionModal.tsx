@@ -135,10 +135,10 @@ export default function PresentacionModal({ opened, onClose, idCompany, codigos,
     try {
       if (presentacion) {
         await vitrinaSend(`/api/vitrina/gestion/presentaciones/${presentacion.id}`, 'PATCH', body);
-        onSaved(`Presentación «${form.molecula.trim()}» actualizada.`);
+        onSaved(`Presentación ${form.molecula.trim()} actualizada.`);
       } else {
         const r = await vitrinaSend<{ codigos: number }>('/api/vitrina/gestion/presentaciones', 'POST', { ...body, codigos: (codigos ?? []).map((c) => c.id) });
-        onSaved(`Presentación «${form.molecula.trim()}» creada con ${r.codigos} código(s) SAP. Queda pendiente de validar y sin activar.`);
+        onSaved(`Presentación ${form.molecula.trim()} creada con ${r.codigos} código(s) SAP. Queda pendiente de validar y sin activar.`);
       }
     } catch (e) {
       setError(errorTexto(e));
@@ -232,7 +232,7 @@ export default function PresentacionModal({ opened, onClose, idCompany, codigos,
         />
         <Switch
           label='Fabricado para terceros'
-          description='PISA, Bioselect y similares: la visibilidad queda fija en «Interna» y nunca sale en el modo presentación.'
+          description='PISA, Bioselect y similares: la visibilidad queda fija en Interna y nunca sale en el modo presentación.'
           checked={form.es_para_terceros}
           onChange={(e) => set('es_para_terceros', e.currentTarget.checked)}
           size='md'
@@ -252,13 +252,13 @@ export default function PresentacionModal({ opened, onClose, idCompany, codigos,
             data-testid='vitrina-visibilidad'
           />
           <Text size='xs' c='dimmed' mt={4}>
-            Aunque elija «Vista al cliente» u «Ofertable», ningún código se muestra hasta activarlo a mano, con la presentación validada y el registro sanitario al día.
+            Aunque elija Vista al cliente u Ofertable, ningún código se muestra hasta activarlo a mano, con la presentación validada y el registro sanitario al día.
           </Text>
         </div>
         <Switch label='Destacada' checked={form.destacada} onChange={(e) => set('destacada', e.currentTarget.checked)} size='md' />
         {!editar && (
           <Alert color='blue' variant='light' icon={<IconInfoCircle size={18} />}>
-            La presentación queda «Pendiente de validar» y sus códigos sin activar.
+            La presentación queda Pendiente de validar y sus códigos sin activar.
           </Alert>
         )}
         <Group justify='flex-end' gap='sm' mt='sm'>

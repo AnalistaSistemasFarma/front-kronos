@@ -33,7 +33,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ cod
     if (!user) return unauthorized();
     if (!(await canConfigureAgents(user.email))) {
       return jsonNoStore(
-        { error: 'Registrar hallazgos requiere el permiso «Auditoría de agentes · Configurar».' },
+        { error: 'Registrar hallazgos requiere el permiso Auditoría de agentes · Configurar.' },
         { status: 403 }
       );
     }

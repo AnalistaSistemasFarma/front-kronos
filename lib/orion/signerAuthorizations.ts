@@ -242,7 +242,7 @@ export async function createOrionSignerAuthorizations(
               body: [
                 `Solicitud #${params.requestId}`,
                 multiLine,
-                `Ya firmó ${progress.done}. Abra la solicitud y toque «Tu turno» para firmar de nuevo.`,
+                `Ya firmó ${progress.done}. Abra la solicitud y toque Tu turno para firmar de nuevo.`,
               ]
                 .filter(Boolean)
                 .join(' · '),

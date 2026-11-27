@@ -148,7 +148,7 @@ export default function ErroresIaPage() {
       actualizarFila(j.error as ErrorIaDto);
       setAviso({
         color: "green",
-        texto: `«${e.titulo.slice(0, 80)}» quedó ${NOMBRE_ESTADO[nuevo].toLowerCase()}.`,
+        texto: `${e.titulo.slice(0, 80)} quedó ${NOMBRE_ESTADO[nuevo].toLowerCase()}.`,
       });
     } catch (err) {
       setAviso({ color: "red", texto: err instanceof Error ? err.message : String(err) });

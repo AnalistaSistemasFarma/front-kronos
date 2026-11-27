@@ -17,7 +17,7 @@ export async function GET() {
     const user = await resolveSessionUser();
     if (!user) return unauthorized();
     const empresas = await projectModuleCompanies(user.id);
-    if (empresas.length === 0) return jsonNoStore({ error: 'No tiene el módulo «Proyectos».' }, { status: 404 });
+    if (empresas.length === 0) return jsonNoStore({ error: 'No tiene el módulo Proyectos.' }, { status: 404 });
 
     const [alcance, catalogAdmin] = await Promise.all([alcancePermisos(user.email), esAdminCatalogo(user.email)]);
     const editableCompanies = empresas.map((e) => e.idCompany).filter((id) => alcance.all || alcance.companyIds.includes(id));

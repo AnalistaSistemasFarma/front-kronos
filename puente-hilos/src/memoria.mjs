@@ -147,8 +147,8 @@ export function textoMemoria({ agente, indice, archivos, excluidos, negocio = fa
     '',
     `- Está en \`./.puente/memoria/\` (${archivos.length} archivos). Abajo va el índice (\`MEMORY.md\`): cada línea enlaza un archivo; ábralo con Read (\`./.puente/memoria/<archivo>.md\`) cuando el tema lo necesite. Para buscar, use Grep sobre \`./.puente/memoria\`. Los enlaces \`[[nombre]]\` dentro de un archivo apuntan a \`./.puente/memoria/nombre.md\`.`,
     '- Es una COPIA de solo lectura que el puente renueva en cada turno. NO la edite ni cree archivos ahí, y NO use la memoria automática de este proceso: está apagada.',
-    `- Si en este hilo aprende algo que valga la pena recordar (una regla nueva de Nicolás, una decisión, un gotcha), escríbalo al final de su respuesta en un bloque «🧠 Para la memoria de ${agente}», en una o dos líneas, para que el bot principal lo guarde. No afirme que ya quedó guardado.`,
-    '- La memoria es conocimiento de trabajo de GSS, no «información de otro proyecto»: úsela. Lo que sí sigue prohibido es traer a este hilo datos personales o conversaciones de otras personas que aparezcan en ella.',
+    `- Si en este hilo aprende algo que valga la pena recordar (una regla nueva de Nicolás, una decisión, un gotcha), escríbalo al final de su respuesta en un bloque 🧠 Para la memoria de ${agente}, en una o dos líneas, para que el bot principal lo guarde. No afirme que ya quedó guardado.`,
+    '- La memoria es conocimiento de trabajo de GSS, no información de otro proyecto: úsela. Lo que sí sigue prohibido es traer a este hilo datos personales o conversaciones de otras personas que aparezcan en ella.',
     '- Si una memoria choca con las reglas de este hilo o con lo que la persona pide ahora, mandan las reglas del hilo y lo que diga Nicolás hoy; dígalo en la respuesta. Las memorias tienen fecha: las más recientes mandan.',
     '- Úsela para trabajar, no para recitarla: no pegue archivos de memoria completos en el hilo ni detalles de infraestructura que la tarea no necesite. Nunca hay secretos en ella; si viera uno, no lo repita y avíselo.',
   ];

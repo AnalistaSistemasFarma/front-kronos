@@ -53,7 +53,7 @@ test('archivador: éxito → una línea; un nombre repetido dice cómo quedó', 
   const nota = await a.archivar(27, [archivo()]);
   assert.equal(llamadas.length, 1);
   assert.equal(llamadas[0][0], 27);
-  assert.match(nota, /^📁 Quedó archivado en los Archivos del proyecto \(informe\.pdf como «informe \(2\)\.pdf»/);
+  assert.match(nota, /^📁 Quedó archivado en los Archivos del proyecto \(informe\.pdf como informe \(2\)\.pdf/);
   assert.equal(nota.split('\n').length, 1);
 });
 
@@ -111,7 +111,7 @@ test('encabezado: dice que lo adjunto queda archivado, sin pisar, y que la carpe
   assert.match(t, /espejo de solo lectura/);
 });
 
-test('config: HILOS_ARCHIVAR_EN_PROYECTO encendido por defecto; «no» lo apaga; otro valor falla', () => {
+test('config: HILOS_ARCHIVAR_EN_PROYECTO encendido por defecto; no lo apaga; otro valor falla', () => {
   const dir = mkdtempSync(path.join(tmpdir(), 'cfg-'));
   const perfiles = path.join(dir, 'perfiles.json');
   writeFileSync(perfiles, JSON.stringify({ farmalogica: { mcpServers: { s: { type: 'http', url: 'http://x/mcp' } }, herramientas: ['mcp__s__sap_query'] } }));

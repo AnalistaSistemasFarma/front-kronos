@@ -477,7 +477,7 @@ export default function PurchaseInlineForm({ companyId, edit, duplicate, onDone 
         ok: !attachWarning,
         message: enviar
           ? `Solicitud de compra #${docEntry} enviada a autorización.${attachWarning}`
-          : `Solicitud de compra #${docEntry} guardada en borrador; la encuentra en Mis solicitudes («En Borrador»).${attachWarning}`,
+          : `Solicitud de compra #${docEntry} guardada en borrador; la encuentra en Mis solicitudes (En Borrador).${attachWarning}`,
       });
     } catch {
       toast.error('Error de red al crear la solicitud de compra');
@@ -490,7 +490,7 @@ export default function PurchaseInlineForm({ companyId, edit, duplicate, onDone 
   if (readiness === 'no-write') {
     return (
       <Alert color="yellow" title="Solicitud de compra">
-        No tiene permiso para crear solicitudes de compra en esta compañía («Compras · Gestionar solicitudes»).
+        No tiene permiso para crear solicitudes de compra en esta compañía (Compras · Gestionar solicitudes).
       </Alert>
     );
   }
@@ -498,7 +498,7 @@ export default function PurchaseInlineForm({ companyId, edit, duplicate, onDone 
     return (
       <Alert color="yellow" title="Falta su perfil de SAPSEND en esta compañía">
         Para crear solicitudes de compra su usuario necesita el ID de usuario y el ID de departamento de SAPSEND de esta
-        compañía. Pídale a Tecnología que los registre en Administración → Usuarios → «SAPSEND por empresa».
+        compañía. Pídale a Tecnología que los registre en Administración → Usuarios → SAPSEND por empresa.
       </Alert>
     );
   }

@@ -78,6 +78,7 @@ export interface BoardItem {
   assigned: string;
   companies: string[];
   process: string;
+  flowId: number | null;
   searchParts: unknown[];
 }
 
@@ -132,6 +133,7 @@ export const workflowItem = (w: Workflow): BoardItem => ({
   assigned: w.assigned.join(', ') || 'Sin asignar',
   companies: w.companies,
   process: clean(w.process),
+  flowId: w.id,
   searchParts: [w.id, w.process, w.category, ...w.companies, ...w.departments, ...w.assigned],
 });
 
@@ -149,6 +151,7 @@ export const requestItem = (r: RequestRow): BoardItem => ({
   assigned: r.user || 'Sin asignar',
   companies: uniq([r.company]),
   process: clean(r.process),
+  flowId: r.id_process_category ?? null,
   searchParts: [r.id, r.subject, r.description, r.company, r.category, r.process, r.status, r.requester, r.user],
 });
 
@@ -167,6 +170,7 @@ export const taskItem = (t: TaskRow): BoardItem => ({
   assigned: t.assigned || 'Sin asignar',
   companies: uniq([t.company]),
   process: clean(t.process),
+  flowId: null,
   searchParts: [
     t.id_request_general,
     t.task,
@@ -215,13 +219,27 @@ export const emptySelection = (): Selection => ({ workflows: new Set(), requests
 
 export const isSelected = (selection: Selection, item: BoardItem) => selection[item.kind].has(item.id);
 
-export function setSelected(selection: Selection, items: BoardItem[], checked: boolean): Selection {
+export function linkedItems(items: BoardItem[], universe: BoardItem[]): BoardItem[] {
+  const flowIds = new Set(
+    items.filter((i) => i.kind !== 'tasks' && i.flowId != null).map((i) => i.flowId as number)
+  );
+  if (!flowIds.size) return items;
+  const linked = universe.filter((i) => i.kind !== 'tasks' && i.flowId != null && flowIds.has(i.flowId));
+  return [...new Map([...items, ...linked].map((i) => [i.key, i])).values()];
+}
+
+export function setSelected(
+  selection: Selection,
+  items: BoardItem[],
+  checked: boolean,
+  universe: BoardItem[] = items
+): Selection {
   const next: Selection = {
     workflows: new Set(selection.workflows),
     requests: new Set(selection.requests),
     tasks: new Set(selection.tasks),
   };
-  for (const item of items) {
+  for (const item of linkedItems(items, universe)) {
     if (checked) next[item.kind].add(item.id);
     else next[item.kind].delete(item.id);
   }

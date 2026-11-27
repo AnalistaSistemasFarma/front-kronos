@@ -43,7 +43,7 @@ export async function POST(request: NextRequest) {
     if (errors.length) return NextResponse.json({ error: 'Datos inválidos', errors }, { status: 422 });
 
     const access = await salesEndpointForUser(email, companyId, 'write');
-    if (!access?.endpoint) return NextResponse.json({ error: 'No tiene permiso para crear ofertas en esta empresa («Ventas · Gestionar ofertas»).' }, { status: 403 });
+    if (!access?.endpoint) return NextResponse.json({ error: 'No tiene permiso para crear ofertas en esta empresa (Ventas · Gestionar ofertas).' }, { status: 403 });
 
     // Antes de escribir en SAP: la empresa debe tener el flujo configurado (si se va a enviar).
     if (modo === 'enviar') {

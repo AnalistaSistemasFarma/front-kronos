@@ -483,7 +483,7 @@ export default function SeccionReuniones({
     const r = await apiSend<{ id: number; agentName: string }>('POST', `/api/proyectos/${proyecto.idProject}/reuniones/${m.id}/analisis`, undefined, 'No se pudo pedir el análisis.');
     setPidiendo(null);
     if (r.ok) {
-      avisar({ tipo: 'ok', texto: `${r.data.agentName} está analizando «${m.subject}». El resultado aparece aquí en unos minutos.` });
+      avisar({ tipo: 'ok', texto: `${r.data.agentName} está analizando ${m.subject}. El resultado aparece aquí en unos minutos.` });
       setViendo(null);
       void cargar();
     } else avisar({ tipo: 'error', texto: r.error });
@@ -525,7 +525,7 @@ export default function SeccionReuniones({
           proyecto.capabilities.contribute &&
           !datos.viewer.meetingsEnabled && (
             <Text size='xs' c='dimmed'>
-              Para asignar reuniones necesita el módulo «Mis reuniones».
+              Para asignar reuniones necesita el módulo Mis reuniones.
             </Text>
           )
         )}
@@ -568,7 +568,7 @@ export default function SeccionReuniones({
 
       {datos.meetings.length === 0 ? (
         <Text size='sm' c='dimmed' ta='center' py='lg'>
-          No hay reuniones asignadas en este periodo. Asígnelas desde «Mis reuniones» o con el botón «Asignar reunión».
+          No hay reuniones asignadas en este periodo. Asígnelas desde Mis reuniones o con el botón Asignar reunión.
         </Text>
       ) : (
         <Table.ScrollContainer minWidth={720}>
@@ -665,7 +665,7 @@ export default function SeccionReuniones({
       <ConfirmarModal
         opened={quitar !== null}
         titulo='Quitar la reunión del proyecto'
-        texto={`«${quitar?.subject ?? ''}» deja de verse en el proyecto, junto con su análisis. Las tareas que ya se crearon en el cronograma no cambian.`}
+        texto={`${quitar?.subject ?? ''} deja de verse en el proyecto, junto con su análisis. Las tareas que ya se crearon en el cronograma no cambian.`}
         accion='Quitar'
         color='red'
         cargando={ocupado}
@@ -677,7 +677,7 @@ export default function SeccionReuniones({
       <ConfirmarModal
         opened={quitarRegla !== null}
         titulo='Quitar la regla de la serie'
-        texto={`Las próximas reuniones de «${quitarRegla?.subject ?? ''}» ya no se asignarán solas. Las que ya están en el proyecto se quedan.`}
+        texto={`Las próximas reuniones de ${quitarRegla?.subject ?? ''} ya no se asignarán solas. Las que ya están en el proyecto se quedan.`}
         accion='Quitar regla'
         color='red'
         cargando={ocupado}

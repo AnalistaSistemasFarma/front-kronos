@@ -45,5 +45,5 @@ export function armarCuerpoReenvio(opciones: { nota: string; autor: string; orig
 /** Aviso que ve quien reenvió. */
 export function avisoMensajeReenviado(destino: { titulo: string; tipo: 'persona' | 'grupo' | 'proyecto' | 'agente' }): string {
   if (destino.tipo === 'persona') return `Mensaje reenviado a ${destino.titulo}.`;
-  return `Mensaje reenviado al ${destino.tipo} «${destino.titulo}».`;
+  return `Mensaje reenviado al ${destino.tipo} ${destino.titulo}.`;
 }

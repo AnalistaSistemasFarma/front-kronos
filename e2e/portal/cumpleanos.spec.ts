@@ -44,7 +44,7 @@ test.describe('Portal TH · Cumpleaños en el calendario', () => {
     expect((await request.get(`/api/portal/cumpleanos?desde=${DIA}&hasta=${DIA}`)).status()).toBe(401);
   });
 
-  test('el día del cumpleaños sale marcado y, al elegirlo, «CUMPLEAÑOS» con nombre, empresa y cargo de cada persona', async ({ page }) => {
+  test('el día del cumpleaños sale marcado y, al elegirlo, CUMPLEAÑOS con nombre, empresa y cargo de cada persona', async ({ page }) => {
     await page.setViewportSize({ width: 1366, height: 900 });
     await simular(page);
     await page.goto('/portal');

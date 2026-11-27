@@ -295,7 +295,7 @@ export default function SapsendMonitorPage() {
     insights.push({ id: `sl-${c.sapsendDb}`, severity: 'critical', area: 'externos', title: `Service Layer de ${c.company} sin respuesta`, detail: c.sl!.pulse.error ?? 'Sin respuesta' });
   }
   if (snap && snap.totals.slowNow > 0) {
-    insights.push({ id: 'slow', severity: 'warning', area: 'base', title: `${snap.totals.slowNow} consulta(s) de más de 10 s`, detail: 'Vea «Ejecutándose en este momento» en Base de datos.' });
+    insights.push({ id: 'slow', severity: 'warning', area: 'base', title: `${snap.totals.slowNow} consulta(s) de más de 10 s`, detail: 'Vea Ejecutándose en este momento en Base de datos.' });
   }
   const personalLogins = (snap?.logins ?? []).filter((l) => l.accountType === 'persona');
   if (personalLogins.length > 0) {

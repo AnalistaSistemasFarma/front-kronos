@@ -117,7 +117,7 @@ test.describe('Formación · Top 10 de estudiantes', () => {
     await expect(panel(page).locator('[data-usted="true"]')).toHaveCount(0);
   });
 
-  test('sin nadie en el top: mensaje de ánimo; un error se avisa ARRIBA en rojo con «Reintentar»; sin sesión no aparece', async ({ page }) => {
+  test('sin nadie en el top: mensaje de ánimo; un error se avisa ARRIBA en rojo con Reintentar; sin sesión no aparece', async ({ page }) => {
     await page.setViewportSize({ width: 1920, height: 1000 });
     await simular(page, { top: { top: [], total: 0, usted: null } });
     await page.goto('/portal/formacion');

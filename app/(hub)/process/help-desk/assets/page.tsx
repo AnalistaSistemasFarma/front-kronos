@@ -273,7 +273,7 @@ const RAM_OPTIONS = toOptions([
 const SITIOS = [
   { value: 'OFICINA PRINCIPAL FARMALOGICA', label: 'OFICINA PRINCIPAL FARMALOGICA' },
   { value: 'FARMALOGICA PLANTA', label: 'FARMALOGICA PLANTA' },
-  { value: 'CELTA', label: 'CELTA' },
+  { value: 'KELAB', label: 'KELAB' },
   { value: 'RYAN', label: 'OFICINA PRINCIPAL RYAN' },
   { value: 'GSS', label: 'OFICINA PRINCIPAL GSS' },
   { value: 'OLP', label: 'OFICINA PRINCIPAL OLP' },

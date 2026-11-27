@@ -11,6 +11,10 @@ const TASK_SELECT = `
             trg.start_date, trg.resolution, trg.date_resolution, uex.name as executor_final, uex.image as executor_final_image,
             tpc.id_linked_process, lp.process as linked_process_label,
             lrq.id as linked_request_id, lrq.status_req as linked_request_status,
+            -- 2026-11-26: several linked requests (e.g. one NC per finding of an audit).
+            tpc.linked_multiple,
+            (SELECT r2.id, r2.consecutive, r2.subject_request AS subject, r2.status_req
+               FROM requests_general r2 WHERE r2.id_origin_task = trg.id ORDER BY r2.id FOR JSON PATH) AS linked_requests_json,
             pc.id AS id_process_category
         FROM task_request_general trg
             INNER JOIN task_process_category tpc ON tpc.id = trg.id_task
@@ -24,7 +28,7 @@ const TASK_SELECT = `
             INNER JOIN company c ON c.id_company = rg.id_company
 			      LEFT JOIN [user] uex ON uex.id = trg.id_executor_final
             LEFT JOIN process_category lp ON lp.id = tpc.id_linked_process
-            LEFT JOIN requests_general lrq ON lrq.id_origin_task = trg.id
+            OUTER APPLY (SELECT TOP 1 r1.id, r1.status_req FROM requests_general r1 WHERE r1.id_origin_task = trg.id ORDER BY r1.id DESC) lrq
 `;
 
 /**

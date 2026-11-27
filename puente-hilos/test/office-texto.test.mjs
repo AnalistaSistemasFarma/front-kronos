@@ -47,7 +47,7 @@ test('docx: headers, headings, paragraphs, tables, text boxes once', () => {
 
 test('xlsx: shared/inline strings, formulas, merges and dropdown lists', () => {
   const md = officeToMarkdown(XLSX, 'xlsx', 'cargue.xlsx');
-  assert.match(md, /## Hoja «Datos»/);
+  assert.match(md, /## Hoja Datos/);
   assert.match(md, /Fila 1: A1: CUM \| B1: Línea terapéutica/);
   assert.match(md, /A2: 20109639 \| B2: ANALGESICOS \| C2: 40219278 \[fórmula =A2\*2\]/);
   assert.match(md, /Celdas combinadas: A1:B1/);

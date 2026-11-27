@@ -363,6 +363,10 @@ const SAFE_DOWNLOAD_CONTENT_TYPES = new Set([
   'audio/mpeg',
   'audio/ogg',
   'audio/wav',
+  // Voice notes (2026-11-26): what MediaRecorder produces (lib/chat/voice-note.ts).
+  'audio/webm',
+  'audio/mp4',
+  'audio/aac',
   'video/mp4',
   'video/webm',
 ]);
@@ -410,6 +414,9 @@ export const MIME_POR_EXTENSION: Readonly<Record<string, string>> = {
   heif: 'image/heif',
   mp3: 'audio/mpeg',
   m4a: 'audio/mp4',
+  aac: 'audio/aac',
+  weba: 'audio/webm',
+  opus: 'audio/ogg',
   ogg: 'audio/ogg',
   wav: 'audio/wav',
   mp4: 'video/mp4',

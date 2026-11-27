@@ -275,8 +275,8 @@ export default function MejoraContinuaPanel({
                               } else if (ok) {
                                 setAviso(
                                   s.accion.tipo === 'quitar_secuencial'
-                                    ? 'Listo: el cambio quedó preparado en el editor (resaltado). Revíselo y pulse «Guardar cambios».'
-                                    : `Listo: abrimos la edición y resaltamos «${s.accion.campo}». Haga el ajuste y pulse «Guardar cambios».`
+                                    ? 'Listo: el cambio quedó preparado en el editor (resaltado). Revíselo y pulse Guardar cambios.'
+                                    : `Listo: abrimos la edición y resaltamos ${s.accion.campo}. Haga el ajuste y pulse Guardar cambios.`
                                 );
                               }
                             }}

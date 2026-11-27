@@ -180,7 +180,7 @@ export function normalizarRepoCatalogo(raw: unknown, { editando = false }: { edi
   const name = texto(r.name);
   if (!name || name.length > MAX_NOMBRE_REPO) return { ok: false, error: `El nombre es obligatorio (máx. ${MAX_NOMBRE_REPO} caracteres).` };
   const github = texto(r.github);
-  if (!RE_GITHUB_REPO.test(github)) return { ok: false, error: 'El repositorio de GitHub va como «dueño/repositorio».' };
+  if (!RE_GITHUB_REPO.test(github)) return { ok: false, error: 'El repositorio de GitHub va como dueño/repositorio.' };
   const branchTesting = texto(r.branchTesting);
   const branchProduction = texto(r.branchProduction);
   if (!RE_RAMA.test(branchTesting) || !RE_RAMA.test(branchProduction)) {

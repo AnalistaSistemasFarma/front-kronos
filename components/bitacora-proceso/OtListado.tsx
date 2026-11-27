@@ -3,11 +3,28 @@
 import { useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Alert, Badge, Box, Button, Card, Group, Loader, SimpleGrid, Stack, Table, Text, TextInput, Title, UnstyledButton } from '@mantine/core';
+import { Alert, Badge, Box, Button, Card, Group, Loader, SegmentedControl, SimpleGrid, Stack, Table, Text, TextInput, Title, UnstyledButton } from '@mantine/core';
 import { useMediaQuery } from '@mantine/hooks';
 import { IconAlertTriangle, IconCheck, IconChevronRight, IconPlus, IconSearch, IconSettings } from '@tabler/icons-react';
 import toast from 'react-hot-toast';
-import { OT_BASE_URL, OT_DIAS_CERRADAS, OT_ROL_LABEL } from '../../lib/bitacora-proceso/constants';
+import { isOtPlanta, OT_BASE_URL, OT_DIAS_CERRADAS, OT_PLANTA_COLOR, OT_PLANTA_LABEL, OT_ROL_LABEL } from '../../lib/bitacora-proceso/constants';
+
+/** Planta con su color (2026-11-26): que nadie registre en la bitácora de la otra planta. */
+function BadgePlanta({ planta, size = 'lg', sinPlanta = false }: { planta: number | null; size?: 'md' | 'lg'; sinPlanta?: boolean }) {
+  if (!isOtPlanta(planta)) {
+    // Abiertas antes de la planta: se marcan para que el supervisor se la asigne.
+    return sinPlanta ? (
+      <Badge color='yellow' variant='outline' size={size} data-testid='ot-sin-planta'>
+        Sin planta
+      </Badge>
+    ) : null;
+  }
+  return (
+    <Badge color={OT_PLANTA_COLOR[planta]} variant='filled' size={size} data-testid='ot-planta-badge'>
+      {OT_PLANTA_LABEL[planta]}
+    </Badge>
+  );
+}
 import type { OrdenResumen } from '../../lib/bitacora-proceso/db';
 import type { OtCompanyAccess } from '../../lib/bitacora-proceso/rules';
 import NuevaOrdenModal from './NuevaOrdenModal';
@@ -30,17 +47,19 @@ export default function OtListado({ company }: { company: OtCompanyAccess }) {
   const desktop = useMediaQuery('(min-width: 48em)') ?? false;
   const { data, error, loading } = useOtFetch<{ ordenes: OrdenResumen[] }>(`/api/bitacora-proceso?company=${company.idCompany}`, 60_000);
   const [buscar, setBuscar] = useState('');
+  const [plantaFiltro, setPlantaFiltro] = useState<'TODAS' | '1' | '2'>('TODAS');
   const [nueva, setNueva] = useState(false);
   const [creada, setCreada] = useState<string | null>(null);
 
   const filtradas = useMemo(() => {
-    const all = data?.ordenes ?? [];
+    const todas = data?.ordenes ?? [];
+    const all = plantaFiltro === 'TODAS' ? todas : todas.filter((o) => String(o.planta) === plantaFiltro);
     const q = buscar.trim().toLowerCase();
     if (!q) return all;
     return all.filter((o) =>
       [o.lote, o.producto, o.itemCode ?? '', o.sapOpDocNum ? String(o.sapOpDocNum) : '', codigoOt(o.consecutivo)].some((v) => v.toLowerCase().includes(q))
     );
-  }, [data, buscar]);
+  }, [data, buscar, plantaFiltro]);
   const abiertas = filtradas.filter((o) => o.estado === 'ABIERTA');
   const cerradas = filtradas.filter((o) => o.estado === 'CERRADA');
   const ir = (o: OrdenResumen) => router.push(otHref(`${OT_BASE_URL}/${o.id}`, company.idCompany));
@@ -84,6 +103,13 @@ export default function OtListado({ company }: { company: OtCompanyAccess }) {
         onChange={(e) => setBuscar(e.currentTarget.value)}
         data-testid='ot-buscar'
       />
+      <SegmentedControl
+        size='md'
+        value={plantaFiltro}
+        onChange={(v) => setPlantaFiltro(v as 'TODAS' | '1' | '2')}
+        data={[{ value: 'TODAS', label: 'Todas las plantas' }, { value: '1', label: OT_PLANTA_LABEL[1] }, { value: '2', label: OT_PLANTA_LABEL[2] }]}
+        data-testid='ot-filtro-planta'
+      />
 
       <Title order={2} size='h3'>
         Abiertas <Badge variant='light' size='lg' ml={6}>{abiertas.length}</Badge>
@@ -96,16 +122,26 @@ export default function OtListado({ company }: { company: OtCompanyAccess }) {
         <Card withBorder radius='md' p='lg'>
           <Text c='dimmed'>
             No hay bitácoras abiertas{buscar ? ' que coincidan' : ''}.
-            {puedeAbrir ? ' Abra una con «Nueva bitácora».' : ' El supervisor o el jefe de producción debe abrir la bitácora del turno.'}
+            {puedeAbrir ? ' Abra una con Nueva bitácora.' : ' El supervisor o el jefe de producción debe abrir la bitácora del turno.'}
           </Text>
         </Card>
       ) : (
         <SimpleGrid cols={{ base: 1, sm: 2, lg: 3 }} spacing='md'>
           {abiertas.map((o) => (
             <UnstyledButton key={o.id} onClick={() => ir(o)} style={{ display: 'block', width: '100%' }} data-testid='ot-abierta'>
-              <Card withBorder shadow='sm' radius='md' p='md' h='100%'>
+              <Card
+                withBorder
+                shadow='sm'
+                radius='md'
+                p='md'
+                h='100%'
+                style={isOtPlanta(o.planta) ? { borderLeft: `8px solid var(--mantine-color-${OT_PLANTA_COLOR[o.planta]}-6)` } : undefined}
+              >
                 <Group justify='space-between' wrap='nowrap' mb={6}>
-                  <Text fw={700} size='lg'>{codigoOt(o.consecutivo)}</Text>
+                  <Group gap={8} wrap='nowrap'>
+                    <Text fw={700} size='lg'>{codigoOt(o.consecutivo)}</Text>
+                    <BadgePlanta planta={o.planta} sinPlanta />
+                  </Group>
                   <Group gap={6} wrap='nowrap'>
                     <Badge color='green' variant='light' size='lg'>Abierta</Badge>
                     <IconChevronRight size={20} />
@@ -153,7 +189,9 @@ export default function OtListado({ company }: { company: OtCompanyAccess }) {
             <Table.Tbody>
               {cerradas.map((o) => (
                 <Table.Tr key={o.id} onClick={() => ir(o)} style={{ cursor: 'pointer' }}>
-                  <Table.Td fw={600}>{codigoOt(o.consecutivo)}</Table.Td>
+                  <Table.Td fw={600}>
+                    {codigoOt(o.consecutivo)} <BadgePlanta planta={o.planta} size='md' />
+                  </Table.Td>
                   <Table.Td>{o.producto}</Table.Td>
                   <Table.Td>{o.lote}</Table.Td>
                   <Table.Td>{turnoLabel(o.turno)}</Table.Td>

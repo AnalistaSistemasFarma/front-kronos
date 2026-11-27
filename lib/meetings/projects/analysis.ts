@@ -248,7 +248,7 @@ export async function requestAnalysis(user: ProjectUser, project: ProjectAccess,
       entity: 'reunion',
       idEntity: linkId,
       action: 'analizar',
-      detail: `${requester} pidió a ${agent.displayName} el análisis de la reunión «${link.subject.slice(0, 200)}» del ${date} (análisis #${a.id_analysis}).`,
+      detail: `${requester} pidió a ${agent.displayName} el análisis de la reunión ${link.subject.slice(0, 200)} del ${date} (análisis #${a.id_analysis}).`,
       idUser: user.id,
       idAgent: agent.idAgent,
       via: 'web',
@@ -274,7 +274,7 @@ export async function analysisTurnForAgent(m: { id: number; role: string; body: 
   });
   if (!a) return null;
   if (a.status !== 'analizando') {
-    return { body: `${m.body}\n\n(Este análisis ya no está pendiente en SynerLink: responda solo «Entendido».)` };
+    return { body: `${m.body}\n\n(Este análisis ya no está pendiente en SynerLink: responda solo Entendido.)` };
   }
   let lines = transcripts.get(a.id_analysis)?.lines ?? null;
   if (!lines) {
@@ -291,7 +291,7 @@ export async function analysisTurnForAgent(m: { id: number; role: string; body: 
         where: { id_analysis: a.id_analysis, status: 'analizando' },
         data: { status: 'fallido', error: 'No se pudo volver a leer la transcripción de Teams. Pida el análisis de nuevo.', finished_at: new Date() },
       });
-      return { body: `${m.body}\n\n(No se pudo leer la transcripción y el análisis se canceló: responda solo «Entendido».)` };
+      return { body: `${m.body}\n\n(No se pudo leer la transcripción y el análisis se canceló: responda solo Entendido.)` };
     }
     rememberTranscript(a.id_analysis, lines);
   }
@@ -411,7 +411,7 @@ export async function onAgentPublishedAnalysis(p: {
     entity: 'reunion',
     idEntity: a.id_project_meeting,
     action: 'analisis_listo',
-    detail: `Análisis #${a.id_analysis} de la reunión «${a.meeting.subject.slice(0, 200)}» listo: efectividad ${result.score}/100, ${result.decisions.length} decisiones, ${result.commitments.length} compromisos (${proposals.length} propuestas de tarea).`,
+    detail: `Análisis #${a.id_analysis} de la reunión ${a.meeting.subject.slice(0, 200)} listo: efectividad ${result.score}/100, ${result.decisions.length} decisiones, ${result.commitments.length} compromisos (${proposals.length} propuestas de tarea).`,
     idUser: null,
     idAgent: p.idAgent,
     via: 'puente',

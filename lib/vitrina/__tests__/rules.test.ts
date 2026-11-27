@@ -113,7 +113,7 @@ describe('Vitrina · visibilidad (terceros, canales, datos)', () => {
   it('terceros: visibilidad fija INTERNA (rechaza otra)', () => {
     expect(visibilidadPermitida('INTERNA', true)).toBe('INTERNA');
     expect(() => visibilidadPermitida('CLIENTE', true)).toThrow(VitrinaError);
-    expect(() => visibilidadPermitida('OFERTABLE', true)).toThrow(/fija «Interna»/);
+    expect(() => visibilidadPermitida('OFERTABLE', true)).toThrow(/fija Interna/);
     expect(visibilidadPermitida('OFERTABLE', false)).toBe('OFERTABLE');
     expect(() => visibilidadPermitida('PUBLICA', false)).toThrow(/no válida/);
   });
@@ -184,8 +184,8 @@ describe('Vitrina · código de Ryan (301 + unidades + producto)', () => {
     ]);
     expect(grupos.find((g) => g.producto === '036')!.avisos).toEqual([]);
     const avisos065 = grupos.find((g) => g.producto === '065')!.avisos;
-    expect(avisos065.some((a) => a.includes('«-LP»'))).toBe(true);
-    expect(avisos065.some((a) => a.includes('«0»'))).toBe(true);
+    expect(avisos065.some((a) => a.includes('sufijo -LP,'))).toBe(true);
+    expect(avisos065.some((a) => a.includes('sufijo 0,'))).toBe(true);
   });
 
   it('avisa de dos códigos con las mismas unidades (duplicado por país)', () => {
@@ -201,7 +201,7 @@ describe('Vitrina · sugerencias', () => {
     expect(familiaSugerida(RYAN, 130)).toBeNull();
   });
 
-  it('canal: INST al final o «institucional» en el nombre', () => {
+  it('canal: INST al final o institucional en el nombre', () => {
     expect(canalSugerido('PTMP0153INST', '')).toBe('INSTITUCIONAL');
     expect(canalSugerido('301100008', 'BICARBONATO DE SODIO 1mEq/mL Institucional (CAJA X 100)')).toBe('INSTITUCIONAL');
     expect(canalSugerido('PTMP0111', 'MEROPENEM')).toBe('SIN_DATO');
@@ -237,7 +237,7 @@ describe('Vitrina · semilla CSV', () => {
     expect(semillaDeEmpresa(r.formato, 2)).toBe(false);
   });
 
-  it('lee la carga de Ryan, con «;» dentro de la observación', () => {
+  it('lee la carga de Ryan, con ; dentro de la observación', () => {
     const csv = [
       'Codigo SAP Ryan;Nombre en SAP;Unidades (segun codigo);Producto (3 ultimos digitos);Pais;Observacion',
       '301001022;NALOXIV (NALOXONA 0,4 mg/mL) S.I (UND);1;022;Colombia;Unidad suelta; producto 022 coincide con hioscina',
@@ -279,7 +279,7 @@ describe('Vitrina · exclusividades', () => {
 });
 
 describe('Vitrina · concentración sugerida', () => {
-  it('une dosis con «/» o «+»', () => {
+  it('une dosis con / o +', () => {
     expect(parsePresentacionSugerida('Adrenalina 1 mg/mL x10')?.concentracion).toBe('1 mg/mL');
     expect(parsePresentacionSugerida('Ampicilina + Sulbactam 1 g + 0,5 g x10')?.concentracion).toBe('1 g+0,5 g');
   });

@@ -94,7 +94,7 @@ export async function POST(req) {
         .query(insertAssignedQuery);
 
       await transaction.commit();
-      await logFlowChange(Number(id_process), guard.email, 'datos del flujo', `Nombre «${process}», ${active === 0 || active === false ? 'inactivo' : 'activo'}, encargado ${id_user_assigned}.`);
+      await logFlowChange(Number(id_process), guard.email, 'datos del flujo', `Nombre ${process}, ${active === 0 || active === false ? 'inactivo' : 'activo'}, encargado ${id_user_assigned}.`);
 
       return new Response(
         JSON.stringify({

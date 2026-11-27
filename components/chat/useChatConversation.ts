@@ -21,6 +21,7 @@ import type { AgentMetricsDto } from '../../lib/chat/agent-metrics';
 import { avisarMensajeEntrante, mensajeFresco } from '../../lib/chat/message-sound';
 import { avisarProyectoLeido } from '../../lib/proyectos/iconoHeader';
 import { alternarReaccion, type ChatReactionDto } from '../../lib/chat/media-rules';
+import { buildVoiceNoteBody } from '../../lib/chat/voice-note';
 
 /** Lo que se manda para un GIF o un sticker (POST /api/chat/conversations/[id]/media). */
 export type MediaParaEnviar =
@@ -152,7 +153,7 @@ export interface ChatThreadState {
   hasOlder: boolean;
   loadingOlder: boolean;
   /** `cita` = mensaje al que responde, o null. */
-  send: (body: string, files?: File[], cita?: ChatReplyToDto | null) => Promise<boolean>;
+  send: (body: string, files?: File[], cita?: ChatReplyToDto | null, opciones?: { voiceDurationMs?: number }) => Promise<boolean>;
   /** Pone o quita MI reacción (optimista; 2026-10-20). */
   react: (idMessage: number, emoji: string) => Promise<void>;
   /** Envía un GIF o un sticker (2026-10-20). */
@@ -622,10 +623,14 @@ export function useChatConversation(
     async (
       body: string,
       files: File[] = [],
-      cita: ChatReplyToDto | null = null
+      cita: ChatReplyToDto | null = null,
+      opciones: { voiceDurationMs?: number } = {}
     ): Promise<boolean> => {
       const conversationId = conversationIdRef.current;
-      const text = body.trim();
+      // Voice note (2026-11-26): the server writes the real body (with the
+      // transcript); the optimistic one only lets the bubble draw the player.
+      const voiceDurationMs = files.length === 1 ? opciones.voiceDurationMs : undefined;
+      const text = voiceDurationMs !== undefined ? buildVoiceNoteBody(voiceDurationMs, null) : body.trim();
       // Con adjuntos el texto puede ir vacío; sin nada de nada, no se envía.
       if (conversationId === null || (text.length === 0 && files.length === 0)) return false;
 
@@ -666,7 +671,11 @@ export function useChatConversation(
         let res: Response;
         if (files.length > 0) {
           const form = new FormData();
-          form.append('body', text);
+          form.append('body', voiceDurationMs !== undefined ? '' : text);
+          if (voiceDurationMs !== undefined) {
+            form.append('voiceNote', '1');
+            form.append('voiceDurationMs', String(Math.round(voiceDurationMs)));
+          }
           if (cita) form.append('replyTo', String(cita.idMessage));
           for (const file of files) form.append('files', file);
           // Sin `Content-Type` a mano: el navegador tiene que ponerlo con su

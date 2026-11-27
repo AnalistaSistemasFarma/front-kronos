@@ -103,7 +103,7 @@ const concesionParam = z
   .trim()
   .min(10)
   .max(80)
-  .describe('El concesion_id que aparece en el mensaje con el que la persona le dio acceso a sus proyectos (empieza por «pg_»). No invente uno.');
+  .describe('El concesion_id que aparece en el mensaje con el que la persona le dio acceso a sus proyectos (empieza por pg_). No invente uno.');
 
 /**
  * Acceso de LECTURA (2026-11-06): o la concesión de 24 h, o el TURNO del chat normal
@@ -259,7 +259,7 @@ export function registerProyectosTools(server: McpServer, ctx: ProyectosCtx): vo
     },
     async (args) =>
       ejecutar(ctx, 'proyecto_calendario', args, async () => {
-        if (args.hasta < args.desde) throw new ProyectosRechazo('«hasta» no puede ser anterior a «desde».');
+        if (args.hasta < args.desde) throw new ProyectosRechazo('hasta no puede ser anterior a desde.');
         if (diasEntre(args.desde, args.hasta) > MAX_DIAS_CALENDARIO) throw new ProyectosRechazo(`El rango no puede pasar de ${MAX_DIAS_CALENDARIO} días.`);
         const { agente, concesion } = await resolverAcceso(ctx.scope, args);
         const proyectos = args.id_proyecto ? [await proyectoVisible(concesion, args.id_proyecto)] : (await proyectosVisibles(concesion)).slice(0, 30);
@@ -373,7 +373,7 @@ export function registerProyectosTools(server: McpServer, ctx: ProyectosCtx): vo
         };
         return {
           payload: { tarea },
-          resumen: `${args.hito ? 'Hito' : 'Tarea'} «${args.titulo}» (${tarea.startDate}${tarea.endDate !== tarea.startDate ? ` → ${tarea.endDate}` : ''})${args.responsable ? `, responsable ${args.responsable}` : ''}`,
+          resumen: `${args.hito ? 'Hito' : 'Tarea'} ${args.titulo} (${tarea.startDate}${tarea.endDate !== tarea.startDate ? ` → ${tarea.endDate}` : ''})${args.responsable ? `, responsable ${args.responsable}` : ''}`,
         };
       })
   );
@@ -411,7 +411,7 @@ export function registerProyectosTools(server: McpServer, ctx: ProyectosCtx): vo
         if (args.hito !== undefined) tarea.isMilestone = args.hito;
         if (Object.keys(tarea).length === 0) throw new ProyectosRechazo('La propuesta no cambia nada.');
         const partes = Object.entries(tarea).map(([k, v]) => `${k}: ${String(v)}`);
-        return { payload: { idTask: args.id_tarea, tarea }, resumen: `Tarea «${t[0].title}» → ${partes.join(', ')}` };
+        return { payload: { idTask: args.id_tarea, tarea }, resumen: `Tarea ${t[0].title} → ${partes.join(', ')}` };
       })
   );
 
@@ -425,7 +425,7 @@ export function registerProyectosTools(server: McpServer, ctx: ProyectosCtx): vo
         if (!s) throw new ProyectosRechazo('No se encontró esa solicitud entre las que la persona ve en la empresa del proyecto.');
         const ya = await tx.$queryRaw<{ n: number }[]>(Prisma.sql`SELECT COUNT(1) AS n FROM chat_project_request WHERE id_project = ${p.idProject} AND id_request = ${args.id_solicitud}`);
         if (Number(ya[0]?.n) > 0) throw new ProyectosRechazo('Esa solicitud ya está vinculada al proyecto.');
-        return { payload: { idRequest: args.id_solicitud }, resumen: `Vincular la solicitud #${args.id_solicitud} «${s.subject.slice(0, 200)}»` };
+        return { payload: { idRequest: args.id_solicitud }, resumen: `Vincular la solicitud #${args.id_solicitud} ${s.subject.slice(0, 200)}` };
       })
   );
 
@@ -437,7 +437,7 @@ export function registerProyectosTools(server: McpServer, ctx: ProyectosCtx): vo
       proponer('proyecto_proponer_desvincular_solicitud', 'solicitud_desvincular', args, async (p, _c, tx) => {
         const v = await tx.$queryRaw<{ subject: string }[]>(Prisma.sql`SELECT TOP 1 subject FROM chat_project_request WHERE id_project = ${p.idProject} AND id_request = ${args.id_solicitud}`);
         if (!v[0]) throw new ProyectosRechazo('Esa solicitud no está vinculada al proyecto.');
-        return { payload: { idRequest: args.id_solicitud }, resumen: `Quitar del proyecto la solicitud #${args.id_solicitud} «${v[0].subject.slice(0, 200)}»` };
+        return { payload: { idRequest: args.id_solicitud }, resumen: `Quitar del proyecto la solicitud #${args.id_solicitud} ${v[0].subject.slice(0, 200)}` };
       })
   );
 
@@ -447,7 +447,7 @@ export function registerProyectosTools(server: McpServer, ctx: ProyectosCtx): vo
     {
       concesion_id: concesionParam,
       id_proyecto: proyectoParam,
-      asistente: z.string().trim().regex(/^[A-Za-z0-9_-]{1,60}$/).describe('code del asistente designado (p. ej. «play»).'),
+      asistente: z.string().trim().regex(/^[A-Za-z0-9_-]{1,60}$/).describe('code del asistente designado (p. ej. play).'),
       titulo: z.string().trim().max(120).optional().describe('Título de la conversación (opcional).'),
     },
     async (args) =>
@@ -457,13 +457,13 @@ export function registerProyectosTools(server: McpServer, ctx: ProyectosCtx): vo
           SELECT TOP 1 a.display_name FROM chat_project_agent pa INNER JOIN agent a ON a.id_agent = pa.id_agent WHERE pa.id_project = ${p.idProject} AND LOWER(a.code) = ${code}
         `);
         if (!a[0]) throw new ProyectosRechazo('Ese asistente no está designado en el proyecto.');
-        return { payload: { agentCode: code, title: args.titulo ?? null }, resumen: `Abrir una conversación con ${a[0].display_name}${args.titulo ? ` «${args.titulo}»` : ''}` };
+        return { payload: { agentCode: code, title: args.titulo ?? null }, resumen: `Abrir una conversación con ${a[0].display_name}${args.titulo ? ` ${args.titulo}` : ''}` };
       })
   );
 
   server.tool(
     'proyecto_proponer_invitar',
-    'PROPONE invitar a una persona al proyecto como editora o lectora. Solo si la persona de la concesión es la DUEÑA del proyecto. Al confirmar, SynerLink exige que la invitada tenga el permiso «Proyectos» en la empresa del proyecto.',
+    'PROPONE invitar a una persona al proyecto como editora o lectora. Solo si la persona de la concesión es la DUEÑA del proyecto. Al confirmar, SynerLink exige que la invitada tenga el permiso Proyectos en la empresa del proyecto.',
     {
       concesion_id: concesionParam,
       id_proyecto: proyectoParam,

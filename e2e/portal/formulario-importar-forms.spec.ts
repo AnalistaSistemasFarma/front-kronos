@@ -42,9 +42,9 @@ async function preparar(page: Page, opciones: { terminar: 'listo' | 'error' }) {
     if (estado.sondeos === 2) return r.fulfill({ json: { estado: 'en_curso', progreso: 55, etapa: 'Leyendo las preguntas' } });
     await new Promise((x) => setTimeout(x, 1500)); // deja ver la barra a medio camino
     if (opciones.terminar === 'error') {
-      return r.fulfill({ json: { estado: 'error', progreso: 55, etapa: 'Error', error: 'El formulario no es público: Microsoft pide iniciar sesión. En Forms, en «Compartir», elija «Cualquier persona con el vínculo puede responder» y copie ese enlace.' } });
+      return r.fulfill({ json: { estado: 'error', progreso: 55, etapa: 'Error', error: 'El formulario no es público: Microsoft pide iniciar sesión. En Forms, en Compartir, elija Cualquier persona con el vínculo puede responder y copie ese enlace.' } });
     }
-    return r.fulfill({ json: { estado: 'listo', progreso: 100, etapa: 'Listo', resultado: { ...IMPORTADO, advertencias: ['Pregunta 13 «Marque varias»: es de tipo selección múltiple y no se puede importar; agréguela a mano si la necesita.'] } } });
+    return r.fulfill({ json: { estado: 'listo', progreso: 100, etapa: 'Listo', resultado: { ...IMPORTADO, advertencias: ['Pregunta 13 Marque varias: es de tipo selección múltiple y no se puede importar; agréguela a mano si la necesita.'] } } });
   });
   return estado;
 }
@@ -83,7 +83,7 @@ test.describe('Portal TH · Formación · importar desde Microsoft Forms', () =>
     if (CAPTURAS) await page.screenshot({ path: `${CAPTURAS}/41-importar-progreso.png` });
 
     // Listo: aviso verde ARRIBA y a la vista; advertencias en amarillo.
-    await expect(imp.getByTestId('importar-listo')).toContainText('Se importaron 12 preguntas de «Evaluación Inducción Organizacional y SST Farmalógica SA 2025» (nombre y cédula quedaron en «Datos que se piden»)');
+    await expect(imp.getByTestId('importar-listo')).toContainText('Se importaron 12 preguntas de Evaluación Inducción Organizacional y SST Farmalógica SA 2025 (nombre y cédula quedaron en Datos que se piden)');
     await expect(imp.getByTestId('importar-listo')).toContainText('Todavía no se guardó nada');
     await expect(imp.getByTestId('importar-advertencias')).toContainText('selección múltiple');
     await page.waitForTimeout(900);
@@ -164,7 +164,7 @@ test.describe('Portal TH · Formación · importar desde Microsoft Forms', () =>
 });
 
 test.describe('Portal TH · Formación · importar desde Forms · correcciones de la revisión (2026-10-14)', () => {
-  test('si ya hay algo escrito, pide confirmación antes de reemplazarlo («Cancelar» no llama al servidor)', async ({ page }) => {
+  test('si ya hay algo escrito, pide confirmación antes de reemplazarlo (Cancelar no llama al servidor)', async ({ page }) => {
     await page.setViewportSize({ width: 1366, height: 900 });
     const estado = await preparar(page, { terminar: 'listo' });
     const c = await abrirConstructor(page, 'evaluacion');
@@ -184,7 +184,7 @@ test.describe('Portal TH · Formación · importar desde Forms · correcciones d
     await expect(c.getByTestId('titulo-formulario')).toHaveValue(IMPORTADO.titulo);
   });
 
-  test('«Cancelar importación» deja de consultar, avisa y no cambia lo escrito', async ({ page }) => {
+  test('Cancelar importación deja de consultar, avisa y no cambia lo escrito', async ({ page }) => {
     await page.setViewportSize({ width: 1366, height: 900 });
     await preparar(page, { terminar: 'listo' });
     const cancelados: string[] = [];

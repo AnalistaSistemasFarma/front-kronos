@@ -19,6 +19,8 @@ import {
   crearArea,
   crearOperador,
   crearOrden,
+  cambiarPlanta,
+  crearNotaRegistro,
   crearRegistro,
   getOrdenDetalle,
   getOtAccessForUser,
@@ -107,7 +109,7 @@ describe.skipIf(!url)('Bitácora de Proceso · integración con SQL Server', () 
     return confirmarVistoBueno(prisma, idOrden, access, obs, conf('SUPERVISOR', supervisorId, supervisor));
   };
   const orden = (extra: Record<string, unknown> = {}) =>
-    parseNuevaOrden({ company: FARMA, producto: 'PRUEBA IT', lote: `L-${sufijo}`, turno: 'MANANA', operadores: [opA], idArea, inspector: inspectorId, jefeProduccion: jefeId, ...extra });
+    parseNuevaOrden({ company: FARMA, producto: 'PRUEBA IT', lote: `L-${sufijo}`, turno: 'MANANA', operadores: [opA], idArea, inspector: inspectorId, jefeProduccion: jefeId, planta: 1, ...extra });
 
   beforeAll(async () => {
     await prisma.$executeRawUnsafe(`
@@ -444,6 +446,47 @@ describe.skipIf(!url)('Bitácora de Proceso · integración con SQL Server', () 
     } finally {
       await asignarResponsable(prisma, { idCompany: FARMA, idUser: jefeId, rol: 'JEFE_PROD' }, actor(supervisorId));
     }
+  });
+
+  it('2026-11-26: planta (1|2), tipo de personal y NOTAS de corrección inmutables (solo mientras está abierta)', async () => {
+    // Tipo de personal en el maestro.
+    const insp = await crearOperador(prisma, { idCompany: FARMA, nombre: `INSPECTORA ${sufijo}`, documento: null, tipo: 'INSPECTOR' }, actor(supervisorId));
+    expect(insp).toMatchObject({ tipo: 'INSPECTOR' });
+    await expect(prisma.$executeRaw`UPDATE dbo.ot_operador SET tipo = N'JEFE' WHERE id_operador = ${insp.id_operador}`).rejects.toThrow();
+    // Planta al abrir; la base solo acepta 1 o 2.
+    const o = await crearOrden(prisma, orden({ producto: 'PRUEBA IT PLANTA', lote: `PL-${sufijo}`, planta: 2, operadores: [opA, insp.id_operador] }), actor(supervisorId));
+    await expect(prisma.$executeRaw`UPDATE dbo.ot_orden_trabajo SET planta = 3 WHERE id_orden_trabajo = ${o.id}`).rejects.toThrow();
+    const reg = await crearRegistro(prisma, o.id, ajeno, { idActividad: idTolva, idOperador: opA, observacion: null }, actor(ajenoId));
+    // Nota de corrección: el registro no cambia; la nota lleva hora del servidor y usuario.
+    const nota = await crearNotaRegistro(prisma, o.id, BigInt(reg.id), ajeno, 'Me equivoqué de actividad', actor(ajenoId));
+    let det = await getOrdenDetalle(prisma, o.id, supervisor, supervisorId);
+    expect(det?.planta).toBe(2);
+    expect(det?.operadores.find((x) => x.id === insp.id_operador)?.tipo).toBe('INSPECTOR');
+    expect(det?.registros[0]).toMatchObject({ actividad: expect.any(String), notas: [{ id: nota.id, texto: 'Me equivoqué de actividad' }] });
+    // Un registro de otra bitácora: 404. La nota no se edita ni se borra.
+    expect(await status(crearNotaRegistro(prisma, o.id, BigInt(999999999), ajeno, 'x x x', actor(ajenoId)))).toBe(404);
+    await expect(prisma.$executeRaw`UPDATE dbo.ot_registro_nota SET texto = N'otra' WHERE id_nota = ${nota.id}`).rejects.toThrow(/no se pueden editar ni borrar/);
+    await expect(prisma.$executeRaw`DELETE FROM dbo.ot_registro_nota WHERE id_nota = ${nota.id}`).rejects.toThrow(/no se pueden editar ni borrar/);
+    // Cerrada: ya no admite notas.
+    await cerrar(o.id, supervisor);
+    expect(await status(crearNotaRegistro(prisma, o.id, BigInt(reg.id), ajeno, 'tarde', actor(ajenoId)))).toBe(409);
+    det = await getOrdenDetalle(prisma, o.id, supervisor, supervisorId);
+    expect(det?.registros[0].notas).toHaveLength(1);
+    // Cerrada: la planta ya no se cambia.
+    expect(await status(cambiarPlanta(prisma, o.id, supervisor, 1, actor(supervisorId)))).toBe(409);
+  });
+
+  it('2026-11-26: bitácora viva SIN planta: el supervisor se la asigna (queda quién y cuándo); un operario sin Gestión no', async () => {
+    const o = await crearOrden(prisma, orden({ producto: 'PRUEBA IT SIN PLANTA', lote: `SP-${sufijo}` }), actor(supervisorId));
+    await prisma.$executeRaw`UPDATE dbo.ot_orden_trabajo SET planta = NULL WHERE id_orden_trabajo = ${o.id}`;
+    let det = await getOrdenDetalle(prisma, o.id, supervisor, supervisorId);
+    expect(det).toMatchObject({ planta: null, plantaAsignada: null, puedeCambiarPlanta: true });
+    expect(await status(cambiarPlanta(prisma, o.id, operario, 1, actor(operarioId)))).toBe(403);
+    expect(await cambiarPlanta(prisma, o.id, supervisor, 1, actor(supervisorId))).toEqual({ planta: 1, anterior: null });
+    expect(await cambiarPlanta(prisma, o.id, supervisor, 2, actor(supervisorId))).toEqual({ planta: 2, anterior: 1 });
+    det = await getOrdenDetalle(prisma, o.id, supervisor, supervisorId);
+    expect(det?.planta).toBe(2);
+    expect(det?.plantaAsignada?.en).toBeTruthy();
   });
 
   it('TEXTO LIBRE (2026-10-17): Gestión marca la actividad; el texto es obligatorio, queda saneado y marcado en el registro aunque luego cambie el catálogo', async () => {

@@ -192,7 +192,7 @@ test.describe('Chat · barra lateral · escritorio', () => {
     await expect(barra.getByRole('button', { name: /Chat con Jorge Alba/ })).toBeVisible();
     await expect(barra.getByRole('button', { name: /Chat con Mark/ })).toHaveCount(0);
     await barra.getByRole('textbox', { name: 'Buscar chat por nombre' }).fill('zzz');
-    await expect(barra.getByText('Ningún chat coincide con «zzz».')).toBeVisible();
+    await expect(barra.getByText('Ningún chat coincide con zzz.')).toBeVisible();
 
     // Se recuerda expandida al volver a entrar.
     await page.reload();

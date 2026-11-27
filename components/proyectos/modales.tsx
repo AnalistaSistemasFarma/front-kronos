@@ -528,7 +528,7 @@ export function InvitarModal({
     >
       <ErrorArriba error={error} onClose={() => setError(null)} />
       <Text size='xs' c='dimmed'>
-        Solo aparecen quienes tienen el permiso «Proyectos» en {proyecto.company.companyName}. Verán todo lo trabajado en el proyecto.
+        Solo aparecen quienes tienen el permiso Proyectos en {proyecto.company.companyName}. Verán todo lo trabajado en el proyecto.
       </Text>
       <Stack gap={4}>
         <Text size='sm' fw={500}>
@@ -670,7 +670,7 @@ export function DesignarAgenteModal({
       <Text size='xs' c='dimmed'>
         {perfiles
           ? `Asistentes que usted tiene en ${proyecto.company.companyName}, con proyectos habilitados. Con el primero se escogen los conectores del proyecto.`
-          : `Asistentes que usted tiene en ${proyecto.company.companyName}, con proyectos habilitados y con el perfil «${proyecto.profile.label}».`}
+          : `Asistentes que usted tiene en ${proyecto.company.companyName}, con proyectos habilitados y con el perfil ${proyecto.profile.label}.`}
       </Text>
       {candidatos === null ? (
         <EsqueletoFilas n={3} />

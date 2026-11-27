@@ -190,7 +190,7 @@ export default function NuevoProyectoModal({
         />
         <SgcSelect
           label='Empresa'
-          description='Solo los miembros con el permiso «Proyectos» en esta empresa podrán entrar.'
+          description='Solo los miembros con el permiso Proyectos en esta empresa podrán entrar.'
           data={datos.companies.map((c) => ({ value: String(c.idCompany), label: c.companyName }))}
           value={empresa}
           onChange={setEmpresa}
@@ -226,7 +226,7 @@ export default function NuevoProyectoModal({
             <Alert color='blue' radius='md' icon={<IconInfoCircle size={18} />} py={8} data-testid='proyectos-sin-asistentes'>
               <Text size='sm'>
                 El proyecto queda para las personas: miembros, tareas, archivos, correos y solicitudes vinculados. Puede agregar asistentes después, en
-                «Detalles» → «Agregar asistente».
+                Detalles → Agregar asistente.
               </Text>
               {designables.length === 0 && (
                 <Text size='xs' c='dimmed' mt={4}>
@@ -299,7 +299,7 @@ export default function NuevoProyectoModal({
             checked={sugerirEquipo}
             onChange={(e) => setSugerirEquipo(e.currentTarget.checked)}
             label='Pedir al asistente que sugiera un equipo de subagentes'
-            description='Propondrá de 3 a 6 especialistas para las actividades del proyecto. Usted los aprueba, edita o descarta en la sección «Equipo»; nada trabaja sin su aprobación.'
+            description='Propondrá de 3 a 6 especialistas para las actividades del proyecto. Usted los aprueba, edita o descarta en la sección Equipo; nada trabaja sin su aprobación.'
             data-testid='proyectos-sugerir-equipo'
           />
           <Divider my={4} />
@@ -341,8 +341,8 @@ export default function NuevoProyectoModal({
                   <Text size='sm'>Solo conversación e información del proyecto.</Text>
                 </Group>
                 <Text size='xs' c='dimmed'>
-                  El acceso a código lo da la administración de SynerLink o quien tenga el permiso «Permisos de agentes en Proyectos» en esta empresa. Se puede
-                  cambiar después, en la sección «Permisos» del proyecto.
+                  El acceso a código lo da la administración de SynerLink o quien tenga el permiso Permisos de agentes en Proyectos en esta empresa. Se puede
+                  cambiar después, en la sección Permisos del proyecto.
                 </Text>
               </Alert>
             )}

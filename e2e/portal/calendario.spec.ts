@@ -244,7 +244,7 @@ test.describe('Portal TH · calendario · correcciones de la revisión (2026-10-
     await expect(page.getByText('Evento VIEJO de octubre')).toHaveCount(0);
   });
 
-  test('«Quitar» queda deshabilitado mientras se borra (sin doble DELETE)', async ({ page }) => {
+  test('Quitar queda deshabilitado mientras se borra (sin doble DELETE)', async ({ page }) => {
     await page.setViewportSize({ width: 1366, height: 900 });
     const estado = await preparar(page, { editor: true });
     await page.route('**/api/portal/eventos/*', async (r) => {

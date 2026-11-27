@@ -168,7 +168,7 @@ export default function SubagenteModal({
                         {fija ? ' (siempre)' : ''}
                       </Text>
                       <Text size='xs' c='dimmed'>
-                        {admitida ? HERRAMIENTA_INFO[t].description : `El perfil «${profileLabel}» no lo admite.`}
+                        {admitida ? HERRAMIENTA_INFO[t].description : `El perfil ${profileLabel} no lo admite.`}
                       </Text>
                     </div>
                   </Group>

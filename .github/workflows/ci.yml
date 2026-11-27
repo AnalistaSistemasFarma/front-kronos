@@ -597,6 +597,14 @@ jobs:
           echo "EXEC sp_set_session_context N'biomedica_hoja_vida_reversa_acepta_perdida', 1;" > /tmp/biomed-hv-rev.sql && cat prisma/manual/2026-11-23-biomedica-hoja-vida-reversa.sql >> /tmp/biomed-hv-rev.sql
           npx prisma db execute --schema prisma/schema.prisma --file /tmp/biomed-hv-rev.sql
           npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261123150000_biomedica_hoja_vida/migration.sql
+          # Repuestos e insumos biomédicos (2026-11-26): migración y PRUEBAS dos veces (idempotencia), objetos y PROD que se niega.
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261126190000_biomedica_repuestos/migration.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261126190000_biomedica_repuestos/migration.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-11-26-biomedica-repuestos-PRUEBAS.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-11-26-biomedica-repuestos-PRUEBAS.sql
+          echo "IF OBJECT_ID(N'dbo.biomed_repuesto', N'U') IS NULL OR OBJECT_ID(N'dbo.biomed_repuesto_mov_solo_insercion', N'TR') IS NULL THROW 50000, N'La migración de repuestos biomédicos no dejó sus tablas o el disparador.', 1;" > /tmp/biomed-rep-ok.sql
+          npx prisma db execute --schema prisma/schema.prisma --file /tmp/biomed-rep-ok.sql
+          if npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-11-26-biomedica-repuestos-PROD.sql; then echo "El script de PROD de repuestos biomédicos debió negarse en kronos_ci"; exit 1; fi
           # Agente de desarrollo en Proyectos (2026-10-27): migración y PRUEBAS dos veces (idempotencia), columna NOT NULL, PROD que se niega y la corrección de proyectos en modo LISTAR (no escribe).
           npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261027170000_agent_es_desarrollo/migration.sql
           npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261027170000_agent_es_desarrollo/migration.sql
@@ -642,6 +650,11 @@ jobs:
           # Bitácora · margen superior para el encabezado batch (#8316, 2026-11-23): migración y PRUEBAS dos veces, reversa dos veces, otra vez PRUEBAS (idempotencia ida y vuelta), tabla + CHECK y PROD que se niega.
           npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261123180000_bitacora_proceso_margen_batch/migration.sql
           npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261123180000_bitacora_proceso_margen_batch/migration.sql
+          # Planta, tipo de personal y notas de corrección (2026-11-26): dos veces (idempotente).
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261126150000_bitacora_proceso_planta_tipo_notas/migration.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261126150000_bitacora_proceso_planta_tipo_notas/migration.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261126170000_bitacora_proceso_planta_asignada/migration.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261126170000_bitacora_proceso_planta_asignada/migration.sql
           npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-11-23-bitacora-margen-batch-PRUEBAS.sql
           npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-11-23-bitacora-margen-batch-PRUEBAS.sql
           npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-11-23-bitacora-margen-batch-reversa.sql

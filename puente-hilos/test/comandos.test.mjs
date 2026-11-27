@@ -118,9 +118,9 @@ test('catalogoPlugins y skillsDePlugins leen las skills y excluidas.json de los 
 
 test('objetivo: textos del encabezado y lectura de goal_status en la transcripción', () => {
   const o = { condicion: 'quede el PDF', autor: 'Silvia', fijado: '2026-10-22T16:00:00Z' };
-  assert.match(textoObjetivo(o), /Objetivo activo[\s\S]*Silvia el 2026-10-22: «quede el PDF»/);
+  assert.match(textoObjetivo(o), /Objetivo activo[\s\S]*Silvia el 2026-10-22: quede el PDF/);
   assert.equal(textoObjetivo(null), '');
-  assert.match(encabezadoObjetivo(o), /^🎯 Objetivo activo de esta conversación \(\/goal\): «quede el PDF»/);
+  assert.match(encabezadoObjetivo(o), /^🎯 Objetivo activo de esta conversación \(\/goal\): quede el PDF/);
   const lineas = (...a) => a.map((x) => JSON.stringify({ type: 'attachment', attachment: { type: 'goal_status', ...x } })).join('\n');
   assert.deepEqual(estadoObjetivoSesion('x', () => lineas({ met: false, sentinel: true, condition: 'c' }, { met: true, condition: 'c', reason: 'ok' })), { met: true, fallido: false, condicion: 'c', motivo: 'ok' });
   assert.equal(estadoObjetivoSesion('x', () => lineas({ met: false, failed: true, condition: 'c' })).fallido, true);
@@ -305,7 +305,7 @@ test('puente: /goal se guarda por conversación, va en el encabezado de cada tur
   assert.equal(c1.prompt, '/goal quede el PDF');
   assert.equal(JSON.parse(c1.args[c1.args.indexOf('--settings') + 1]).disableAllHooks, false);
   assert.equal(c1.maxRevisionesObjetivo, 3);
-  assert.match(r1, /Objetivo activo\*\* \(\/goal\): «quede el PDF»/);
+  assert.match(r1, /Objetivo activo\*\* \(\/goal\): quede el PDF/);
   assert.equal(p.estado.objetivoDe(40).condicion, 'quede el PDF');
   assert.match(readFileSync(path.join(c1.cwd, '.puente', 'sistema.md'), 'utf8'), /## Objetivo activo de esta conversación \(\/goal\)/);
 
@@ -313,7 +313,7 @@ test('puente: /goal se guarda por conversación, va en el encabezado de cada tur
   cumplido = true;
   const r2 = await p.turno('ya lo adjunté');
   const c2 = p.corridas[1];
-  assert.match(c2.prompt, /^🎯 Objetivo activo de esta conversación \(\/goal\): «quede el PDF»\n\n---\n\n\*\*Silvia\*\* escribió:\nya lo adjunté$/);
+  assert.match(c2.prompt, /^🎯 Objetivo activo de esta conversación \(\/goal\): quede el PDF\n\n---\n\n\*\*Silvia\*\* escribió:\nya lo adjunté$/);
   assert.equal(JSON.parse(c2.args[c2.args.indexOf('--settings') + 1]).disableAllHooks, false);
   assert.match(r2, /Objetivo cumplido/);
   assert.equal(p.estado.objetivoDe(40), null);

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import ExcelJS from 'exceljs';
 import {
   ajustarPaginaUnaDeAncho,
+  filaFirmaSupervisor,
   filasFirmaJefe,
   assertMismoLote,
   elegirOpBatchRecord,
@@ -26,13 +27,13 @@ function errorOf(fn: () => unknown) {
 
 function orden(consecutivo: number, abiertaEn: string, extra: Partial<OrdenDetalle> = {}): OrdenDetalle {
   return {
-    id: consecutivo, idCompany: 1, consecutivo, producto: 'MEROPENEM 500 mg', itemCode: 'PPMP0503', lote: '2421626', turno: 'MANANA', area: 'Envase y grafado',
+    id: consecutivo, idCompany: 1, consecutivo, producto: 'MEROPENEM 500 mg', itemCode: 'PPMP0503', lote: '2421626', turno: 'MANANA', area: 'Envase y grafado', areaCatalogo: null,
     sapOp: { AbsoluteEntry: 14332, DocumentNumber: 14118 }, sapOpDocNum: 14118, estado: 'CERRADA', abiertaEn, abiertaPor: 'Sandra Supervisora',
     cerradaEn: '2026-11-03T19:00:00.000Z', cerradaPor: 'Sandra Supervisora', observacionCierre: null, operarios: [],
-    operadores: [{ id: 7, nombre: 'Pepito Pérez', activo: true }], inspector: null, jefe: { id: 'j', name: 'Natalia Velandia' },
+    operadores: [{ id: 7, nombre: 'Pepito Pérez', activo: true, tipo: 'OPERARIO' }, { id: 54, nombre: 'ALVAREZ JUDY', activo: true, tipo: 'INSPECTOR' }], planta: 2, inspector: null, jefe: { id: 'j', name: 'Natalia Velandia' },
     registros: [
-      { id: '1', actividad: 'Control de peso', operador: 'Pepito Pérez', usuario: 'Producción Planta', registradoEn: '2026-11-03T12:00:05.000Z', observacion: null, textoLibre: false },
-      { id: '2', actividad: 'Otra', operador: 'Pepito Pérez', usuario: 'Producción Planta', registradoEn: '2026-11-03T13:10:00.000Z', observacion: 'Cambio de rollo de agrafes', textoLibre: true },
+      { id: '1', actividad: 'Control de peso', operador: 'Pepito Pérez', usuario: 'Producción Planta', registradoEn: '2026-11-03T12:00:05.000Z', observacion: null, textoLibre: false, notas: [] },
+      { id: '2', actividad: 'Otra', operador: 'Pepito Pérez', usuario: 'Producción Planta', registradoEn: '2026-11-03T13:10:00.000Z', observacion: 'Cambio de rollo de agrafes', textoLibre: true, notas: [{ id: 1, texto: 'Me equivoqué, era Alimentación tapón', usuario: 'Producción Planta', creadaEn: '2026-11-03T13:12:00.000Z' }] },
     ],
     firmas: [],
     vistos: [
@@ -103,6 +104,24 @@ describe('Bitácora de Proceso · Excel del batch record (2026-11-24)', () => {
     expect(filasFirmaJefe([orden(1, '2026-11-03T11:00:00.000Z'), otro], e)[1].celdas[0].texto).toBe('Nombre: ');
   });
 
+  it('firma del supervisor en cada turno (2026-11-26): quien cerró; si sigue abierta, quien abrió', () => {
+    const e = { seccion: 1, linea: 2, encabezadoTabla: 3, celda: 4, pie: 5 };
+    expect(filaFirmaSupervisor(orden(1, '2026-11-03T11:00:00.000Z'), e).celdas.map((c) => c.texto)).toEqual(['Supervisor que cerró: Sandra Supervisora', 'Firma:', 'Fecha:']);
+    const abierta = orden(2, '2026-11-03T19:00:00.000Z', { estado: 'ABIERTA', cierre: null, abiertaPor: 'Pilar Ramirez' });
+    expect(filaFirmaSupervisor(abierta, e).celdas[0].texto).toBe('Supervisor que abrió: Pilar Ramirez');
+    const jefe = orden(3, '2026-11-04T11:00:00.000Z', { cierre: { nombre: 'Natalia Velandia', como: 'JEFE_PROD', en: '2026-11-04T19:00:00.000Z', metodo: 'sesion_propia', cuentaComoVistoJefe: true } });
+    expect(filaFirmaSupervisor(jefe, e).celdas[0].texto).toBe('Cerró (jefe de producción): Natalia Velandia');
+  });
+
+  it('el título del área usa el nombre ACTUAL del catálogo (agrafado → grafado)', async () => {
+    const enc = { producto: 'X', concentracion: '', lote: 'L', op: '1', loteMp: '' };
+    const buf = await buildBatchRecordXlsx(enc, [orden(1, '2026-11-03T11:00:00.000Z', { area: 'Envase y agrafado', areaCatalogo: 'Envase y grafado' })]);
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(buf as unknown as ArrayBuffer);
+    expect(wb.worksheets[0].getCell('C9').value).toBe('BITACORA DE AREA ENVASE Y GRAFADO');
+    expect(String(wb.worksheets[0].getCell('A10').value)).toContain('Área Envase y grafado');
+  });
+
   it('todas las bitácoras del archivo son del mismo lote', () => {
     expect(() => assertMismoLote([orden(1, '2026-11-03T11:00:00.000Z'), orden(2, '2026-11-03T19:00:00.000Z')])).not.toThrow();
     expect(errorOf(() => assertMismoLote([orden(1, '2026-11-03T11:00:00.000Z'), orden(2, '2026-11-03T19:00:00.000Z', { lote: 'OTRO' })])).status).toBe(400);
@@ -128,12 +147,16 @@ describe('Bitácora de Proceso · Excel del batch record (2026-11-24)', () => {
     expect(ws.getCell('C1').value).toBe('BATCH RECORD');
     expect(ws.pageSetup.printTitlesRow).toBe('1:8');
     expect(ws.getImages()).toHaveLength(1); // logo de la plantilla
-    expect(String(ws.getCell('A10').value)).toMatch(/^Bitácora BP-0001 · OP 14118 · Turno Mañana/);
+    expect(String(ws.getCell('A10').value)).toMatch(/^Bitácora BP-0001 · PLANTA 2 · OP 14118 · Turno Mañana/);
     const textos: string[] = [];
     ws.eachRow((row) => row.eachCell((c) => textos.push(String(c.value ?? ''))));
     const todo = textos.join('\n');
     expect(todo.indexOf('BP-0001')).toBeLessThan(todo.indexOf('BP-0002'));
     expect(todo).toContain('Texto libre: Cambio de rollo de agrafes');
+    // 2026-11-26: nota de corrección debajo del registro, planta y personal por tipo.
+    expect(todo).toContain('Nota 08:12 (Producción Planta): Me equivoqué, era Alimentación tapón');
+    expect(todo).toContain('Inspectores de calidad: ALVAREZ JUDY');
+    expect(todo).toContain('Operarios: Pepito Pérez');
     expect(todo).toContain('Registró en SynerLink: Producción Planta');
     expect(todo).not.toContain('(registró:');
     expect(todo).toContain('07:00:05'); // hora del servidor en Colombia (UTC−5)
@@ -181,7 +204,7 @@ describe('Bitácora de Proceso · Excel del batch record (2026-11-24)', () => {
     const enc = { producto: 'MEROPENEM', concentracion: '500 mg', lote: '2421626', op: '14118', loteMp: '8MT2606117' };
     const registros = Array.from({ length: 60 }, (_, i) => ({
       id: String(i), actividad: i % 3 ? 'Alimentación de tapones' : 'Control de material particulado en frasco vacío', operador: 'Pepito Pérez', usuario: 'Producción Planta',
-      registradoEn: new Date(Date.UTC(2026, 10, 3, 11, i)).toISOString(), observacion: i % 7 ? null : 'Observación larga del operario para revisar el alto de la fila en la impresión', textoLibre: false,
+      registradoEn: new Date(Date.UTC(2026, 10, 3, 11, i)).toISOString(), observacion: i % 7 ? null : 'Observación larga del operario para revisar el alto de la fila en la impresión', textoLibre: false, notas: [],
     }));
     const ordenes = [1, 2, 3].map((n) => orden(n, `2026-11-0${n}T11:00:00.000Z`, { registros }));
     const buf = await buildBatchRecordXlsx(enc, ordenes);

@@ -1246,10 +1246,10 @@ export default function TableroComercialPage() {
         <div className={s.pager}>
           <span>Página {pg + 1} de {paginas} · {num(detalleFilas.length)} registros</span>
           <div style={{ display: 'flex', gap: 4 }}>
-            <button type='button' disabled={pg === 0} onClick={() => setDtPg(0)}>«</button>
+            <button type='button' disabled={pg === 0} onClick={() => setDtPg(0)}></button>
             <button type='button' disabled={pg === 0} onClick={() => setDtPg(pg - 1)}>‹</button>
             <button type='button' disabled={pg >= paginas - 1} onClick={() => setDtPg(pg + 1)}>›</button>
-            <button type='button' disabled={pg >= paginas - 1} onClick={() => setDtPg(paginas - 1)}>»</button>
+            <button type='button' disabled={pg >= paginas - 1} onClick={() => setDtPg(paginas - 1)}></button>
           </div>
         </div>
         <p className={s.note}>Respeta los filtros de la barra superior. Clic en un cliente, pedido o producto para abrir su ficha.</p>
@@ -1261,7 +1261,7 @@ export default function TableroComercialPage() {
   if (sinAcceso) {
     return (
       <Alert color='yellow' title='Sin acceso' m='md'>
-        No tiene acceso a este tablero. Solicite el permiso «Dashboard de gestión comercial» al administrador.
+        No tiene acceso a este tablero. Solicite el permiso Dashboard de gestión comercial al administrador.
       </Alert>
     );
   }

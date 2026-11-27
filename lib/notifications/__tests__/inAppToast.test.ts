@@ -4,6 +4,8 @@ import {
   addToStack,
   bellSummaryToast,
   newBellNotifications,
+  plainPreview,
+  previewNeedsMedia as previewNeedsMediaForPlain,
   removeFromStack,
   samePage,
   toastFromBellNotification,
@@ -261,5 +263,30 @@ describe('previewNeedsMedia', () => {
     expect(previewNeedsMedia('[GIF: gato bailando]')).toBe(true);
     expect(previewNeedsMedia('Mire el [GIF: x] que le mandé')).toBe(false);
     expect(previewNeedsMedia('Hola')).toBe(false);
+  });
+});
+
+describe('plain-text preview (msg 40593)', () => {
+  it('strips Markdown marks from agent messages', () => {
+    const md = '**PRs de Juan (3)**\n1. **#1165** — `fix` de [firmas](https://x.test/pr/1165)\n- __listo__ ## Resumen';
+    expect(plainPreview(md)).toBe('PRs de Juan (3) #1165 — fix de firmas listo Resumen');
+  });
+
+  it('is applied to every card source', () => {
+    const md = '**Hola** _equipo_ `x`';
+    expect(toastFromProjectEvent({ idConversation: 1, idMessage: 1, authorName: 'A', createdAt: '', muted: false, preview: md })?.preview).not.toMatch(/[*`]/);
+    expect(toastFromBellNotification({ id: 1, title: '**Nueva** tarea', body: md, url: null, created_at: '' }).preview).not.toMatch(/[*`]/);
+    expect(toastFromBellNotification({ id: 1, title: '**Nueva** tarea', body: md, url: null, created_at: '' }).title).toBe('Nueva tarea');
+  });
+
+  it('keeps the sticker/GIF stand-in recognizable', () => {
+    const p = plainPreview('[Sticker: pulgar arriba]');
+    expect(p).toBe('[Sticker: pulgar arriba]');
+    expect(previewNeedsMediaForPlain(p)).toBe(true);
+  });
+
+  it('clips long text', () => {
+    expect(plainPreview('**' + 'a'.repeat(400) + '**')!.length).toBeLessThanOrEqual(160);
+    expect(plainPreview('')).toBeNull();
   });
 });

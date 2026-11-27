@@ -90,7 +90,7 @@ export async function GET(request: NextRequest) {
     const companyId = Number(sp.get('companyId'));
     if (!companyId) return NextResponse.json({ error: 'Falta companyId' }, { status: 400 });
     const a = await salesEndpointForUser(session.user.email, companyId);
-    if (!a?.endpoint) return NextResponse.json({ error: 'Sin acceso a Ventas en esta empresa («Ventas · Ofertas»).' }, { status: 403 });
+    if (!a?.endpoint) return NextResponse.json({ error: 'Sin acceso a Ventas en esta empresa (Ventas · Ofertas).' }, { status: 403 });
     const sap = await sapLogin(a.endpoint);
     try {
       const docEntry = Number(sp.get('docEntry'));

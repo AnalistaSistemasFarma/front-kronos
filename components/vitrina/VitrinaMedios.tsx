@@ -255,7 +255,7 @@ function Detalle({ company, presentacion, avisar }: { company: CompanyAccess; pr
         <Stack gap='xs' mb='md'>
           {data.documentos.length === 0 && (
             <Text size='sm' c='dimmed'>
-              Sin documentos vinculados: la ficha muestra «pendiente de vinculación».
+              Sin documentos vinculados: la ficha muestra pendiente de vinculación.
             </Text>
           )}
           {data.documentos.map((d) => (
