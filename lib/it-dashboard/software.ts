@@ -6,7 +6,28 @@
 export const SOFTWARE_KINDS = [
   { value: 'software', label: 'Software' },
   { value: 'certificado', label: 'Certificado' },
+  { value: 'dominio', label: 'Dominio' },
 ] as const;
+
+/** Days before the expiration date when the notification e-mail is sent. */
+export const NOTIFY_DAYS_BEFORE = 5;
+/** Max notification e-mails per item. */
+export const MAX_NOTIFY_EMAILS = 10;
+
+const EMAIL = /^[^\s@,;]+@[^\s@,;]+\.[^\s@,;]+$/;
+
+/** «a@x.com, b@y.com» or an array → clean, lower-case, unique list. */
+export function parseEmailList(value: unknown): string[] {
+  const raw = Array.isArray(value) ? value.map(String) : String(value ?? '').split(/[,;\s]+/);
+  const out: string[] = [];
+  for (const v of raw) {
+    const e = v.trim().toLowerCase();
+    if (e && !out.includes(e)) out.push(e);
+  }
+  return out;
+}
+
+export const isEmail = (value: string) => EMAIL.test(value) && value.length <= 254;
 
 export const LICENSE_TYPES = [
   { value: 'perpetua', label: 'Perpetua' },
@@ -29,6 +50,8 @@ export interface SoftwareInput {
   assignedTo: string;
   cost: number | null;
   licenseType: LicenseType | '';
+  /** People notified NOTIFY_DAYS_BEFORE days before the expiration date. */
+  notifyEmails: string[];
 }
 
 export interface SoftwareItem extends SoftwareInput {
@@ -36,6 +59,8 @@ export interface SoftwareItem extends SoftwareInput {
   company: string;
   updatedAt: string | null;
   updatedBy: string | null;
+  /** Last notification sent (ISO). */
+  noticeSentAt: string | null;
 }
 
 export const SOFTWARE_TEXT_LIMITS = { description: 300, provider: 100, assignedTo: 200 } as const;
@@ -74,7 +99,7 @@ export function validateSoftwareInput(body: unknown): SoftwareValidation {
   if (!companyId) errors.companyId = 'Elija la empresa';
 
   const kind = asText(src.kind);
-  if (!SOFTWARE_KINDS.some((k) => k.value === kind)) errors.kind = 'Elija Software o Certificado';
+  if (!SOFTWARE_KINDS.some((k) => k.value === kind)) errors.kind = 'Elija Software, Certificado o Dominio';
 
   const description = asText(src.description);
   if (!description) errors.description = 'Escriba la descripción';
@@ -108,6 +133,12 @@ export function validateSoftwareInput(body: unknown): SoftwareValidation {
   const licenseType = asText(src.licenseType);
   if (licenseType && !LICENSE_TYPES.some((l) => l.value === licenseType)) errors.licenseType = 'Tipo de licencia no válido';
 
+  const notifyEmails = parseEmailList(src.notifyEmails);
+  const badEmail = notifyEmails.find((e) => !isEmail(e));
+  if (badEmail) errors.notifyEmails = `Correo no válido: ${badEmail}`;
+  else if (notifyEmails.length > MAX_NOTIFY_EMAILS) errors.notifyEmails = `Máximo ${MAX_NOTIFY_EMAILS} correos`;
+  else if (notifyEmails.length && !expirationDate) errors.notifyEmails = 'Para notificar se necesita la fecha de vencimiento';
+
   if (Object.keys(errors).length) return { ok: false, errors };
   return {
     ok: true,
@@ -122,8 +153,32 @@ export function validateSoftwareInput(body: unknown): SoftwareValidation {
       assignedTo,
       cost: costRaw === null ? null : Math.round((costRaw as number) * 100) / 100,
       licenseType: licenseType as LicenseType | '',
+      notifyEmails,
     },
   };
+}
+
+/** Whole days from today (Bogotá date, YYYY-MM-DD) to the expiration date. */
+export function daysUntil(expirationDate: string, todayIso: string): number {
+  const exp = Date.parse(`${expirationDate.slice(0, 10)}T00:00:00Z`);
+  const t = Date.parse(`${todayIso.slice(0, 10)}T00:00:00Z`);
+  return Math.round((exp - t) / 86400000);
+}
+
+/**
+ * True when the item must be notified today: it expires within the next
+ * NOTIFY_DAYS_BEFORE days (and has not expired) and no notice was sent yet for
+ * this expiration date (a renewal with a new date arms it again; a missed run
+ * still sends it on the following days).
+ */
+export function needsExpiryNotice(
+  item: { expirationDate: string; notifyEmails: string[]; noticeSentFor: string | null },
+  todayIso: string
+): boolean {
+  if (!item.expirationDate || item.notifyEmails.length === 0) return false;
+  if (item.noticeSentFor && item.noticeSentFor.slice(0, 10) === item.expirationDate.slice(0, 10)) return false;
+  const d = daysUntil(item.expirationDate, todayIso);
+  return d >= 0 && d <= NOTIFY_DAYS_BEFORE;
 }
 
 export type ExpiryState = 'expired' | 'soon' | 'ok' | 'none';

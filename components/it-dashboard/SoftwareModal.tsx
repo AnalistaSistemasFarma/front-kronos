@@ -14,6 +14,7 @@ import {
   Skeleton,
   Stack,
   Table,
+  TagsInput,
   Text,
   TextInput,
   ThemeIcon,
@@ -23,6 +24,7 @@ import {
 import {
   IconAlertCircle,
   IconArrowLeft,
+  IconBell,
   IconCheck,
   IconDeviceFloppy,
   IconEdit,
@@ -31,6 +33,9 @@ import {
 } from '@tabler/icons-react';
 import {
   LICENSE_TYPES,
+  MAX_NOTIFY_EMAILS,
+  NOTIFY_DAYS_BEFORE,
+  isEmail,
   SOFTWARE_KINDS,
   SOFTWARE_TEXT_LIMITS,
   expiryState,
@@ -60,6 +65,7 @@ const EMPTY_FORM: FormState = {
   assignedTo: '',
   cost: '',
   licenseType: '',
+  notifyEmails: [],
 };
 
 function ExpiryBadge({ date }: { date: string }) {
@@ -104,6 +110,7 @@ function SoftwareForm({
           assignedTo: initial.assignedTo,
           cost: initial.cost ?? '',
           licenseType: initial.licenseType,
+          notifyEmails: initial.notifyEmails,
         }
       : { ...EMPTY_FORM, companyId: lockedCompanyId ? String(lockedCompanyId) : '' }
   );
@@ -242,6 +249,28 @@ function SoftwareForm({
           onChange={(v) => set('licenseType', (v ?? '') as FormState['licenseType'])}
           error={errors.licenseType}
           clearable
+          comboboxProps={{ zIndex: 500, withinPortal: true }}
+        />
+        <TagsInput
+          label='Correos de notificación'
+          description={`Se les envía un aviso ${NOTIFY_DAYS_BEFORE} días antes del vencimiento`}
+          placeholder={form.notifyEmails.length ? '' : 'correo@empresa.com y Enter'}
+          value={form.notifyEmails}
+          onChange={(values) => {
+            const clean = values.map((v) => v.trim().toLowerCase()).filter(Boolean);
+            setErrors((cur) => ({ ...cur, notifyEmails: undefined }));
+            const bad = clean.find((v) => !isEmail(v));
+            if (bad) {
+              setErrors((cur) => ({ ...cur, notifyEmails: `Correo no válido: ${bad}` }));
+              return;
+            }
+            set('notifyEmails', Array.from(new Set(clean)));
+          }}
+          splitChars={[',', ';', ' ']}
+          maxTags={MAX_NOTIFY_EMAILS}
+          clearable
+          leftSection={<IconBell size={16} />}
+          error={errors.notifyEmails}
           comboboxProps={{ zIndex: 500, withinPortal: true }}
         />
       </SimpleGrid>
@@ -404,6 +433,7 @@ export default function SoftwareModal({
                     <Table.Th>Compra</Table.Th>
                     <Table.Th>Vencimiento</Table.Th>
                     <Table.Th ta='right'>Costo</Table.Th>
+                    <Table.Th>Aviso</Table.Th>
                     <Table.Th aria-label='Editar' />
                   </Table.Tr>
                 </Table.Thead>
@@ -411,7 +441,7 @@ export default function SoftwareModal({
                   {items.map((i) => (
                     <Table.Tr key={i.id}>
                       <Table.Td>
-                        <Badge variant='light' color={i.kind === 'certificado' ? 'grape' : 'blue'}>
+                        <Badge variant='light' color={i.kind === 'certificado' ? 'grape' : i.kind === 'dominio' ? 'teal' : 'blue'}>
                           {kindLabel(i.kind)}
                         </Badge>
                       </Table.Td>
@@ -430,6 +460,22 @@ export default function SoftwareModal({
                         <ExpiryBadge date={i.expirationDate} />
                       </Table.Td>
                       <Table.Td ta='right'>{i.cost == null ? '—' : formatMoney(i.cost)}</Table.Td>
+                      <Table.Td>
+                        {i.notifyEmails.length ? (
+                          <Tooltip
+                            label={`${i.notifyEmails.join(', ')}${i.noticeSentAt ? ` · último aviso ${formatDate(i.noticeSentAt)}` : ''}`}
+                            withArrow
+                            multiline
+                            maw={320}
+                          >
+                            <Badge size='sm' variant='light' color='blue' leftSection={<IconBell size={12} />}>
+                              {i.notifyEmails.length}
+                            </Badge>
+                          </Tooltip>
+                        ) : (
+                          '—'
+                        )}
+                      </Table.Td>
                       <Table.Td>
                         <Tooltip label='Editar' withArrow>
                           <ActionIcon variant='subtle' aria-label={`Editar ${i.description}`} onClick={() => setMode(i)}>
