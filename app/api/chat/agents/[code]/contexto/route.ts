@@ -112,12 +112,12 @@ export async function POST(request: NextRequest, { params }: Params) {
 
     if (!(await puedeLimpiar(user.email, agente.code))) {
       return jsonNoStore(
-        { error: 'Limpiar el contexto requiere el permiso «Auditoría de agentes · Configurar» sobre este agente.' },
+        { error: 'Limpiar el contexto requiere el permiso Auditoría de agentes · Configurar sobre este agente.' },
         { status: 403 }
       );
     }
     const body = await readJsonBody(request);
-    if (!body || body.confirmar !== true) return badRequest('Falta la confirmación («confirmar»: true).');
+    if (!body || body.confirmar !== true) return badRequest('Falta la confirmación (confirmar: true).');
 
     const idConversation = await conversacionPropia(body.conversacion, user.id, agente.idAgent);
     const contexto = await leerContexto(agente.idAgent, idConversation);

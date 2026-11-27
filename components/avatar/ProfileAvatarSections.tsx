@@ -238,7 +238,7 @@ export function AvataresAgentesSection({ onResultado }: { onResultado: (r: Resul
       </Title>
       <Text size='sm' c='dimmed' mb='md'>
         Asistentes del chat de los que usted es responsable (o todos, si es administrador). Su avatar es estilo Notion (DiceBear ·
-        Lorelei), siempre sonriente; en «Cabeza», además de las cuatro de persona, puede elegir un animal, planeta, constelación,
+        Lorelei), siempre sonriente; en Cabeza, además de las cuatro de persona, puede elegir un animal, planeta, constelación,
         estrella o robot, y sobre él se siguen poniendo ojos, boca, gafas, pelo y demás. Si aún no tiene, el editor arranca con el
         que sale de su nombre. El cambio lo ve toda la empresa.
       </Text>

@@ -169,7 +169,7 @@ export default function TarjetaAccionCorreo({ accion, onCambio }: { accion: Acci
                 {TITULO[a.tipo]}
               </Text>
               <Text size='xs' c='dimmed' truncate>
-                {a.agente} · hilo «{a.asunto || '(Sin asunto)'}»
+                {a.agente} · hilo {a.asunto || '(Sin asunto)'}
               </Text>
             </Stack>
           </Group>

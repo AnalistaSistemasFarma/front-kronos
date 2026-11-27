@@ -38,7 +38,7 @@ for (const oscuro of [false, true]) {
       await sesion(context, baseURL!);
     });
 
-    test('cápsula: «+» a la izquierda, caja al centro, enviar redondo a la derecha; formato arriba', async ({ page }) => {
+    test('cápsula: + a la izquierda, caja al centro, enviar redondo a la derecha; formato arriba', async ({ page }) => {
       await simularChat(page, { gif: true, oscuro, misStickers: true });
       await page.goto('/process/chat?agent=horus');
       await expect(hilo(page).getByText('quedó en SharePoint')).toBeVisible();
@@ -110,7 +110,7 @@ for (const oscuro of [false, true]) {
   });
 }
 
-test.describe('Chat · «Mis stickers» · escritorio', () => {
+test.describe('Chat · Mis stickers · escritorio', () => {
   test.skip(!SECRET || REMOTO, 'Requiere NEXTAUTH_SECRET del servidor local (CI) para firmar la sesión de prueba.');
   test.use({ viewport: { width: 1440, height: 900 } });
 
@@ -140,7 +140,7 @@ test.describe('Chat · «Mis stickers» · escritorio', () => {
     await ventana.getByLabel('Nombre').fill('¡Bravo, equipo!');
     await capturar(page, 'escritorio-6-mis-stickers-cargar');
     await ventana.getByRole('button', { name: 'Guardar' }).click();
-    await expect(ventana.getByText('Sticker agregado a «Mis stickers».')).toBeVisible();
+    await expect(ventana.getByText('Sticker agregado a Mis stickers.')).toBeVisible();
     expect(estado.subidos).toBe(1);
     await expect(ventana.getByText('¡Bravo, equipo!')).toBeVisible();
 
@@ -152,7 +152,7 @@ test.describe('Chat · «Mis stickers» · escritorio', () => {
     await expect(ventana.getByText('Laura · para ONE LATAM PHARMA')).toBeVisible();
     await capturar(page, 'escritorio-7-mis-stickers-propuesta');
     await ventana.getByRole('button', { name: 'Aprobar' }).click();
-    await expect(ventana.getByText('«¡Bravo, equipo!» quedó como sticker de ONE LATAM PHARMA.')).toBeVisible();
+    await expect(ventana.getByText('¡Bravo, equipo! quedó como sticker de ONE LATAM PHARMA.')).toBeVisible();
     expect(estado.revisiones.at(-1)).toEqual({ id: 501, accion: 'aprobar' });
     await page.keyboard.press('Escape');
 
@@ -176,7 +176,7 @@ for (const oscuro of [false, true]) {
       await sesion(context, baseURL!);
     });
 
-    test('la misma cápsula: «+» con adjuntar, emoji y formato; enviar redondo a la derecha', async ({ page }) => {
+    test('la misma cápsula: + con adjuntar, emoji y formato; enviar redondo a la derecha', async ({ page }) => {
       await simularChat(page, { gif: true, oscuro, misStickers: true });
       await page.goto('/process/chat?agent=horus');
       await expect(hilo(page).getByText('quedó en SharePoint')).toBeVisible();

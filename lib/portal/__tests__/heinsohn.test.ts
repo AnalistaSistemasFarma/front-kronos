@@ -55,7 +55,7 @@ describe('leerConfigHeinsohn', () => {
     expect(c.ruta).toEqual(['HEINSOHN NOMINA', 'PORTAL NOMINA.xlsx']);
     expect(c.clientId).toBe('c');
   });
-  it('PORTAL_TH_SP_HEINSOHN la cambia; rutas peligrosas se rechazan; sin variables de SharePoint, «no configurado»', () => {
+  it('PORTAL_TH_SP_HEINSOHN la cambia; rutas peligrosas se rechazan; sin variables de SharePoint, no configurado', () => {
     expect(leerConfigHeinsohn({ ...ENV, PORTAL_TH_SP_HEINSOHN: 'NOMINA/Otra.xlsx' } as NodeJS.ProcessEnv).ruta).toEqual(['NOMINA', 'Otra.xlsx']);
     for (const mala of ['..', '../x.xlsx', 'A//B.xlsx', '/A.xlsx', 'A:B.xlsx', 'A/B/C/D/E.xlsx']) {
       expect(() => leerConfigHeinsohn({ ...ENV, PORTAL_TH_SP_HEINSOHN: mala } as NodeJS.ProcessEnv), mala).toThrow(FormacionStorageNoConfigurado);
@@ -96,8 +96,8 @@ describe('empresasDesdeHoja', () => {
   it('encuentra las columnas por su nombre aunque cambien de orden, tildes o mayúsculas', () => {
     expect(ubicarColumnasHeinsohn(['link de acceso', 'Empresa'])).toEqual({ empresa: 1, enlace: 0 });
     expect(ubicarColumnasHeinsohn(['Empresa', 'Enlace'])).toEqual({ empresa: 0, enlace: 1 });
-    expect(() => ubicarColumnasHeinsohn(['X', 'LINK'])).toThrow(/«EMPRESA»/);
-    expect(() => ubicarColumnasHeinsohn(['EMPRESA', 'X'])).toThrow(/«LINK DE ACCESO»/);
+    expect(() => ubicarColumnasHeinsohn(['X', 'LINK'])).toThrow(/EMPRESA/);
+    expect(() => ubicarColumnasHeinsohn(['EMPRESA', 'X'])).toThrow(/LINK DE ACCESO/);
   });
   it('hoja vacía o solo con encabezado: lista vacía', () => {
     expect(empresasDesdeHoja([])).toEqual({ empresas: [], omitidas: [] });

@@ -179,14 +179,14 @@ export async function GET(request: NextRequest) {
       const pisa = await basePisa();
       if (!pisa) {
         avisos.push(
-          'Aún no hay base de ventas de Pisa: suba «Historico Ventas Pisa.xlsx» a la pestaña Archivos del proyecto para sumarla. Se muestra solo la venta de OLP (SAP).'
+          'Aún no hay base de ventas de Pisa: suba Historico Ventas Pisa.xlsx a la pestaña Archivos del proyecto para sumarla. Se muestra solo la venta de OLP (SAP).'
         );
       } else {
         filas = filas.concat(pisaEnRango(pisa.filas, r.actual.desde, r.actual.hasta));
         filasAnterior = filasAnterior.concat(pisaEnRango(pisa.filas, r.anterior.desde, r.anterior.hasta));
         filasAnio = filasAnio.concat(pisaEnRango(pisa.filas, r.anioAnterior.desde, r.anioAnterior.hasta));
         avisos.push(
-          `Incluye la venta directa de Pisa (ERP) del archivo «${pisa.archivo}» (datos hasta el ${pisa.hasta}), sin lo facturado a ONE LATAM PHARMA. ` +
+          `Incluye la venta directa de Pisa (ERP) del archivo ${pisa.archivo} (datos hasta el ${pisa.hasta}), sin lo facturado a ONE LATAM PHARMA. ` +
             'Pase el cursor sobre la venta para ver el detalle OLP / Pisa.'
         );
         if (pisa.hasta && r.actual.hasta > pisa.hasta) {
@@ -199,7 +199,7 @@ export async function GET(request: NextRequest) {
     }
     avisos.push('El número de documento que se muestra es el del asiento contable: la vista de SAP no entrega hoy el número de factura de forma confiable.');
     if (esquema === 'viejo') {
-      avisos.push('La vista de ventas de esta empresa está en su versión anterior: línea terapéutica, ciudad y pedidos quedan «No disponible».');
+      avisos.push('La vista de ventas de esta empresa está en su versión anterior: línea terapéutica, ciudad y pedidos quedan No disponible.');
     }
     if (filas.length >= CAP) avisos.push(`Se alcanzó el tope de ${CAP.toLocaleString('es-CO')} líneas; el mes puede estar incompleto.`);
 

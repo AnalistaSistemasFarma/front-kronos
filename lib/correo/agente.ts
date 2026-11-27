@@ -648,7 +648,7 @@ export async function confirmarAccion(d: CorreoDeps, px: AgentePort, acceso: Acc
       ejecutado = true;
       idRequest = r.notaEnSolicitud;
       resultado = `Respuesta${todos ? ' a todos' : ''} enviada desde su buzón${r.notaEnSolicitud ? `; quedó como nota en la solicitud #${r.notaEnSolicitud}` : ''}.`;
-      informe = `✅ Envié desde mi buzón la respuesta que me propuso${editada ? ' (con mis ajustes)' : ''} en el hilo «${a.share.asunto ?? ''}».`;
+      informe = `✅ Envié desde mi buzón la respuesta que me propuso${editada ? ' (con mis ajustes)' : ''} en el hilo ${a.share.asunto ?? ''}.`;
     } else if (a.tipo === 'SOLICITUD') {
       const s = prop.solicitud!;
       const prov = await proveedorDe(d, acceso);
@@ -675,7 +675,7 @@ export async function confirmarAccion(d: CorreoDeps, px: AgentePort, acceso: Acc
       idRequest = r.idRequest ?? null;
       const acuse = r.acuse ? (r.acuse.estado === 'ENVIADO' || r.acuse.estado === 'YA_ENVIADO' ? ' Se informó en el hilo.' : ` No se informó en el hilo: ${r.acuse.mensaje ?? r.acuse.estado}.`) : '';
       resultado = `Solicitud #${idRequest} creada y vinculada al hilo.${acuse}`.slice(0, 1000);
-      informe = `✅ Creé la solicitud #${idRequest} desde el hilo «${a.share.asunto ?? ''}», como me propuso${editada ? ' (con mis ajustes)' : ''}.`;
+      informe = `✅ Creé la solicitud #${idRequest} desde el hilo ${a.share.asunto ?? ''}, como me propuso${editada ? ' (con mis ajustes)' : ''}.`;
     } else {
       const textoNota = String(edicion.texto ?? prop.nota!.texto).trim();
       if (textoNota.length < 2) throw new CorreoError('Escriba la nota.', 400);
@@ -762,7 +762,7 @@ export async function descartarAccion(d: CorreoDeps, px: AgentePort, acceso: Acc
     })
   );
   const que = a.tipo === 'RESPUESTA' ? 'la respuesta' : a.tipo === 'SOLICITUD' ? 'la solicitud' : 'la nota';
-  await informarAlAgente(px, a, acceso, `✖️ Descarté ${que} que me propuso para el hilo «${a.share.asunto ?? ''}». No se envió ni se creó nada.`, t);
+  await informarAlAgente(px, a, acceso, `✖️ Descarté ${que} que me propuso para el hilo ${a.share.asunto ?? ''}. No se envió ni se creó nada.`, t);
   return { estado: 'DESCARTADA', resultado: 'Descartada por la persona.', idRequest: null };
 }
 

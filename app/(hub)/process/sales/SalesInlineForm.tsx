@@ -337,7 +337,7 @@ export default function SalesInlineForm({ companyId, onDone, editDocEntry, initi
   if (readiness === 'no-write') {
     return (
       <Alert color="yellow" title="Oferta de venta">
-        No tiene permiso para crear ofertas de venta en esta empresa («Ventas · Gestionar ofertas»).
+        No tiene permiso para crear ofertas de venta en esta empresa (Ventas · Gestionar ofertas).
       </Alert>
     );
   }
@@ -364,7 +364,7 @@ export default function SalesInlineForm({ companyId, onDone, editDocEntry, initi
     const revisar = (r.lines as Line[]).filter((l) => String(l.aiNote ?? '').startsWith('Revisar')).length;
     setPdfAvisos([
       `Oferta montada desde el PDF: ${r.customer.CardName} · ${r.lines.length} línea(s)${r.leidas && r.leidas !== r.lines.length ? ` de ${r.leidas} leídas en el PDF` : ''}${r.numeroOrdenCompra ? ` · OC ${r.numeroOrdenCompra}` : ''}.`,
-      ...(revisar ? [`${revisar} línea(s) marcadas «Revisar»: la IA eligió el artículo por la descripción y hay otros parecidos.`] : []),
+      ...(revisar ? [`${revisar} línea(s) marcadas Revisar: la IA eligió el artículo por la descripción y hay otros parecidos.`] : []),
       ...(!r.fechaEntrega || r.fechaEntrega < today() ? ['El PDF no trae una fecha de entrega válida: indíquela.'] : []),
       ...r.avisos,
     ]);
@@ -455,7 +455,7 @@ export default function SalesInlineForm({ companyId, onDone, editDocEntry, initi
         </Text>
       )}
       <Text size="xs" c="dimmed">
-        Consejo: escriba «*» y Enter (o use la lupa) en cliente, artículo o bodega para abrir la búsqueda ampliada, como en SAP.
+        Consejo: escriba * y Enter (o use la lupa) en cliente, artículo o bodega para abrir la búsqueda ampliada, como en SAP.
       </Text>
       <Group grow align="flex-start">
         <Textarea label="Comentarios" description="Si lo deja vacío se usa el asunto automático." autosize minRows={2} maxLength={254} value={comments} onChange={(e) => setComments(e.currentTarget.value)} />
@@ -482,7 +482,7 @@ export default function SalesInlineForm({ companyId, onDone, editDocEntry, initi
         </Group>
         {sinBodega > 0 && (
           <Alert color="orange" variant="light" p="xs" mb={6}>
-            {sinBodega} línea(s) sin bodega. Elija la bodega arriba y use «Asignar a las líneas sin bodega».
+            {sinBodega} línea(s) sin bodega. Elija la bodega arriba y use Asignar a las líneas sin bodega.
           </Alert>
         )}
         <ScrollArea type="auto" offsetScrollbars>

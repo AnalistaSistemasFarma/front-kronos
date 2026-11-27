@@ -84,7 +84,7 @@ export default function PasskeysSection({ onResultado }: { onResultado: (r: Resu
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || 'No se pudo registrar el dispositivo');
       setName('');
-      onResultado({ tipo: 'ok', mensaje: `Listo: ya puede entrar con el biométrico de «${data.passkey?.name ?? 'este dispositivo'}».` });
+      onResultado({ tipo: 'ok', mensaje: `Listo: ya puede entrar con el biométrico de ${data.passkey?.name ?? 'este dispositivo'}.` });
       await load();
     } catch (err) {
       onResultado({ tipo: 'error', mensaje: mensajeRegistro(err) });
@@ -94,13 +94,13 @@ export default function PasskeysSection({ onResultado }: { onResultado: (r: Resu
   };
 
   const eliminar = async (item: PasskeyItem) => {
-    if (!window.confirm(`¿Eliminar «${item.name}»? Ese dispositivo ya no podrá entrar con biométrico.`)) return;
+    if (!window.confirm(`¿Eliminar ${item.name}? Ese dispositivo ya no podrá entrar con biométrico.`)) return;
     setDeleting(item.id);
     try {
       const res = await fetch(`/api/passkeys/${item.id}`, { method: 'DELETE' });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || 'No se pudo eliminar el dispositivo');
-      onResultado({ tipo: 'ok', mensaje: `Se eliminó «${item.name}».` });
+      onResultado({ tipo: 'ok', mensaje: `Se eliminó ${item.name}.` });
       await load();
     } catch (err) {
       onResultado({ tipo: 'error', mensaje: err instanceof Error ? err.message : 'Error inesperado' });

@@ -178,7 +178,7 @@ export default function EditorMarkdown({ value, onChange, placeholder, disabled,
         </Tabs.Panel>
       </Tabs>
       <Text size='xs' c='dimmed' mt={4}>
-        Formato: **negrita**, *cursiva*, «- » para listas y [texto](https://…) para enlaces.{pegarTablas ? ' Puede pegar tablas de Excel, Word u Outlook.' : ''}
+        Formato: **negrita**, *cursiva*, -  para listas y [texto](https://…) para enlaces.{pegarTablas ? ' Puede pegar tablas de Excel, Word u Outlook.' : ''}
       </Text>
     </Box>
   );

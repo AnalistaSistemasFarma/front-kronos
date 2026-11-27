@@ -122,7 +122,7 @@ export default function OtListado({ company }: { company: OtCompanyAccess }) {
         <Card withBorder radius='md' p='lg'>
           <Text c='dimmed'>
             No hay bitácoras abiertas{buscar ? ' que coincidan' : ''}.
-            {puedeAbrir ? ' Abra una con «Nueva bitácora».' : ' El supervisor o el jefe de producción debe abrir la bitácora del turno.'}
+            {puedeAbrir ? ' Abra una con Nueva bitácora.' : ' El supervisor o el jefe de producción debe abrir la bitácora del turno.'}
           </Text>
         </Card>
       ) : (

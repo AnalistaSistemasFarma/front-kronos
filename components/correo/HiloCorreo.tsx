@@ -477,7 +477,7 @@ export default function HiloCorreo({
     if (!ultimo || !texto.trim()) return;
     const grande = archivos.find((f) => f.size > CORREO_MAX_ADJUNTO_RESPUESTA_BYTES);
     if (grande) {
-      setResultado({ color: 'red', texto: `«${grande.name}» pesa más de 3 MB.` });
+      setResultado({ color: 'red', texto: `${grande.name} pesa más de 3 MB.` });
       return;
     }
     setEnviando(true);

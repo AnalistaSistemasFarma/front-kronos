@@ -73,7 +73,7 @@ export interface FilaTurno {
 /** Regla PURA: ¿el mensaje prueba quién le escribe a este agente en su chat normal? Devuelve el motivo del rechazo o null. */
 export function motivoRechazoTurno(f: FilaTurno | undefined, idAgent: number): string | null {
   if (!f) return 'el mensaje no existe en esa conversación';
-  if (f.kind !== 'direct' && f.kind !== 'group') return `la conversación es de tipo «${f.kind}», no del chat normal`;
+  if (f.kind !== 'direct' && f.kind !== 'group') return `la conversación es de tipo ${f.kind}, no del chat normal`;
   if (f.conv_archived === true || f.conv_archived === 1) return 'la conversación está archivada';
   if (f.role !== 'user' || !f.id_user_author) return 'el mensaje no lo escribió una persona';
   if (!(f.reciente === 1 || f.reciente === true)) return 'el mensaje es antiguo';

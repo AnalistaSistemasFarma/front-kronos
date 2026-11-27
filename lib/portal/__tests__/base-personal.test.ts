@@ -56,7 +56,7 @@ describe('leerConfigBasePersonal', () => {
     expect(c.ruta).toEqual(['CONTACTOS', 'BASE PERSONAL.xlsx']);
     expect(c.clientId).toBe('c');
   });
-  it('PORTAL_TH_SP_BASE_PERSONAL la cambia; rutas peligrosas se rechazan; sin variables de SharePoint, «no configurado»', () => {
+  it('PORTAL_TH_SP_BASE_PERSONAL la cambia; rutas peligrosas se rechazan; sin variables de SharePoint, no configurado', () => {
     expect(leerConfigBasePersonal({ ...ENV, PORTAL_TH_SP_BASE_PERSONAL: 'OTRA/Base.xlsx' } as NodeJS.ProcessEnv).ruta).toEqual(['OTRA', 'Base.xlsx']);
     for (const mala of ['..', '../x.xlsx', 'A//B.xlsx', '/A.xlsx', 'A:B.xlsx', 'A/B/C/D/E.xlsx']) {
       expect(() => leerConfigBasePersonal({ ...ENV, PORTAL_TH_SP_BASE_PERSONAL: mala } as NodeJS.ProcessEnv), mala).toThrow(FormacionStorageNoConfigurado);
@@ -83,7 +83,7 @@ describe('personasDesdeHoja', () => {
   });
   it('sin la columna de estado, no descarta a nadie; sin otra necesaria, avisa cuál falta', () => {
     expect(personasDesdeHoja([['Empresa', 'Apellidos y Nombres', 'Área / Dependencia', 'Cargo', 'Correo corporativo'], ['Kelab', 'ANA', 'X', 'JEFE', '']])).toHaveLength(1);
-    expect(() => ubicarColumnas(['Empresa', 'Apellidos y Nombres', 'Área / Dependencia', 'Correo corporativo'])).toThrow(/columna «CARGO»/);
+    expect(() => ubicarColumnas(['Empresa', 'Apellidos y Nombres', 'Área / Dependencia', 'Correo corporativo'])).toThrow(/columna CARGO/);
   });
   it('una hoja vacía o solo con encabezado da una lista vacía', () => {
     expect(personasDesdeHoja([])).toEqual([]);

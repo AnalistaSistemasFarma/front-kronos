@@ -49,13 +49,13 @@ export async function POST(request: NextRequest) {
     const body = await readJsonBody(request);
     if (!body) return badRequest('El cuerpo debe ser un objeto JSON.');
     const semana = esDia(body.semana) ? body.semana : null;
-    if (!semana) return badRequest('Falta «semana» (YYYY-MM-DD).');
+    if (!semana) return badRequest('Falta semana (YYYY-MM-DD).');
     if (!Array.isArray(body.resumenes) || body.resumenes.length === 0 || body.resumenes.length > 200) {
-      return badRequest('«resumenes» debe ser una lista de 1 a 200 elementos.');
+      return badRequest('resumenes debe ser una lista de 1 a 200 elementos.');
     }
     const items: { code: string; summary: string; model: string | null; inputHash: string | null }[] = [];
     for (const r of body.resumenes as Record<string, unknown>[]) {
-      if (!r || typeof r.code !== 'string' || !r.code.trim()) return badRequest('Cada resumen necesita «code».');
+      if (!r || typeof r.code !== 'string' || !r.code.trim()) return badRequest('Cada resumen necesita code.');
       try {
         items.push({
           code: r.code.trim().toLowerCase().slice(0, 60),

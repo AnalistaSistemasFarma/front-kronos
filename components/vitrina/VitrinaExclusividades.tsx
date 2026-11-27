@@ -31,7 +31,7 @@ export default function VitrinaExclusividades({ company, version, avisar }: { co
     setBusy(true);
     try {
       await vitrinaSend(`/api/vitrina/gestion/exclusividades/${borrar.id}?company=${company.idCompany}`, 'DELETE');
-      avisar(true, `Exclusividad de «${borrar.clienteBeneficiario}» eliminada (queda en el historial).`);
+      avisar(true, `Exclusividad de ${borrar.clienteBeneficiario} eliminada (queda en el historial).`);
       setBorrar(null);
       await reload(true);
     } catch (e) {
@@ -120,7 +120,7 @@ export default function VitrinaExclusividades({ company, version, avisar }: { co
       <Modal opened={Boolean(borrar)} onClose={() => setBorrar(null)} title='Eliminar exclusividad' radius='md'>
         <Stack gap='sm'>
           <Text>
-            ¿Eliminar la exclusividad de «{borrar?.clienteBeneficiario}» sobre {borrar?.presentacion}? Quedará registrada en el historial.
+            ¿Eliminar la exclusividad de {borrar?.clienteBeneficiario} sobre {borrar?.presentacion}? Quedará registrada en el historial.
           </Text>
           <Group justify='flex-end' gap='sm'>
             <Button variant='default' onClick={() => setBorrar(null)}>
@@ -158,7 +158,7 @@ function ExclusividadModal({ idCompany, actual, onClose, onSaved }: { idCompany:
     try {
       if (actual) await vitrinaSend(`/api/vitrina/gestion/exclusividades/${actual.id}`, 'PATCH', body);
       else await vitrinaSend('/api/vitrina/gestion/exclusividades', 'POST', body);
-      onSaved(actual ? `Exclusividad de «${cliente.trim()}» actualizada.` : `Exclusividad de «${cliente.trim()}» registrada.`);
+      onSaved(actual ? `Exclusividad de ${cliente.trim()} actualizada.` : `Exclusividad de ${cliente.trim()} registrada.`);
     } catch (e) {
       setError(errorTexto(e));
     } finally {

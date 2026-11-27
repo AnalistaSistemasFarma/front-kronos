@@ -305,8 +305,8 @@ export function motivoNoFusionar(pr, { base, rutasPermitidas, checksRequeridos =
   const checks = pr.statusCheckRollup ?? [];
   for (const nombre of checksRequeridos) {
     const c = checks.filter((x) => (x.name ?? x.context) === nombre);
-    if (c.length === 0) return `falta el check «${nombre}».`;
-    if (!c.every((x) => (x.conclusion ?? x.state) === 'SUCCESS')) return `el check «${nombre}» no está en verde (${c.map((x) => x.conclusion ?? x.status ?? x.state).join(', ')}). Consulte con gh pr checks <n> (sin --watch); si sigue en curso, dígaselo a la persona y reintente la fusión en el siguiente mensaje.`;
+    if (c.length === 0) return `falta el check ${nombre}.`;
+    if (!c.every((x) => (x.conclusion ?? x.state) === 'SUCCESS')) return `el check ${nombre} no está en verde (${c.map((x) => x.conclusion ?? x.status ?? x.state).join(', ')}). Consulte con gh pr checks <n> (sin --watch); si sigue en curso, dígaselo a la persona y reintente la fusión en el siguiente mensaje.`;
   }
   return null;
 }

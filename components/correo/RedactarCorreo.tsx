@@ -96,7 +96,7 @@ export default function RedactarCorreo({ abierto, desktop, correoOperador, domin
     if (r.error) return setError(r.error);
     if (!texto.trim() && !asunto.trim() && !archivos.length) return setError('Escriba el asunto o el mensaje.');
     const grande = archivos.find((f) => f.size > CORREO_MAX_ADJUNTO_RESPUESTA_BYTES);
-    if (grande) return setError(`«${grande.name}» pesa más de 3 MB. Compártalo como enlace de OneDrive o SharePoint.`);
+    if (grande) return setError(`${grande.name} pesa más de 3 MB. Compártalo como enlace de OneDrive o SharePoint.`);
     if (archivos.some((f) => f.size === 0)) return setError('Hay un adjunto vacío.');
     if (archivos.reduce((s, f) => s + f.size, 0) > CORREO_MAX_TOTAL_RESPUESTA_BYTES) return setError('Los adjuntos suman más de 10 MB.');
     if (!asunto.trim() && !sinAsuntoConfirmado) return setConfirmarSinAsunto(true);

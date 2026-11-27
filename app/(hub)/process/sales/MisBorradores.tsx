@@ -98,7 +98,7 @@ export default function MisBorradores() {
       {drafts === null ? (
         <Loader size='sm' />
       ) : drafts.length === 0 ? (
-        <Text size='sm' c='dimmed'>No tiene ofertas guardadas en borrador. Al crear una oferta, apague «Enviar a autorización al crear» para guardarla aquí.</Text>
+        <Text size='sm' c='dimmed'>No tiene ofertas guardadas en borrador. Al crear una oferta, apague Enviar a autorización al crear para guardarla aquí.</Text>
       ) : (
         <ScrollArea type='auto'>
           <Table striped verticalSpacing='xs' style={{ minWidth: 980 }}>

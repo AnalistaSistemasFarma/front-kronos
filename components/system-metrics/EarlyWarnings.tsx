@@ -87,7 +87,7 @@ export function EarlyWarnings({
                     <div className={styles.insightDetail}>
                       {formatDateTime(a.raisedAt)} · {formatAgo(a.raisedAt)} ·{' '}
                       {a.notified === 0
-                        ? 'no se envió: nadie activó «Recibir alertas»'
+                        ? 'no se envió: nadie activó Recibir alertas'
                         : a.notified === 1
                           ? 'enviada a 1 persona'
                           : `enviada a ${a.notified} personas`}

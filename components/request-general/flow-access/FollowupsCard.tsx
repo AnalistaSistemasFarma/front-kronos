@@ -111,13 +111,13 @@ export function FollowupsCard({ processId }: { processId: number }) {
           <Stack gap={4}>
             <Text size='sm'>
               {data.tracking
-                ? `Fechas comprometidas en «${data.tableFields.find((f) => f.id === data.tracking!.idFormField)?.label ?? 'tabla'}»: aviso ${data.tracking.warnBusinessDays} días hábiles antes y al vencer${data.tracking.singleExtension ? '; una sola prórroga' : ''}.`
+                ? `Fechas comprometidas en ${data.tableFields.find((f) => f.id === data.tracking!.idFormField)?.label ?? 'tabla'}: aviso ${data.tracking.warnBusinessDays} días hábiles antes y al vencer${data.tracking.singleExtension ? '; una sola prórroga' : ''}.`
                 : 'Sin seguimiento de fechas comprometidas.'}
             </Text>
             {data.calendarField ? (
               <Text size='sm'>
-                Cronograma anual por «{data.dateFields.find((f) => f.id === data.calendarField)?.label}»
-                {data.calendarGroupField ? ` y «${data.selectFields.find((f) => f.id === data.calendarGroupField)?.label}»` : ''}.{' '}
+                Cronograma anual por {data.dateFields.find((f) => f.id === data.calendarField)?.label}
+                {data.calendarGroupField ? ` y ${data.selectFields.find((f) => f.id === data.calendarGroupField)?.label}` : ''}.{' '}
                 <Anchor component={Link} href={`/process/request-general/cronograma?id=${processId}`} size='sm'>
                   Ver cronograma
                 </Anchor>
@@ -125,7 +125,7 @@ export function FollowupsCard({ processId }: { processId: number }) {
             ) : null}
             {delayed.map((t) => (
               <Text key={t.id} size='sm'>
-                «{t.task}» se activa {t.startDelayDays} día(s) después de cerrarse la tarea anterior.
+                {t.task} se activa {t.startDelayDays} día(s) después de cerrarse la tarea anterior.
               </Text>
             ))}
           </Stack>

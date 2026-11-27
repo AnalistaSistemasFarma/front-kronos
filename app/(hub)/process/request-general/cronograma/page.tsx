@@ -78,7 +78,7 @@ function Contenido() {
 
       {error && <Alert color='red'>{error}</Alert>}
       {!data && !error && <Loader />}
-      {data && !data.configured && <Alert color='orange'>Este flujo no tiene cronograma: en el editor del flujo, «Seguimiento de fechas», elija el campo de fecha programada.</Alert>}
+      {data && !data.configured && <Alert color='orange'>Este flujo no tiene cronograma: en el editor del flujo, Seguimiento de fechas, elija el campo de fecha programada.</Alert>}
 
       {data?.configured && (
         <Card withBorder radius='md' p={0}>

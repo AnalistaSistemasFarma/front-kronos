@@ -435,7 +435,7 @@ export async function reintentarMensaje(idIssue: number, email: string): Promise
         return {
           ok: false,
           status: 409,
-          motivo: `El error es del ambiente «${String(f.ambiente)}»; el reintento solo se hace desde ese ambiente.`,
+          motivo: `El error es del ambiente ${String(f.ambiente)}; el reintento solo se hace desde ese ambiente.`,
         };
       const tx = new sql.Transaction(pool);
       await tx.begin();

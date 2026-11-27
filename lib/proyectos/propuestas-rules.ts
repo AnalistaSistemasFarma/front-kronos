@@ -177,7 +177,7 @@ export function resumenPropuesta(p: Payload, extra: { tituloTarea?: string | nul
   switch (p.kind) {
     case 'tarea_crear': {
       const t = p.tarea;
-      s = `${t.isMilestone ? 'Hito' : 'Tarea'} «${t.title}» (${fechas(t)})${t.responsable ? `, responsable ${t.responsable}` : ''}${t.status ? `, ${TASK_STATUS_LABELS[t.status as keyof typeof TASK_STATUS_LABELS] ?? t.status}` : ''}`;
+      s = `${t.isMilestone ? 'Hito' : 'Tarea'} ${t.title} (${fechas(t)})${t.responsable ? `, responsable ${t.responsable}` : ''}${t.status ? `, ${TASK_STATUS_LABELS[t.status as keyof typeof TASK_STATUS_LABELS] ?? t.status}` : ''}`;
       break;
     }
     case 'tarea_editar': {
@@ -186,21 +186,21 @@ export function resumenPropuesta(p: Payload, extra: { tituloTarea?: string | nul
       if (t.status) partes.push(`estado: ${TASK_STATUS_LABELS[t.status as keyof typeof TASK_STATUS_LABELS] ?? t.status}`);
       if (t.progress !== undefined && t.progress !== null) partes.push(`avance: ${t.progress} %`);
       if (t.startDate || t.endDate) partes.push(`fechas: ${fechas(t) || t.endDate}`);
-      if (t.title) partes.push(`título: «${t.title}»`);
+      if (t.title) partes.push(`título: ${t.title}`);
       if (t.responsable) partes.push(`responsable: ${t.responsable}`);
       if (t.description !== undefined) partes.push('descripción');
       if (t.isMilestone !== undefined) partes.push(`hito: ${t.isMilestone ? 'sí' : 'no'}`);
-      s = `Tarea «${extra.tituloTarea ?? `#${p.idTask}`}» → ${partes.join(', ')}`;
+      s = `Tarea ${extra.tituloTarea ?? `#${p.idTask}`} → ${partes.join(', ')}`;
       break;
     }
     case 'solicitud_vincular':
-      s = `Vincular la solicitud #${p.idRequest}${extra.asuntoSolicitud ? ` «${extra.asuntoSolicitud}»` : ''}`;
+      s = `Vincular la solicitud #${p.idRequest}${extra.asuntoSolicitud ? ` ${extra.asuntoSolicitud}` : ''}`;
       break;
     case 'solicitud_desvincular':
-      s = `Quitar del proyecto la solicitud #${p.idRequest}${extra.asuntoSolicitud ? ` «${extra.asuntoSolicitud}»` : ''}`;
+      s = `Quitar del proyecto la solicitud #${p.idRequest}${extra.asuntoSolicitud ? ` ${extra.asuntoSolicitud}` : ''}`;
       break;
     case 'conversacion_crear':
-      s = `Abrir una conversación con ${p.agentCode}${p.title ? ` «${p.title}»` : ''}`;
+      s = `Abrir una conversación con ${p.agentCode}${p.title ? ` ${p.title}` : ''}`;
       break;
     case 'miembro_invitar':
       s = `Invitar a ${p.email} como ${p.role === 'reader' ? 'lector' : 'editor'}`;

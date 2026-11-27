@@ -72,7 +72,7 @@ export async function PATCH(request: NextRequest, { params }: Ctx) {
     if ('response' in guard) return guard.response;
     if (guard.project.archived) return archivedProject();
     if (!(await puedeGestionarPermisos(guard.user.email, guard.project.idCompany))) {
-      return forbidden('Solo la administración o quien tenga el permiso «Permisos de agentes en Proyectos» en esta empresa puede cambiarlos.');
+      return forbidden('Solo la administración o quien tenga el permiso Permisos de agentes en Proyectos en esta empresa puede cambiarlos.');
     }
 
     const payload = await readJsonBody(request);

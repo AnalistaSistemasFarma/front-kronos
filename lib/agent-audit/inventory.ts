@@ -331,7 +331,7 @@ export function evaluarHallazgos(a: InventoryAgent): FindingDraft[] {
         ruleCode: 'mcp-escritura-sin-auth',
         severity: 'critico',
         subject: m.name,
-        title: `MCP «${m.name}» puede escribir y no exige autenticación`,
+        title: `MCP ${m.name} puede escribir y no exige autenticación`,
         detail: `${donde ? `${donde}. ` : ''}Herramientas de escritura: ${m.writeTools.join(', ') || 'detectadas'}. Cualquiera en la red puede usarlo.`,
       });
     } else if (m.auth === 'ninguna') {
@@ -339,7 +339,7 @@ export function evaluarHallazgos(a: InventoryAgent): FindingDraft[] {
         ruleCode: 'mcp-sin-auth',
         severity: 'medio',
         subject: m.name,
-        title: `MCP «${m.name}» no exige autenticación`,
+        title: `MCP ${m.name} no exige autenticación`,
         detail: `${donde ? `${donde}. ` : ''}Es de lectura, pero cualquiera en la red puede consultarlo.`,
       });
     } else if (m.access === 'escritura') {
@@ -347,7 +347,7 @@ export function evaluarHallazgos(a: InventoryAgent): FindingDraft[] {
         ruleCode: 'mcp-escritura',
         severity: 'bajo',
         subject: m.name,
-        title: `MCP «${m.name}» tiene herramientas de escritura`,
+        title: `MCP ${m.name} tiene herramientas de escritura`,
         detail: `${donde ? `${donde}. ` : ''}Revisar si el rol del agente necesita escribir (mínimo privilegio).`,
       });
     }

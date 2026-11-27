@@ -158,7 +158,7 @@ export default function ChatMisStickers({ abierto, onCerrar }: { abierto: boolea
       }
       setArchivo(null);
       setNombre('');
-      setAviso('Sticker agregado a «Mis stickers».');
+      setAviso('Sticker agregado a Mis stickers.');
       await Promise.all([cargar(), refrescarCatalogo()]);
     } catch {
       setError('No se pudo guardar el sticker. Revise la conexión e intente de nuevo.');
@@ -239,7 +239,7 @@ export default function ChatMisStickers({ abierto, onCerrar }: { abierto: boolea
               <TextInput
                 size='sm'
                 label='Nombre'
-                description='Es lo que leen los asistentes: «[Sticker: …]».'
+                description='Es lo que leen los asistentes: [Sticker: …].'
                 placeholder='Por ejemplo: ¡Buen trabajo, equipo!'
                 value={nombre}
                 maxLength={MAX_NOMBRE_STICKER}
@@ -325,7 +325,7 @@ export default function ChatMisStickers({ abierto, onCerrar }: { abierto: boolea
                     aria-label={`Quitar ${m.label}`}
                     disabled={ocupado === m.idSticker}
                     onClick={() =>
-                      void accion(m.idSticker, `/api/chat/stickers/mios/${m.idSticker}`, { method: 'DELETE' }, 'Sticker quitado de «Mis stickers».')
+                      void accion(m.idSticker, `/api/chat/stickers/mios/${m.idSticker}`, { method: 'DELETE' }, 'Sticker quitado de Mis stickers.')
                     }
                   >
                     Quitar
@@ -373,7 +373,7 @@ export default function ChatMisStickers({ abierto, onCerrar }: { abierto: boolea
                           p.idSticker,
                           `/api/chat/stickers/propuestas/${p.idSticker}`,
                           { method: 'POST', body: JSON.stringify({ accion: 'aprobar' }) },
-                          `«${p.label}» quedó como sticker de ${p.companyName}.`
+                          `${p.label} quedó como sticker de ${p.companyName}.`
                         )
                       }
                     >
@@ -390,7 +390,7 @@ export default function ChatMisStickers({ abierto, onCerrar }: { abierto: boolea
                           p.idSticker,
                           `/api/chat/stickers/propuestas/${p.idSticker}`,
                           { method: 'POST', body: JSON.stringify({ accion: 'rechazar' }) },
-                          `Propuesta «${p.label}» rechazada.`
+                          `Propuesta ${p.label} rechazada.`
                         )
                       }
                     >

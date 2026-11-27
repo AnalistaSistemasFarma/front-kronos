@@ -113,7 +113,7 @@ async function alertarFallo(cfg: NabucoConfig, doc: DocCandidato, idEnvio: numbe
       { Intentos: String(intentos) },
       { Error: error.slice(0, 500) },
     ],
-    'Se agotaron los reintentos automáticos. Revise el envío en SynerLink → Transferencias Nabuco y use «Reintentar» o «Descartar».'
+    'Se agotaron los reintentos automáticos. Revise el envío en SynerLink → Transferencias Nabuco y use Reintentar o Descartar.'
   );
   if (n > 0) await marcarAlertaEnviada(idEnvio);
 }

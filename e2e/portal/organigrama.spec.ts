@@ -64,7 +64,7 @@ test.describe('Portal TH · Organigrama de GSS', () => {
     expect((await request.get('/api/portal/organigrama')).status()).toBe(401);
   });
 
-  test('el botón «Organigrama» queda ENCIMA de «Correos Corporativos» en la ventana Contactos', async ({ page }) => {
+  test('el botón Organigrama queda ENCIMA de Correos Corporativos en la ventana Contactos', async ({ page }) => {
     await page.setViewportSize({ width: 1366, height: 900 });
     await simular(page);
     await page.goto('/portal');
@@ -78,7 +78,7 @@ test.describe('Portal TH · Organigrama de GSS', () => {
     if (CAPTURAS) await page.screenshot({ path: `${CAPTURAS}/100-organigrama-boton.png` });
   });
 
-  test('dibuja los 118 cargos que lee de SynerLink, con el color de su nivel, y se ve completo con «Ver todo»', async ({ page }) => {
+  test('dibuja los 118 cargos que lee de SynerLink, con el color de su nivel, y se ve completo con Ver todo', async ({ page }) => {
     await page.setViewportSize({ width: 1600, height: 900 });
     await simular(page);
     const visor = await abrir(page);
@@ -169,7 +169,7 @@ test.describe('Portal TH · Organigrama de GSS', () => {
     await expect(page.getByTestId('organigrama-personas')).toBeVisible();
   });
 
-  test('si no se puede cargar el organigrama, el aviso rojo va arriba con «Reintentar»; si faltan las personas, el árbol se ve igual', async ({ page }) => {
+  test('si no se puede cargar el organigrama, el aviso rojo va arriba con Reintentar; si faltan las personas, el árbol se ve igual', async ({ page }) => {
     await page.setViewportSize({ width: 1600, height: 900 });
     await simular(page, { falla: true });
     const visor = await abrir(page);

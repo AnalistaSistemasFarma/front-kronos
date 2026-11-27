@@ -381,7 +381,7 @@ export function DetalleSolicitudModal({
       </Stack>
       {solicitud.puedoFijarFecha ? (
         <Group align='flex-end' gap='sm' wrap='wrap'>
-          <TextInput type='date' label='Fecha objetivo del proyecto' description='El «vencimiento» que se ve en el calendario.' value={objetivo} onChange={(e) => setObjetivo(e.currentTarget.value)} miw={180} data-testid='solicitud-objetivo' />
+          <TextInput type='date' label='Fecha objetivo del proyecto' description='El vencimiento que se ve en el calendario.' value={objetivo} onChange={(e) => setObjetivo(e.currentTarget.value)} miw={180} data-testid='solicitud-objetivo' />
           <Button onClick={() => void guardar(objetivo || null)} loading={guardando} disabled={(objetivo || null) === solicitud.targetDate}>
             Guardar
           </Button>
@@ -546,7 +546,7 @@ export function GestionarAsistenteModal({ opened, proyecto, onClose, onListo }: 
                 ))}
                 <Radio.Group value={alcance} onChange={(v) => setAlcance(v as 'proyecto' | 'todos')} label='Alcance'>
                   <Stack gap={4} mt={4}>
-                    <Radio value='proyecto' label={`Solo este proyecto («${proyecto.name}»)`} />
+                    <Radio value='proyecto' label={`Solo este proyecto (${proyecto.name})`} />
                     <Radio value='todos' label='Todos mis proyectos' />
                   </Stack>
                 </Radio.Group>

@@ -169,7 +169,7 @@ test.describe('Icono de Proyectos · con sesión y API simulado', () => {
     await expect(icono(page)).toHaveAttribute('aria-label', 'Proyectos: 4 conversaciones con mensajes nuevos', { timeout: 10_000 });
   });
 
-  test('«Ver todos los proyectos» y «Marcar todo como leído»', async ({ page }) => {
+  test('Ver todos los proyectos y Marcar todo como leído', async ({ page }) => {
     await simular(page, 200);
     await page.goto('/process');
     await icono(page).click();

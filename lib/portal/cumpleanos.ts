@@ -84,7 +84,7 @@ export function ubicarColumnasCumple(encabezados: unknown[]): Record<keyof typeo
   const out = {} as Record<keyof typeof COLUMNAS, number>;
   for (const [campo, opciones] of Object.entries(COLUMNAS) as [keyof typeof COLUMNAS, readonly string[]][]) {
     const i = h.findIndex((x) => opciones.some((o) => x === o || (o.length > 5 && x.startsWith(o))));
-    if (i < 0 && campo !== 'estado' && campo !== 'correo') throw new FormacionStorageError(`BASE PERSONAL no tiene la columna «${opciones[0]}».`);
+    if (i < 0 && campo !== 'estado' && campo !== 'correo') throw new FormacionStorageError(`BASE PERSONAL no tiene la columna ${opciones[0]}.`);
     out[campo] = i;
   }
   return out;

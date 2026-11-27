@@ -207,7 +207,7 @@ test.describe('Proyectos · estado en vivo del agente', () => {
     await sesion(context, baseURL!);
   });
 
-  test('escritorio: la conversación pasa a «Orus está trabajando…» por el pulso y vuelve a lo normal al terminar', async ({ page }) => {
+  test('escritorio: la conversación pasa a Orus está trabajando… por el pulso y vuelve a lo normal al terminar', async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 900 });
     const api = await simular(page);
     await page.goto('/process/proyectos/4');
@@ -271,7 +271,7 @@ test.describe('Proyectos · estado en vivo del agente', () => {
     await expect(tarjeta.getByTestId('proyecto-tarjeta-estado')).toHaveCount(0, { timeout: 10_000 });
   });
 
-  test('icono de la cabecera: punto animado y «Trabajando ahora» en el panel', async ({ page }) => {
+  test('icono de la cabecera: punto animado y Trabajando ahora en el panel', async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 900 });
     const api = await simular(page);
     await page.goto('/process');

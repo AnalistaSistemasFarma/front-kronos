@@ -136,7 +136,7 @@ export default function ConsultarAgenteModal({
         )}
         <Textarea
           label='¿Qué necesita del agente? (opcional)'
-          placeholder='Por ejemplo: «Prepárame una respuesta formal confirmando la recepción del contrato».'
+          placeholder='Por ejemplo: Prepárame una respuesta formal confirmando la recepción del contrato.'
           autosize
           minRows={2}
           maxRows={6}

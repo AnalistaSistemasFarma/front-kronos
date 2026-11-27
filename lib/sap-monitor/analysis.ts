@@ -382,7 +382,7 @@ export function durationText(seconds: number): string {
 }
 
 function who(o: { hostName: string | null; loginName: string | null; programName: string | null }): string {
-  const parts = [o.hostName && `equipo ${o.hostName}`, o.loginName && `usuario ${o.loginName}`, o.programName && `programa «${o.programName}»`].filter(Boolean);
+  const parts = [o.hostName && `equipo ${o.hostName}`, o.loginName && `usuario ${o.loginName}`, o.programName && `programa ${o.programName}`].filter(Boolean);
   return parts.length ? parts.join(', ') : 'origen desconocido';
 }
 
@@ -411,7 +411,7 @@ export function evaluateSqlAlerts(observations: IncidentObservation[]): EarlyWar
         happening: `La sesión ${o.sessionId} (${who(o)}) lleva ${durationText(o.seconds)} con la misma consulta en ${o.databaseName ?? 'SQL'}.`,
         why: 'Suele ser una vista *B1SLQuery o un informe sin filtro de fecha, o una consulta esperando a un bloqueo.',
         risk: 'Consume CPU, memoria y disco del SQL de SAP y puede retener bloqueos sobre tablas de inventario o ventas.',
-        action: 'Mire en «Vistas SAP» si es una vista llamada en bucle y quién la llama; ajuste el filtro o la frecuencia en el origen (Power BI, Power Automate, app).',
+        action: 'Mire en Vistas SAP si es una vista llamada en bucle y quién la llama; ajuste el filtro o la frecuencia en el origen (Power BI, Power Automate, app).',
       });
     } else if (o.kind === 'transaccion' && o.seconds >= t.txWarningSec) {
       out.push({

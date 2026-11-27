@@ -226,7 +226,7 @@ export async function sendToAuthorize(params: {
       const id = await startStep({
         idRequest,
         stepKind: 'sap',
-        stepName: 'Pasar a «Por autorizar»',
+        stepName: 'Pasar a Por autorizar',
         actionKey: 'purchase.state_to_authorize',
         triggerEvent: 'on_start',
         triggeredBy: 'user',
@@ -238,7 +238,7 @@ export async function sendToAuthorize(params: {
       {
         idRequest,
         stepKind: 'sap',
-        stepName: 'Pasar a «Por autorizar»',
+        stepName: 'Pasar a Por autorizar',
         actionKey: 'purchase.state_to_authorize',
         triggerEvent: 'on_start',
         triggeredBy: 'user',
@@ -394,7 +394,7 @@ export async function onAuthorizationDecision(
       const id = await startStep({
         idRequest: link.id_request_general,
         stepKind: 'sap',
-        stepName: 'Pasar a «No aprobado»',
+        stepName: 'Pasar a No aprobado',
         actionKey: 'purchase.state_rejected',
         triggerEvent: 'on_reject',
         triggeredBy,
@@ -418,7 +418,7 @@ export async function onAuthorizationDecision(
       {
         idRequest: link.id_request_general,
         stepKind: 'sap',
-        stepName: 'Pasar a «No aprobado»',
+        stepName: 'Pasar a No aprobado',
         actionKey: 'purchase.state_rejected',
         triggerEvent: 'on_reject',
         triggeredBy,
@@ -512,7 +512,7 @@ export async function sendToQuotation(params: {
   if (!link) return { ok: false, status: 404, error: 'La solicitud no tiene una autorizacion pendiente.' };
 
   if (!(await isAuthorizationEffectEnabled(link.id_request_general, 'on_quote', 'purchase.state_quotation'))) {
-    return { ok: false, status: 409, error: 'El flujo de esta solicitud no tiene habilitado «Enviar a cotizar».' };
+    return { ok: false, status: 409, error: 'El flujo de esta solicitud no tiene habilitado Enviar a cotizar.' };
   }
 
   const user = await prisma.user.findUnique({ where: { email: userEmail }, select: { id: true } });
@@ -538,7 +538,7 @@ export async function sendToQuotation(params: {
       {
         idRequest: link.id_request_general,
         stepKind: 'sap',
-        stepName: 'Pasar a «En cotización»',
+        stepName: 'Pasar a En cotización',
         actionKey: 'purchase.state_quotation',
         triggerEvent: 'on_quote',
         triggeredBy: 'user',
@@ -611,14 +611,14 @@ export async function moveDraftToAuthorize(
   try {
     const draft = await sapGet<Record<string, unknown>>(sap, `Drafts(${link.doc_entry})?$select=DocEntry,U_SEND_State`);
     const state = normalizeState(draft.U_SEND_State);
-    if (state === 'LA') return { ok: true, detail: `Borrador ${link.doc_entry} ya está «Por autorizar»` };
+    if (state === 'LA') return { ok: true, detail: `Borrador ${link.doc_entry} ya está Por autorizar` };
     const check = checkTransition(state, state === 'ENC' ? 'reenviar' : 'enviar');
     if (!check.ok) return { ok: false, error: check.error };
     await withStep(
       {
         idRequest,
         stepKind: 'sap',
-        stepName: 'Pasar a «Por autorizar»',
+        stepName: 'Pasar a Por autorizar',
         actionKey: 'purchase.state_to_authorize',
         triggerEvent: 'on_execute',
         triggeredBy,
@@ -632,7 +632,7 @@ export async function moveDraftToAuthorize(
         }),
       () => ({ status: 'ok', sapDocEntry: link.doc_entry })
     );
-    return { ok: true, detail: `Borrador ${link.doc_entry} pasó a «Por autorizar»` };
+    return { ok: true, detail: `Borrador ${link.doc_entry} pasó a Por autorizar` };
   } catch (e) {
     return { ok: false, error: e instanceof SapError ? e.friendly : (e as Error).message };
   } finally {

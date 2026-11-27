@@ -953,7 +953,7 @@ export default function ApiClientModal({
               label='Nivel de acceso'
               footer={
                 form.accessMode === 'escritura'
-                  ? 'Lectura y escritura: puede consultar y también usar los permisos marcados como «Escritura» (crear, editar, subir…).'
+                  ? 'Lectura y escritura: puede consultar y también usar los permisos marcados como Escritura (crear, editar, subir…).'
                   : 'Solo lectura: puede consultar lo que le marques, pero ningún permiso de escritura.'
               }
             >
@@ -1015,7 +1015,7 @@ export default function ApiClientModal({
                 }
                 footer={
                   !form.allCompanies && form.companyIds.length === 0
-                    ? 'Elige al menos una empresa o activa «Todas las empresas».'
+                    ? 'Elige al menos una empresa o activa Todas las empresas.'
                     : form.allCompanies
                       ? 'Úsalo solo si el cliente de verdad necesita ver todas las empresas.'
                       : 'En las empresas que marques, el cliente podrá usar los permisos de abajo.'
@@ -1265,7 +1265,7 @@ export default function ApiClientModal({
                                               {chosen.length > 0 ? 'Empresas · ' + chosen.length + ' de ' + restrictionOptions.length : 'Empresas'}
                                             </span>
                                             <MultiSelect
-                                              aria-label={'Empresas donde vale «' + p.label + '»'}
+                                              aria-label={'Empresas donde vale ' + p.label}
                                               data={restrictionOptions}
                                               value={chosen}
                                               onChange={(ids) => setPermissionCompanies(p.code, ids, restrictionOptions.length)}
@@ -1592,7 +1592,7 @@ export default function ApiClientModal({
       />
       <ActionSheet
         opened={confirm?.kind === 'delete'}
-        title={`¿Eliminar «${client?.name ?? 'este cliente'}»?`}
+        title={`¿Eliminar ${client?.name ?? 'este cliente'}?`}
         message={
           keys.length > 0
             ? `Se borran sus permisos y empresas, y ${keys.length === 1 ? 'su llave activa deja' : `sus ${keys.length} llaves activas dejan`} de funcionar en máximo 1 minuto. No se puede deshacer.`

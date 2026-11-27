@@ -181,7 +181,7 @@ test.describe('Correo · Redactar (escritorio)', () => {
     await page.getByTestId('correo-redactar-enviar').click();
     await expect(page.getByTestId('correo-redactar')).toHaveCount(0);
     const aviso = page.getByTestId('correo-aviso-enviado');
-    await expect(aviso).toContainText('«Contratos pendientes de octubre» enviado desde su buzón a 4 destinatarios');
+    await expect(aviso).toContainText('Contratos pendientes de octubre enviado desde su buzón a 4 destinatarios');
     // El aviso queda ARRIBA de la bandeja.
     expect((await aviso.boundingBox())!.y).toBeLessThan((await page.getByTestId('correo-bandeja').boundingBox())!.y);
     await captura(page, '06-escritorio-aviso-enviado');
@@ -223,7 +223,7 @@ test.describe('Correo · Redactar (escritorio)', () => {
     await expect(page.getByTestId('correo-redactar')).toHaveCount(0);
   });
 
-  test('bandera de envío apagada: «Redactar» deshabilitado', async ({ page }) => {
+  test('bandera de envío apagada: Redactar deshabilitado', async ({ page }) => {
     await simular(page, { envioHabilitado: false });
     await page.goto('/process/correo');
     await expect(page.getByTestId('correo-redactar-btn')).toBeDisabled();

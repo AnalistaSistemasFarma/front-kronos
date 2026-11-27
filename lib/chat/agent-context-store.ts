@@ -346,7 +346,7 @@ export async function reportarOrden(
         const actual = filaAOrden(f);
         if (!transicionValida(actual.status, estado)) {
           await tx.rollback();
-          throw new TransicionInvalida(`La orden está «${actual.status}»; no puede pasar a «${estado}».`);
+          throw new TransicionInvalida(`La orden está ${actual.status}; no puede pasar a ${estado}.`);
         }
         const u = await new sql.Request(tx)
           .input('id_command', sql.Int, idCommand)

@@ -109,7 +109,7 @@ test.describe('Portal TH · AYUDAS', () => {
     await expect(otra.getByTestId('ayudas-visor').getByRole('button', { name: 'Reintentar' })).toBeVisible();
   });
 
-  test('«Políticas y reglamentos» sigue abriendo su propia ventana, sin mezclarse con Ayudas', async ({ page }) => {
+  test('Políticas y reglamentos sigue abriendo su propia ventana, sin mezclarse con Ayudas', async ({ page }) => {
     await simular(page);
     await page.goto('/portal');
     await panel(page).getByRole('button', { name: 'Políticas y reglamentos' }).click();
@@ -117,7 +117,7 @@ test.describe('Portal TH · AYUDAS', () => {
     await expect(page.getByTestId('ayudas-visor')).toHaveCount(0);
   });
 
-  test('celular: la lista ocupa la ventana; al elegir un video se ve la vista previa y «← Documentos» vuelve', async ({ page }) => {
+  test('celular: la lista ocupa la ventana; al elegir un video se ve la vista previa y ← Documentos vuelve', async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await simular(page);
     await page.goto('/portal');

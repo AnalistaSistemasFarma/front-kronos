@@ -18,7 +18,7 @@ import { loadPortalAccess, portalAccessSummary, type PortalAccessState } from '.
 
 const LABEL = 'Lo que ve cada usuario, por empresa';
 const FOOTER =
-  'Para crear usuarios, vincular empresas o cambiar módulos usa «Administrar portal». No hace falta «Guardar»: los cambios quedan al momento.';
+  'Para crear usuarios, vincular empresas o cambiar módulos usa Administrar portal. No hace falta Guardar: los cambios quedan al momento.';
 /** Módulos visibles por usuario antes de «+N más» (hay usuarios con 17 y se pierde la vista). */
 const CHIPS_PREVIEW = 6;
 
@@ -103,8 +103,8 @@ export default function PortalAccessSection({
       trailing = 'Sin acceso';
       content = (
         <div className={ps.empty}>
-          Este NIT no tiene usuarios activos en el portal, así que hoy no ve nada. Créale usuarios con «Administrar
-          portal».
+          Este NIT no tiene usuarios activos en el portal, así que hoy no ve nada. Créale usuarios con Administrar
+          portal.
         </div>
       );
     } else {

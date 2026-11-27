@@ -428,10 +428,10 @@ export function configOpenclaw(env, { entorno, hilosDir, perfiles, perfilAgente,
     ['HILOS_CUOTA', cuotaModo],
     ['HILOS_SUBAGENTES', subagentes],
   ].filter(([v, modo]) => (env[v] ?? '').trim() && modo === 'si');
-  if (explicitas.length) throw new ErrorConfig(`Con HILOS_RUNNER=openclaw quedan apagados: ${explicitas.map(([v]) => v).join(', ')} (ponga «no» o quítelos).`);
+  if (explicitas.length) throw new ErrorConfig(`Con HILOS_RUNNER=openclaw quedan apagados: ${explicitas.map(([v]) => v).join(', ')} (ponga no o quítelos).`);
   for (const [clave, p] of perfiles) {
     if (Object.keys(p.mcpServers).length || p.herramientas.length || p.web) {
-      throw new ErrorConfig(`Con HILOS_RUNNER=openclaw los perfiles no llevan conectores ni web (el agente usa los suyos): revise «${clave}» en perfiles.json.`);
+      throw new ErrorConfig(`Con HILOS_RUNNER=openclaw los perfiles no llevan conectores ni web (el agente usa los suyos): revise ${clave} en perfiles.json.`);
     }
   }
   const bin = (env.HILOS_OPENCLAW_BIN ?? '').trim() || '/opt/homebrew/bin/openclaw';
@@ -442,12 +442,12 @@ export function configOpenclaw(env, { entorno, hilosDir, perfiles, perfilAgente,
   const perfil = (env.HILOS_OPENCLAW_PERFIL ?? '').trim() || null;
   if (perfil && !/^[a-z0-9][a-z0-9_-]{0,63}$/i.test(perfil)) throw new ErrorConfig('HILOS_OPENCLAW_PERFIL inválido.');
   const localRaw = (env.HILOS_OPENCLAW_LOCAL ?? 'no').trim().toLowerCase();
-  if (!['si', 'no'].includes(localRaw)) throw new ErrorConfig('HILOS_OPENCLAW_LOCAL debe ser «si» o «no».');
+  if (!['si', 'no'].includes(localRaw)) throw new ErrorConfig('HILOS_OPENCLAW_LOCAL debe ser si o no.');
   const actRaw = (env.HILOS_OPENCLAW_ACTIVIDAD ?? 'si').trim().toLowerCase();
-  if (!['si', 'no'].includes(actRaw)) throw new ErrorConfig('HILOS_OPENCLAW_ACTIVIDAD debe ser «si» o «no».');
+  if (!['si', 'no'].includes(actRaw)) throw new ErrorConfig('HILOS_OPENCLAW_ACTIVIDAD debe ser si o no.');
   const prefijo = (env.HILOS_OPENCLAW_SESION_PREFIJO ?? '').trim() || `proyecto-${entorno}-`;
-  if (!/^[a-z0-9][a-z0-9-]{0,40}-$/.test(prefijo)) throw new ErrorConfig('HILOS_OPENCLAW_SESION_PREFIJO: minúsculas, números y guiones, terminado en «-».');
-  if (/^synerlink/.test(prefijo)) throw new ErrorConfig('HILOS_OPENCLAW_SESION_PREFIJO no puede empezar por «synerlink»: es el espacio de sesiones del chat del agente.');
+  if (!/^[a-z0-9][a-z0-9-]{0,40}-$/.test(prefijo)) throw new ErrorConfig('HILOS_OPENCLAW_SESION_PREFIJO: minúsculas, números y guiones, terminado en -.');
+  if (/^synerlink/.test(prefijo)) throw new ErrorConfig('HILOS_OPENCLAW_SESION_PREFIJO no puede empezar por synerlink: es el espacio de sesiones del chat del agente.');
   if ((entorno === 'pruebas') !== /pruebas|testing/.test(prefijo)) throw new ErrorConfig(`HILOS_OPENCLAW_SESION_PREFIJO debe decir de qué entorno es (${entorno}): pruebas y producción no comparten sesiones.`);
   const ruta = (nombre) => {
     const v = (env[nombre] ?? '').trim() || null;
@@ -470,7 +470,7 @@ export function configOpenclaw(env, { entorno, hilosDir, perfiles, perfilAgente,
   // openclaw (openclaw/credencial.mjs, solo lectura). Encendido por defecto; HILOS_CUOTA sigue
   // siendo el medidor de Claude Code y con openclaw debe quedar en «no».
   const cuotaRaw = (env.HILOS_OPENCLAW_CUOTA ?? 'si').trim().toLowerCase();
-  if (!['si', 'no'].includes(cuotaRaw)) throw new ErrorConfig('HILOS_OPENCLAW_CUOTA debe ser «si» o «no».');
+  if (!['si', 'no'].includes(cuotaRaw)) throw new ErrorConfig('HILOS_OPENCLAW_CUOTA debe ser si o no.');
   const dirAgente = ruta('HILOS_OPENCLAW_DIR_AGENTE');
   // Alcance por rutas del código (2026-11-06, openclaw/codigo.mjs): archivo JSON { "rutas": [globs] }.
   const rutasPermitidas = ruta('HILOS_OPENCLAW_RUTAS_PERMITIDAS');
@@ -583,7 +583,7 @@ export function cargarConfig(env = process.env) {
 
   // PRUEBAS para todos los hilos (pruebas-kronos.mjs, 2026-10-22). Encendido por defecto.
   const pruebasModo = (env.HILOS_PRUEBAS_KRONOS ?? 'si').trim().toLowerCase();
-  if (!['si', 'no'].includes(pruebasModo)) throw new ErrorConfig('HILOS_PRUEBAS_KRONOS debe ser «si» o «no».');
+  if (!['si', 'no'].includes(pruebasModo)) throw new ErrorConfig('HILOS_PRUEBAS_KRONOS debe ser si o no.');
   const pruebasWeb = (env.HILOS_PRUEBAS_KRONOS_WEB ?? 'http://192.168.11.230:3030').trim();
   {
     let u;
@@ -596,16 +596,16 @@ export function cargarConfig(env = process.env) {
   }
   // HTML → PDF en el puente (pdf.mjs, 2026-10-21). Encendido por defecto; HILOS_PDF=no lo apaga.
   const pdfModo = (env.HILOS_PDF ?? 'si').trim().toLowerCase();
-  if (!['si', 'no'].includes(pdfModo)) throw new ErrorConfig('HILOS_PDF debe ser «si» o «no».');
+  if (!['si', 'no'].includes(pdfModo)) throw new ErrorConfig('HILOS_PDF debe ser si o no.');
   const pdfChrome = (env.HILOS_PDF_CHROME ?? '').trim() || null;
   if (pdfChrome && !path.isAbsolute(pdfChrome)) throw new ErrorConfig('HILOS_PDF_CHROME debe ser una ruta absoluta.');
 
   // Archivar en los Archivos del proyecto lo que el hilo adjunta (archivar-proyecto.mjs, 2026-10-23). Encendido por defecto.
   const archivarModo = (env.HILOS_ARCHIVAR_EN_PROYECTO ?? 'si').trim().toLowerCase();
-  if (!['si', 'no'].includes(archivarModo)) throw new ErrorConfig('HILOS_ARCHIVAR_EN_PROYECTO debe ser «si» o «no».');
+  if (!['si', 'no'].includes(archivarModo)) throw new ErrorConfig('HILOS_ARCHIVAR_EN_PROYECTO debe ser si o no.');
   // Medidor del consumo de Anthropic (cuota.mjs, 2026-10-22). Encendido por defecto.
   const cuotaModo = (env.HILOS_CUOTA ?? 'si').trim().toLowerCase();
-  if (!['si', 'no'].includes(cuotaModo)) throw new ErrorConfig('HILOS_CUOTA debe ser «si» o «no».');
+  if (!['si', 'no'].includes(cuotaModo)) throw new ErrorConfig('HILOS_CUOTA debe ser si o no.');
   const cuotaIntervaloMs = (env.HILOS_CUOTA_INTERVALO_MS ?? '').trim() === '0' ? 0 : entero(env, 'HILOS_CUOTA_INTERVALO_MS', 5 * 60 * 1000, 60 * 1000, 60 * 60 * 1000);
 
   // Memoria del bot principal (solo lectura; ver memoria.mjs). Nunca dentro de HILOS_DIR.
@@ -693,7 +693,7 @@ export function cargarConfig(env = process.env) {
   if (runner !== 'openclaw') {
     const siNo = (nombre) => {
       const v = (env[nombre] ?? 'si').trim().toLowerCase() || 'si';
-      if (!['si', 'no'].includes(v)) throw new ErrorConfig(`${nombre} debe ser «si» o «no».`);
+      if (!['si', 'no'].includes(v)) throw new ErrorConfig(`${nombre} debe ser si o no.`);
       return v === 'si';
     };
     const lista = (nombre) =>

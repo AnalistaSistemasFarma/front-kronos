@@ -123,7 +123,7 @@ export default function AssignMeetingModal({ opened, onClose, onDone, meeting, p
   };
 
   return (
-    <Modal opened={opened} onClose={onClose} title={<Text fw={600}>{project ? `Asignar una reunión a «${project.name}»` : 'Asignar reunión a un proyecto'}</Text>} size='lg'>
+    <Modal opened={opened} onClose={onClose} title={<Text fw={600}>{project ? `Asignar una reunión a ${project.name}` : 'Asignar reunión a un proyecto'}</Text>} size='lg'>
       <Stack gap='sm'>
         {error && (
           <Alert color='red' icon={<IconAlertCircle size={18} />} withCloseButton onClose={() => setError(null)} py={8} role='alert'>

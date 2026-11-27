@@ -63,7 +63,7 @@ export async function replyToNotification(
   if (!row) return { ok: false, status: 404, error: 'La notificación no existe.' };
 
   const target = notificationReplyTarget(row.url);
-  if (!target) return { ok: false, status: 422, error: 'Esta notificación no admite respuesta. Use «Abrir».' };
+  if (!target) return { ok: false, status: 422, error: 'Esta notificación no admite respuesta. Use Abrir.' };
 
   let kind: 'request' | 'ticket';
   let targetId: number;

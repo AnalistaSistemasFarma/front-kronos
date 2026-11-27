@@ -138,7 +138,7 @@ export default function AnalisisSeguridadPage() {
       });
       const j = await r.json();
       if (!r.ok) throw new Error(j?.error ?? "No se pudo guardar la revisión.");
-      setAviso(`Hallazgo #${h.id} marcado como «${ESTADOS[estado]}».`);
+      setAviso(`Hallazgo #${h.id} marcado como ${ESTADOS[estado]}.`);
       window.scrollTo({ top: 0, behavior: "smooth" });
       await cargar(periodo);
     } catch (e) {

@@ -59,7 +59,7 @@ export function SapTaskActionPicker({
         <Text size="xs">
           {when === 'on_execute'
             ? 'La ejecuta el sistema cuando le llega el turno en el flujo, sin responsable.'
-            : 'Es condicional: el sistema la ejecuta solo si la autorización anterior termina así; si no, queda «Omitida».'}{' '}
+            : 'Es condicional: el sistema la ejecuta solo si la autorización anterior termina así; si no, queda Omitida.'}{' '}
           Si SAP falla, queda pendiente con el error y se puede reintentar; todo queda en el historial de la solicitud.
         </Text>
       </Alert>

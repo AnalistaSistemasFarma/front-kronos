@@ -29,7 +29,7 @@ async function ctx(companyIdRaw: unknown) {
   const companyId = Number(companyIdRaw);
   if (!companyId) return { error: NextResponse.json({ error: 'Falta companyId' }, { status: 400 }) };
   const access = await salesEndpointForUser(email, companyId, 'write');
-  if (!access?.endpoint) return { error: NextResponse.json({ error: 'Sin permiso «Ventas · Gestionar ofertas» en esta empresa.' }, { status: 403 }) };
+  if (!access?.endpoint) return { error: NextResponse.json({ error: 'Sin permiso Ventas · Gestionar ofertas en esta empresa.' }, { status: 403 }) };
   const user = await prisma.user.findUnique({ where: { email }, select: { id: true } });
   if (!user) return { error: NextResponse.json({ error: 'Usuario no encontrado.' }, { status: 401 }) };
   return { companyId, endpoint: access.endpoint, userId: user.id };

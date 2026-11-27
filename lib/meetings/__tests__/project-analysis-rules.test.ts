@@ -63,7 +63,7 @@ describe('parseAnalysisReply', () => {
     expect(parseAnalysisReply(`\`\`\`json\n${JSON.stringify(valid)}\n\`\`\``).ok).toBe(true);
   });
   it('fails clearly without a block or with invalid JSON', () => {
-    expect(parseAnalysisReply('No pude leer la transcripción.')).toEqual({ ok: false, error: 'La respuesta no trae el bloque «analisis-reunion».' });
+    expect(parseAnalysisReply('No pude leer la transcripción.')).toEqual({ ok: false, error: 'La respuesta no trae el bloque analisis-reunion.' });
     const bad = parseAnalysisReply('```analisis-reunion\n{no json}\n```');
     expect(bad.ok).toBe(false);
   });
@@ -122,7 +122,7 @@ describe('commitments → task proposals', () => {
     { subject: 'Seguimiento', meetingDate: '2026-11-23', idAnalysis: 9 },
     members
   );
-  it('only exact members become «responsable»; ambiguous names go to the description', () => {
+  it('only exact members become responsable; ambiguous names go to the description', () => {
     expect(items[0].tarea.responsable).toBe('qa.sgc@gsslatam.com');
     expect(items[1].tarea.responsable).toBeNull();
     expect(String(items[1].tarea.description)).toContain('Responsable mencionado en la reunión: Laura.');

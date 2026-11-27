@@ -476,12 +476,12 @@ export function archivosDesdeUltimaSintesis(archivos: ArchivoMesa[], ronda: numb
 
 /** «informe.csv (lo compartió Mechita en la ronda 2)». */
 export function describirArchivo(a: ArchivoMesa): string {
-  return `«${a.nombre}» (lo compartió ${a.agente}${a.ronda ? ` en la ronda ${a.ronda}` : ''})`;
+  return `${a.nombre} (lo compartió ${a.agente}${a.ronda ? ` en la ronda ${a.ronda}` : ''})`;
 }
 
 /** Detalle del evento `archivo_compartido` (cabe en NVARCHAR(1000)). */
 export function detalleArchivoCompartido(nombre: string, agente: string, ronda: number | null): string {
-  return `${agente} compartió «${nombre}»${ronda ? ` en la ronda ${ronda}` : ''}.`.slice(0, 1000);
+  return `${agente} compartió ${nombre}${ronda ? ` en la ronda ${ronda}` : ''}.`.slice(0, 1000);
 }
 
 export const ADVERTENCIA_ARCHIVOS =
@@ -508,10 +508,10 @@ function lineasArchivosDisponibles(archivos: ArchivoMesa[]): string[] {
 /** Lo que la síntesis del moderador debe decir sobre los archivos. */
 function lineasSintesisArchivos(desdeUltima: ArchivoMesa[]): string[] {
   if (desdeUltima.length === 0) {
-    return ['Termine con una línea que empiece con «Archivos compartidos:» y diga que en estas rondas nadie compartió archivos.'];
+    return ['Termine con una línea que empiece con Archivos compartidos: y diga que en estas rondas nadie compartió archivos.'];
   }
   return [
-    'Termine con una línea que empiece con «Archivos compartidos:» y diga, para cada archivo que se pasó desde la última síntesis, quién lo compartió y para qué sirve. Son estos:',
+    'Termine con una línea que empiece con Archivos compartidos: y diga, para cada archivo que se pasó desde la última síntesis, quién lo compartió y para qué sirve. Son estos:',
     ...desdeUltima.map((a) => `- ${describirArchivo(a)}`),
   ];
 }

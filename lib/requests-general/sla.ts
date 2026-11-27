@@ -209,7 +209,7 @@ export function parseSlaInput(raw: { value?: unknown; unit?: unknown; warnPct?: 
   if (raw.warnPct !== null && raw.warnPct !== undefined && raw.warnPct !== '') {
     warnPct = Number(raw.warnPct);
     if (!Number.isInteger(warnPct) || warnPct < 1 || warnPct > 99) {
-      return { ok: false, error: 'El umbral de «próximo a vencer» debe estar entre 1 y 99 %.' };
+      return { ok: false, error: 'El umbral de próximo a vencer debe estar entre 1 y 99 %.' };
     }
   }
   return { ok: true, value, unit, warnPct };

@@ -23,7 +23,7 @@ export default function VentasPage() {
             Ventas · Ofertas
           </Title>
           <Text c='dimmed' mb='md'>
-            La oferta de venta se crea como una solicitud en «Mis solicitudes» (proceso «Oferta de venta»). El flujo revisa precio y cupo, pide las autorizaciones y crea el pedido en SAP.
+            La oferta de venta se crea como una solicitud en Mis solicitudes (proceso Oferta de venta). El flujo revisa precio y cupo, pide las autorizaciones y crea el pedido en SAP.
           </Text>
           <Group>
             <Button component={Link} href='/process/request-general/create-request' leftSection={<IconPlus size={16} />}>

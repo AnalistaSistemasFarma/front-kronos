@@ -82,7 +82,7 @@ export function ListaConversaciones({
     <Stack gap={6}>
       {proyecto.capabilities.write && (
         <Tooltip
-          label={proyecto.agents.length === 0 ? 'El proyecto no tiene asistentes. Agréguelos en «Detalles».' : 'No tiene asignado ninguno de los asistentes del proyecto.'}
+          label={proyecto.agents.length === 0 ? 'El proyecto no tiene asistentes. Agréguelos en Detalles.' : 'No tiene asignado ninguno de los asistentes del proyecto.'}
           disabled={puedeAbrir}
           withArrow
         >
@@ -446,7 +446,7 @@ export function SeccionArchivos({
             autoComplete='off'
             data-1p-ignore='true'
             data-lpignore='true'
-            label={actual ? `Nueva carpeta dentro de «${nombreCarpeta(actual)}»` : 'Nueva carpeta'}
+            label={actual ? `Nueva carpeta dentro de ${nombreCarpeta(actual)}` : 'Nueva carpeta'}
             value={nueva}
             onChange={(e) => setNueva(e.currentTarget.value)}
             maxLength={100}

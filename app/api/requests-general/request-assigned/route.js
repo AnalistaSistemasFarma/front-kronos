@@ -165,7 +165,7 @@ export async function GET(req) {
             ).value('.', 'NVARCHAR(MAX)'), 1, 2, '') AS id_assigned_process_category
       ) users_proc
       OUTER APPLY (
-        -- Foto del primer responsable del proceso (para el avatar de «Asignado»).
+        -- Foto del primer responsable del proceso (para el avatar de Asignado).
         SELECT TOP 1 u4.image
         FROM user_process_category_request_general upcrg4
         INNER JOIN [user] u4 ON u4.id = upcrg4.id_user

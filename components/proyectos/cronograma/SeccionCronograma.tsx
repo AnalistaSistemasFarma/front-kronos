@@ -323,7 +323,7 @@ export default function SeccionCronograma({
       <ConfirmarModal
         opened={modal === 'borrar'}
         titulo='Borrar la tarea'
-        texto={`«${tarea?.title ?? ''}» sale del cronograma. El historial de cambios se conserva.`}
+        texto={`${tarea?.title ?? ''} sale del cronograma. El historial de cambios se conserva.`}
         accion='Borrar'
         color='red'
         cargando={false}

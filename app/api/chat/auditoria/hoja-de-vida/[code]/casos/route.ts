@@ -31,7 +31,7 @@ async function preparar(request: Request, params: Promise<{ code: string }>) {
   if (!(await canConfigureAgents(user.email))) {
     return {
       error: jsonNoStore(
-        { error: 'Vincular casos requiere el permiso «Auditoría de agentes · Configurar».' },
+        { error: 'Vincular casos requiere el permiso Auditoría de agentes · Configurar.' },
         { status: 403 }
       ),
     };

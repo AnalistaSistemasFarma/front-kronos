@@ -38,7 +38,7 @@ const cumpleHoy = [{ fecha: HOY, personas: [{ nombre: 'ACOSTA RUIZ LUIS FERNANDO
 const eventoEmpresa = [{ id: 7, fecha: HOY, titulo: 'Capacitación en seguridad', descripcion: 'Auditorio, 10:00', tipo: 'empresa' }];
 const ventana = (page: Page) => page.getByTestId('ventana-hoy');
 
-test.describe('Portal TH · ventana emergente «Hoy»', () => {
+test.describe('Portal TH · ventana emergente Hoy', () => {
   test('una marca VIEJA de la versión de una vez por día NO impide que salga en un navegador real (caso de Cristian, 2026-10-19)', async ({ page }) => {
     await page.setViewportSize({ width: 1366, height: 900 });
     // El navegador de una persona: sin `navigator.webdriver` y con la marca que dejó la versión anterior.
@@ -141,7 +141,7 @@ test.describe('Portal TH · ventana emergente «Hoy»', () => {
     await expect(page.getByRole('dialog', { name: 'Contactos' })).toBeVisible();
   });
 
-  test('un día SIN NADA también sale (Cristian, 2026-10-21: «que salga siempre»): «Hoy no hay eventos ni cumpleaños» y los próximos', async ({ page }) => {
+  test('un día SIN NADA también sale (Cristian, 2026-10-21: que salga siempre): Hoy no hay eventos ni cumpleaños y los próximos', async ({ page }) => {
     await page.setViewportSize({ width: 1366, height: 900 });
     // La ventana pide cada fuente con el rango hoy → hoy + 30 días (el calendario pide aparte el mes visible).
     const pedidos: string[] = [];

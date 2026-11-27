@@ -74,8 +74,8 @@ export default function CatalogoReposModal({ opened, onClose }: { opened: boolea
     setOk(
       vista.tipo === 'activo'
         ? vista.repo.active
-          ? `«${vista.repo.name}» quedó desactivado.`
-          : `«${vista.repo.name}» quedó activo.`
+          ? `${vista.repo.name} quedó desactivado.`
+          : `${vista.repo.name} quedó activo.`
         : vista.repo
           ? 'Repositorio actualizado.'
           : 'Repositorio agregado al catálogo.'
@@ -188,8 +188,8 @@ export default function CatalogoReposModal({ opened, onClose }: { opened: boolea
             {vista.tipo === 'activo' ? (
               <Text size='sm'>
                 {vista.repo.active
-                  ? `Al desactivar «${vista.repo.name}», deja de ofrecerse y los agentes de los proyectos que lo tienen pierden el acceso desde su próximo turno.`
-                  : `Al activar «${vista.repo.name}», vuelve a ofrecerse y los proyectos que lo tenían vinculado lo recuperan.`}
+                  ? `Al desactivar ${vista.repo.name}, deja de ofrecerse y los agentes de los proyectos que lo tienen pierden el acceso desde su próximo turno.`
+                  : `Al activar ${vista.repo.name}, vuelve a ofrecerse y los proyectos que lo tenían vinculado lo recuperan.`}
               </Text>
             ) : (
               <>

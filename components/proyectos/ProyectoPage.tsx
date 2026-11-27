@@ -143,7 +143,7 @@ export default function ProyectoPage({ idProject }: { idProject: number }) {
     if (creado === '1') setAviso({ tipo: 'ok', texto: 'Proyecto creado. Abra una conversación con uno de sus asistentes.' });
     // Equipo de subagentes (F2): se pidió la sugerencia al crear.
     if (creado === 'equipo') {
-      setAviso({ tipo: 'ok', texto: 'Proyecto creado. El asistente está armando una propuesta de equipo: revísela en «Equipo» en unos minutos.' });
+      setAviso({ tipo: 'ok', texto: 'Proyecto creado. El asistente está armando una propuesta de equipo: revísela en Equipo en unos minutos.' });
     }
   }, [searchParams]);
 
@@ -259,7 +259,7 @@ export default function ProyectoPage({ idProject }: { idProject: number }) {
     pedirConfirmacion({
       titulo: 'Eliminar la conversación',
       texto:
-        `«${c.title ?? 'Conversación'}» dejará de verse en el proyecto y los asistentes dejarán de atenderla. ` +
+        `${c.title ?? 'Conversación'} dejará de verse en el proyecto y los asistentes dejarán de atenderla. ` +
         'Los mensajes y los adjuntos no se borran: quedan guardados para auditoría y el cambio queda registrado con su nombre y la fecha.',
       accion: 'Eliminar',
       hacer: async () => {
@@ -456,7 +456,7 @@ export default function ProyectoPage({ idProject }: { idProject: number }) {
             onArchivar={() =>
               pedirConfirmacion({
                 titulo: 'Archivar el proyecto',
-                texto: 'Los miembros y los asistentes dejan de verlo. Usted lo puede restaurar desde «Archivados».',
+                texto: 'Los miembros y los asistentes dejan de verlo. Usted lo puede restaurar desde Archivados.',
                 accion: 'Archivar',
                 hacer: async () => {
                   const ok = await accion(() => apiSend('DELETE', base), null);

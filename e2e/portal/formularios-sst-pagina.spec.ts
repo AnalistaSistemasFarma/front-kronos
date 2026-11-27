@@ -80,7 +80,7 @@ test.describe('Portal TH · formularios SST (etapa 3)', () => {
     expect((await request.post('/api/portal/formularios-sst/SST-REPORTE-ACTOS', { data: {} })).status()).toBe(401);
   });
 
-  test('la página lista los dos formularios; quien no es lector NO ve «Ver respuestas» ni Excel', async ({ page }) => {
+  test('la página lista los dos formularios; quien no es lector NO ve Ver respuestas ni Excel', async ({ page }) => {
     await page.setViewportSize({ width: 1366, height: 900 });
     await simular(page);
     await page.goto('/portal/formularios-sst');
@@ -128,7 +128,7 @@ test.describe('Portal TH · formularios SST (etapa 3)', () => {
     expect(envios).toHaveLength(2);
   });
 
-  test('B2: sin la autorización de datos no se envía; con ella sí, con «Otras» y la escala', async ({ page }) => {
+  test('B2: sin la autorización de datos no se envía; con ella sí, con Otras y la escala', async ({ page }) => {
     await page.setViewportSize({ width: 1366, height: 900 });
     const envios = await simular(page);
     await page.goto('/portal/formularios-sst');
@@ -165,7 +165,7 @@ test.describe('Portal TH · formularios SST (etapa 3)', () => {
     await expect(page.getByTestId('formulario-enviado')).toHaveCount(0);
   });
 
-  test('un lector SST ve «Ver respuestas» y el Excel; la tabla trae los envíos con sus columnas y el buscador filtra', async ({ page }) => {
+  test('un lector SST ve Ver respuestas y el Excel; la tabla trae los envíos con sus columnas y el buscador filtra', async ({ page }) => {
     await page.setViewportSize({ width: 1600, height: 900 });
     await simular(page, { puedeVer: true });
     await page.goto('/portal/formularios-sst');
@@ -213,7 +213,7 @@ test.describe('Portal TH · formularios SST (etapa 3)', () => {
     await expect(page.getByTestId('respuestas-sst-error')).toContainText('El portal no tiene permiso para leer FORMULARIOS SST en SharePoint. Avise a Tecnología.');
   });
 
-  test('sin sesión: pide ingresar al portal; si la lista falla, aviso rojo con «Reintentar»', async ({ page }) => {
+  test('sin sesión: pide ingresar al portal; si la lista falla, aviso rojo con Reintentar', async ({ page }) => {
     await simular(page, { sinSesion: true });
     await page.goto('/portal/formularios-sst');
     await expect(page.getByRole('heading', { name: 'Ingrese primero al portal' })).toBeVisible();

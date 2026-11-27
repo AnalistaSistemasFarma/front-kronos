@@ -83,7 +83,7 @@ export function crearArchivador({ synerlink, log = () => {}, ahora = Date.now, d
     const archivados = Array.isArray(r?.archived) ? r.archived : [];
     log(`conversación ${idConversation}: ${archivados.length || archivos.length} archivo(s) archivado(s) en el proyecto.`);
     const renombrados = archivados.filter((a) => a?.renamed && a.fileName);
-    const detalle = renombrados.length ? ` (${renombrados.map((a) => `${a.originalName} como «${a.fileName}», porque ya había uno con ese nombre`).join('; ')})` : '';
+    const detalle = renombrados.length ? ` (${renombrados.map((a) => `${a.originalName} como ${a.fileName}, porque ya había uno con ese nombre`).join('; ')})` : '';
     return `📁 ${archivos.length === 1 ? 'Quedó archivado' : 'Quedaron archivados'} en los Archivos del proyecto${detalle}.`;
   }
 
@@ -92,5 +92,5 @@ export function crearArchivador({ synerlink, log = () => {}, ahora = Date.now, d
 
 /** Línea del encabezado del turno (textoSistema → bloqueArchivar). */
 export function textoArchivarProyecto() {
-  return '- ARCHIVOS DEL PROYECTO: todo lo que adjunte a su respuesta (líneas `MEDIA:` o el PDF de `PDF:`) queda ADEMÁS archivado en la pestaña Archivos del proyecto, como «subido por usted en esta conversación», a la vista de los miembros y como base de conocimiento de las demás conversaciones. Si ya hay un archivo con el mismo nombre, el nuevo se guarda como «nombre (2)»; nada se sobrescribe. Use nombres claros (por ejemplo informe-ventas-2026-10.pdf). No copie archivos a la carpeta de archivos del proyecto: es un espejo de solo lectura y no publica nada.';
+  return '- ARCHIVOS DEL PROYECTO: todo lo que adjunte a su respuesta (líneas `MEDIA:` o el PDF de `PDF:`) queda ADEMÁS archivado en la pestaña Archivos del proyecto, como subido por usted en esta conversación, a la vista de los miembros y como base de conocimiento de las demás conversaciones. Si ya hay un archivo con el mismo nombre, el nuevo se guarda como nombre (2); nada se sobrescribe. Use nombres claros (por ejemplo informe-ventas-2026-10.pdf). No copie archivos a la carpeta de archivos del proyecto: es un espejo de solo lectura y no publica nada.';
 }

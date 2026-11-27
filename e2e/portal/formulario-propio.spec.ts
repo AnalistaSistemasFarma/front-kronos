@@ -253,7 +253,7 @@ test.describe('Portal TH · Formación · formulario propio', () => {
     if (CAPTURAS) await page.screenshot({ path: `${CAPTURAS}/12-celular-tabla-respuestas.png` });
   });
 
-  test('un administrador/formador en «Vista estudiante» NO ve «Ver respuestas» (solo en «Vista formador»)', async ({ page }) => {
+  test('un administrador/formador en Vista estudiante NO ve Ver respuestas (solo en Vista formador)', async ({ page }) => {
     await page.setViewportSize({ width: 1366, height: 860 });
     await simular(page, { puedeMarcarManual: true, esFormador: true });
     await page.goto('/portal/formacion');
@@ -268,7 +268,7 @@ test.describe('Portal TH · Formación · formulario propio', () => {
     await expect(page.getByRole('button', { name: 'Respuestas', exact: true }).first()).toBeVisible();
   });
 
-  test('administrador del Excel que NO es formador: conserva «Ver respuestas» en su única vista', async ({ page }) => {
+  test('administrador del Excel que NO es formador: conserva Ver respuestas en su única vista', async ({ page }) => {
     await simular(page, { puedeMarcarManual: true, esFormador: false });
     await page.goto('/portal/formacion');
     await expect(page.getByRole('button', { name: 'Vista formador' })).toHaveCount(0);

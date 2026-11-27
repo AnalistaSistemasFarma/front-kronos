@@ -190,7 +190,7 @@ export default function CompartirAdjunto({ adjunto, onAviso }: { adjunto: Adjunt
 
       {reenviar && (
         <ReenviarModal
-          titulo={`Reenviar «${adjunto.fileName}»`}
+          titulo={`Reenviar ${adjunto.fileName}`}
           url={urlReenviarAdjunto(adjunto.downloadUrl, adjunto.id)}
           onClose={() => setReenviar(false)}
           onListo={(elegido) => {

@@ -67,7 +67,7 @@ export default function NabucoShell({ requireAdmin, children }: { requireAdmin?:
   if (!company) {
     return (
       <Alert color='yellow' icon={<IconAlertTriangle size={18} />} title={title} m='md'>
-        {`No tiene acceso a ${title}: le falta el permiso «${title}» en alguna empresa. Lo asigna un administrador en Administración → Usuarios.`}
+        {`No tiene acceso a ${title}: le falta el permiso ${title} en alguna empresa. Lo asigna un administrador en Administración → Usuarios.`}
       </Alert>
     );
   }

@@ -111,7 +111,7 @@ describe('marcadores de lista (sinNumeracionDePreguntas / sinMarcadoresDeOpcione
     expect(i.preguntas[2].opciones).toEqual(['Sí', 'No']);
     // "B. Braun" en la segunda posición coincide con la letra «b»: no se quita, pero se avisa para revisar.
     expect(i.preguntas[3].opciones).toEqual(['Baxter', 'B. Braun']);
-    expect(i.advertencias.join(' ')).toMatch(/Pregunta 4: la opción «B\. Braun» parece traer una letra/);
+    expect(i.advertencias.join(' ')).toMatch(/Pregunta 4: la opción B\. Braun parece traer una letra/);
   });
 });
 
@@ -123,7 +123,7 @@ describe('normalizarImportacion', () => {
     // Solo la cuarta opción de la pregunta 4 trae "d." escrita a mano: no se quita (las demás no la
     // traen), pero se avisa para que quien importa la revise.
     expect(i.advertencias).toHaveLength(1);
-    expect(i.advertencias[0]).toMatch(/^Pregunta 4: la opción «d\. Solo está prohibido/);
+    expect(i.advertencias[0]).toMatch(/^Pregunta 4: la opción d\. Solo está prohibido/);
     expect(i.preguntas.slice(0, 2).map((p) => [p.texto, p.tipo])).toEqual([
       ['Nombre Completo', 'texto'],
       ['Número de cédula', 'texto'],

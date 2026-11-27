@@ -353,7 +353,7 @@ export async function leerHojaDeVidaCompleta(idAgent: number) {
       .map((t) => ({
         occurredAt: t.resueltaEl as string,
         kind: 'caso',
-        title: `Caso #${c.idRequest}: se resolvió «${t.tarea}»`,
+        title: `Caso #${c.idRequest}: se resolvió ${t.tarea}`,
         detail: t.responsable ? `Responsable: ${t.responsable}` : null,
       })),
   ]);

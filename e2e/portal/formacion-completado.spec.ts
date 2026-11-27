@@ -242,7 +242,7 @@ test.describe('Portal TH · Formación · completado automático', () => {
     if (CAPTURAS) await page.screenshot({ path: `${CAPTURAS}/4-curso-completado.png`, fullPage: true });
   });
 
-  test('el ADMINISTRADOR que es formador conserva el marcado a mano en «Vista estudiante», sin bloqueos (Cristian, 2026-10-14)', async ({ page }) => {
+  test('el ADMINISTRADOR que es formador conserva el marcado a mano en Vista estudiante, sin bloqueos (Cristian, 2026-10-14)', async ({ page }) => {
     await simular(page, { puedeMarcarManual: true, esFormador: true, completados: [1] });
     await abrirCurso(page);
     // Casillas editables: marca y desmarca a mano; sin el aviso de «se marcan solas».
@@ -301,7 +301,7 @@ test.describe('Portal TH · Formación · completado automático', () => {
     if (CAPTURAS) await page.screenshot({ path: `${CAPTURAS}/8-restablecer-hecho.png` });
   });
 
-  test('quien no está en el Excel de permisos no ve el botón «Restablecer»', async ({ page }) => {
+  test('quien no está en el Excel de permisos no ve el botón Restablecer', async ({ page }) => {
     await simular(page, { puedeMarcarManual: false, esFormador: true, completados: [] });
     await page.route('**/api/portal/courses/3/roster', (r) =>
       r.fulfill({ json: { estudiantes: [{ correo: 'ana@gsslatam.com', nombre: 'Ana Gómez', inscritoEl: '2026-10-01T00:00:00Z', porcentaje: 0, materialesCompletados: [], certificado: null }] } })

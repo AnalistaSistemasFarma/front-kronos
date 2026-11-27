@@ -208,7 +208,7 @@ test.describe('Proyectos · permisos de los agentes', () => {
     await capturar(page, 'escritorio-permisos-solo-lectura');
   });
 
-  test('con el permiso: cambia a «Desarrollo + pases» con motivo, aviso verde arriba y registro', async ({ page }) => {
+  test('con el permiso: cambia a Desarrollo + pases con motivo, aviso verde arriba y registro', async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 900 });
     const api = await simular(page, { canEdit: true });
     await page.goto('/process/proyectos/4?seccion=permisos');
@@ -248,7 +248,7 @@ test.describe('Proyectos · permisos de los agentes', () => {
     await capturar(page, 'escritorio-permisos-guardados');
   });
 
-  test('«Nuevo proyecto»: con permiso en la empresa se escogen; sin él, «Ninguno» en solo lectura', async ({ page }) => {
+  test('Nuevo proyecto: con permiso en la empresa se escogen; sin él, Ninguno en solo lectura', async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 900 });
     const api = await simular(page, { canEdit: true, editables: [8] });
     await page.goto('/process/proyectos?nuevo=1');
@@ -277,7 +277,7 @@ test.describe('Proyectos · permisos de los agentes', () => {
     });
   });
 
-  test('«Nuevo proyecto» con Play (agente de negocio): se escoge el código igual, con aviso informativo', async ({ page }) => {
+  test('Nuevo proyecto con Play (agente de negocio): se escoge el código igual, con aviso informativo', async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 900 });
     const api = await simular(page, { canEdit: true, editables: [8], soloPlay: true });
     await page.goto('/process/proyectos?nuevo=1');
@@ -300,7 +300,7 @@ test.describe('Proyectos · permisos de los agentes', () => {
     expect(api.escrituras[0].body).toMatchObject({ idCompany: 8, agentCodes: ['play'], agentPolicy: { codeLevel: 'lectura', repos: ['front-kronos'] } });
   });
 
-  test('«Nuevo proyecto» sin permiso: el POST no lleva permisos (queda en «Ninguno»)', async ({ page }) => {
+  test('Nuevo proyecto sin permiso: el POST no lleva permisos (queda en Ninguno)', async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 900 });
     const api = await simular(page, { canEdit: false, editables: [] });
     await page.goto('/process/proyectos?nuevo=1');

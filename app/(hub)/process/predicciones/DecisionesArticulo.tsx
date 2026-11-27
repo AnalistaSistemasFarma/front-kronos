@@ -404,9 +404,9 @@ export default function DecisionesArticulo({ companyId }: { companyId: number })
       <ComoLeer
         items={[
           'Cada fila es una decisión sobre un artículo: reabastecer (D1), riesgo de quedarse sin inventario en 30 días (D2), lotes que podrían vencerse antes de venderse (D3) y registro sanitario por vencer (D7).',
-          'La probabilidad sale de simular 1.000 escenarios de venta con los errores que el pronóstico tuvo en meses pasados. «Regla» indica que la decisión no es probabilística (por ejemplo, la fecha del registro sanitario).',
+          'La probabilidad sale de simular 1.000 escenarios de venta con los errores que el pronóstico tuvo en meses pasados. Regla indica que la decisión no es probabilística (por ejemplo, la fecha del registro sanitario).',
           'La posición de inventario suma lo aprobado, lo que está en cuarentena y las órdenes de compra abiertas, y le resta lo ya comprometido con clientes.',
-          '«En juego» es la venta que se perdería (D1 y D2), el valor que quedaría sin vender (D3) o tres meses de venta del producto (D7), en pesos.',
+          'En juego es la venta que se perdería (D1 y D2), el valor que quedaría sin vender (D3) o tres meses de venta del producto (D7), en pesos.',
           'La calidad del dato es independiente de la probabilidad: baja significa poca historia, pocas pruebas o datos incompletos en SAP; tómela como referencia.',
           'Tiempo de reposición: el de SAP para cada artículo; si no tiene, se suponen 30 días. Nivel de servicio 95 % y cobertura objetivo de 90 días.',
         ]}

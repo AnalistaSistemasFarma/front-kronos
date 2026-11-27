@@ -174,15 +174,15 @@ async function legacyMatch(
     const extra = recientes.filter((r) => !p.candidates.some((c) => c.ItemCode === r.ItemCode)).map((r) => ({ ItemCode: r.ItemCode, ItemName: r.ItemName }));
     const b = bestCandidate(p.input.ItemDescription, a.servicios ? [...p.candidates, ...extra] : p.candidates, { servicios: a.servicios, preferidos });
     if (!b) {
-      avisos.push(`«${p.input.ItemDescription}» (${p.input.Quantity}): no se encontró en SAP; agréguelo a mano.`);
+      avisos.push(`${p.input.ItemDescription} (${p.input.Quantity}): no se encontró en SAP; agréguelo a mano.`);
       continue;
     }
     const otros = p.candidates.filter((c) => c.ItemCode !== b.ItemCode).slice(0, 3).map((c) => c.ItemCode).join(', ');
     elegidos.push({
       ...p.input, ItemCode: b.ItemCode,
       aiNote: b.seguro
-        ? `Emparejado por descripción con «${b.ItemName}»`
-        : `Revisar: se emparejó con «${b.ItemCode} ${b.ItemName}»${otros ? ` (otros posibles: ${otros})` : ''}`,
+        ? `Emparejado por descripción con ${b.ItemName}`
+        : `Revisar: se emparejó con ${b.ItemCode} ${b.ItemName}${otros ? ` (otros posibles: ${otros})` : ''}`,
     });
   }
   if (elegidos.length) {

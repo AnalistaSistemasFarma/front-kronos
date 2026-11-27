@@ -309,11 +309,11 @@ export function registerAgentMessageTool(server: McpServer, ctx: Ctx): void {
   if (!agentMessageEnabled(ctx.scope)) return;
   server.tool(
     AGENT_MESSAGE_TOOL,
-    'ESCRITURA acotada. Le envía un mensaje SUYO (como este asistente) a una persona en su chat de SynerLink con usted, por iniciativa propia: por ejemplo, para avisarle que ya quedó listo un acceso o un trámite que pidió. El mensaje queda en la conversación directa de esa persona con usted (si no existe, se crea), le llega la notificación y se marca como «Mensaje iniciado por el asistente». Solo funciona si la persona está activa y tiene asignado este asistente en una empresa de su alcance. Úselo solo cuando haya un motivo concreto; tiene tope diario por asistente y por persona, y cada envío queda auditado con el motivo. No lo use para responder en la conversación que está atendiendo (para eso está su respuesta normal).',
+    'ESCRITURA acotada. Le envía un mensaje SUYO (como este asistente) a una persona en su chat de SynerLink con usted, por iniciativa propia: por ejemplo, para avisarle que ya quedó listo un acceso o un trámite que pidió. El mensaje queda en la conversación directa de esa persona con usted (si no existe, se crea), le llega la notificación y se marca como Mensaje iniciado por el asistente. Solo funciona si la persona está activa y tiene asignado este asistente en una empresa de su alcance. Úselo solo cuando haya un motivo concreto; tiene tope diario por asistente y por persona, y cada envío queda auditado con el motivo. No lo use para responder en la conversación que está atendiendo (para eso está su respuesta normal).',
     {
       destinatario: z.string().trim().min(3).max(255).describe('Correo de la persona en SynerLink (preferido) o su id de usuario.'),
       texto: z.string().min(1).max(MAX_BODY_CHARS).describe(`Mensaje en Markdown, escrito para la persona (máximo ${MAX_BODY_CHARS} caracteres). Sin HTML.`),
-      motivo: z.string().min(5).max(MAX_REASON_CHARS).describe('Motivo breve del envío, para la auditoría (p. ej. «Avisar que ya tiene acceso a SAP, pedido por Nicolás Rivera»).'),
+      motivo: z.string().min(5).max(MAX_REASON_CHARS).describe('Motivo breve del envío, para la auditoría (p. ej. Avisar que ya tiene acceso a SAP, pedido por Nicolás Rivera).'),
     },
     async (args) => {
       const base = {
