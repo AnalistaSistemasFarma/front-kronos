@@ -49,6 +49,7 @@ import InternetPanel from './InternetPanel';
 import SoftwareModal from './SoftwareModal';
 import { formatMoney, formatNumber } from './assetFormat';
 import { iconForAssetType } from './assetTypeIcons';
+import { companyLogoSrc } from '../ui/CompanyLogo';
 
 const ALL = 'all';
 
@@ -81,6 +82,7 @@ function CompanyButton({
   onClick: () => void;
   icon: typeof IconBuilding;
 }) {
+  const logo = Icon === IconBuildingSkyscraper ? null : companyLogoSrc(name);
   return (
     <UnstyledButton
       onClick={onClick}
@@ -98,9 +100,30 @@ function CompanyButton({
     >
       <Group justify='space-between' wrap='nowrap' gap='sm'>
         <Group gap='sm' wrap='nowrap' style={{ minWidth: 0 }}>
-          <ThemeIcon variant={selected ? 'filled' : 'light'} radius='md' size='md' style={selected ? { background: color } : { color }}>
-            <Icon size={16} />
-          </ThemeIcon>
+          {logo ? (
+            // Company logo from /public/landing/empresas (same files as components/ui/CompanyLogo).
+            <Box
+              style={{
+                width: 44,
+                height: 32,
+                flexShrink: 0,
+                borderRadius: 'var(--mantine-radius-sm)',
+                background: '#fff',
+                border: '1px solid var(--mantine-color-default-border)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                padding: 3,
+              }}
+            >
+              {/* eslint-disable-next-line @next/next/no-img-element -- small static logos */}
+              <img src={logo} alt='' style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain', display: 'block' }} />
+            </Box>
+          ) : (
+            <ThemeIcon variant={selected ? 'filled' : 'light'} radius='md' size='md' style={selected ? { background: color } : { color }}>
+              <Icon size={16} />
+            </ThemeIcon>
+          )}
           <Text size='sm' fw={selected ? 700 : 500} lineClamp={2} style={{ minWidth: 0 }}>
             {name}
           </Text>
