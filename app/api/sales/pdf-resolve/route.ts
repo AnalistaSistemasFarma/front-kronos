@@ -6,6 +6,8 @@ import { salesCompanyConfig } from '../../../../lib/sales/companyConfig';
 import { MAX_PDF_LINES, type ImportLine } from '../../../../lib/sales/linesImport';
 import { validateLines } from '../../../../lib/sales/linesValidate';
 import { bestCandidate, nitBase } from '../../../../lib/sales/pdfOrder';
+import { CONFIDENCE_LABEL, convertLine } from '../../../../lib/sales/itemPrediction';
+import { resolveItems } from '../../../../lib/sales/itemResolver';
 import { recentItems, RECENT_LINES, searchPath } from '../../../../lib/sales/search';
 import { sapGet, sapLogin, sapLogout, SapError } from '../../../../lib/sap/serviceLayer';
 
@@ -13,8 +15,10 @@ import { sapGet, sapLogin, sapLogout, SapError } from '../../../../lib/sap/servi
  * Monta la oferta desde lo que la IA del navegador leyó del PDF de la OC (solo datos extraídos; el PDF no llega
  * al servidor):
  *  1) identifica el CLIENTE en SAP por el NIT (CardCode o FederalTaxID) — o usa el que ya eligió el usuario;
- *  2) valida las líneas; las que no traen código de SAP se emparejan por descripción y se toma el artículo
- *     más parecido (marcado «a revisar» si no es claro).
+ *  2) valida las líneas. Empresas de productos: predicción del artículo en el servidor (código de SAP, código de
+ *     barras, catálogo del cliente, historial de pedidos y facturas del cliente, descripción), con hasta 3
+ *     candidatos y nivel de confianza; solo la confianza alta queda elegida sin confirmar (2026-11-27).
+ *     Empresas de servicios: emparejamiento por descripción (como antes).
  * POST { companyId, nit?, cardCode?, lines } -> { customer, customerCandidates, lines, avisos }
  */
 const q = (v: string) => `'${v.replace(/'/g, "''")}'`;
@@ -66,6 +70,17 @@ export async function POST(request: NextRequest) {
       // 2) Líneas. Empresas de servicios (descripción editable: Kelab, Meditrack): la OC trae descripciones libres
       // y SAP tiene pocos artículos genéricos; se empareja por cobertura y la línea conserva la descripción del PDF.
       const servicios = Boolean(conf?.descripcionEditable);
+      if (!servicios) {
+        const lines = await predictLines(sap, {
+          cardCode: customer.CardCode, input, priceListDefault: conf?.priceListDefault ?? null, defaultWarehouse: conf?.defaultWarehouse ?? null,
+        });
+        const n = (c: string) => lines.filter((l) => (l.match as { confidence: string }).confidence === c).length;
+        const porConfirmar = n('media') + n('baja');
+        const avisos = [...avisoTope];
+        if (porConfirmar) avisos.push(`${porConfirmar} línea(s) por confirmar: revise el artículo sugerido antes de agregarlas.`);
+        if (n('ninguna')) avisos.push(`${n('ninguna')} línea(s) sin artículo en SAP: búsquelo o desmárquelas.`);
+        return NextResponse.json({ customer, customerCandidates, lines, avisos });
+      }
       // Artículos que ya se le han facturado a este cliente: desempatan el emparejamiento por descripción.
       const recientes = await sapGet<Record<string, unknown>>(sap, searchPath('recent_items', { cardCode: customer.CardCode }), { Prefer: `odata.maxpagesize=${RECENT_LINES}` })
         .then((d) => recentItems(d, 60))
@@ -113,4 +128,55 @@ export async function POST(request: NextRequest) {
     console.error('Error montando la oferta desde el PDF:', error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
+}
+
+type Validated = Record<string, unknown>;
+
+/**
+ * Predicts the SAP item of each PO line and validates the top candidates (price list, warehouse) in ONE
+ * validateLines call. Each line goes out with its best candidate and a «match» object for the UI.
+ */
+async function predictLines(
+  sap: Awaited<ReturnType<typeof sapLogin>>,
+  a: { cardCode: string; input: ImportLine[]; priceListDefault: number | null; defaultWarehouse: string | null }
+): Promise<Validated[]> {
+  const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Bogota' }).format(new Date());
+  const resolved = await resolveItems(sap, { cardCode: a.cardCode, input: a.input, today });
+  // One pseudo-line per (line, candidate), with the box → unit conversion of that candidate.
+  const pseudo: ImportLine[] = [];
+  const key: { line: number; cand: number }[] = [];
+  resolved.forEach((r, i) => r.prediction.candidates.forEach((c, j) => {
+    const conv = convertLine(Number(r.input.Quantity), r.input.UnitPrice, c.factor);
+    key.push({ line: i, cand: j });
+    pseudo.push({ row: key.length, ItemCode: c.ItemCode, Quantity: conv.Quantity, UnitPrice: conv.UnitPrice, WarehouseCode: r.input.WarehouseCode ?? '', ItemDescription: '' });
+  }));
+  const v = pseudo.length
+    ? await validateLines(sap, { cardCode: a.cardCode, input: pseudo, matchByDescription: false, priceListDefault: a.priceListDefault, defaultWarehouse: a.defaultWarehouse })
+    : { lines: [] as Validated[] };
+  const validated = new Map<string, Validated>();
+  for (const l of v.lines) {
+    const k = key[Number(l.row) - 1];
+    if (k) validated.set(`${k.line}|${k.cand}`, l);
+  }
+  return resolved.map((r, i) => {
+    const p = r.prediction;
+    const candidates = p.candidates
+      .map((c, j) => ({ ...c, line: validated.get(`${i}|${j}`) }))
+      .filter((c) => c.line)
+      .map((c) => ({ ...c, line: { ...c.line, row: r.input.row } }));
+    const confidence = candidates.length ? p.confidence : 'ninguna';
+    const match = {
+      confidence, reason: candidates.length ? candidates[0].reason : p.reason,
+      autoSelected: confidence === 'alta', confirmed: confidence === 'alta',
+      source: { barcode: r.input.Barcode ?? '', clientCode: r.input.ClientCode ?? '', description: r.input.ItemDescription, quantity: r.input.Quantity, price: r.input.UnitPrice },
+      candidates,
+    };
+    const best = candidates[0]?.line;
+    const aiNote = best ? `${CONFIDENCE_LABEL[confidence]}: ${match.reason}` : null;
+    if (best) return { ...best, aiNote, match };
+    return {
+      row: r.input.row, ItemCode: '', ItemDescription: r.input.ItemDescription || (r.input.Barcode ? `EAN ${r.input.Barcode}` : r.input.ClientCode ?? ''),
+      Quantity: r.input.Quantity, ListPrice: 0, UnitPrice: r.input.UnitPrice ?? 0, WarehouseCode: '', aiNote: null, match,
+    };
+  });
 }
