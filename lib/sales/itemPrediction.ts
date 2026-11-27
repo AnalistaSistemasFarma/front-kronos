@@ -70,6 +70,8 @@ export interface Candidate {
   reason: string;
   /** Units per PO unit: 1, or the pack size when the PO price is a box price. */
   factor: number;
+  /** The customer bought it before (orders or invoices). */
+  history?: boolean;
 }
 
 export interface LinePrediction {
@@ -123,7 +125,7 @@ export function priceFactor(poPrice: number | null, refPrice: number | null, pac
 
 const W = { exact: 1.0, barcode: 0.9, catalog: 0.9, clientRef: 0.5, history: 0.3, historyFrequent: 0.05, desc: 0.4, price: 0.15 };
 /** Description model (lines without a strong key): ingredient, strength, presentation, company sales, price, penalties. */
-export const WD = { ingredient: 0.3, strength: 0.2, strengthClash: -0.15, form: 0.03, sold: 0.15, priceClose: 0.15, priceNear: 0.07, exportVariant: -0.3, rawMaterial: -0.4, noStock: -0.1 };
+export const WD = { ingredient: 0.3, strength: 0.2, strengthClash: -0.15, form: 0.03, sold: 0.15, priceClose: 0.15, priceNear: 0.07, exportVariant: -0.3, brandVariant: -0.15, rawMaterial: -0.4, noStock: -0.1 };
 /** Months of company-wide sales read for the description model. */
 export const SALES_MONTHS = 6;
 /** Score that maps to 100 % on screen. */
@@ -208,6 +210,7 @@ export function rankLine(
       }
       if (byDescription) {
         if (dm.exportVariant) { raw += WD.exportVariant; reasons.push('Variante de exportación'); }
+        if (dm.brandVariant) { raw += WD.brandVariant; reasons.push('Marca comercial'); }
         if (it.rawMaterial) { raw += WD.rawMaterial; reasons.push('Materia prima o insumo'); }
         if (it.stock != null && it.stock <= 0) { raw += WD.noStock; reasons.push('Sin existencias'); }
       }
@@ -261,7 +264,7 @@ export function rankLine(
   // Description fallback: never empty when the master has plausible items (same active ingredient).
   const plausible = active.filter((c) => c.dm?.ingredientOk);
   if ((!top || top.raw < 0.2) && plausible.length) {
-    const candidates = plausible.slice(0, 3).map(({ ItemCode, ItemName, score, reason, factor }) => ({ ItemCode, ItemName, score, reason, factor }));
+    const candidates = plausible.slice(0, 3).map(({ ItemCode, ItemName, score, reason, factor, inHistory }) => ({ ItemCode, ItemName, score, reason, factor, ...(inHistory ? { history: true } : {}) }));
     return { confidence: 'baja', reason: `Coincidencia aproximada por descripción: ${candidates[0].reason}`, candidates, autoSelected: false };
   }
   if (!top || top.raw < 0.2) {
@@ -283,7 +286,7 @@ export function rankLine(
     confidence = clean && evidence && (!second || top.raw - second.raw >= 0.1) ? 'media' : 'baja';
   } else if (top.raw >= 0.5) confidence = 'media';
   else confidence = 'baja';
-  const candidates = active.slice(0, 3).map(({ ItemCode, ItemName, score, reason, factor }) => ({ ItemCode, ItemName, score, reason, factor }));
+  const candidates = active.slice(0, 3).map(({ ItemCode, ItemName, score, reason, factor, inHistory }) => ({ ItemCode, ItemName, score, reason, factor, ...(inHistory ? { history: true } : {}) }));
   return { confidence, reason: top.reason, candidates, autoSelected: confidence === 'alta' };
 }
 
@@ -294,3 +297,15 @@ export function convertLine(qty: number, price: number | null, factor: number): 
 }
 
 export const CONFIDENCE_LABEL: Record<Confidence, string> = { alta: 'Alta', media: 'Media', baja: 'Baja', ninguna: 'Sin artículo' };
+
+/**
+ * After validation: the customer's history stays first; among the rest, items with a price in the customer's price
+ * list go before items without one (stable, otherwise the score order is kept). PURE.
+ */
+export function preferPriceList<T extends { history?: boolean; reason: string; line: Record<string, unknown> }>(cands: T[]): T[] {
+  const key = (c: T) => (c.history ? 0 : Number(c.line.ListPrice) > 0 ? 1 : 2);
+  return cands
+    .map((c, i) => ({ c, i }))
+    .sort((a, b) => key(a.c) - key(b.c) || a.i - b.i)
+    .map(({ c }) => (!c.history && Number(c.line.ListPrice) > 0 && !c.reason.includes('En lista de precios') ? { ...c, reason: `${c.reason} · En lista de precios` } : c));
+}

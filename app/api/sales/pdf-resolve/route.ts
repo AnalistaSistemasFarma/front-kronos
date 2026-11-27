@@ -6,7 +6,7 @@ import { salesCompanyConfig } from '../../../../lib/sales/companyConfig';
 import { MAX_PDF_LINES, type ImportLine } from '../../../../lib/sales/linesImport';
 import { validateLines } from '../../../../lib/sales/linesValidate';
 import { bestCandidate, nitBase } from '../../../../lib/sales/pdfOrder';
-import { CONFIDENCE_LABEL, convertLine } from '../../../../lib/sales/itemPrediction';
+import { CONFIDENCE_LABEL, convertLine, preferPriceList } from '../../../../lib/sales/itemPrediction';
 import { resolveItems } from '../../../../lib/sales/itemResolver';
 import { recentItems, RECENT_LINES, searchPath } from '../../../../lib/sales/search';
 import { sapGet, sapLogin, sapLogout, SapError } from '../../../../lib/sap/serviceLayer';
@@ -131,10 +131,10 @@ async function predictLines(
   }
   return resolved.map((r, i) => {
     const p = r.prediction;
-    const candidates = p.candidates
+    const candidates = preferPriceList(p.candidates
       .map((c, j) => ({ ...c, line: validated.get(`${i}|${j}`) }))
-      .filter((c) => c.line)
-      .map((c) => ({ ...c, line: { ...c.line, row: r.input.row } }));
+      .filter((c): c is typeof c & { line: Validated } => Boolean(c.line))
+      .map((c) => ({ ...c, line: { ...c.line, row: r.input.row } })));
     const confidence = candidates.length ? p.confidence : 'ninguna';
     const match = {
       confidence, reason: candidates.length ? candidates[0].reason : p.reason,
