@@ -30,6 +30,9 @@ export async function GET(req: Request) {
         q('SELECT id_form_field, date_col, extension_col, status_col, done_value, warn_business_days, single_extension FROM dbo.process_date_tracking WHERE id_process_category = @p'),
         q('SELECT id, task, start_delay_days FROM task_process_category WHERE id_process_category = @p AND active = 1 ORDER BY display_order, id'),
       ]);
+      // 2026-11-26: annual calendar (date field + list field for the rows).
+      const cal = await q(`SELECT pc.calendar_field, pc.calendar_group_field FROM process_category pc WHERE pc.id = @p`);
+      const other = await q(`SELECT id, field_label, field_type FROM process_form_field WHERE id_process_category = @p AND active = 1 AND field_type IN (N'date', N'select') ORDER BY display_order, id`);
       const tableFields = (fields.recordset as { id: number; field_label: string; config_json: string | null }[]).map((f) => {
         let columns: { key: string; label: string; type: string }[] = [];
         try {
@@ -45,6 +48,10 @@ export async function GET(req: Request) {
         tracking: t
           ? { idFormField: t.id_form_field, dateCol: t.date_col, extensionCol: t.extension_col, statusCol: t.status_col, doneValue: t.done_value, warnBusinessDays: t.warn_business_days, singleExtension: Boolean(t.single_extension) }
           : null,
+        calendarField: (cal.recordset[0] as { calendar_field: number | null } | undefined)?.calendar_field ?? null,
+        calendarGroupField: (cal.recordset[0] as { calendar_group_field: number | null } | undefined)?.calendar_group_field ?? null,
+        dateFields: (other.recordset as { id: number; field_label: string; field_type: string }[]).filter((f) => f.field_type === 'date').map((f) => ({ id: f.id, label: f.field_label })),
+        selectFields: (other.recordset as { id: number; field_label: string; field_type: string }[]).filter((f) => f.field_type === 'select').map((f) => ({ id: f.id, label: f.field_label })),
         tasks: (tasks.recordset as { id: number; task: string; start_delay_days: number | null }[]).map((x) => ({ id: x.id, task: x.task, startDelayDays: x.start_delay_days })),
       };
     });
@@ -100,6 +107,16 @@ export async function PUT(req: Request) {
             .input('by', sql.NVarChar(255), guard.email)
             .query('INSERT INTO dbo.process_date_tracking (id_process_category, id_form_field, date_col, extension_col, status_col, done_value, warn_business_days, single_extension, updated_by) VALUES (@p, @f, @d, @e, @s, @dv, @w, @one, @by)');
         }
+        const calField = body?.calendarField ? Number(body.calendarField) : null;
+        const calGroup = body?.calendarGroupField ? Number(body.calendarGroupField) : null;
+        await new sql.Request(tx)
+          .input('p', sql.Int, id)
+          .input('cf', sql.Int, calField)
+          .input('cg', sql.Int, calGroup)
+          .query(`UPDATE process_category SET
+              calendar_field = (SELECT id FROM process_form_field WHERE id = @cf AND id_process_category = @p AND field_type = N'date'),
+              calendar_group_field = (SELECT id FROM process_form_field WHERE id = @cg AND id_process_category = @p AND field_type = N'select')
+            WHERE id = @p`);
         for (const x of delays) {
           await new sql.Request(tx).input('t', sql.Int, x.id).input('p', sql.Int, id).input('d', sql.Int, x.days).query('UPDATE task_process_category SET start_delay_days = @d WHERE id = @t AND id_process_category = @p');
         }
