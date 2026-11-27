@@ -8,6 +8,7 @@ import { validateLines } from '../../../../lib/sales/linesValidate';
 import { bestCandidate, nitBase } from '../../../../lib/sales/pdfOrder';
 import { CONFIDENCE_LABEL, convertLine, preferPriceList } from '../../../../lib/sales/itemPrediction';
 import { resolveItems } from '../../../../lib/sales/itemResolver';
+import { loadLearned, withLearned } from '../../../../lib/sales/learnedMappings';
 import { recentItems, RECENT_LINES, searchPath } from '../../../../lib/sales/search';
 import { sapGet, sapLogin, sapLogout, SapError } from '../../../../lib/sap/serviceLayer';
 
@@ -72,7 +73,7 @@ export async function POST(request: NextRequest) {
       // match, the previous description/coverage matching (free-text service lines keep the PDF description).
       const servicios = Boolean(conf?.descripcionEditable);
       const predicted = await predictLines(sap, {
-        cardCode: customer.CardCode, input, priceListDefault: conf?.priceListDefault ?? null, defaultWarehouse: conf?.defaultWarehouse ?? null,
+        companyId, cardCode: customer.CardCode, input, priceListDefault: conf?.priceListDefault ?? null, defaultWarehouse: conf?.defaultWarehouse ?? null,
       });
       const confidenceOf = (l: Record<string, unknown>) => (l.match as { confidence: string } | undefined)?.confidence;
       const avisos: string[] = [...avisoTope];
@@ -107,10 +108,12 @@ type Validated = Record<string, unknown>;
  */
 async function predictLines(
   sap: Awaited<ReturnType<typeof sapLogin>>,
-  a: { cardCode: string; input: ImportLine[]; priceListDefault: number | null; defaultWarehouse: string | null }
+  a: { companyId: number; cardCode: string; input: ImportLine[]; priceListDefault: number | null; defaultWarehouse: string | null }
 ): Promise<Validated[]> {
   const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Bogota' }).format(new Date());
-  const resolved = await resolveItems(sap, { cardCode: a.cardCode, input: a.input, today });
+  // Learned mappings of this customer go first (taught by the users in this form; see learnedMappings.ts).
+  const [raw, learned] = await Promise.all([resolveItems(sap, { cardCode: a.cardCode, input: a.input, today }), loadLearned(a.companyId, a.cardCode)]);
+  const resolved = withLearned(raw, learned);
   // One pseudo-line per (line, candidate), with the box → unit conversion of that candidate.
   const pseudo: ImportLine[] = [];
   const key: { line: number; cand: number }[] = [];
@@ -133,8 +136,11 @@ async function predictLines(
       .map((c, j) => ({ ...c, line: validated.get(`${i}|${j}`) }))
       .filter((c): c is typeof c & { line: Validated } => Boolean(c.line))
       .map((c) => ({ ...c, line: { ...c.line, row: r.input.row } })));
-    const confidence = candidates.length ? p.confidence : 'ninguna';
+    // The learned item must have survived the validation (active, in SAP) to keep its confidence.
+    const learnedOk = r.learned && candidates[0]?.ItemCode === r.learned.itemCode ? r.learned : undefined;
+    const confidence = !candidates.length ? 'ninguna' : r.learned && !learnedOk ? (candidates.length ? 'baja' : 'ninguna') : p.confidence;
     const match = {
+      ...(learnedOk ? { learned: { kind: learnedOk.kind, id: learnedOk.id } } : {}),
       confidence, reason: candidates.length ? candidates[0].reason : p.reason,
       autoSelected: confidence === 'alta', confirmed: confidence === 'alta',
       source: { barcode: r.input.Barcode ?? '', clientCode: r.input.ClientCode ?? '', description: r.input.ItemDescription, quantity: r.input.Quantity, price: r.input.UnitPrice },
