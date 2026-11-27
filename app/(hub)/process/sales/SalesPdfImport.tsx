@@ -409,7 +409,9 @@ export default function SalesPdfImport({ companyId, companyName, cardCode, onLoa
       return { ...l, aiNote: `${m.autoSelected && m.confirmed ? CONFIDENCE_LABEL[m.confidence] : 'Confirmado'}: ${m.reason}` };
     });
     if (!lines.length) return;
-    onLoaded({ ...sim, lines });
+    // The confirmation notices of the simulation no longer apply: every line that goes to the offer is confirmed.
+    const avisos = sim.avisos.filter((a) => !/por confirmar: revise|sin artículo en SAP: búsquelo/.test(a));
+    onLoaded({ ...sim, avisos, lines });
     setSim(null);
     setPhase('idle');
   };
