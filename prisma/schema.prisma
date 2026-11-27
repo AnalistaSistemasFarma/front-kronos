@@ -6084,6 +6084,52 @@ model BiomedMantenimiento {
   @@schema("dbo")
 }
 
+/// INGENIERÍA BIOMÉDICA · REPUESTOS E INSUMOS (2026-11-26): inventario aparte del de equipos, con existencias.
+model BiomedRepuesto {
+  id_biomed_repuesto Int       @id @default(autoincrement())
+  id_company         Int
+  /// repuesto | insumo
+  tipo               String    @db.NVarChar(20)
+  codigo             String?   @db.NVarChar(50)
+  nombre             String    @db.NVarChar(200)
+  unidad             String    @default("unidad") @db.NVarChar(30)
+  modelo_compatible  String?   @db.NVarChar(150)
+  ubicacion          String?   @db.NVarChar(100)
+  stock              Decimal   @default(0) @db.Decimal(18, 2)
+  stock_minimo       Decimal?  @db.Decimal(18, 2)
+  item_code_sap      String?   @db.NVarChar(50)
+  activo             Boolean   @default(true)
+  created_by         String    @db.NVarChar(255)
+  created_at         DateTime  @default(now())
+  updated_by         String?   @db.NVarChar(255)
+  updated_at         DateTime?
+
+  @@index([id_company, tipo])
+  @@map("biomed_repuesto")
+  @@schema("dbo")
+}
+
+/// Movimientos de repuestos e insumos (entrada, salida, ajuste): solo inserción (disparador en la base).
+model BiomedRepuestoMov {
+  id_biomed_repuesto_mov Int      @id @default(autoincrement())
+  id_company             Int
+  id_biomed_repuesto     Int
+  /// entrada | salida | ajuste
+  tipo                   String   @db.NVarChar(20)
+  cantidad               Decimal  @db.Decimal(18, 2)
+  stock_resultante       Decimal  @db.Decimal(18, 2)
+  id_biomed_equipo       Int?
+  referencia             String?  @db.NVarChar(100)
+  observacion            String?  @db.NVarChar(1000)
+  actor_email            String   @db.NVarChar(255)
+  created_at             DateTime @default(now())
+
+  @@index([id_biomed_repuesto, created_at], map: "biomed_repuesto_mov_repuesto_idx")
+  @@index([id_biomed_equipo], map: "biomed_repuesto_mov_equipo_idx")
+  @@map("biomed_repuesto_mov")
+  @@schema("dbo")
+}
+
 /// Historial de cada equipo (control de cambios): solo inserción (disparador en la base).
 model BiomedEquipoEvento {
   id_biomed_equipo_evento Int      @id @default(autoincrement())
