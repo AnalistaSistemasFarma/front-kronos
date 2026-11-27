@@ -1,4 +1,5 @@
 import type { Prisma } from '../../../app/generated/prisma';
+import { enrollInLinkedCourse } from './trainingCourse';
 import { SGC_AUDIT_ACTIONS, writeSgcAudit } from '../audit';
 import { SGC_SUBPROCESS_URLS } from '../constants';
 import {
@@ -147,6 +148,8 @@ async function addReaders(tx: Tx, request: { id_request: number }, idTask: numbe
     await tx.sgcReadRecord.create({ data: { id_request: request.id_request, id_task: idTask, id_task_assignee: a.id_task_assignee, user_email: r.email, sources_json: JSON.stringify(r.sources).slice(0, 1000), status: 'pendiente', assigned_at: now } });
     added.push(r.email);
   }
+  // 2026-11-26: si la capacitación tiene un curso de Formación, quien entra a la divulgación queda inscrito en él.
+  if (added.length) await enrollInLinkedCourse(tx, request.id_request, added);
   return added;
 }
 

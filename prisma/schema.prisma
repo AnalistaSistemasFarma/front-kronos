@@ -3891,6 +3891,18 @@ model SgcTraining {
   @@schema("sgc")
 }
 
+/// 2026-11-26: curso de FORMACIÓN de la capacitación de una solicitud del SGC (tabla en dbo, fuera del esquema validado).
+model SgcTrainingCourse {
+  id_training Int      @id
+  course_id   Int
+  linked_by   String   @db.NVarChar(255)
+  linked_at   DateTime @default(now())
+
+  @@index([course_id])
+  @@map("sgc_training_course")
+  @@schema("dbo")
+}
+
 // Cada carga del Excel de resultados (SOLO INSERCIÓN): la vigente es la última.
 model SgcTrainingUpload {
   id_training_upload Int      @id @default(autoincrement())

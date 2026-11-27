@@ -5,6 +5,7 @@ import { Alert, Anchor, Badge, Button, Card, Code, FileButton, Grid, Group, Numb
 import SgcSelect from '../SgcSelect';
 import { IconCalendarEvent, IconChecklist, IconDownload, IconEye, IconFileSpreadsheet, IconSchool, IconUpload } from '@tabler/icons-react';
 import SgcEvaluationBuilder from './SgcEvaluationBuilder';
+import SgcTrainingCourseLink from './SgcTrainingCourseLink';
 import SgcDocumentViewerModal from '../SgcDocumentViewerModal';
 import type { SgcRequestDetail } from '../../../lib/sgc/db/requests';
 import { SGC_TRAINING_DEFAULT_MAX_ATTEMPTS, SGC_TRAINING_DEFAULT_MIN_PCT, SGC_TRAINING_MODE_LABELS, SGC_TRAINING_RESULTS_TEMPLATE_CSV, SGC_TRAINING_RESULTS_TEMPLATE_NAME, type SgcTrainingMode } from '../../../lib/sgc/training/results';
@@ -270,6 +271,8 @@ export default function SgcTrainingCard({ view, onSave, onUpload, onRetrain, use
         </Group>
       )}
       {!t && !view.canManage && <Text size='sm' c='dimmed'>{view.byCreator ? 'El creador del documento aún no registra la capacitación.' : 'Calidad aún no registra la capacitación.'}</Text>}
+      {/* 2026-11-26: curso de Formación ligado (inscripción de la divulgación, avance y certificado). */}
+      {t && requestId && <SgcTrainingCourseLink requestId={requestId} view={view} onChanged={onChanged} />}
 
       {/* S17 (R30): banco de preguntas de la evaluación en SynerLink (lo arma el creador del documento o Calidad). */}
       {t && own && view.canManage && requestId && <SgcEvaluationBuilder requestId={requestId} onSaved={onChanged} />}
