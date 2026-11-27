@@ -31,6 +31,7 @@ import { spawn } from 'node:child_process';
 import { HERRAMIENTAS_PROHIBIDAS } from './config.mjs';
 import { entornoTopes, HERRAMIENTAS_SUBAGENTE, revisarAgentesInit } from './equipo.mjs';
 import { NEGADAS_COMPLETO, revisarInitCompleto } from './orus-completo.mjs';
+import { coincideNegada } from './conectores-agente.mjs';
 import { etiquetaHerramienta as etiquetaDetallada } from './openclaw/actividad.mjs';
 
 /** Herramientas de archivos: lectura libre dentro del hilo, escritura solo en ./trabajo. */
@@ -79,6 +80,8 @@ export function armarArgumentos({ perfil, sesion, rutaMcp, rutaSistema, dirArchi
     ...(codigo ? codigo.prohibidas : []),
     // Permisos del proyecto, nivel LECTURA (politica.mjs): sin secretos de los clones.
     ...(lectura ? lectura.prohibidas : []),
+    // Agent connectors (conectores-agente.mjs): the tools its chat denies.
+    ...(perfil.prohibidas ?? []),
   ];
   // Sin sandbox SOLO con terminal completa (turno de operador en un proyecto con la bandera).
   if (codigo && !codigo.sandbox?.enabled && codigo.terminalCompleta !== true) throw new Error('Turno con código sin sandbox: no se arma.');
@@ -292,6 +295,7 @@ export function revisarInit(evento, perfil, equipo = null, codigo = null, script
     // Con código vinculado, Bash (con sus reglas y el sandbox).
     if ((codigo || scripts) && HERRAMIENTAS_CODIGO.includes(h)) continue;
     if (HERRAMIENTAS_PROHIBIDAS.includes(h)) problemas.push(`herramienta prohibida: ${h}`);
+    else if ((perfil.prohibidas ?? []).some((r) => coincideNegada(h, r))) problemas.push(`herramienta negada en el chat del agente: ${h}`);
   }
   if (equipo) problemas.push(...revisarAgentesInit(evento, equipo));
   const modo = evento?.permissionMode;

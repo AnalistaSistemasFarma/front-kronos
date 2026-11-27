@@ -387,7 +387,7 @@ export function crearPuente({ cfg, synerlink, estado, correr = correrTurno, conv
       if (!completo && cfg.conectoresAgente) {
         try {
           delAgente = prepararConectoresAgente({ cfg, idConversation, perfilServidores: perfil.mcpServers });
-          if (delAgente?.servidores.length) log(`conversación ${idConversation}: conectores del agente: ${delAgente.servidores.join(', ')}${delAgente.engramProyecto ? ` (engram → ${delAgente.engramProyecto})` : ''}${delAgente.faltan.length ? `; variables sin valor: ${delAgente.faltan.join(', ')}` : ''}.`);
+          if (delAgente?.servidores.length) log(`conversación ${idConversation}: conectores del agente: ${delAgente.servidores.join(', ')}${delAgente.engramProyecto ? ` (engram → ${delAgente.engramProyecto})` : ''}${delAgente.prohibidas?.length ? `; negadas como en su chat: ${delAgente.prohibidas.join(', ')}` : ''}${delAgente.faltan.length ? `; variables sin valor: ${delAgente.faltan.join(', ')}` : ''}.`);
         } catch (e) {
           delAgente = null;
           log(`conversación ${idConversation}: no se pudieron leer los conectores del agente, el turno va sin ellos:`, e.message);
@@ -513,7 +513,7 @@ export function crearPuente({ cfg, synerlink, estado, correr = correrTurno, conv
           textoGrafos(grafosTurno, { conBash: Boolean(codigo || completo) }) +
           (completo ? `\n${textoOrusCompleto({ autores: completo.autores, servidores: completo.servidores })}` : ''),
         bloqueMemoria: memoria.bloque,
-        bloqueConectores: (conectores?.bloque ?? '') + (delAgente?.servidores.length ? textoConectoresAgente({ agente: agenteNombre, servidores: delAgente.servidores, origen: delAgente.origen, engramProyecto: delAgente.engramProyecto }) : '') + skillScriptsText(scripts),
+        bloqueConectores: (conectores?.bloque ?? '') + (delAgente?.servidores.length ? textoConectoresAgente({ agente: agenteNombre, servidores: delAgente.servidores, origen: delAgente.origen, engramProyecto: delAgente.engramProyecto, denegadas: delAgente.prohibidas }) : '') + skillScriptsText(scripts),
         bloquePruebas: pruebas.bloque,
         bloquePdf: textoPdf({ disponible: Boolean(chromePdf), recursos }),
         bloqueTiempo: textoTiempoTurno({ topeMs: cfg.timeoutTurnoMs, avisoMs: cfg.avisoProgresoMs ?? 0 }),
@@ -1064,7 +1064,7 @@ export function conectoresAgenteListo(cfg) {
   if (!cfg.conectoresAgente?.configDir) return 'apagados';
   try {
     const a = servidoresAgente(cfg.conectoresAgente);
-    return `${a.nombres.length ? a.nombres.join(', ') : 'ninguno'} (de ${cfg.conectoresAgente.configDir})${a.engramProyecto ? `; engram fijado a su memoria ${a.engramProyecto}` : ''}${a.faltan.length ? `; variables sin valor: ${a.faltan.join(', ')}` : ''}`;
+    return `${a.nombres.length ? a.nombres.join(', ') : 'ninguno'} (de ${cfg.conectoresAgente.configDir})${a.engramProyecto ? `; engram fijado a su memoria ${a.engramProyecto}` : ''}${a.denegadas?.length ? `; negadas como en su chat: ${a.denegadas.join(', ')}` : ''}${a.faltan.length ? `; variables sin valor: ${a.faltan.join(', ')}` : ''}`;
   } catch (e) {
     return `NO se pudieron leer (${e.message.slice(0, 120)}): los turnos irán sin ellos`;
   }
