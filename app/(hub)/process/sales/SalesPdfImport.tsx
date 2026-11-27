@@ -1,11 +1,12 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
-import { Alert, Badge, Button, Checkbox, Group, Menu, Modal, Progress, ScrollArea, Select, Stack, Table, Text, Tooltip } from '@mantine/core';
+import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
+import { Alert, Badge, Button, Checkbox, Group, Menu, Modal, Progress, ScrollArea, Select, Stack, Table, Tabs, Text, Tooltip } from '@mantine/core';
 import { useMediaQuery } from '@mantine/hooks';
-import { IconAlertCircle, IconCircleCheck, IconHistory, IconLoader2, IconRobot, IconSearch, IconSparkles } from '@tabler/icons-react';
+import { IconAlertCircle, IconCircleCheck, IconFileText, IconHistory, IconLoader2, IconRobot, IconSearch, IconSparkles } from '@tabler/icons-react';
 import toast from 'react-hot-toast';
 import SalesSearchModal from './SalesSearchModal';
+import PoDocumentViewer from './PoDocumentViewer';
 import CustomerOrdersModal, { type PoLineRef } from './CustomerOrdersModal';
 import { CONFIDENCE_LABEL, type Confidence } from '../../../../lib/sales/itemPrediction';
 import { blockingLines, canApply, lowConfidenceIndexes, offerAiNote } from '../../../../lib/sales/pdfReview';
@@ -128,6 +129,42 @@ export default function SalesPdfImport({ companyId, companyName, cardCode, onLoa
     if (next >= simShown) setSimShown(next + 1);
     setTimeout(() => rowRefs.current[next]?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 50);
   };
+  /** Uploaded PO file, shown next to the lines so the user can compare (Nicolás Rivera, 2026-11-27). */
+  const [docFile, setDocFile] = useState<File | null>(null);
+  const [docUrl, setDocUrl] = useState<string | null>(null);
+  useEffect(() => {
+    if (!docFile) return setDocUrl(null);
+    const url = URL.createObjectURL(docFile);
+    setDocUrl(url);
+    return () => URL.revokeObjectURL(url);
+  }, [docFile]);
+  const docIsPdf = Boolean(docFile && (docFile.type === 'application/pdf' || /\.pdf$/i.test(docFile.name)));
+  const docIsImage = Boolean(docFile?.type.startsWith('image/'));
+  const hasDoc = Boolean(docUrl && (docIsPdf || docIsImage));
+  const [showDoc, setShowDoc] = useState(true);
+  /** Split layout from 1024 px; below that the lines and the document go in tabs. */
+  const isWide = useMediaQuery('(min-width: 1024px)');
+  const [mobileTab, setMobileTab] = useState<string | null>('lineas');
+  /** Width of the document panel, in % of the split area. */
+  const [docPct, setDocPct] = useState(42);
+  const [dragging, setDragging] = useState(false);
+  const splitRef = useRef<HTMLDivElement | null>(null);
+  const startDrag = (e: ReactPointerEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    setDragging(true);
+    const move = (ev: PointerEvent) => {
+      const r = splitRef.current?.getBoundingClientRect();
+      if (!r || !r.width) return;
+      setDocPct(Math.min(65, Math.max(25, ((r.right - ev.clientX) / r.width) * 100)));
+    };
+    const up = () => {
+      setDragging(false);
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+  };
   /** Avance de la lectura por fragmentos (OC de varias hojas). */
   const [step, setStep] = useState<{ k: number; n: number } | null>(null);
   /** Agentes del chat asignados al usuario, de CUALQUIER empresa («Montar con agente»; Nicolás Rivera, 2026-11-24:
@@ -180,6 +217,7 @@ export default function SalesPdfImport({ companyId, companyName, cardCode, onLoa
 
   const analyze = async (file: File | null) => {
     if (!file) return;
+    setDocFile(file);
     setError('');
     setProgress(0);
     setPhase('leyendo');
@@ -279,6 +317,7 @@ export default function SalesPdfImport({ companyId, companyName, cardCode, onLoa
    */
   const analyzeWithAgent = async (file: File | null, a: ChatAgent | null) => {
     if (!file || !a) return;
+    setDocFile(file);
     setError('');
     setAgent(a);
     setConversationId(null);
@@ -429,6 +468,7 @@ export default function SalesPdfImport({ companyId, companyName, cardCode, onLoa
     const avisos = sim.avisos.filter((a) => !/por confirmar: revise|confianza Baja: rev|sin artículo en SAP: búsquelo/.test(a));
     onLoaded({ ...sim, avisos, lines });
     setSim(null);
+    setDocFile(null);
     setPhase('idle');
   };
   const inputId = `pdf-ia-${companyId}`;
@@ -542,84 +582,124 @@ export default function SalesPdfImport({ companyId, companyName, cardCode, onLoa
               <Button size="compact-xs" variant="light" color="violet" leftSection={<IconHistory size={14} />} onClick={() => setOrdersFor(null)}>
                 Pedidos anteriores del cliente
               </Button>
+              {hasDoc && isWide && (
+                <Button size="compact-xs" variant={showDoc ? 'light' : 'filled'} color="gray" leftSection={<IconFileText size={14} />} onClick={() => setShowDoc((v) => !v)}>
+                  {showDoc ? 'Ocultar documento' : 'Ver documento'}
+                </Button>
+              )}
             </Group>
             {sim.avisos.length > 0 && <Alert color="orange" variant="light">{sim.avisos.map((a, i) => <Text key={i} size="xs">{a}</Text>)}</Alert>}
-            <ScrollArea style={{ flex: 1, minHeight: 200 }} type="auto" offsetScrollbars>
-              <Table striped withTableBorder stickyHeader verticalSpacing={4} miw={900}>
-                <Table.Thead>
-                  <Table.Tr>
-                    <Table.Th><Checkbox checked={sim.lines.every((l) => l.include)} indeterminate={sim.lines.some((l) => l.include) && !sim.lines.every((l) => l.include)}
-                      onChange={(e) => { const c = e.currentTarget.checked; setSim({ ...sim, lines: sim.lines.map((l) => ({ ...l, include: c })) }); }} /></Table.Th>
-                    <Table.Th title="Renglón de la OC">#</Table.Th><Table.Th style={{ minWidth: 480, width: '55%' }}>Artículo en SAP</Table.Th><Table.Th style={{ textAlign: 'right' }}>Cantidad</Table.Th>
-                    <Table.Th style={{ textAlign: 'right' }}>Precio OC</Table.Th><Table.Th style={{ textAlign: 'right' }}>Precio lista</Table.Th>
-                    <Table.Th style={{ textAlign: 'right' }}>Total línea</Table.Th>
-                  </Table.Tr>
-                </Table.Thead>
-                <Table.Tbody>
-                  {sim.lines.slice(0, simShown).map((l, i) => (
-                    <Table.Tr key={i} ref={(el) => { rowRefs.current[i] = el; }} data-confianza={matchOf(l)?.confidence}
-                      style={matchOf(l)?.confidence === 'baja' && l.ItemCode ? { background: 'var(--mantine-color-red-light)', boxShadow: 'inset 3px 0 0 var(--mantine-color-red-filled)' } : undefined}>
-                      <Table.Td><Checkbox checked={l.include} onChange={(e) => { const c = e.currentTarget.checked; setSim({ ...sim, lines: sim.lines.map((x, j) => (j === i ? { ...x, include: c } : x)) }); }} /></Table.Td>
-                      <Table.Td><Text size="xs" c="dimmed">{String(l.row ?? i + 1)}</Text></Table.Td>
-                      <Table.Td>
-                        {(() => {
-                          const m = matchOf(l);
-                          if (!m) {
-                            return (
-                              <>
-                                <Text size="sm">{String(l.ItemCode)} · {String(l.ItemDescription ?? '')}</Text>
-                                {l.aiNote ? <Badge size="xs" variant="light" color={String(l.aiNote).startsWith('Revisar') ? 'orange' : 'violet'} style={{ whiteSpace: 'normal', height: 'auto' }}>✨ {String(l.aiNote)}</Badge> : null}
-                              </>
-                            );
-                          }
-                          const fuente = [m.source.barcode && `EAN ${m.source.barcode}`, m.source.clientCode && `Ref. cliente ${m.source.clientCode}`, m.source.description, `${Number(m.source.quantity).toLocaleString('es-CO')} a ${money(m.source.price)}`].filter(Boolean).join(' · ');
-                          return (
-                            <Stack gap={2}>
-                              <Text size="xs" c="dimmed">En la OC: {fuente || 'sin datos del artículo'}</Text>
-                              <Group gap={6} wrap="nowrap" align="center">
-                                <Badge size="sm" color={CONFIDENCE_COLOR[m.confidence]} variant={m.confidence === 'alta' ? 'filled' : 'light'} style={{ flexShrink: 0 }}>
-                                  {CONFIDENCE_LABEL[m.confidence]}
-                                </Badge>
-                                {m.candidates.length > 0 ? (
-                                  <Select
-                                    size="xs" style={{ flex: 1, minWidth: 320 }} comboboxProps={{ zIndex: 1400, withinPortal: true, width: 'max-content', position: 'bottom-start' }} allowDeselect={false}
-                                    aria-label="Artículo sugerido"
-                                    title={(() => { const c = m.candidates.find((x) => x.ItemCode === String(l.ItemCode || '')); return c ? `${c.ItemCode} · ${c.ItemName}` : undefined; })()}
-                                    value={String(l.ItemCode || '') || null}
-                                    data={m.candidates.map((c) => ({ value: c.ItemCode, label: `${c.ItemCode} · ${c.ItemName}${c.score ? ` (${Math.round(c.score * 100)} %)` : ''}` }))}
-                                    onChange={(v) => chooseCandidate(i, v)}
-                                  />
-                                ) : (
-                                  <Text size="sm" c="dimmed" style={{ flex: 1 }}>Sin artículo sugerido</Text>
-                                )}
-                                <Tooltip label="Buscar otro artículo en SAP" withinPortal zIndex={1400}>
-                                  <Button size="compact-xs" variant="subtle" onClick={() => setPickFor(i)} aria-label="Buscar artículo"><IconSearch size={14} /></Button>
-                                </Tooltip>
-                                <Tooltip label="Ver pedidos anteriores" withinPortal zIndex={1400}>
-                                  <Button size="compact-xs" variant="subtle" color="violet" onClick={() => setOrdersFor(i)} aria-label="Ver pedidos anteriores"><IconHistory size={14} /></Button>
-                                </Tooltip>
-                              </Group>
-                              <Text size="xs" c={m.confidence === 'ninguna' ? 'red' : 'dimmed'}>{m.reason}</Text>
-                            </Stack>
-                          );
-                        })()}
-                      </Table.Td>
-                      <Table.Td style={{ textAlign: 'right' }}>{Number(l.Quantity).toLocaleString('es-CO')}</Table.Td>
-                      <Table.Td style={{ textAlign: 'right' }}>{money(l.UnitPrice)}</Table.Td>
-                      <Table.Td style={{ textAlign: 'right' }}>{money(l.ListPrice)}</Table.Td>
-                      <Table.Td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}><Text size="sm" fw={500} c={l.include ? undefined : 'dimmed'}>{money(Number(l.Quantity ?? 0) * Number(l.UnitPrice ?? 0))}</Text></Table.Td>
+            <style>{'tr:hover > .po-row-num p { font-weight: 700; color: var(--mantine-color-violet-filled); }'}</style>
+            {(() => {
+              const linesTable = (
+              <ScrollArea style={{ flex: 1, minHeight: 200 }} type="auto" offsetScrollbars>
+                <Table striped highlightOnHover withTableBorder stickyHeader verticalSpacing={4} miw={hasDoc && isWide && showDoc ? 760 : 900}>
+                  <Table.Thead>
+                    <Table.Tr>
+                      <Table.Th><Checkbox checked={sim.lines.every((l) => l.include)} indeterminate={sim.lines.some((l) => l.include) && !sim.lines.every((l) => l.include)}
+                        onChange={(e) => { const c = e.currentTarget.checked; setSim({ ...sim, lines: sim.lines.map((l) => ({ ...l, include: c })) }); }} /></Table.Th>
+                      <Table.Th title="Renglón de la OC">#</Table.Th><Table.Th style={{ minWidth: hasDoc && isWide && showDoc ? 360 : 480, width: '55%' }}>Artículo en SAP</Table.Th><Table.Th style={{ textAlign: 'right' }}>Cantidad</Table.Th>
+                      <Table.Th style={{ textAlign: 'right' }}>Precio OC</Table.Th><Table.Th style={{ textAlign: 'right' }}>Precio lista</Table.Th>
+                      <Table.Th style={{ textAlign: 'right' }}>Total línea</Table.Th>
                     </Table.Tr>
-                  ))}
-                </Table.Tbody>
-              </Table>
-              {sim.lines.length > simShown && (
-                <Group justify="center" my="xs">
-                  <Button size="xs" variant="light" onClick={() => setSimShown((n) => n + 100)}>
-                    Mostrar 100 más (se ven {simShown} de {sim.lines.length})
-                  </Button>
-                </Group>
-              )}
-            </ScrollArea>
+                  </Table.Thead>
+                  <Table.Tbody>
+                    {sim.lines.slice(0, simShown).map((l, i) => (
+                      <Table.Tr key={i} ref={(el) => { rowRefs.current[i] = el; }} data-confianza={matchOf(l)?.confidence}
+                        style={matchOf(l)?.confidence === 'baja' && l.ItemCode ? { background: 'var(--mantine-color-red-light)', boxShadow: 'inset 3px 0 0 var(--mantine-color-red-filled)' } : undefined}>
+                        <Table.Td><Checkbox checked={l.include} onChange={(e) => { const c = e.currentTarget.checked; setSim({ ...sim, lines: sim.lines.map((x, j) => (j === i ? { ...x, include: c } : x)) }); }} /></Table.Td>
+                        <Table.Td className="po-row-num"><Text size="xs" c="dimmed">{String(l.row ?? i + 1)}</Text></Table.Td>
+                        <Table.Td>
+                          {(() => {
+                            const m = matchOf(l);
+                            if (!m) {
+                              return (
+                                <>
+                                  <Text size="sm">{String(l.ItemCode)} · {String(l.ItemDescription ?? '')}</Text>
+                                  {l.aiNote ? <Badge size="xs" variant="light" color={String(l.aiNote).startsWith('Revisar') ? 'orange' : 'violet'} style={{ whiteSpace: 'normal', height: 'auto' }}>✨ {String(l.aiNote)}</Badge> : null}
+                                </>
+                              );
+                            }
+                            const fuente = [m.source.barcode && `EAN ${m.source.barcode}`, m.source.clientCode && `Ref. cliente ${m.source.clientCode}`, m.source.description, `${Number(m.source.quantity).toLocaleString('es-CO')} a ${money(m.source.price)}`].filter(Boolean).join(' · ');
+                            return (
+                              <Stack gap={2}>
+                                <Text size="xs" c="dimmed">En la OC: {fuente || 'sin datos del artículo'}</Text>
+                                <Group gap={6} wrap="nowrap" align="center">
+                                  <Badge size="sm" color={CONFIDENCE_COLOR[m.confidence]} variant={m.confidence === 'alta' ? 'filled' : 'light'} style={{ flexShrink: 0 }}>
+                                    {CONFIDENCE_LABEL[m.confidence]}
+                                  </Badge>
+                                  {m.candidates.length > 0 ? (
+                                    <Select
+                                      size="xs" style={{ flex: 1, minWidth: 320 }} comboboxProps={{ zIndex: 1400, withinPortal: true, width: 'max-content', position: 'bottom-start' }} allowDeselect={false}
+                                      aria-label="Artículo sugerido"
+                                      title={(() => { const c = m.candidates.find((x) => x.ItemCode === String(l.ItemCode || '')); return c ? `${c.ItemCode} · ${c.ItemName}` : undefined; })()}
+                                      value={String(l.ItemCode || '') || null}
+                                      data={m.candidates.map((c) => ({ value: c.ItemCode, label: `${c.ItemCode} · ${c.ItemName}${c.score ? ` (${Math.round(c.score * 100)} %)` : ''}` }))}
+                                      onChange={(v) => chooseCandidate(i, v)}
+                                    />
+                                  ) : (
+                                    <Text size="sm" c="dimmed" style={{ flex: 1 }}>Sin artículo sugerido</Text>
+                                  )}
+                                  <Tooltip label="Buscar otro artículo en SAP" withinPortal zIndex={1400}>
+                                    <Button size="compact-xs" variant="subtle" onClick={() => setPickFor(i)} aria-label="Buscar artículo"><IconSearch size={14} /></Button>
+                                  </Tooltip>
+                                  <Tooltip label="Ver pedidos anteriores" withinPortal zIndex={1400}>
+                                    <Button size="compact-xs" variant="subtle" color="violet" onClick={() => setOrdersFor(i)} aria-label="Ver pedidos anteriores"><IconHistory size={14} /></Button>
+                                  </Tooltip>
+                                </Group>
+                                <Text size="xs" c={m.confidence === 'ninguna' ? 'red' : 'dimmed'}>{m.reason}</Text>
+                              </Stack>
+                            );
+                          })()}
+                        </Table.Td>
+                        <Table.Td style={{ textAlign: 'right' }}>{Number(l.Quantity).toLocaleString('es-CO')}</Table.Td>
+                        <Table.Td style={{ textAlign: 'right' }}>{money(l.UnitPrice)}</Table.Td>
+                        <Table.Td style={{ textAlign: 'right' }}>{money(l.ListPrice)}</Table.Td>
+                        <Table.Td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}><Text size="sm" fw={500} c={l.include ? undefined : 'dimmed'}>{money(Number(l.Quantity ?? 0) * Number(l.UnitPrice ?? 0))}</Text></Table.Td>
+                      </Table.Tr>
+                    ))}
+                  </Table.Tbody>
+                </Table>
+                {sim.lines.length > simShown && (
+                  <Group justify="center" my="xs">
+                    <Button size="xs" variant="light" onClick={() => setSimShown((n) => n + 100)}>
+                      Mostrar 100 más (se ven {simShown} de {sim.lines.length})
+                    </Button>
+                  </Group>
+                )}
+              </ScrollArea>
+              );
+              const viewer = hasDoc && docFile && docUrl ? <PoDocumentViewer file={docFile} url={docUrl} passive={dragging} /> : null;
+              if (!viewer) return linesTable;
+              if (isWide) {
+                return (
+                  <div ref={splitRef} style={{ flex: 1, minHeight: 200, display: 'flex', userSelect: dragging ? 'none' : undefined }}>
+                    <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>{linesTable}</div>
+                    {showDoc && (
+                      <>
+                        <div role="separator" aria-orientation="vertical" aria-label="Cambiar el ancho del documento" title="Arrastre para cambiar el ancho"
+                          onPointerDown={startDrag} onDoubleClick={() => setDocPct(42)}
+                          style={{ width: 12, flexShrink: 0, cursor: 'col-resize', display: 'flex', justifyContent: 'center', touchAction: 'none' }}>
+                          <div style={{ width: 3, borderRadius: 2, background: dragging ? 'var(--mantine-color-violet-filled)' : 'var(--mantine-color-default-border)' }} />
+                        </div>
+                        <div style={{ width: `${docPct}%`, flexShrink: 0, minWidth: 0, display: 'flex', flexDirection: 'column' }}>{viewer}</div>
+                      </>
+                    )}
+                  </div>
+                );
+              }
+              return (
+                <div style={{ flex: 1, minHeight: 300, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  <Tabs value={mobileTab} onChange={setMobileTab} keepMounted={false}>
+                    <Tabs.List grow>
+                      <Tabs.Tab value="lineas">Líneas</Tabs.Tab>
+                      <Tabs.Tab value="documento" leftSection={<IconFileText size={14} />}>Documento</Tabs.Tab>
+                    </Tabs.List>
+                  </Tabs>
+                  {mobileTab === 'documento' ? <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>{viewer}</div> : linesTable}
+                </div>
+              );
+            })()}
             <Group justify="flex-end">
               <Text fw={700}>
                 Total del documento (antes de impuestos): {money(sim.lines.filter((l) => l.include).reduce((a, l) => a + Number(l.Quantity ?? 0) * Number(l.UnitPrice ?? 0), 0))}
@@ -646,7 +726,7 @@ export default function SalesPdfImport({ companyId, companyName, cardCode, onLoa
                 );
               })()}
               <Group gap="xs">
-                <Button variant="default" onClick={() => { setSim(null); setPhase('idle'); }}>Cancelar</Button>
+                <Button variant="default" onClick={() => { setSim(null); setDocFile(null); setPhase('idle'); }}>Cancelar</Button>
                 <Button color="violet" disabled={!canApply(sim.lines)} onClick={apply}>
                   Agregar a la oferta ({sim.lines.filter((l) => l.include).length})
                 </Button>
