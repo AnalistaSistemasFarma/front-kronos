@@ -17,6 +17,7 @@ type Row = {
   subnet_mask: string | null;
   gateway: string | null;
   dns_servers: string | null;
+  dns_secondary: string | null;
   bandwidth: string | null;
   channel_type: string | null;
   connection_type: string | null;
@@ -35,6 +36,7 @@ function toInternet(r: Row): CompanyInternet {
     subnetMask: r.subnet_mask ?? '',
     gateway: r.gateway ?? '',
     dnsServers: r.dns_servers ?? '',
+    dns2: r.dns_secondary ?? '',
     bandwidth: r.bandwidth ?? '',
     channelType: (r.channel_type ?? '') as ChannelType | '',
     connectionType: (r.connection_type ?? '') as ConnectionType | '',
@@ -50,7 +52,7 @@ export async function loadCompanyInternet(): Promise<CompanyInternet[]> {
   const rows = await prisma.$queryRaw<Row[]>`
     SELECT
       c.id_company AS companyId, c.company,
-      ci.provider, ci.public_ip, ci.subnet_mask, ci.gateway, ci.dns_servers, ci.bandwidth,
+      ci.provider, ci.public_ip, ci.subnet_mask, ci.gateway, ci.dns_servers, ci.dns_secondary, ci.bandwidth,
       ci.channel_type, ci.connection_type, ci.notes, ci.updated_at, ci.updated_by,
       CASE WHEN ci.id_company IS NULL THEN 0 ELSE 1 END AS registered
     FROM company c
@@ -85,6 +87,7 @@ export async function saveCompanyInternet(
       subnet_mask = ${orNull(input.subnetMask)},
       gateway = ${orNull(input.gateway)},
       dns_servers = ${orNull(input.dnsServers)},
+      dns_secondary = ${orNull(input.dns2)},
       bandwidth = ${orNull(input.bandwidth)},
       channel_type = ${orNull(input.channelType)},
       connection_type = ${orNull(input.connectionType)},
@@ -92,10 +95,10 @@ export async function saveCompanyInternet(
       updated_at = SYSUTCDATETIME(),
       updated_by = ${updatedBy}
     WHEN NOT MATCHED THEN INSERT
-      (id_company, provider, public_ip, subnet_mask, gateway, dns_servers, bandwidth,
+      (id_company, provider, public_ip, subnet_mask, gateway, dns_servers, dns_secondary, bandwidth,
        channel_type, connection_type, notes, updated_at, updated_by)
       VALUES (${companyId}, ${orNull(input.provider)}, ${orNull(input.publicIp)}, ${orNull(input.subnetMask)},
-              ${orNull(input.gateway)}, ${orNull(input.dnsServers)}, ${orNull(input.bandwidth)},
+              ${orNull(input.gateway)}, ${orNull(input.dnsServers)}, ${orNull(input.dns2)}, ${orNull(input.bandwidth)},
               ${orNull(input.channelType)}, ${orNull(input.connectionType)}, ${orNull(input.notes)},
               SYSUTCDATETIME(), ${updatedBy});
   `;

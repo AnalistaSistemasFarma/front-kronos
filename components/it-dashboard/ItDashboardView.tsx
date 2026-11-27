@@ -14,6 +14,7 @@ import {
   Modal,
   Paper,
   ScrollArea,
+  Select,
   SimpleGrid,
   Skeleton,
   Stack,
@@ -34,6 +35,7 @@ import {
   IconDeviceDesktop,
   IconLicense,
   IconPackage,
+  IconPhone,
   IconRefresh,
   IconWorld,
 } from '@tabler/icons-react';
@@ -46,6 +48,7 @@ import { useDashboardChartPalette } from '../dashboard/useDashboardChartPalette'
 import { useProjectColors } from '../dashboard/useProjectColors';
 import AssetListModal from './AssetListModal';
 import InternetPanel from './InternetPanel';
+import TelephonyPanel from './TelephonyPanel';
 import SoftwareModal from './SoftwareModal';
 import { formatMoney, formatNumber } from './assetFormat';
 import { iconForAssetType } from './assetTypeIcons';
@@ -268,6 +271,7 @@ export default function ItDashboardView() {
   const [forbidden, setForbidden] = useState(false);
   const [section, setSection] = useState<'assets' | 'software' | 'providers' | null>(null);
   const [softwareCount, setSoftwareCount] = useState<number | null>(null);
+  const [providerKind, setProviderKind] = useState<'internet' | 'telefonia'>('internet');
 
   const filterQuery = useMemo(() => {
     const params = new URLSearchParams();
@@ -498,7 +502,7 @@ export default function ItDashboardView() {
               />
               <SectionButton
                 label='Proveedores'
-                hint='Internet y servicios contratados'
+                hint='Internet y telefonía'
                 color={categoricalPalette[4 % categoricalPalette.length]}
                 icon={IconWorld}
                 onClick={() => setSection('providers')}
@@ -609,11 +613,28 @@ export default function ItDashboardView() {
         }
       >
         <Stack gap='sm'>
-          <Group gap='xs'>
-            <IconWorld size={18} />
-            <Title order={5}>Internet</Title>
-          </Group>
-          {section === 'providers' ? <InternetPanel companyId={companyId} /> : null}
+          {/* Kind of provider (requested 2026-11-27): Internet or Telefonía. */}
+          <Select
+            aria-label='Tipo de proveedor'
+            data={[
+              { value: 'internet', label: 'Internet' },
+              { value: 'telefonia', label: 'Telefonía' },
+            ]}
+            value={providerKind}
+            onChange={(v) => setProviderKind((v as 'internet' | 'telefonia') ?? 'internet')}
+            allowDeselect={false}
+            leftSection={providerKind === 'telefonia' ? <IconPhone size={18} /> : <IconWorld size={18} />}
+            w={240}
+            styles={{ input: { fontWeight: 700, fontSize: 'var(--mantine-font-size-md)' } }}
+            comboboxProps={{ zIndex: 500, withinPortal: true }}
+          />
+          {section === 'providers' ? (
+            providerKind === 'telefonia' ? (
+              <TelephonyPanel companyId={companyId} />
+            ) : (
+              <InternetPanel companyId={companyId} />
+            )
+          ) : null}
         </Stack>
       </Modal>
 
