@@ -30,7 +30,7 @@ import { closeLinkedOriginTask } from '../closeLinkedOriginTask.js';
 const pool = {} as never;
 
 beforeEach(() => {
-  h.origin = { id: 2086, id_task: 807, id_request_general: 10125, id_status: 4, display_order: 1, task: 'Solicitud de Firma', closes_request: true, id_process_category: 210, subject_request: 'QA' };
+  h.origin = { linked_multiple: false, id: 2086, id_task: 807, id_request_general: 10125, id_status: 4, display_order: 1, task: 'Solicitud de Firma', closes_request: true, id_process_category: 210, subject_request: 'QA' };
   h.open = 0;
   h.updates = [];
   h.advanced = 0;
@@ -48,6 +48,14 @@ describe('cierre de la tarea de origen de un subproceso', () => {
   it('si quedan tareas abiertas, la madre sigue abierta', async () => {
     h.open = 1;
     await closeLinkedOriginTask(pool, { originTaskId: 2086, mirroredStatus: 2, closedByUserId: 'u3', linkedRequestId: 10126 });
+    expect(h.closed).toEqual([]);
+  });
+
+  it('una tarea con varias solicitudes vinculadas (una NC por hallazgo) NO se cierra cuando se cierra una hija', async () => {
+    h.origin = { ...h.origin, linked_multiple: true };
+    await closeLinkedOriginTask(pool, { originTaskId: 2086, mirroredStatus: 2, closedByUserId: 'u3', linkedRequestId: 10126 });
+    expect(h.updates).toEqual([]);
+    expect(h.advanced).toBe(0);
     expect(h.closed).toEqual([]);
   });
 
