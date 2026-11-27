@@ -67,58 +67,29 @@ export async function POST(request: NextRequest) {
         });
       }
 
-      // 2) Líneas. Empresas de servicios (descripción editable: Kelab, Meditrack): la OC trae descripciones libres
-      // y SAP tiene pocos artículos genéricos; se empareja por cobertura y la línea conserva la descripción del PDF.
+      // 2) Líneas. Every company: item prediction (code, barcode, catalog, customer history, description).
+      // Companies with editable descriptions (Kelab, Meditrack, also OLP) get, for the lines the prediction could not
+      // match, the previous description/coverage matching (free-text service lines keep the PDF description).
       const servicios = Boolean(conf?.descripcionEditable);
-      if (!servicios) {
-        const lines = await predictLines(sap, {
-          cardCode: customer.CardCode, input, priceListDefault: conf?.priceListDefault ?? null, defaultWarehouse: conf?.defaultWarehouse ?? null,
-        });
-        const n = (c: string) => lines.filter((l) => (l.match as { confidence: string }).confidence === c).length;
-        const porConfirmar = n('media') + n('baja');
-        const avisos = [...avisoTope];
-        if (porConfirmar) avisos.push(`${porConfirmar} línea(s) por confirmar: revise el artículo sugerido antes de agregarlas.`);
-        if (n('ninguna')) avisos.push(`${n('ninguna')} línea(s) sin artículo en SAP: búsquelo o desmárquelas.`);
-        return NextResponse.json({ customer, customerCandidates, lines, avisos });
-      }
-      // Artículos que ya se le han facturado a este cliente: desempatan el emparejamiento por descripción.
-      const recientes = await sapGet<Record<string, unknown>>(sap, searchPath('recent_items', { cardCode: customer.CardCode }), { Prefer: `odata.maxpagesize=${RECENT_LINES}` })
-        .then((d) => recentItems(d, 60))
-        .catch(() => []);
-      const preferidos = new Map(recientes.map((r) => [r.ItemCode, r.Times]));
-      const v = await validateLines(sap, {
-        cardCode: customer.CardCode, input, matchByDescription: true, servicios,
-        priceListDefault: conf?.priceListDefault ?? null, defaultWarehouse: conf?.defaultWarehouse ?? null,
+      const predicted = await predictLines(sap, {
+        cardCode: customer.CardCode, input, priceListDefault: conf?.priceListDefault ?? null, defaultWarehouse: conf?.defaultWarehouse ?? null,
       });
-      const avisos: string[] = [...avisoTope, ...v.errors.map((e) => e.error)];
-      const lines: Record<string, unknown>[] = v.lines.map((l) => ({ ...l, aiNote: null as string | null }));
-      const elegidos: (ImportLine & { aiNote: string })[] = [];
-      for (const p of v.pending) {
-        // Los artículos que ya se le venden al cliente entran como candidatos aunque la búsqueda no los trajera.
-        const extra = recientes.filter((r) => !p.candidates.some((c) => c.ItemCode === r.ItemCode)).map((r) => ({ ItemCode: r.ItemCode, ItemName: r.ItemName }));
-        const b = bestCandidate(p.input.ItemDescription, servicios ? [...p.candidates, ...extra] : p.candidates, { servicios, preferidos });
-        if (!b) {
-          avisos.push(`«${p.input.ItemDescription}» (${p.input.Quantity}): no se encontró en SAP; agréguelo a mano.`);
-          continue;
-        }
-        const otros = p.candidates.filter((c) => c.ItemCode !== b.ItemCode).slice(0, 3).map((c) => c.ItemCode).join(', ');
-        elegidos.push({
-          ...p.input, ItemCode: b.ItemCode,
-          aiNote: b.seguro
-            ? `Emparejado por descripción con «${b.ItemName}»`
-            : `Revisar: se emparejó con «${b.ItemCode} ${b.ItemName}»${otros ? ` (otros posibles: ${otros})` : ''}`,
-        });
+      const confidenceOf = (l: Record<string, unknown>) => (l.match as { confidence: string } | undefined)?.confidence;
+      const avisos: string[] = [...avisoTope];
+      const legacyInput = servicios ? input.filter((_l, i) => confidenceOf(predicted[i]) === 'ninguna') : [];
+      let lines: Record<string, unknown>[] = predicted;
+      if (legacyInput.length) {
+        const legacy = await legacyMatch(sap, { cardCode: customer.CardCode, input: legacyInput, servicios, priceListDefault: conf?.priceListDefault ?? null, defaultWarehouse: conf?.defaultWarehouse ?? null });
+        const done = new Set(legacy.lines.map((l) => Number(l.row)));
+        lines = [...predicted.filter((l) => !done.has(Number(l.row))), ...legacy.lines];
+        avisos.push(...legacy.avisos);
       }
-      if (elegidos.length) {
-        const v2 = await validateLines(sap, {
-          cardCode: customer.CardCode, input: elegidos, matchByDescription: false, descripcionEditable: servicios,
-          priceListDefault: conf?.priceListDefault ?? null, defaultWarehouse: conf?.defaultWarehouse ?? null,
-        });
-        v2.lines.forEach((l) => lines.push({ ...l, aiNote: elegidos.find((e) => e.row === l.row)?.aiNote ?? null }));
-        avisos.push(...v2.errors.map((e) => e.error));
-      }
-      // Mismo orden del PDF, de arriba abajo (las emparejadas por descripción se validan aparte y quedaban al final).
+      // Mismo orden del PDF, de arriba abajo.
       lines.sort((x, y) => Number(x.row ?? 0) - Number(y.row ?? 0));
+      const n = (c: string) => lines.filter((l) => confidenceOf(l) === c).length;
+      const porConfirmar = n('media') + n('baja');
+      if (porConfirmar) avisos.push(`${porConfirmar} línea(s) por confirmar: revise el artículo sugerido antes de agregarlas.`);
+      if (n('ninguna')) avisos.push(`${n('ninguna')} línea(s) sin artículo en SAP: búsquelo o desmárquelas.`);
       return NextResponse.json({ customer, customerCandidates, lines, avisos });
     } finally {
       await sapLogout(sap);
@@ -179,4 +150,48 @@ async function predictLines(
       Quantity: r.input.Quantity, ListPrice: 0, UnitPrice: r.input.UnitPrice ?? 0, WarehouseCode: '', aiNote: null, match,
     };
   });
+}
+
+/** Previous matching (description / coverage, customer's recent invoices as tie-break) for lines the prediction could not match. */
+async function legacyMatch(
+  sap: Awaited<ReturnType<typeof sapLogin>>,
+  a: { cardCode: string; input: ImportLine[]; servicios: boolean; priceListDefault: number | null; defaultWarehouse: string | null }
+): Promise<{ lines: Record<string, unknown>[]; avisos: string[] }> {
+  // Artículos que ya se le han facturado a este cliente: desempatan el emparejamiento por descripción.
+  const recientes = await sapGet<Record<string, unknown>>(sap, searchPath('recent_items', { cardCode: a.cardCode }), { Prefer: `odata.maxpagesize=${RECENT_LINES}` })
+    .then((d) => recentItems(d, 60))
+    .catch(() => []);
+  const preferidos = new Map(recientes.map((r) => [r.ItemCode, r.Times]));
+  const v = await validateLines(sap, {
+    cardCode: a.cardCode, input: a.input, matchByDescription: true, servicios: a.servicios,
+    priceListDefault: a.priceListDefault, defaultWarehouse: a.defaultWarehouse,
+  });
+  const avisos: string[] = v.errors.map((e) => e.error);
+  const lines: Record<string, unknown>[] = v.lines.map((l) => ({ ...l, aiNote: null as string | null }));
+  const elegidos: (ImportLine & { aiNote: string })[] = [];
+  for (const p of v.pending) {
+    // Los artículos que ya se le venden al cliente entran como candidatos aunque la búsqueda no los trajera.
+    const extra = recientes.filter((r) => !p.candidates.some((c) => c.ItemCode === r.ItemCode)).map((r) => ({ ItemCode: r.ItemCode, ItemName: r.ItemName }));
+    const b = bestCandidate(p.input.ItemDescription, a.servicios ? [...p.candidates, ...extra] : p.candidates, { servicios: a.servicios, preferidos });
+    if (!b) {
+      avisos.push(`«${p.input.ItemDescription}» (${p.input.Quantity}): no se encontró en SAP; agréguelo a mano.`);
+      continue;
+    }
+    const otros = p.candidates.filter((c) => c.ItemCode !== b.ItemCode).slice(0, 3).map((c) => c.ItemCode).join(', ');
+    elegidos.push({
+      ...p.input, ItemCode: b.ItemCode,
+      aiNote: b.seguro
+        ? `Emparejado por descripción con «${b.ItemName}»`
+        : `Revisar: se emparejó con «${b.ItemCode} ${b.ItemName}»${otros ? ` (otros posibles: ${otros})` : ''}`,
+    });
+  }
+  if (elegidos.length) {
+    const v2 = await validateLines(sap, {
+      cardCode: a.cardCode, input: elegidos, matchByDescription: false, descripcionEditable: a.servicios,
+      priceListDefault: a.priceListDefault, defaultWarehouse: a.defaultWarehouse,
+    });
+    v2.lines.forEach((l) => lines.push({ ...l, aiNote: elegidos.find((e) => e.row === l.row)?.aiNote ?? null }));
+    avisos.push(...v2.errors.map((e) => e.error));
+  }
+  return { lines, avisos };
 }
