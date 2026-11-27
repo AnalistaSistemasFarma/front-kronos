@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { CAPTURAS, REMOTO, SECRET, abrirExpresiones, capturar, caja, guardarVideo, hilo, sesion, simularChat } from './chat-simulado';
+import { CAPTURAS, REMOTO, SECRET, openExpressions, capturar, caja, guardarVideo, hilo, sesion, simularChat } from './chat-simulado';
 
 /**
  * Chat · stickers ANIMADOS y panel Emoji | Stickers | GIF (2026-10-20).
@@ -45,7 +45,7 @@ test.describe('Chat · stickers animados · escritorio', () => {
 
     // Since the Gemini-style pill (2026-11-24) the panel opens from the «+»
     // menu, on the left of the pill.
-    await abrirExpresiones(page);
+    await openExpressions(page);
     const panel = page.getByTestId('chat-expresiones');
     await expect(panel.getByRole('tab', { name: 'Emoji' })).toBeVisible();
     await expect(panel.getByRole('tab', { name: 'Stickers' })).toHaveAttribute('aria-selected', 'true');
@@ -86,7 +86,7 @@ test.describe('Chat · stickers animados · escritorio', () => {
   test('sin llave de GIF no aparece la pestaña GIF', async ({ page }) => {
     await simularChat(page, { gif: false });
     await page.goto('/process/chat?agent=horus');
-    await abrirExpresiones(page);
+    await openExpressions(page);
     const panel = page.getByTestId('chat-expresiones');
     await expect(panel.getByRole('tab', { name: 'Stickers' })).toBeVisible();
     await expect(panel.getByRole('tab', { name: 'GIF' })).toHaveCount(0);
@@ -137,7 +137,7 @@ test.describe('Chat · stickers animados · celular', () => {
 
     await caja(page).tap();
     await expect(caja(page)).toBeFocused();
-    await abrirExpresiones(page, { tocar: true });
+    await openExpressions(page, { tap: true });
 
     const hoja = page.locator('.chat-expresiones-hoja');
     await expect(hoja).toBeVisible();

@@ -63,7 +63,7 @@ import {
   buildRailSections,
   conversationKey,
   formatUnread,
-  guardarRutaAntesDeChat,
+  saveRouteBeforeChat,
   railItemHref,
   railOpenDetail,
   totalUnread,
@@ -617,10 +617,10 @@ export default function ChatRail({
       // Desde otra pantalla (p. ej. Solicitudes): al cerrar el chat ampliado vuelve ahí.
       let destino = railItemHref(item);
       if (!pathnameRef.current.startsWith('/process/chat')) {
-        const desde = `${window.location.pathname}${window.location.search}`;
-        guardarRutaAntesDeChat(desde);
+        const fromUrl = `${window.location.pathname}${window.location.search}`;
+        saveRouteBeforeChat(fromUrl);
         const sep = destino.includes('?') ? '&' : '?';
-        destino = `${destino}${sep}from=${encodeURIComponent(desde)}`;
+        destino = `${destino}${sep}from=${encodeURIComponent(fromUrl)}`;
       }
       router.push(destino);
     },

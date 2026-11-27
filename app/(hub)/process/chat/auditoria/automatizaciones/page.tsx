@@ -61,7 +61,7 @@ const fechaCorta = (iso: string | null) => {
 };
 const MESES = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"];
 /** «16 al 22 de noviembre de 2026» (or across months/years when needed). */
-const rangoSemana = (desde: string, hasta: string) => {
+const weekRange = (desde: string, hasta: string) => {
   const [a1, m1, d1] = desde.split("-").map(Number);
   const [a2, m2, d2] = hasta.split("-").map(Number);
   if (a1 === a2 && m1 === m2) return `${d1} al ${d2} de ${MESES[m2 - 1]} de ${a2}`;
@@ -69,7 +69,7 @@ const rangoSemana = (desde: string, hasta: string) => {
   return `${d1} de ${MESES[m1 - 1]} de ${a1} al ${d2} de ${MESES[m2 - 1]} de ${a2}`;
 };
 /** Small company logo next to an agent name (no logo → nothing; the badge keeps the name). */
-const LogoEmpresa = ({ empresa }: { empresa: string | null }) =>
+const CompanyLogoBadge = ({ empresa }: { empresa: string | null }) =>
   empresa ? (
     <span style={{ display: "inline-flex", flexShrink: 0 }}>
       <CompanyLogo name={empresa} height={18} />
@@ -466,7 +466,7 @@ export default function IndicadorAutomatizacionesPage() {
               </Card>
             )}
 
-            {datos.semanaRelevante && datos.semanaRelevante.casos.length > 0 ? (
+            {datos.topWeek && datos.topWeek.casos.length > 0 ? (
               <Card
                 withBorder
                 radius="md"
@@ -477,7 +477,7 @@ export default function IndicadorAutomatizacionesPage() {
               >
                 <Text fw={600} size="sm" mb={2}>
                   Casos de uso más relevantes · semana del{" "}
-                  {rangoSemana(datos.semanaRelevante.desde, datos.semanaRelevante.hasta)}
+                  {weekRange(datos.topWeek.desde, datos.topWeek.hasta)}
                 </Text>
                 <Text size="xs" c="dimmed" mb={6}>
                   El caso que más capacidad liberó en cada agente esa semana
@@ -495,11 +495,11 @@ export default function IndicadorAutomatizacionesPage() {
                       </Table.Tr>
                     </Table.Thead>
                     <Table.Tbody>
-                      {datos.semanaRelevante.casos.map((c) => (
+                      {datos.topWeek.casos.map((c) => (
                         <Table.Tr key={c.code}>
                           <Table.Td style={{ minWidth: 170 }}>
                             <Group gap={6} wrap="nowrap">
-                              <LogoEmpresa empresa={c.empresa} />
+                              <CompanyLogoBadge empresa={c.empresa} />
                               <div>
                                 <Link
                                   href={`/process/chat/auditoria/automatizaciones/${encodeURIComponent(c.code)}`}
@@ -542,8 +542,8 @@ export default function IndicadorAutomatizacionesPage() {
                   Casos de uso más relevantes
                 </Text>
                 <Text size="xs" c="dimmed" mb={6}>
-                  {datos.semanaRelevante
-                    ? `Sin casos medidos en la semana del ${rangoSemana(datos.semanaRelevante.desde, datos.semanaRelevante.hasta)}; se muestran los que más capacidad liberan por mes.`
+                  {datos.topWeek
+                    ? `Sin casos medidos en la semana del ${weekRange(datos.topWeek.desde, datos.topWeek.hasta)}; se muestran los que más capacidad liberan por mes.`
                     : "Los que más capacidad liberan por mes."}
                 </Text>
                 <ScrollArea type="auto">
@@ -621,7 +621,7 @@ export default function IndicadorAutomatizacionesPage() {
                       <Table.Tr key={a.idAgent}>
                         <Table.Td>
                           <Group gap={6} wrap="nowrap">
-                            <LogoEmpresa empresa={a.empresa} />
+                            <CompanyLogoBadge empresa={a.empresa} />
                             <Text size="sm" fw={600}>
                               {a.displayName}
                             </Text>

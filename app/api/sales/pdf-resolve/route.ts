@@ -20,7 +20,7 @@ import { sapGet, sapLogin, sapLogout, SapError } from '../../../../lib/sap/servi
  *     barras, catálogo del cliente, historial de pedidos y facturas del cliente, descripción), con hasta 3
  *     candidatos y nivel de confianza; toda línea con artículo sugerido va a la oferta sin confirmación por línea; la confianza baja solo se resalta (2026-11-27).
  *     Empresas de servicios: emparejamiento por descripción (como antes).
- * POST { companyId, nit?, cardCode?, lines } -> { customer, customerCandidates, lines, avisos }
+ * POST { companyId, nit?, cardCode?, lines } -> { customer, customerCandidates, lines, warnings }
  */
 const q = (v: string) => `'${v.replace(/'/g, "''")}'`;
 
@@ -33,7 +33,7 @@ export async function POST(request: NextRequest) {
     const received = Array.isArray(body.lines) ? body.lines.length : 0;
     const input = (Array.isArray(body.lines) ? body.lines : []).slice(0, MAX_PDF_LINES) as ImportLine[];
     // Never drop lines silently: the user is told how many were left out.
-    const avisoTope = received > MAX_PDF_LINES ? [`La orden trae ${received} líneas; se montan las primeras ${MAX_PDF_LINES}. Agregue las demás a mano o en otra oferta.`] : [];
+    const lineCapWarning = received > MAX_PDF_LINES ? [`La orden trae ${received} líneas; se montan las primeras ${MAX_PDF_LINES}. Agregue las demás a mano o en otra oferta.`] : [];
     if (!companyId || !input.length) return NextResponse.json({ error: 'Faltan datos de la orden de compra.' }, { status: 400 });
     const access = await salesEndpointForUser(session.user.email, companyId, 'write');
     if (!access?.endpoint) return NextResponse.json({ error: 'Sin permiso para crear ofertas en esta empresa.' }, { status: 403 });
@@ -64,7 +64,7 @@ export async function POST(request: NextRequest) {
       if (!customer) {
         return NextResponse.json({
           customer: null, customerCandidates, lines: [],
-          avisos: [base ? `No se identificó un único cliente con el NIT ${body.nit} del PDF: elíjalo y vuelva a cargar el PDF.` : 'El PDF no trae NIT legible: elija el cliente y vuelva a cargar el PDF.'],
+          warnings: [base ? `No se identificó un único cliente con el NIT ${body.nit} del PDF: elíjalo y vuelva a cargar el PDF.` : 'El PDF no trae NIT legible: elija el cliente y vuelva a cargar el PDF.'],
         });
       }
 
@@ -76,20 +76,20 @@ export async function POST(request: NextRequest) {
         companyId, cardCode: customer.CardCode, input, priceListDefault: conf?.priceListDefault ?? null, defaultWarehouse: conf?.defaultWarehouse ?? null,
       });
       const confidenceOf = (l: Record<string, unknown>) => (l.match as { confidence: string } | undefined)?.confidence;
-      const avisos: string[] = [...avisoTope];
+      const warnings: string[] = [...lineCapWarning];
       const legacyInput = servicios ? input.filter((_l, i) => confidenceOf(predicted[i]) === 'ninguna') : [];
       let lines: Record<string, unknown>[] = predicted;
       if (legacyInput.length) {
         const legacy = await legacyMatch(sap, { cardCode: customer.CardCode, input: legacyInput, servicios, priceListDefault: conf?.priceListDefault ?? null, defaultWarehouse: conf?.defaultWarehouse ?? null });
         const done = new Set(legacy.lines.map((l) => Number(l.row)));
         lines = [...predicted.filter((l) => !done.has(Number(l.row))), ...legacy.lines];
-        avisos.push(...legacy.avisos);
+        warnings.push(...legacy.warnings);
       }
       // Mismo orden del PDF, de arriba abajo.
       lines.sort((x, y) => Number(x.row ?? 0) - Number(y.row ?? 0));
       const n = (c: string) => lines.filter((l) => confidenceOf(l) === c).length;
-      if (n('ninguna')) avisos.push(`${n('ninguna')} línea(s) sin artículo en SAP: búsquelo o desmárquelas.`);
-      return NextResponse.json({ customer, customerCandidates, lines, avisos });
+      if (n('ninguna')) warnings.push(`${n('ninguna')} línea(s) sin artículo en SAP: búsquelo o desmárquelas.`);
+      return NextResponse.json({ customer, customerCandidates, lines, warnings });
     } finally {
       await sapLogout(sap);
     }
@@ -160,7 +160,7 @@ async function predictLines(
 async function legacyMatch(
   sap: Awaited<ReturnType<typeof sapLogin>>,
   a: { cardCode: string; input: ImportLine[]; servicios: boolean; priceListDefault: number | null; defaultWarehouse: string | null }
-): Promise<{ lines: Record<string, unknown>[]; avisos: string[] }> {
+): Promise<{ lines: Record<string, unknown>[]; warnings: string[] }> {
   // Artículos que ya se le han facturado a este cliente: desempatan el emparejamiento por descripción.
   const recientes = await sapGet<Record<string, unknown>>(sap, searchPath('recent_items', { cardCode: a.cardCode }), { Prefer: `odata.maxpagesize=${RECENT_LINES}` })
     .then((d) => recentItems(d, 60))
@@ -170,7 +170,7 @@ async function legacyMatch(
     cardCode: a.cardCode, input: a.input, matchByDescription: true, servicios: a.servicios,
     priceListDefault: a.priceListDefault, defaultWarehouse: a.defaultWarehouse,
   });
-  const avisos: string[] = v.errors.map((e) => e.error);
+  const warnings: string[] = v.errors.map((e) => e.error);
   const lines: Record<string, unknown>[] = v.lines.map((l) => ({ ...l, aiNote: null as string | null }));
   const elegidos: (ImportLine & { aiNote: string })[] = [];
   for (const p of v.pending) {
@@ -178,15 +178,15 @@ async function legacyMatch(
     const extra = recientes.filter((r) => !p.candidates.some((c) => c.ItemCode === r.ItemCode)).map((r) => ({ ItemCode: r.ItemCode, ItemName: r.ItemName }));
     const b = bestCandidate(p.input.ItemDescription, a.servicios ? [...p.candidates, ...extra] : p.candidates, { servicios: a.servicios, preferidos });
     if (!b) {
-      avisos.push(`${p.input.ItemDescription} (${p.input.Quantity}): no se encontró en SAP; agréguelo a mano.`);
+      warnings.push(`${p.input.ItemDescription} (${p.input.Quantity}): no se encontró en SAP; agréguelo a mano.`);
       continue;
     }
-    const otros = p.candidates.filter((c) => c.ItemCode !== b.ItemCode).slice(0, 3).map((c) => c.ItemCode).join(', ');
+    const others = p.candidates.filter((c) => c.ItemCode !== b.ItemCode).slice(0, 3).map((c) => c.ItemCode).join(', ');
     elegidos.push({
       ...p.input, ItemCode: b.ItemCode,
       aiNote: b.seguro
         ? `Emparejado por descripción con ${b.ItemName}`
-        : `Revisar: se emparejó con ${b.ItemCode} ${b.ItemName}${otros ? ` (otros posibles: ${otros})` : ''}`,
+        : `Revisar: se emparejó con ${b.ItemCode} ${b.ItemName}${others ? ` (otros posibles: ${others})` : ''}`,
     });
   }
   if (elegidos.length) {
@@ -195,7 +195,7 @@ async function legacyMatch(
       priceListDefault: a.priceListDefault, defaultWarehouse: a.defaultWarehouse,
     });
     v2.lines.forEach((l) => lines.push({ ...l, aiNote: elegidos.find((e) => e.row === l.row)?.aiNote ?? null }));
-    avisos.push(...v2.errors.map((e) => e.error));
+    warnings.push(...v2.errors.map((e) => e.error));
   }
-  return { lines, avisos };
+  return { lines, warnings };
 }

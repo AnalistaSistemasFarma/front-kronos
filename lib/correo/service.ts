@@ -1,5 +1,5 @@
 import type { CorreoConfig } from './config';
-import { capacidadesCorreo, inquilinoDeCorreo } from './config';
+import { mailCapabilities, inquilinoDeCorreo } from './config';
 import {
   CORREO_LOTE_MARCAR_CARPETA,
   CORREO_MAX_ADJUNTO_BYTES,
@@ -116,7 +116,7 @@ export interface EstadoConexion {
   correo: string;
   envioHabilitado: boolean;
   /** Send is off only because the session's tenant is read-only (CORREO_<K>_ENVIO=false). */
-  envioRestringidoInquilino: boolean;
+  tenantSendRestricted: boolean;
   etiquetarHabilitado: boolean;
   /** Eliminar (mover a Elementos eliminados con «Deshacer»): escritura encendida y CORREO_ELIMINAR_HABILITADO. */
   eliminarHabilitado: boolean;
@@ -127,13 +127,13 @@ export interface EstadoConexion {
 
 export function estadoConexion(d: CorreoDeps, acceso: AccesoCorreo): EstadoConexion {
   const disponible = d.cfg.modo === 'mock' || (d.cfg.modo === 'graph' && inquilinoDeCorreo(d.cfg, acceso.email) !== null);
-  const cap = capacidadesCorreo(d.cfg, acceso.email);
+  const cap = mailCapabilities(d.cfg, acceso.email);
   return {
     modo: d.cfg.modo,
     disponible,
     correo: acceso.email.toLowerCase(),
     envioHabilitado: cap.envio,
-    envioRestringidoInquilino: cap.envioRestringidoInquilino,
+    tenantSendRestricted: cap.tenantSendRestricted,
     etiquetarHabilitado: cap.etiquetar,
     eliminarHabilitado: cap.eliminar,
     sincronizacionAutomatica: d.cfg.syncHabilitado,
@@ -322,21 +322,21 @@ export async function imagenesMensajeHilo(d: CorreoDeps, acceso: AccesoCorreo, c
 
 /** Leído / no leído escribe en el buzón (Mail.ReadWrite): lo controla el mismo interruptor que las categorías. */
 function exigirEscrituraBuzon(d: CorreoDeps, acceso: AccesoCorreo): void {
-  if (!capacidadesCorreo(d.cfg, acceso.email).etiquetar) throw new CorreoError('Marcar correos como leídos o no leídos no está habilitado en este ambiente.', 403);
+  if (!mailCapabilities(d.cfg, acceso.email).etiquetar) throw new CorreoError('Marcar correos como leídos o no leídos no está habilitado en este ambiente.', 403);
 }
 
 /** Message when the session cannot send mail (global flag off or read-only tenant), or null when it can. */
-export function motivoSinEnvio(d: CorreoDeps, acceso: AccesoCorreo, accion: string): string | null {
-  const cap = capacidadesCorreo(d.cfg, acceso.email);
+export function noSendReason(d: CorreoDeps, acceso: AccesoCorreo, accion: string): string | null {
+  const cap = mailCapabilities(d.cfg, acceso.email);
   if (cap.envio) return null;
-  return cap.envioRestringidoInquilino
+  return cap.tenantSendRestricted
     ? `${accion} desde SynerLink no está habilitado para su empresa: el Correo está en modo solo lectura.`
     : `${accion} desde SynerLink no está habilitado en este ambiente.`;
 }
 
-function exigirEnvio(d: CorreoDeps, acceso: AccesoCorreo, accion: string): void {
-  const motivo = motivoSinEnvio(d, acceso, accion);
-  if (motivo) throw new CorreoError(motivo, 403);
+function requireSend(d: CorreoDeps, acceso: AccesoCorreo, accion: string): void {
+  const reason = noSendReason(d, acceso, accion);
+  if (reason) throw new CorreoError(reason, 403);
 }
 
 async function auditarLeido(d: CorreoDeps, acceso: AccesoCorreo, leido: boolean, e: { conversationId?: string | null; mensajeId?: string | null; detalle: string }, ip: string | null) {
@@ -472,7 +472,7 @@ export async function responder(
   const total = p.adjuntos.reduce((s, a) => s + a.bytes.length, 0);
   if (p.adjuntos.some((a) => a.bytes.length > CORREO_MAX_ADJUNTO_RESPUESTA_BYTES)) throw new CorreoError('Cada adjunto de la respuesta puede pesar máximo 3 MB.', 400);
   if (total > CORREO_MAX_TOTAL_RESPUESTA_BYTES) throw new CorreoError('Los adjuntos de la respuesta suman más de 10 MB.', 400);
-  exigirEnvio(d, acceso, 'Responder');
+  requireSend(d, acceso, 'Responder');
   const prov = await proveedorDe(d, acceso);
   // Se lee el mensaje del buzón PROPIO: si el id no es de su buzón, Graph responde 404.
   const original = await prov.mensaje(p.mensajeId);
@@ -532,7 +532,7 @@ export async function enviarNuevo(
   acceso: AccesoCorreo,
   p: { para: string[]; cc: string[]; cco: string[]; asunto: string; texto: string; adjuntos: ArchivoAdjunto[]; ip: string | null }
 ): Promise<{ destinatarios: number }> {
-  exigirEnvio(d, acceso, 'Enviar correos');
+  requireSend(d, acceso, 'Enviar correos');
   const r = revisarDestinatarios({ para: p.para, cc: p.cc, cco: p.cco });
   if (r.error) throw new CorreoError(r.error, 400, 'DESTINATARIOS');
   const asunto = limpiarAsunto(p.asunto);
@@ -766,7 +766,7 @@ export async function crearDesdeFila(
   }
 
   let etiquetado = false;
-  if (fila.etiquetar && capacidadesCorreo(d.cfg, acceso.email).etiquetar) {
+  if (fila.etiquetar && mailCapabilities(d.cfg, acceso.email).etiquetar) {
     try {
       for (const m of elegidos) await prov.categorizar(m.id, correoCategoria(idRequest));
       etiquetado = true;
@@ -836,8 +836,8 @@ export async function enviarAcuse(
     hilo?: MensajeCompleto[];
   }
 ): Promise<ResultadoAcuse> {
-  const sinEnvio = motivoSinEnvio(d, acceso, 'Responder');
-  if (sinEnvio) return { estado: 'DESHABILITADO', mensaje: sinEnvio };
+  const noSend = noSendReason(d, acceso, 'Responder');
+  if (noSend) return { estado: 'DESHABILITADO', mensaje: noSend };
   let reservado: { idLink: number; clave: string } | null = null;
   let idRequest: number | undefined;
   try {

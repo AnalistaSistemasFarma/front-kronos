@@ -1,9 +1,9 @@
 import { NextResponse } from 'next/server';
 
-// Identificador del build que está sirviendo este proceso. Lo usa
-// components/errors/RecuperacionActualizacion.tsx para saber si el servidor ya
-// tiene una versión nueva. Bajo /api/health/ para que IIS lo deje pasar incluso
-// con la página de mantenimiento activa. Sin datos sensibles.
+// Build id served by this process. components/errors/UpdateRecovery.tsx uses it
+// to know whether the server already has a new version. It lives under
+// /api/health/ so IIS lets it through even with the maintenance page on.
+// No sensitive data.
 export const dynamic = 'force-dynamic';
 
 export function GET() {

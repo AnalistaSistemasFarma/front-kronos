@@ -32,7 +32,7 @@ import type { FitStatus, ModelName } from "../../../../../../lib/agent-audit/ado
  * that estimates the ceiling and when adoption stabilizes. THE GATE IS IN THE ENDPOINT.
  */
 
-type Respuesta = AdoptionDto & { puedeRefrescar: boolean };
+type ApiResponse = AdoptionDto & { canRefresh: boolean };
 
 const n = (v: number | null | undefined, dec = 0) =>
   v === null || v === undefined || !Number.isFinite(v)
@@ -41,12 +41,12 @@ const n = (v: number | null | undefined, dec = 0) =>
 const pct = (v: number | null | undefined, dec = 1) => (v === null || v === undefined ? "—" : `${n(v * 100, dec)} %`);
 const pp = (v: number | null) => (v === null ? "—" : `${v > 0 ? "+" : ""}${n(v, 1)} p.p.`);
 const MESES = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"];
-const semana = (iso: string | null) => {
+const weekLabel = (iso: string | null) => {
   if (!iso) return "—";
   const [a, m, d] = iso.split("-").map(Number);
   return `${d} ${MESES[m - 1]} ${a}`;
 };
-const semanaCorta = (iso: string) => {
+const shortWeek = (iso: string) => {
   const [, m, d] = iso.split("-").map(Number);
   return `${d} ${MESES[m - 1]}`;
 };
@@ -64,8 +64,8 @@ function paleta(oscuro: boolean) {
   return {
     ia: oscuro ? "#51cf66" : "#2f9e44",
     iaSuave: oscuro ? "rgba(81,207,102,0.18)" : "rgba(47,158,68,0.14)",
-    activos: oscuro ? "#8ce99a" : "#69db7c",
-    ajuste: oscuro ? "#e9ecef" : "#343a40",
+    active: oscuro ? "#8ce99a" : "#69db7c",
+    fit: oscuro ? "#e9ecef" : "#343a40",
     plantilla: oscuro ? "#adb5bd" : "#495057",
     m365: oscuro ? "#74c0fc" : "#1c7ed6",
     th: oscuro ? "#ffa94d" : "#e8590c",
@@ -74,14 +74,14 @@ function paleta(oscuro: boolean) {
 }
 
 export default function AdopcionIaPage() {
-  const [datos, setDatos] = useState<Respuesta | null>(null);
+  const [datos, setDatos] = useState<ApiResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [cargando, setCargando] = useState(false);
   const [empresa, setEmpresa] = useState<string | null>(null);
   const [area, setArea] = useState<string | null>(null);
   const oscuro = useComputedColorScheme("light", { getInitialValueInEffect: true }) === "dark";
 
-  const cargar = useCallback(
+  const load = useCallback(
     async (refrescar = false) => {
       setCargando(true);
       try {
@@ -103,8 +103,8 @@ export default function AdopcionIaPage() {
     [empresa, area],
   );
   useEffect(() => {
-    void cargar();
-  }, [cargar]);
+    void load();
+  }, [load]);
 
   const c = paleta(oscuro);
   const ui = getChartUiColors(oscuro);
@@ -113,25 +113,25 @@ export default function AdopcionIaPage() {
     if (!datos) return null;
     const obs = datos.series;
     const curva = datos.fit.curve;
-    const semanas = [...new Set([...obs.map((p) => p.week), ...curva.map((p) => p.week)])].sort();
+    const weeks = [...new Set([...obs.map((p) => p.week), ...curva.map((p) => p.week)])].sort();
     const de = <T,>(arr: { week: string }[], f: (x: never) => T) => {
       const m = new Map(arr.map((x) => [x.week, f(x as never)]));
-      return semanas.map((w) => (m.has(w) ? (m.get(w) as T) : null));
+      return weeks.map((w) => (m.has(w) ? (m.get(w) as T) : null));
     };
-    const ultima = obs[obs.length - 1]?.week ?? "";
-    const marca = (w: string | null) => semanas.map((s) => (w && s === w ? curva.find((p) => p.week === w)?.fit ?? null : null));
-    const hayCurva = curva.length > 0;
+    const last = obs[obs.length - 1]?.week ?? "";
+    const marca = (w: string | null) => weeks.map((s) => (w && s === w ? curva.find((p) => p.week === w)?.fit ?? null : null));
+    const hasCurve = curva.length > 0;
     const data = {
-      labels: semanas.map(semanaCorta),
+      labels: weeks.map(shortWeek),
       datasets: [
-        ...(hayCurva
+        ...(hasCurve
           ? [
               { label: "Banda 90 % (alta)", data: de(curva, (p: { high: number }) => p.high), borderWidth: 0, pointRadius: 0, backgroundColor: c.iaSuave, fill: "+1" as const, order: 9 },
               { label: "Banda 90 % (baja)", data: de(curva, (p: { low: number }) => p.low), borderWidth: 0, pointRadius: 0, fill: false, order: 9 },
               {
                 label: `Curva ajustada (${datos.fit.best ? MODELO[datos.fit.best] : "—"})`,
                 data: de(curva, (p: { fit: number }) => p.fit),
-                borderColor: c.ajuste,
+                borderColor: c.fit,
                 borderWidth: 1.5,
                 borderDash: [6, 4],
                 pointRadius: 0,
@@ -141,11 +141,11 @@ export default function AdopcionIaPage() {
             ]
           : []),
         { label: "Han usado IA (acumulado)", data: de(obs, (p: { cumulativeAi: number }) => p.cumulativeAi), borderColor: c.ia, backgroundColor: c.ia, borderWidth: 3, pointRadius: 3, fill: false, order: 1 },
-        { label: "Activos con IA en la semana", data: de(obs, (p: { activeAi: number }) => p.activeAi), borderColor: c.activos, backgroundColor: c.activos, borderWidth: 2, pointRadius: 2, fill: false, order: 2 },
+        { label: "Activos con IA en la semana", data: de(obs, (p: { activeAi: number }) => p.activeAi), borderColor: c.active, backgroundColor: c.active, borderWidth: 2, pointRadius: 2, fill: false, order: 2 },
         { label: "Plantilla SynerLink (usuarios activos)", data: de(obs, (p: { headcount: number }) => p.headcount), borderColor: c.plantilla, backgroundColor: c.plantilla, borderWidth: 2, pointRadius: 0, fill: false, order: 4 },
         { label: "Personas con licencia Microsoft 365", data: de(obs, (p: { m365: number | null }) => p.m365), borderColor: c.m365, backgroundColor: c.m365, borderWidth: 1.5, pointRadius: 4, spanGaps: true, fill: false, order: 5 },
         { label: "Base de personal (Talento Humano)", data: de(obs, (p: { th: number | null }) => p.th), borderColor: c.th, backgroundColor: c.th, borderWidth: 1.5, pointRadius: 4, spanGaps: true, fill: false, order: 6 },
-        ...(hayCurva
+        ...(hasCurve
           ? [
               { label: "Inflexión", data: marca(datos.fit.inflectionWeek), borderColor: c.hito, backgroundColor: c.hito, pointStyle: "triangle" as const, pointRadius: 8, showLine: false, order: 0 },
               { label: "Estabilización (95 % del techo)", data: marca(datos.fit.stabilizationWeek), borderColor: c.hito, backgroundColor: c.hito, pointStyle: "rectRot" as const, pointRadius: 8, showLine: false, order: 0 },
@@ -153,10 +153,10 @@ export default function AdopcionIaPage() {
           : []),
       ],
     };
-    return { data, ultimaObservada: ultima ? semanaCorta(ultima) : "—" };
+    return { data, lastObserved: last ? shortWeek(last) : "—" };
   }, [datos, c]);
 
-  const opciones = useMemo(
+  const options = useMemo(
     () =>
       mergeChartOptionsForTheme<"line">(
         {
@@ -186,7 +186,7 @@ export default function AdopcionIaPage() {
   const interacciones = useMemo(() => {
     if (!datos) return null;
     return {
-      labels: datos.series.map((p) => semanaCorta(p.week)),
+      labels: datos.series.map((p) => shortWeek(p.week)),
       datasets: [
         { type: "bar" as const, label: "Mensajes en el chat", data: datos.series.map((p) => p.chatMessages), backgroundColor: c.ia, stack: "i", yAxisID: "y" },
         { type: "bar" as const, label: "Turnos en proyectos", data: datos.series.map((p) => p.projectTurns), backgroundColor: c.m365, stack: "i", yAxisID: "y" },
@@ -194,8 +194,8 @@ export default function AdopcionIaPage() {
           type: "line" as const,
           label: "Interacciones por persona activa",
           data: datos.series.map((p) => p.interactionsPerActive),
-          borderColor: c.ajuste,
-          backgroundColor: c.ajuste,
+          borderColor: c.fit,
+          backgroundColor: c.fit,
           borderWidth: 2,
           pointRadius: 2,
           yAxisID: "y1",
@@ -204,7 +204,7 @@ export default function AdopcionIaPage() {
     };
   }, [datos, c]);
 
-  const opcionesInter = useMemo(
+  const interOptions = useMemo(
     () =>
       mergeChartOptionsForTheme<"bar">(
         {
@@ -254,7 +254,7 @@ export default function AdopcionIaPage() {
         <Text className="ios-process-hub__subtitle" mb="lg">
           Cuántas personas usan los agentes frente a cuántas personas hay, semana a semana, y cuándo se estima que la
           adopción se estabiliza.
-          {datos ? ` Desde el ${semana(datos.historyStart)} hasta la semana del ${semana(datos.lastWeek)} (la semana en curso no se cuenta).` : ""}
+          {datos ? ` Desde el ${weekLabel(datos.historyStart)} hasta la semana del ${weekLabel(datos.lastWeek)} (la semana en curso no se cuenta).` : ""}
         </Text>
 
         <Card withBorder radius="md" padding="md" mb="md" className="chat-surface">
@@ -278,9 +278,9 @@ export default function AdopcionIaPage() {
               onChange={setArea}
               data={(datos?.departments ?? []).map((x) => ({ value: String(x.id), label: x.name }))}
             />
-            {datos?.puedeRefrescar && (
+            {datos?.canRefresh && (
               <Group mt={20}>
-                <Button size="xs" leftSection={<IconRefresh size={14} />} loading={cargando} onClick={() => void cargar(true)}>
+                <Button size="xs" leftSection={<IconRefresh size={14} />} loading={cargando} onClick={() => void load(true)}>
                   Recalcular ahora
                 </Button>
               </Group>
@@ -332,8 +332,8 @@ export default function AdopcionIaPage() {
               {f.k !== null && (
                 <Text size="sm" mt={4}>
                   Modelo: <b>{f.best ? MODELO[f.best] : "—"}</b> · Techo estimado (K): <b>{n(f.k)} personas</b> ({n(f.kLow)}–{n(f.kHigh)}, 90 %)
-                  {k.headcount ? `, ${pct(f.k / k.headcount)} de la plantilla actual` : ""} · Inflexión: <b>{semana(f.inflectionWeek)}</b> ·
-                  95 % del techo: <b>{semana(f.stabilizationWeek)}</b> ({semana(f.stabilizationLow)} a {semana(f.stabilizationHigh)}).
+                  {k.headcount ? `, ${pct(f.k / k.headcount)} de la plantilla actual` : ""} · Inflexión: <b>{weekLabel(f.inflectionWeek)}</b> ·
+                  95 % del techo: <b>{weekLabel(f.stabilizationWeek)}</b> ({weekLabel(f.stabilizationLow)} a {weekLabel(f.stabilizationHigh)}).
                 </Text>
               )}
             </Alert>
@@ -344,9 +344,9 @@ export default function AdopcionIaPage() {
               </Text>
               <Text size="xs" c="dimmed" mb="sm">
                 La línea verde gruesa es lo real. La punteada es la curva en S ajustada y su proyección, con la banda de confianza
-                del 90 %. Última semana observada: {grafico?.ultimaObservada}.
+                del 90 %. Última semana observada: {grafico?.lastObserved}.
               </Text>
-              <div style={{ position: "relative", height: 380 }}>{grafico && <Line data={grafico.data as never} options={opciones} />}</div>
+              <div style={{ position: "relative", height: 380 }}>{grafico && <Line data={grafico.data as never} options={options} />}</div>
             </Card>
 
             <Card withBorder radius="md" padding="md" mb="md" className="chat-surface">
@@ -354,7 +354,7 @@ export default function AdopcionIaPage() {
                 Interacciones con los agentes por semana
               </Text>
               <div style={{ position: "relative", height: 280 }}>
-                {interacciones && <Bar data={interacciones as never} options={opcionesInter} />}
+                {interacciones && <Bar data={interacciones as never} options={interOptions} />}
               </div>
             </Card>
 
@@ -408,7 +408,7 @@ export default function AdopcionIaPage() {
                 de las dos guarda historia: se toma una foto por semana
                 {datos.sources.snapshotsAvailable
                   ? datos.sources.firstSnapshotWeek
-                    ? ` desde la semana del ${semana(datos.sources.firstSnapshotWeek)}`
+                    ? ` desde la semana del ${weekLabel(datos.sources.firstSnapshotWeek)}`
                     : " a partir de esta semana"
                   : " cuando se habilite la tabla de fotos en este ambiente (por ahora solo se ve el valor de hoy)"}
                 .{!datos.sources.m365Live ? " Microsoft 365 no respondió en esta consulta." : ""}

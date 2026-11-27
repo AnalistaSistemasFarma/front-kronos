@@ -1206,7 +1206,7 @@ export default function CorreoPage() {
         conversationId={hiloAbierto}
         carpeta={carpetaActual?.etiqueta ?? null}
         envioHabilitado={estado.conexion.envioHabilitado}
-        soloLectura={estado.conexion.envioRestringidoInquilino === true}
+        soloLectura={estado.conexion.tenantSendRestricted === true}
         agenteHabilitado={estado.conexion.agenteHabilitado === true}
         nombreOperador={estado.usuario.nombre}
         correoOperador={estado.usuario.email}
@@ -1221,7 +1221,7 @@ export default function CorreoPage() {
   ) : null;
 
   const envio = estado.conexion.envioHabilitado;
-  const textoSinEnvio = estado.conexion.envioRestringidoInquilino
+  const textoSinEnvio = estado.conexion.tenantSendRestricted
     ? 'Su empresa tiene el Correo en modo solo lectura: no se pueden enviar correos desde SynerLink.'
     : 'Enviar correos desde SynerLink no está habilitado en este ambiente.';
   const botonRedactar = (
@@ -1424,7 +1424,7 @@ export default function CorreoPage() {
           idOperador={estado.usuario.id}
           etiquetarHabilitado={estado.conexion.etiquetarHabilitado}
           envioHabilitado={estado.conexion.envioHabilitado}
-          soloLectura={estado.conexion.envioRestringidoInquilino === true}
+          soloLectura={estado.conexion.tenantSendRestricted === true}
           nombreOperador={estado.usuario.nombre}
           onClose={(huboCreadas) => {
             setSimulacion(null);

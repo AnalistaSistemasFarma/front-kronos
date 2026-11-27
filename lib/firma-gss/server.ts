@@ -8,7 +8,7 @@ import {
   saveOrionUserSignature,
 } from '../orion/client';
 import { SIGNING_LEGAL_CONSENT_VERSION } from '../orion/signingLegalConsent';
-import type { DatosSelloActuales, DatosSelloDeps } from './datosSello';
+import type { CurrentSealData, SealDataDeps } from './sealData';
 import type { FirmaGssDeps } from './miFirma';
 
 /**
@@ -55,7 +55,7 @@ export async function consultarFirmaGss(email: string, timeoutMs = 6000): Promis
 }
 
 /** Datos del sello y consentimiento actuales en GSS Firma (Orión). */
-async function leerDatosSello(email: string): Promise<DatosSelloActuales> {
+async function readSealData(email: string): Promise<CurrentSealData> {
   const [preview, consent] = await Promise.all([
     getOrionSignerPreview(email).catch(() => null),
     getOrionPersonConsent(email).catch(() => null),
@@ -71,19 +71,19 @@ async function leerDatosSello(email: string): Promise<DatosSelloActuales> {
 }
 
 /** Dependencias REALES de «Datos del sello»: Orión y user_audit_log. */
-export function datosSelloDeps(): DatosSelloDeps {
+export function sealDataDeps(): SealDataDeps {
   return {
-    leerFirma: async (email) => {
+    readSignature: async (email) => {
       const r = await loadOrionUserSignature(email);
       return r.ok ? { dataUrl: r.data?.dataUrl ?? null, method: r.data?.method ?? null } : { dataUrl: null, method: null };
     },
-    leerActuales: leerDatosSello,
-    guardar: async (email, dataUrl, method, datos) => {
+    readCurrent: readSealData,
+    save: async (email, dataUrl, method, datos) => {
       const r = await saveOrionUserSignature(email, dataUrl, method, datos);
       const err = (r.data as { error?: string } | null)?.error || r.error;
       return { ok: r.ok, error: r.ok ? undefined : err || 'GSS Firma no guardó los datos.' };
     },
-    guardarConsentimiento: async (email) => {
+    saveConsent: async (email) => {
       const r = await saveOrionPersonConsent(email, {
         legalConsentAccepted: true,
         legalConsentKind: 'ELECTRONIC',
@@ -96,16 +96,16 @@ export function datosSelloDeps(): DatosSelloDeps {
   };
 }
 
-export interface DatosSelloVista extends DatosSelloActuales {
+export interface SealDataView extends CurrentSealData {
   /** false si GSS Firma no está configurada o no respondió. */
   disponible: boolean;
 }
 
 /** Datos del sello de la persona de la sesión (para el perfil). */
-export async function consultarDatosSello(email: string, timeoutMs = 8000): Promise<DatosSelloVista> {
-  const nada: DatosSelloVista = { disponible: false, hasSigningLegalConsent: false };
+export async function getSealData(email: string, timeoutMs = 8000): Promise<SealDataView> {
+  const nada: SealDataView = { disponible: false, hasSigningLegalConsent: false };
   if (!getOrionConfig().enabled) return nada;
   const timeout = new Promise<null>((resolve) => setTimeout(() => resolve(null), timeoutMs));
-  const r = await Promise.race([leerDatosSello(email).catch(() => null), timeout]);
+  const r = await Promise.race([readSealData(email).catch(() => null), timeout]);
   return r ? { disponible: true, ...r } : nada;
 }

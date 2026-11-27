@@ -3,7 +3,7 @@ import { invalidarHilo } from './cacheHilo';
 import { CORREO_DESHACER_VIGENCIA_MS, CORREO_MAX_ELIMINAR_SELECCION } from './constants';
 import * as data from './db';
 import type { AccesoCorreo } from './db';
-import { capacidadesCorreo } from './config';
+import { mailCapabilities } from './config';
 import { CorreoError } from './errors';
 import { assertGraphId } from './graph';
 import { proveedorDe, type CorreoDeps } from './service';
@@ -60,7 +60,7 @@ export interface ResultadoDeshacer {
 
 /** Eliminar escribe en el buzón (Mail.ReadWrite): exige la escritura general y su propio interruptor. */
 export function eliminarHabilitado(d: CorreoDeps, email: string): boolean {
-  return capacidadesCorreo(d.cfg, email).eliminar;
+  return mailCapabilities(d.cfg, email).eliminar;
 }
 
 function exigirEliminar(d: CorreoDeps, acceso: AccesoCorreo): void {

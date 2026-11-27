@@ -276,7 +276,7 @@ async function bandejaDeProyectos(opciones: {
     return jsonNoStore({ error: 'Proyectos no habilitados para este agente.' }, { status: 404 });
   }
   // Empresas habilitadas, o proyectos de otra empresa donde lo designaron (2026-11-25).
-  const delPuente = await filtroProyectosDelPuente(agent.idAgent, agent.code, config);
+  const bridgeFilter = await filtroProyectosDelPuente(agent.idAgent, agent.code, config);
 
   // MESAS DE DISCUSIÓN (2026-11-04): motor perezoso. Cualquier puente que
   // pregunte por su bandeja empuja las mesas que tengan ronda o turno vencido
@@ -304,7 +304,7 @@ async function bandejaDeProyectos(opciones: {
           archived: false,
           id_agent: agent.idAgent,
           // …y solo de empresas donde el agente está habilitado para Proyectos (o de otra empresa, ver filtroProyectosDelPuente).
-          project: delPuente,
+          project: bridgeFilter,
         },
       },
       orderBy: { id: 'asc' },
@@ -337,7 +337,7 @@ async function bandejaDeProyectos(opciones: {
           conversation: {
             kind: 'project',
             archived: false,
-            project: delPuente,
+            project: bridgeFilter,
           },
         },
         orderBy: { id: 'asc' },
@@ -393,12 +393,12 @@ async function bandejaDeProyectos(opciones: {
 
   // Meeting analysis (2026-11-24): the agent receives the notice + instructions + the transcript, read
   // live (never stored in the thread). See lib/meetings/projects/analysis.ts.
-  const analisis = new Map<number, string>();
+  const analyses = new Map<number, string>();
   for (const m of pending) {
     if (m.role !== 'system' || m.event_type !== null) continue;
     try {
       const t = await analysisTurnForAgent(m, agent.idAgent);
-      if (t) analisis.set(m.id, t.body);
+      if (t) analyses.set(m.id, t.body);
     } catch (error) {
       console.error('[meetings] analysis turn for the agent', m.id, error);
     }
@@ -413,7 +413,7 @@ async function bandejaDeProyectos(opciones: {
       id: m.id,
       idConversation: m.id_conversation,
       role: m.role,
-      body: analisis.get(m.id) ?? turnos.get(m.id)?.body ?? m.body,
+      body: analyses.get(m.id) ?? turnos.get(m.id)?.body ?? m.body,
       createdAt: m.created_at.toISOString(),
       author: m.userAuthor
         ? { kind: 'user' as const, id: m.userAuthor.id, name: m.userAuthor.name, email: m.userAuthor.email }
@@ -430,7 +430,7 @@ async function bandejaDeProyectos(opciones: {
           : m.event_type === EVENT_TYPE_TURNO
           ? // Sin correo: un aviso de turno NUNCA activa permisos de una persona.
             { kind: 'system' as const, id: null, name: 'Mesa de discusión', email: null }
-          : analisis.has(m.id)
+          : analyses.has(m.id)
           ? // No e-mail either: an analysis request never activates a person's permissions.
             { kind: 'system' as const, id: null, name: ANALYSIS_AUTHOR_NAME, email: null }
           : null,

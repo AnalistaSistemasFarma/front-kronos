@@ -2,7 +2,7 @@
 
 import { usePathname } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
-import { isChunkLoadError, recargarUnaVez, RECUPERACION_ACTIVA } from '../../lib/chunk-recovery';
+import { isChunkLoadError, recargarUnaVez, RECOVERY_ENABLED } from '../../lib/chunk-recovery';
 import { isVoiceCallActive } from '../../lib/chat/voice-call-browser';
 
 const BUILD_CLIENTE = process.env.APP_BUILD_ID ?? '';
@@ -14,15 +14,15 @@ const INTERVALO_MS = 5 * 60_000;
  * 2) Consulta /api/health/version: si el servidor ya tiene otro build, muestra un
  *    aviso discreto y recarga la página completa en el próximo cambio de ruta,
  *    antes de que el usuario pida un chunk que ya no existe.
- * Solo en producción (RECUPERACION_ACTIVA): en `next dev` no hace nada.
+ * Production only (RECOVERY_ENABLED): it does nothing in `next dev`.
  */
-export default function RecuperacionActualizacion() {
+export default function UpdateRecovery() {
   const pathname = usePathname();
   const [hayVersionNueva, setHayVersionNueva] = useState(false);
   const rutaInicial = useRef(pathname);
 
   useEffect(() => {
-    if (!RECUPERACION_ACTIVA) return;
+    if (!RECOVERY_ENABLED) return;
     const alError = (ev: Event) => {
       const err = (ev as ErrorEvent).error ?? (ev as ErrorEvent).message;
       const destino = ev.target as HTMLScriptElement | HTMLLinkElement | null;
@@ -47,7 +47,7 @@ export default function RecuperacionActualizacion() {
     // `Date.now()` en next.config cada vez que Next vuelve a leer la configuración (proceso
     // principal, trabajadores, recargas), así que el del navegador y el de /api/health/version
     // casi nunca coinciden: el aviso salía a cada rato y "Actualizar" no lo quitaba.
-    if (!RECUPERACION_ACTIVA || !BUILD_CLIENTE || process.env.NODE_ENV !== 'production') return;
+    if (!RECOVERY_ENABLED || !BUILD_CLIENTE || process.env.NODE_ENV !== 'production') return;
     let vivo = true;
     const revisar = async () => {
       try {

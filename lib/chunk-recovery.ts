@@ -9,7 +9,7 @@
  * vez (marca en sessionStorage para no entrar en bucle).
  */
 
-export const RECUPERACION_ACTIVA = process.env.NODE_ENV === 'production';
+export const RECOVERY_ENABLED = process.env.NODE_ENV === 'production';
 
 const PATRONES_CHUNK = [
   /ChunkLoadError/i,

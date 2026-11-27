@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { agenteCorreoHabilitado, capacidadesCorreo, faltantesInquilino, inquilinoDeCorreo, readCorreoConfig } from '../config';
+import { agenteCorreoHabilitado, mailCapabilities, faltantesInquilino, inquilinoDeCorreo, readCorreoConfig } from '../config';
 
 const env = {
   CORREO_MODO: 'graph',
@@ -61,22 +61,22 @@ describe('Correo · per-tenant capabilities (CORREO_<K>_ENVIO / _ETIQUETAR / _EL
       ['gss', true, true, true],
       ['olp', true, true, true],
     ]);
-    expect(capacidadesCorreo(c, 'x@onelatampharma.com')).toEqual({ envio: true, etiquetar: true, eliminar: true, envioRestringidoInquilino: false });
+    expect(mailCapabilities(c, 'x@onelatampharma.com')).toEqual({ envio: true, etiquetar: true, eliminar: true, tenantSendRestricted: false });
   });
 
   it('a read-only tenant only loses send; the other tenant is unchanged', () => {
     const c = readCorreoConfig({ ...full, CORREO_OLP_ENVIO: 'false' });
-    expect(capacidadesCorreo(c, 'x@onelatampharma.com')).toEqual({ envio: false, etiquetar: true, eliminar: true, envioRestringidoInquilino: true });
-    expect(capacidadesCorreo(c, 'laura@gsslatam.com')).toEqual({ envio: true, etiquetar: true, eliminar: true, envioRestringidoInquilino: false });
+    expect(mailCapabilities(c, 'x@onelatampharma.com')).toEqual({ envio: false, etiquetar: true, eliminar: true, tenantSendRestricted: true });
+    expect(mailCapabilities(c, 'laura@gsslatam.com')).toEqual({ envio: true, etiquetar: true, eliminar: true, tenantSendRestricted: false });
   });
 
   it('tenant flags are ANDed with the global ones; eliminar needs write', () => {
     const sinGlobal = readCorreoConfig({ ...full, CORREO_ENVIO_HABILITADO: 'false' });
-    expect(capacidadesCorreo(sinGlobal, 'laura@gsslatam.com')).toMatchObject({ envio: false, envioRestringidoInquilino: false });
+    expect(mailCapabilities(sinGlobal, 'laura@gsslatam.com')).toMatchObject({ envio: false, tenantSendRestricted: false });
     const sinEscritura = readCorreoConfig({ ...full, CORREO_OLP_ETIQUETAR: 'false' });
-    expect(capacidadesCorreo(sinEscritura, 'x@onelatampharma.com')).toMatchObject({ envio: true, etiquetar: false, eliminar: false });
+    expect(mailCapabilities(sinEscritura, 'x@onelatampharma.com')).toMatchObject({ envio: true, etiquetar: false, eliminar: false });
     const sinEliminar = readCorreoConfig({ ...full, CORREO_OLP_ELIMINAR: 'false' });
-    expect(capacidadesCorreo(sinEliminar, 'x@onelatampharma.com')).toMatchObject({ etiquetar: true, eliminar: false });
-    expect(capacidadesCorreo(sinEliminar, 'laura@gsslatam.com')).toMatchObject({ eliminar: true });
+    expect(mailCapabilities(sinEliminar, 'x@onelatampharma.com')).toMatchObject({ etiquetar: true, eliminar: false });
+    expect(mailCapabilities(sinEliminar, 'laura@gsslatam.com')).toMatchObject({ eliminar: true });
   });
 });

@@ -38,14 +38,14 @@ function tonoWav(): Buffer {
   return buf;
 }
 
-async function simularNotaDeVoz(page: Page) {
-  const enviados: { voiceNote: boolean; durationMs: number; bytes: number }[] = [];
+async function simulateVoiceNote(page: Page) {
+  const sentNotes: { voiceNote: boolean; durationMs: number; bytes: number }[] = [];
   await page.route(/\/api\/chat\/conversations\/\d+\/messages(\?|$)/, async (r, request) => {
     if (request.method() !== 'POST') return r.fallback();
     const raw = request.postDataBuffer() ?? Buffer.alloc(0);
     const text = raw.toString('latin1');
     const durationMs = Number(/name="voiceDurationMs"\r\n\r\n(\d+)/.exec(text)?.[1] ?? 0);
-    enviados.push({ voiceNote: /name="voiceNote"\r\n\r\n1/.test(text), durationMs, bytes: raw.length });
+    sentNotes.push({ voiceNote: /name="voiceNote"\r\n\r\n1/.test(text), durationMs, bytes: raw.length });
     const segundos = Math.round(durationMs / 1000);
     return r.fulfill({
       status: 201,
@@ -68,7 +68,7 @@ async function simularNotaDeVoz(page: Page) {
   await page.route('**/api/chat/attachments/77', (r) =>
     r.fulfill({ status: 200, body: tonoWav(), headers: { 'Content-Type': 'audio/wav', 'Content-Disposition': 'attachment; filename="nota-de-voz.wav"' } })
   );
-  return enviados;
+  return sentNotes;
 }
 
 for (const [nombre, viewport] of [
@@ -85,7 +85,7 @@ for (const [nombre, viewport] of [
 
     test('grabar, enviar, reproducir y ver la transcripción', async ({ page }) => {
       await simularChat(page);
-      const enviados = await simularNotaDeVoz(page);
+      const sentNotes = await simulateVoiceNote(page);
       await page.goto('/process/chat?agent=horus');
       await expect(hilo(page).getByText('quedó en SharePoint')).toBeVisible();
 
@@ -108,32 +108,32 @@ for (const [nombre, viewport] of [
       await capturar(page, `notas-voz-${nombre}-2-grabando`);
       await grabando.getByRole('button', { name: 'Enviar la nota de voz' }).click();
 
-      await expect.poll(() => enviados.length).toBe(1);
-      expect(enviados[0].voiceNote).toBe(true);
-      expect(enviados[0].durationMs).toBeGreaterThan(1500);
-      expect(enviados[0].bytes).toBeGreaterThan(500);
+      await expect.poll(() => sentNotes.length).toBe(1);
+      expect(sentNotes[0].voiceNote).toBe(true);
+      expect(sentNotes[0].durationMs).toBeGreaterThan(1500);
+      expect(sentNotes[0].bytes).toBeGreaterThan(500);
 
-      const nota = hilo(page).getByTestId('chat-nota-voz').last();
-      await expect(nota).toBeVisible();
+      const voiceNote = hilo(page).getByTestId('chat-nota-voz').last();
+      await expect(voiceNote).toBeVisible();
       // The descriptive body is not drawn as text.
       await expect(hilo(page).getByText('[Nota de voz', { exact: false })).toHaveCount(0);
 
-      await nota.getByRole('button', { name: 'Reproducir la nota de voz' }).click();
-      await expect(nota.getByRole('button', { name: 'Pausar la nota de voz' })).toBeVisible();
-      await nota.getByTestId('chat-nota-voz-velocidad').click();
-      await expect(nota.getByTestId('chat-nota-voz-velocidad')).toHaveText('1.5x');
-      await nota.getByTestId('chat-nota-voz-velocidad').click();
-      await expect(nota.getByTestId('chat-nota-voz-velocidad')).toHaveText('2x');
-      await expect(nota.getByRole('link', { name: 'Descargar el audio' })).toHaveAttribute('href', '/api/chat/attachments/77');
+      await voiceNote.getByRole('button', { name: 'Reproducir la nota de voz' }).click();
+      await expect(voiceNote.getByRole('button', { name: 'Pausar la nota de voz' })).toBeVisible();
+      await voiceNote.getByTestId('chat-nota-voz-velocidad').click();
+      await expect(voiceNote.getByTestId('chat-nota-voz-velocidad')).toHaveText('1.5x');
+      await voiceNote.getByTestId('chat-nota-voz-velocidad').click();
+      await expect(voiceNote.getByTestId('chat-nota-voz-velocidad')).toHaveText('2x');
+      await expect(voiceNote.getByRole('link', { name: 'Descargar el audio' })).toHaveAttribute('href', '/api/chat/attachments/77');
 
-      await nota.getByTestId('chat-nota-voz-transcripcion').click();
-      await expect(nota.getByText('la solicitud de compra ya quedó aprobada')).toBeVisible();
+      await voiceNote.getByTestId('chat-nota-voz-transcripcion').click();
+      await expect(voiceNote.getByText('la solicitud de compra ya quedó aprobada')).toBeVisible();
       await capturar(page, `notas-voz-${nombre}-3-enviada`);
     });
 
     test('descartar no envía nada', async ({ page }) => {
       await simularChat(page);
-      const enviados = await simularNotaDeVoz(page);
+      const sentNotes = await simulateVoiceNote(page);
       await page.goto('/process/chat?agent=horus');
       await page.getByRole('button', { name: 'Grabar una nota de voz' }).click();
       await expect(page.getByTestId('chat-nota-voz-grabando')).toBeVisible();
@@ -141,7 +141,7 @@ for (const [nombre, viewport] of [
       await expect(page.getByTestId('chat-nota-voz-grabando')).toHaveCount(0);
       await expect(page.getByTestId('chat-composer-pill')).toBeVisible();
       await page.waitForTimeout(500);
-      expect(enviados).toHaveLength(0);
+      expect(sentNotes).toHaveLength(0);
     });
 
     test('micrófono bloqueado: mensaje claro en español', async ({ page }) => {

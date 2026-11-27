@@ -27,7 +27,7 @@ export async function GET(request: NextRequest) {
     const q = request.nextUrl.searchParams;
     const force = q.get("refrescar") === "1" && scope.all;
     const data = await readAdoption(scope, { companyId: intParam(q.get("empresa")), departmentId: intParam(q.get("area")) }, force);
-    return jsonNoStore({ ...data, puedeRefrescar: scope.all });
+    return jsonNoStore({ ...data, canRefresh: scope.all });
   } catch (error) {
     return serverError("GET /api/chat/auditoria/adopcion", error);
   }

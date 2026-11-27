@@ -18,7 +18,7 @@ export interface EstadoCorreo {
     correo: string;
     envioHabilitado: boolean;
     /** Send off only because the user's company (tenant) is read-only. */
-    envioRestringidoInquilino?: boolean;
+    tenantSendRestricted?: boolean;
     etiquetarHabilitado: boolean;
     /** Eliminar (mover a Elementos eliminados con «Deshacer»): escritura y CORREO_ELIMINAR_HABILITADO. */
     eliminarHabilitado?: boolean;

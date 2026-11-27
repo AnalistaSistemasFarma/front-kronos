@@ -262,14 +262,14 @@ export default function SalesInlineForm({ companyId, onDone, editDocEntry, initi
   const pageStart = (curPage - 1) * LINES_PER_PAGE;
   const money = (v: number) => `$ ${Math.round(v * 100) / 100 === Math.round(v) ? Math.round(v).toLocaleString('es-CO') : v.toLocaleString('es-CO', { maximumFractionDigits: 2 })}`;
   /** Líneas con artículo y sin bodega (llegan así del PDF o del Excel cuando el artículo no tiene bodega por defecto). */
-  const sinBodega = lines.filter((l) => !empty(l.ItemCode) && empty(l.WarehouseCode)).length;
+  const missingWarehouseCount = lines.filter((l) => !empty(l.ItemCode) && empty(l.WarehouseCode)).length;
   /** Asignar una bodega a varias líneas de una vez (Nicolás Rivera, 2026-11-24). */
-  const asignarBodega = (wh: string, soloVacias: boolean) => {
+  const assignWarehouse = (wh: string, onlyEmpty: boolean) => {
     if (!wh.trim()) {
       toast.error('Elija primero la bodega.');
       return;
     }
-    const aplica = (l: Line) => !empty(l.ItemCode) && !(soloVacias && !empty(l.WarehouseCode));
+    const aplica = (l: Line) => !empty(l.ItemCode) && !(onlyEmpty && !empty(l.WarehouseCode));
     const n = lines.filter(aplica).length;
     setLines((prev) => prev.map((l) => (aplica(l) ? { ...l, WarehouseCode: wh.trim() } : l)));
     toast.success(`Bodega ${wh.trim()} asignada a ${n} línea(s).`);
@@ -366,7 +366,7 @@ export default function SalesInlineForm({ companyId, onDone, editDocEntry, initi
       `Oferta montada desde el PDF: ${r.customer.CardName} · ${r.lines.length} línea(s)${r.leidas && r.leidas !== r.lines.length ? ` de ${r.leidas} leídas en el PDF` : ''}${r.numeroOrdenCompra ? ` · OC ${r.numeroOrdenCompra}` : ''}.`,
       ...(revisar ? [`${revisar} línea(s) marcadas Revisar: la IA eligió el artículo por la descripción y hay otros parecidos.`] : []),
       ...(!r.fechaEntrega || r.fechaEntrega < today() ? ['El PDF no trae una fecha de entrega válida: indíquela.'] : []),
-      ...r.avisos,
+      ...r.warnings,
     ]);
     toast.success(`${r.lines.length} línea(s) agregada(s) desde el PDF. Revise la oferta y créela.`);
   };
@@ -472,17 +472,17 @@ export default function SalesInlineForm({ companyId, onDone, editDocEntry, initi
               <SapLookupInput size="xs" companyId={companyId} endpoint="/api/sales/lookup" kind="warehouse" value={bulkWh}
                 onChange={(v) => setBulkWh(v)} onSelect={(o) => setBulkWh(o.value)} ariaLabel="Bodega para varias líneas" />
             </div>
-            <Button size="xs" variant="light" disabled={!bulkWh.trim() || !sinBodega} onClick={() => asignarBodega(bulkWh, true)}>
-              Asignar a las líneas sin bodega{sinBodega ? ` (${sinBodega})` : ''}
+            <Button size="xs" variant="light" disabled={!bulkWh.trim() || !missingWarehouseCount} onClick={() => assignWarehouse(bulkWh, true)}>
+              Asignar a las líneas sin bodega{missingWarehouseCount ? ` (${missingWarehouseCount})` : ''}
             </Button>
-            <Button size="xs" variant="subtle" disabled={!bulkWh.trim()} onClick={() => asignarBodega(bulkWh, false)}>
+            <Button size="xs" variant="subtle" disabled={!bulkWh.trim()} onClick={() => assignWarehouse(bulkWh, false)}>
               A todas
             </Button>
           </Group>
         </Group>
-        {sinBodega > 0 && (
+        {missingWarehouseCount > 0 && (
           <Alert color="orange" variant="light" p="xs" mb={6}>
-            {sinBodega} línea(s) sin bodega. Elija la bodega arriba y use Asignar a las líneas sin bodega.
+            {missingWarehouseCount} línea(s) sin bodega. Elija la bodega arriba y use Asignar a las líneas sin bodega.
           </Alert>
         )}
         <ScrollArea type="auto" offsetScrollbars>

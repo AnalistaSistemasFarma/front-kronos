@@ -23,8 +23,8 @@ import { SIGNER_ID_DOCUMENT_OPTIONS } from '../../lib/orion/signerIdentity';
 import { SIGNING_LEGAL_COPY } from '../../lib/orion/signingLegalConsent';
 import { invalidateUserProfileCache } from '../../lib/orion/userProfileClient';
 
-type Resultado = { tipo: 'ok' | 'error'; mensaje: string };
-interface Vista {
+type Result = { tipo: 'ok' | 'error'; mensaje: string };
+interface SealView {
   disponible: boolean;
   fullName?: string | null;
   idDocumentType?: string | null;
@@ -42,15 +42,15 @@ const VACIO = { fullName: '', idDocumentType: 'CC', idNumber: '', jobTitle: '' }
  * deja firmada de una vez, sin el modal de cédula/cargo.
  * Los datos viven en GSS Firma (Orión), no en el navegador (Ley 1581).
  */
-export default function DatosSelloSection({
+export default function SealDataSection({
   hasSignature,
-  onResultado,
+  onResult,
 }: {
   hasSignature: boolean;
-  onResultado: (r: Resultado) => void;
+  onResult: (r: Result) => void;
 }) {
   const { data: session } = useSession();
-  const [vista, setVista] = useState<Vista | null>(null);
+  const [vista, setVista] = useState<SealView | null>(null);
   const [editando, setEditando] = useState(false);
   const [form, setForm] = useState(VACIO);
   const [aceptaTerminos, setAceptaTerminos] = useState(false);
@@ -58,23 +58,23 @@ export default function DatosSelloSection({
   const [guardando, setGuardando] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const cargar = useCallback(async () => {
+  const load = useCallback(async () => {
     try {
       const res = await fetch('/api/firma-gss/datos-sello', { cache: 'no-store' });
-      setVista(res.ok ? ((await res.json()) as Vista) : { disponible: false, hasSigningLegalConsent: false });
+      setVista(res.ok ? ((await res.json()) as SealView) : { disponible: false, hasSigningLegalConsent: false });
     } catch {
       setVista({ disponible: false, hasSigningLegalConsent: false });
     }
   }, []);
 
   useEffect(() => {
-    void cargar();
-  }, [cargar]);
+    void load();
+  }, [load]);
 
   // Para firmar de una vez basta el nombre y las condiciones aceptadas; documento y cargo son opcionales.
-  const completos = Boolean(vista?.fullName && vista?.hasSigningLegalConsent);
+  const complete = Boolean(vista?.fullName && vista?.hasSigningLegalConsent);
 
-  const abrir = () => {
+  const open = () => {
     setForm({
       fullName: vista?.fullName || session?.user?.name || '',
       idDocumentType: vista?.idDocumentType || 'CC',
@@ -87,13 +87,13 @@ export default function DatosSelloSection({
     setEditando(true);
   };
 
-  const cancelar = () => {
+  const cancel = () => {
     setEditando(false);
     setPassword('');
     setError(null);
   };
 
-  const guardar = async () => {
+  const save = async () => {
     if (!vista?.hasSigningLegalConsent && !aceptaTerminos) {
       return setError('Debe leer y aceptar las condiciones de firma electrónica.');
     }
@@ -110,20 +110,20 @@ export default function DatosSelloSection({
       if (!res.ok) throw new Error(body.error || 'No se pudieron guardar sus datos.');
       // La firma automática lee el perfil de un caché de pestaña: que vea los datos nuevos.
       invalidateUserProfileCache(session?.user?.email);
-      cancelar();
-      await cargar();
-      onResultado({ tipo: 'ok', mensaje: 'Datos del sello guardados. Al autorizar una firma, quedará firmada de una vez.' });
+      cancel();
+      await load();
+      onResult({ tipo: 'ok', mensaje: 'Datos del sello guardados. Al autorizar una firma, quedará firmada de una vez.' });
     } catch (e) {
       const mensaje = e instanceof Error ? e.message : 'No se pudieron guardar sus datos.';
       setError(mensaje);
       setPassword('');
-      onResultado({ tipo: 'error', mensaje });
+      onResult({ tipo: 'error', mensaje });
     } finally {
       setGuardando(false);
     }
   };
 
-  const tipoLabel = (v?: string | null) => SIGNER_ID_DOCUMENT_OPTIONS.find((o) => o.value === v)?.label ?? v ?? '—';
+  const documentTypeLabel = (v?: string | null) => SIGNER_ID_DOCUMENT_OPTIONS.find((o) => o.value === v)?.label ?? v ?? '—';
 
   return (
     <Stack gap='sm' data-testid='datos-sello'>
@@ -136,8 +136,8 @@ export default function DatosSelloSection({
           </Group>
         </Title>
         {vista?.disponible && (
-          <Badge color={completos ? 'green' : 'yellow'} variant='light'>
-            {completos ? 'Completos' : 'Incompletos'}
+          <Badge color={complete ? 'green' : 'yellow'} variant='light'>
+            {complete ? 'Completos' : 'Incompletos'}
           </Badge>
         )}
       </Group>
@@ -161,7 +161,7 @@ export default function DatosSelloSection({
               <b>Nombre:</b> {vista.fullName || '—'}
             </Text>
             <Text size='sm'>
-              <b>Documento:</b> {vista.idNumber ? `${tipoLabel(vista.idDocumentType)} ${vista.idNumber}` : '—'}
+              <b>Documento:</b> {vista.idNumber ? `${documentTypeLabel(vista.idDocumentType)} ${vista.idNumber}` : '—'}
             </Text>
             <Text size='sm'>
               <b>Cargo:</b> {vista.jobTitle || '—'}
@@ -174,11 +174,11 @@ export default function DatosSelloSection({
             <Button
               size='md'
               variant='light'
-              onClick={abrir}
+              onClick={open}
               disabled={!hasSignature}
               data-testid='datos-sello-editar'
             >
-              {completos ? 'Cambiar mis datos' : 'Completar mis datos'}
+              {complete ? 'Cambiar mis datos' : 'Completar mis datos'}
             </Button>
           </Group>
           {!hasSignature && (
@@ -250,13 +250,13 @@ export default function DatosSelloSection({
             onChange={(e) => setPassword(e.currentTarget.value)}
           />
           <Group justify='flex-end' gap='sm'>
-            <Button variant='default' size='md' onClick={cancelar} disabled={guardando}>
+            <Button variant='default' size='md' onClick={cancel} disabled={guardando}>
               Cancelar
             </Button>
             <Button
               size='md'
               leftSection={<IconCheck size={16} />}
-              onClick={guardar}
+              onClick={save}
               loading={guardando}
               disabled={!password}
               data-testid='datos-sello-guardar'

@@ -151,7 +151,7 @@ export interface CasoRelevanteDto {
  * comes from the catalog (case name + description), never from the chat text, so it carries no
  * personal or sensitive data.
  */
-export interface CasoSemanaDto {
+export interface WeekCaseDto {
   code: string;
   agente: string;
   empresa: string | null;
@@ -163,14 +163,14 @@ export interface CasoSemanaDto {
   minHumano: number;
   minDespues: number;
   horasLiberadas: number;
-  puntaje: number;
+  score: number;
 }
-export interface SemanaRelevanteDto {
+export interface TopWeekDto {
   /** Monday of the week (YYYY-MM-DD). */
   desde: string;
   /** Sunday of the week (YYYY-MM-DD). */
   hasta: string;
-  casos: CasoSemanaDto[];
+  casos: WeekCaseDto[];
 }
 export interface IndicadorDto {
   corte: string | null;
@@ -180,7 +180,7 @@ export interface IndicadorDto {
   departamentos: DepartamentoIndicadorDto[];
   casosRelevantes: CasoRelevanteDto[];
   /** Most relevant case of the previous full week, one per agent (null without a cut). */
-  semanaRelevante: SemanaRelevanteDto | null;
+  topWeek: TopWeekDto | null;
   /** Agentes activos (en su alcance) que todavía no tienen casos medidos en este corte. */
   sinMedir: { code: string; displayName: string }[];
   ultima: CorridaDto | null;
@@ -321,7 +321,7 @@ export async function leerIndicador(
       graficos: armarGraficos(agentes, sets[3] ?? []),
       departamentos: consolidarDepartamentos(agentes),
       casosRelevantes: casosRelevantes(agentes, sets[4] ?? [], alcance),
-      semanaRelevante: corte ? armarSemanaRelevante(agentes, sets[3] ?? [], corte) : null,
+      topWeek: corte ? buildTopWeek(agentes, sets[3] ?? [], corte) : null,
       sinMedir: (sets[5] ?? [])
         .filter((f) => agentInScope(alcance, Number(f.id_agent)))
         .map((f) => ({ code: String(f.code), displayName: String(f.display_name) })),
@@ -379,7 +379,7 @@ function casosRelevantes(agentes: AgenteIndicadorDto[], filas: Fila[], alcance: 
 const SIN_DEPTO = "Sin departamento";
 
 /** Monday (YYYY-MM-DD) of the last full week before the cut date. */
-export function semanaAnterior(corte: string): { desde: string; hasta: string } {
+export function previousWeek(corte: string): { desde: string; hasta: string } {
   const d = new Date(`${corte.slice(0, 10)}T00:00:00Z`);
   const lunesActual = d.getTime() - ((d.getUTCDay() + 6) % 7) * 86_400_000;
   const desde = new Date(lunesActual - 7 * 86_400_000).toISOString().slice(0, 10);
@@ -387,10 +387,10 @@ export function semanaAnterior(corte: string): { desde: string; hasta: string } 
   return { desde, hasta };
 }
 
-const PESO_CONFIANZA: Record<string, number> = { alta: 1, media: 0.85, baja: 0.6 };
+const CONFIDENCE_WEIGHT: Record<string, number> = { alta: 1, media: 0.85, baja: 0.6 };
 
 /** First sentence of the catalog description, cut to `max` characters. */
-function primeraFrase(v: string | null, max = 160): string {
+function firstSentence(v: string | null, max = 160): string {
   const t = (v ?? "").replace(/\s+/g, " ").trim();
   if (!t) return "";
   const f = (t.match(/^.*?[.;](\s|$)/)?.[0] ?? t).trim().replace(/[.;]$/, "");
@@ -403,16 +403,16 @@ function primeraFrase(v: string | null, max = 160): string {
  * Score = hours freed that week × confidence weight (alta 1 · media 0,85 · baja 0,6 · none 0,75);
  * ties go to the case asked more times. Pure, for tests.
  */
-export function armarSemanaRelevante(
+export function buildTopWeek(
   agentes: AgenteIndicadorDto[],
   casos: Fila[],
   corte: string,
-): SemanaRelevanteDto {
-  const { desde, hasta } = semanaAnterior(corte);
-  const porId = new Map(agentes.map((a) => [a.idAgent, a]));
-  const mejor = new Map<number, CasoSemanaDto>();
+): TopWeekDto {
+  const { desde, hasta } = previousWeek(corte);
+  const byId = new Map(agentes.map((a) => [a.idAgent, a]));
+  const mejor = new Map<number, WeekCaseDto>();
   for (const c of casos) {
-    const ag = porId.get(Number(c.id_agent));
+    const ag = byId.get(Number(c.id_agent));
     if (!ag) continue; // out of scope or someone else's personal agent
     const n = semanasDeCaso(c.semanas_json)
       .filter((w) => w.inicio === desde)
@@ -420,32 +420,32 @@ export function armarSemanaRelevante(
     if (!n) continue;
     const mh = Number(c.min_humano ?? 0);
     const md = Number(c.min_despues ?? 0);
-    const horas = (n * Math.max(0, mh - md)) / 60;
-    if (horas <= 0) continue;
-    const puntaje = horas * (PESO_CONFIANZA[String(c.confianza ?? "")] ?? 0.75);
+    const hours = (n * Math.max(0, mh - md)) / 60;
+    if (hours <= 0) continue;
+    const score = hours * (CONFIDENCE_WEIGHT[String(c.confianza ?? "")] ?? 0.75);
     const prev = mejor.get(ag.idAgent);
-    if (prev && (prev.puntaje > puntaje || (prev.puntaje === puntaje && prev.ocurrencias >= n))) continue;
+    if (prev && (prev.score > score || (prev.score === score && prev.ocurrencias >= n))) continue;
     const caso = String(c.caso ?? "").trim();
-    const detalle = primeraFrase(txt(c.descripcion));
+    const detail = firstSentence(txt(c.descripcion));
     mejor.set(ag.idAgent, {
       code: ag.code,
       agente: ag.displayName,
       empresa: ag.empresa,
       departamento: nombreDepto(ag.departamento),
       caso,
-      resumen: /[.…!?]$/.test(detalle || caso) ? detalle || caso : `${detalle || caso}.`,
+      resumen: /[.…!?]$/.test(detail || caso) ? detail || caso : `${detail || caso}.`,
       ocurrencias: n,
       minHumano: mh,
       minDespues: md,
-      horasLiberadas: r1(horas),
-      puntaje: Math.round(puntaje * 100) / 100,
+      horasLiberadas: r1(hours),
+      score: Math.round(score * 100) / 100,
     });
   }
   return {
     desde,
     hasta,
     // Listed by hours freed (the column people read); the score only picks the case of each agent.
-    casos: [...mejor.values()].sort((a, b) => b.horasLiberadas - a.horasLiberadas || b.puntaje - a.puntaje || a.agente.localeCompare(b.agente)),
+    casos: [...mejor.values()].sort((a, b) => b.horasLiberadas - a.horasLiberadas || b.score - a.score || a.agente.localeCompare(b.agente)),
   };
 }
 

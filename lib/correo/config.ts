@@ -131,18 +131,18 @@ export function inquilinoDeCorreo(cfg: CorreoConfig, email: string): Inquilino |
 }
 
 /** Effective mailbox capabilities for a session email: global flags ANDed with its tenant's flags. */
-export interface CorreoCapacidades {
+export interface MailCapabilities {
   envio: boolean;
   etiquetar: boolean;
   eliminar: boolean;
   /** Send is on globally but the session's tenant turns it off (read-only tenant). */
-  envioRestringidoInquilino: boolean;
+  tenantSendRestricted: boolean;
 }
 
-export function capacidadesCorreo(cfg: CorreoConfig, email: string): CorreoCapacidades {
+export function mailCapabilities(cfg: CorreoConfig, email: string): MailCapabilities {
   const tenant = cfg.modo === 'off' ? null : inquilinoDeCorreo(cfg, email);
   const envio = cfg.envioHabilitado && (tenant?.envio ?? true);
   const etiquetar = cfg.etiquetarHabilitado && (tenant?.etiquetar ?? true);
   const eliminar = etiquetar && cfg.eliminarHabilitado && (tenant?.eliminar ?? true);
-  return { envio, etiquetar, eliminar, envioRestringidoInquilino: cfg.envioHabilitado && !envio };
+  return { envio, etiquetar, eliminar, tenantSendRestricted: cfg.envioHabilitado && !envio };
 }

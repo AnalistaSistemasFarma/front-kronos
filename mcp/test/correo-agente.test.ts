@@ -19,7 +19,7 @@ import {
   urlDeBuzon,
   type LectorCorreo,
   type MensajeTexto,
-  envioPermitido,
+  sendAllowed,
 } from '../src/correo/graph.js';
 import { callJson, connectClient, createMockPrisma, type CapturedRawQuery, type MockPrisma } from './helpers.js';
 
@@ -330,12 +330,12 @@ describe('read-only tenant (CORREO_<K>_ENVIO=false): reading allowed, replies no
     CORREO_OLP_ENVIO: 'false',
   };
 
-  it('envioPermitido: per tenant, default true, ANDed with CORREO_ENVIO_HABILITADO', () => {
+  it('sendAllowed: per tenant, default true, ANDed with CORREO_ENVIO_HABILITADO', () => {
     const cfg = readCorreoMcpConfig(env);
-    expect(envioPermitido('laura@gsslatam.com', cfg)).toBe(true);
-    expect(envioPermitido('mauricio@onelatampharma.com', cfg)).toBe(false);
-    expect(envioPermitido('laura@gsslatam.com', readCorreoMcpConfig({ ...env, CORREO_ENVIO_HABILITADO: 'false' }))).toBe(false);
-    expect(envioPermitido('laura@gsslatam.com', readCorreoMcpConfig({}))).toBe(true);
+    expect(sendAllowed('laura@gsslatam.com', cfg)).toBe(true);
+    expect(sendAllowed('mauricio@onelatampharma.com', cfg)).toBe(false);
+    expect(sendAllowed('laura@gsslatam.com', readCorreoMcpConfig({ ...env, CORREO_ENVIO_HABILITADO: 'false' }))).toBe(false);
+    expect(sendAllowed('laura@gsslatam.com', readCorreoMcpConfig({}))).toBe(true);
   });
 
   it('correo_proponer_respuesta is rejected and nothing is written', async () => {

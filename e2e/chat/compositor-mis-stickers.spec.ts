@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { expect, test } from '@playwright/test';
-import { CAPTURAS, REMOTO, SECRET, abrirExpresiones, caja, capturar, guardarVideo, hilo, sesion, simularChat } from './chat-simulado';
+import { CAPTURAS, REMOTO, SECRET, openExpressions, caja, capturar, guardarVideo, hilo, sesion, simularChat } from './chat-simulado';
 
 /**
  * Chat · compositor y «Mis stickers» (2026-10-21).
@@ -51,7 +51,7 @@ for (const oscuro of [false, true]) {
       // While empty the send slot is the voice note mic (2026-11-26).
       const mas = (await pill.getByRole('button', { name: 'Más opciones' }).boundingBox())!;
       const textarea = (await caja(page).boundingBox())!;
-      const enviar = pill.getByRole('button', { name: 'Enviar mensaje' });
+      const sendButton = pill.getByRole('button', { name: 'Enviar mensaje' });
       const microfono = pill.getByRole('button', { name: 'Grabar una nota de voz' });
       const env = (await microfono.boundingBox())!;
       const cap = (await pill.boundingBox())!;
@@ -66,14 +66,14 @@ for (const oscuro of [false, true]) {
       expect(parseFloat(await pill.evaluate((el) => getComputedStyle(el).borderTopLeftRadius))).toBeGreaterThanOrEqual(24);
       // Mic instead of send while empty.
       await expect(microfono).toBeVisible();
-      await expect(enviar).toHaveCount(0);
+      await expect(sendButton).toHaveCount(0);
 
       // Grows with the text up to 6 lines, then scrolls.
       await caja(page).fill(Array.from({ length: 12 }, (_, i) => `renglón ${i + 1}`).join('\n'));
       const alta = (await caja(page).boundingBox())!.height;
       expect(alta).toBeGreaterThan(120);
       expect(alta).toBeLessThan(24 * 6 + 30);
-      await expect(enviar).toBeEnabled();
+      await expect(sendButton).toBeEnabled();
       await caja(page).fill('');
 
       // «+» holds attach, emoji/stickers/GIF, format and the old extras.
@@ -101,7 +101,7 @@ for (const oscuro of [false, true]) {
       await capturar(page, `escritorio-${modo}-3-barra-formato`);
 
       // Emoji | Stickers | GIF from the «+» menu, «Mis stickers» first.
-      await abrirExpresiones(page);
+      await openExpressions(page);
       const panel = page.getByTestId('chat-expresiones');
       await expect(panel.getByRole('button', { name: 'Paquete Mis stickers' })).toBeVisible();
       await expect(panel.getByRole('button', { name: 'Agregar un sticker propio' })).toBeVisible();
@@ -123,7 +123,7 @@ test.describe('Chat · Mis stickers · escritorio', () => {
     await page.goto('/process/chat?agent=horus');
     await expect(hilo(page).getByText('quedó en SharePoint')).toBeVisible();
 
-    await abrirExpresiones(page);
+    await openExpressions(page);
     await page.getByTestId('chat-expresiones').getByRole('button', { name: 'Agregar un sticker propio' }).click();
     const ventana = page.getByTestId('chat-mis-stickers');
     await expect(ventana).toBeVisible();
@@ -157,7 +157,7 @@ test.describe('Chat · Mis stickers · escritorio', () => {
     await page.keyboard.press('Escape');
 
     // Enviarlo desde «Mis stickers».
-    await abrirExpresiones(page);
+    await openExpressions(page);
     await page.getByTestId('chat-expresiones').getByRole('button', { name: 'Enviar sticker ¡Bravo, equipo!' }).click();
     expect(estado.mediaEnviada.at(-1)).toEqual({ kind: 'sticker', idSticker: 501 });
     await page.waitForTimeout(800);
@@ -200,14 +200,14 @@ for (const oscuro of [false, true]) {
       await page.waitForTimeout(300);
       const card = (await pill.boundingBox())!;
       expect(Math.round(card.x)).toBe(16);
-      const textoCard = (await caja(page).boundingBox())!;
+      const textCardBox = (await caja(page).boundingBox())!;
       // Card = text row + 40 px buttons row + 15 px padding top and bottom +
       // borders (109 px with one line of text). The text may take two lines
       // with the wider fonts of the CI machine, so it is checked structurally.
-      expect(Math.round(card.height - textoCard.height)).toBe(72);
+      expect(Math.round(card.height - textCardBox.height)).toBe(72);
       const masCard = (await pill.getByRole('button', { name: 'Más opciones' }).boundingBox())!;
-      expect(textoCard.y + textoCard.height).toBeLessThanOrEqual(masCard.y + 1);
-      expect(Math.round(textoCard.x)).toBe(Math.round(card.x + 16));
+      expect(textCardBox.y + textCardBox.height).toBeLessThanOrEqual(masCard.y + 1);
+      expect(Math.round(textCardBox.x)).toBe(Math.round(card.x + 16));
       await capturar(page, `celular-${modo}-1b-tarjeta-expandida`);
       await caja(page).fill('');
       await expect(pill).not.toHaveClass(/chat-composer__pill--expandida/);
@@ -225,7 +225,7 @@ for (const oscuro of [false, true]) {
       await expect(caja(page)).toHaveValue('_hola_');
       await capturar(page, `celular-${modo}-3-formato`);
 
-      await abrirExpresiones(page, { tocar: true });
+      await openExpressions(page, { tap: true });
       await expect(page.locator('.chat-expresiones-hoja')).toBeVisible();
       await expect(page.getByRole('button', { name: 'Paquete Mis stickers' })).toBeVisible();
       // The «+» turns into «Volver al teclado» while the sheet is open.
