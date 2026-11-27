@@ -24,6 +24,43 @@ concurrency:
 
 jobs:
   # ---------------------------------------------------------------------------
+  # English-only code (rule from Nicolás Rivera, 2026-11-27): identifiers,
+  # comments, file names, DB objects, commit messages and the PR title must be
+  # in English. Only user-facing UI text stays in Spanish. Checks only what the
+  # PR adds; legacy names are in scripts/ci/english-identifiers-baseline.txt.
+  # ---------------------------------------------------------------------------
+  english-only:
+    name: English-only code (identifiers, comments, DB names, PR title)
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - name: Checkout (full history for the diff)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: New Spanish names in code, comments, file names and DB objects
+        run: node scripts/ci/check-english-identifiers.mjs --base "origin/${{ github.base_ref }}"
+
+      - name: PR title and commit messages in English
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          node scripts/ci/check-english-identifiers.mjs --text "$PR_TITLE" --label "PR title"
+          status=0
+          while IFS= read -r subject; do
+            [ -z "$subject" ] && continue
+            node scripts/ci/check-english-identifiers.mjs --text "$subject" --label "commit message" || status=1
+          done < <(git log --no-merges --format=%s "origin/${BASE_REF}..HEAD")
+          exit $status
+
+  # ---------------------------------------------------------------------------
   # FRONT (raíz): tsc --noEmit + lint + build + pruebas unitarias (vitest)
   # ---------------------------------------------------------------------------
   front:

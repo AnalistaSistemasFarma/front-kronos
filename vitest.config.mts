@@ -23,6 +23,8 @@ export default defineConfig({
     // `components/sgc/**`: prueba de PARIDAD de las pantallas copiadas de SynerLink (render del marcado).
     include: [
       'lib/**/*.test.ts',
+      // `scripts/ci/**`: English-only guard for code, comments and DB names (2026-11-27).
+      'scripts/ci/**/*.test.ts',
       'app/api/sgc/**/*.test.ts',
       // `app/api/authorization/**`: rutas de Autorizaciones (sesión obligatoria, anti-IDOR).
       'app/api/authorization/**/*.test.ts',
