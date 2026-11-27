@@ -42,6 +42,9 @@
  *                              por agente (p. ej. claude-opus-5-5 en horus-prod). Sin ella, el
  *                              predeterminado de la cuenta. Los subagentes usan el modelo que
  *                              fijó su equipo (null = heredan este).
+ *   HILOS_EFFORT               Optional: reasoning effort of the MAIN thread (`--effort`): low, medium,
+ *                              high, xhigh or max, per agent (e.g. medium for Cosmo, like its chat).
+ *                              Without it, the default of the Claude Code binary.
  *   HILOS_MAX_BUDGET_USD       Opcional: tope de gasto por turno (`--max-budget-usd`). Vacío = sin
  *                              tope general (con equipo manda HILOS_SUBAGENTES_PRESUPUESTO_USD).
  *                              «0» u «off» = SIN NINGÚN TOPE DE GASTO, ni con equipo: el puente no
@@ -120,6 +123,9 @@
  *   HILOS_CONECTORES_AGENTE_PROYECTO    Carpeta de trabajo del bot (su vault): elige los MCP de proyecto.
  *   HILOS_CONECTORES_AGENTE_ENV         .env del bot para resolver ${VAR} (no se imprime).
  *   HILOS_CONECTORES_AGENTE_EXCLUIR     Servidores del agente que no entran (coma).
+ *                                    Its chat `permissions.deny` mcp__<server>__<tool> rules are applied
+ *                                    in the turn (--disallowedTools), so a single denied tool no longer
+ *                                    needs the whole server excluded.
  *   HILOS_CONECTORES_AGENTE_ENGRAM_PROYECTO  Proyecto de engram de su chat (por defecto: el repo git de
  *                                    HILOS_CONECTORES_AGENTE_PROYECTO). Así el hilo lee y guarda en su misma memoria.
  *
@@ -385,6 +391,9 @@ export function sellarEntorno(cfg, ahora = new Date()) {
   return true;
 }
 
+/** Reasoning effort levels accepted by `claude --effort` (2.1.299). */
+export const NIVELES_ESFUERZO = ['low', 'medium', 'high', 'xhigh', 'max'];
+
 /** Runners del turno: `claude -p` (por defecto) u openclaw (2026-10-27). */
 export const RUNNERS = ['claude', 'openclaw'];
 
@@ -404,6 +413,7 @@ export const VARIABLES_NO_OPENCLAW = [
   'HILOS_REPOS_POR_PROYECTO',
   'HILOS_GITHUB_TOKEN_ARCHIVO',
   'HILOS_MODELO',
+  'HILOS_EFFORT',
   'HILOS_MAX_BUDGET_USD',
 ];
 
@@ -765,6 +775,10 @@ export function cargarConfig(env = process.env) {
     throw new ErrorConfig('HILOS_MODELO inválido: use un id o alias de modelo (p. ej. claude-opus-5-5).');
   }
 
+  // Reasoning effort of the main thread (per agent, in its .env): `--effort <level>`.
+  const esfuerzo = (env.HILOS_EFFORT ?? '').trim().toLowerCase() || null;
+  if (esfuerzo && !NIVELES_ESFUERZO.includes(esfuerzo)) throw new ErrorConfig(`HILOS_EFFORT inválido: use ${NIVELES_ESFUERZO.join(', ')}.`);
+
   let claudeBin = (env.HILOS_CLAUDE_BIN ?? '').trim() || 'claude';
   if (claudeBin.includes(path.sep)) {
     try {
@@ -796,6 +810,7 @@ export function cargarConfig(env = process.env) {
     avisoProgresoMs,
     continuarAlAgotar: continuar === 'si',
     modelo,
+    esfuerzo,
     presupuestoUsd: presupuesto && !sinTopeGasto ? Number(presupuesto) : null,
     sinTopeGasto,
     subagentes: subagentes === 'si' && runner === 'claude',

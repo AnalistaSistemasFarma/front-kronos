@@ -31,6 +31,7 @@ import { spawn } from 'node:child_process';
 import { HERRAMIENTAS_PROHIBIDAS } from './config.mjs';
 import { entornoTopes, HERRAMIENTAS_SUBAGENTE, revisarAgentesInit } from './equipo.mjs';
 import { NEGADAS_COMPLETO, revisarInitCompleto } from './orus-completo.mjs';
+import { coincideNegada } from './conectores-agente.mjs';
 import { etiquetaHerramienta as etiquetaDetallada } from './openclaw/actividad.mjs';
 
 /** Herramientas de archivos: lectura libre dentro del hilo, escritura solo en ./trabajo. */
@@ -54,7 +55,7 @@ export const SETTINGS_HIJO = {
  * fija el id con --session-id (así el puente lo conoce de antemano); después,
  * --resume con ese mismo id.
  */
-export function armarArgumentos({ perfil, sesion, rutaMcp, rutaSistema, dirArchivos, modelo, presupuestoUsd, equipo = null, codigo = null, plugins = null, objetivo = false, lectura = null, scripts = null }) {
+export function armarArgumentos({ perfil, sesion, rutaMcp, rutaSistema, dirArchivos, modelo, esfuerzo = null, presupuestoUsd, equipo = null, codigo = null, plugins = null, objetivo = false, lectura = null, scripts = null }) {
   if (!perfil) throw new Error('Falta el perfil.');
   if (!sesion?.id || !/^[0-9a-f-]{36}$/i.test(sesion.id)) throw new Error('session id inválido.');
 
@@ -79,6 +80,8 @@ export function armarArgumentos({ perfil, sesion, rutaMcp, rutaSistema, dirArchi
     ...(codigo ? codigo.prohibidas : []),
     // Permisos del proyecto, nivel LECTURA (politica.mjs): sin secretos de los clones.
     ...(lectura ? lectura.prohibidas : []),
+    // Agent connectors (conectores-agente.mjs): the tools its chat denies.
+    ...(perfil.prohibidas ?? []),
   ];
   // Sin sandbox SOLO con terminal completa (turno de operador en un proyecto con la bandera).
   if (codigo && !codigo.sandbox?.enabled && codigo.terminalCompleta !== true) throw new Error('Turno con código sin sandbox: no se arma.');
@@ -130,6 +133,7 @@ export function armarArgumentos({ perfil, sesion, rutaMcp, rutaSistema, dirArchi
   if (sesion.nueva) args.push('--session-id', sesion.id);
   else args.push('--resume', sesion.id);
   if (modelo) args.push('--model', modelo);
+  if (esfuerzo) args.push('--effort', esfuerzo);
   if (presupuestoUsd) args.push('--max-budget-usd', String(presupuestoUsd));
   if (equipo) args.push(...equipo.extra);
 
@@ -157,7 +161,7 @@ export const SETTINGS_COMPLETO = {
  * settings de proyecto/local plantado en la carpeta del hilo), sin hooks y las negaciones de
  * protección de ramas cuando hay repos montados.
  */
-export function armarArgumentosCompleto({ completo, sesion, rutaSistema, dirArchivos, modelo, presupuestoUsd, codigo = null, plugins = null, objetivo = false, rutaAgentes = null }) {
+export function armarArgumentosCompleto({ completo, sesion, rutaSistema, dirArchivos, modelo, esfuerzo = null, presupuestoUsd, codigo = null, plugins = null, objetivo = false, rutaAgentes = null }) {
   if (completo?.activo !== true || !completo.rutaMcp) throw new Error('Modo completo sin activar: no se arma.');
   if (!sesion?.id || !/^[0-9a-f-]{36}$/i.test(sesion.id)) throw new Error('session id inválido.');
   const prohibidas = [...NEGADAS_COMPLETO, ...(codigo?.prohibidas ?? [])];
@@ -188,6 +192,7 @@ export function armarArgumentosCompleto({ completo, sesion, rutaSistema, dirArch
   if (sesion.nueva) args.push('--session-id', sesion.id);
   else args.push('--resume', sesion.id);
   if (modelo) args.push('--model', modelo);
+  if (esfuerzo) args.push('--effort', esfuerzo);
   if (presupuestoUsd) args.push('--max-budget-usd', String(presupuestoUsd));
   // Equipo aprobado del proyecto: sus definiciones quedan disponibles (sin restringir Agent).
   if (rutaAgentes) args.push('--agents', rutaAgentes, '--forward-subagent-text');
@@ -292,6 +297,7 @@ export function revisarInit(evento, perfil, equipo = null, codigo = null, script
     // Con código vinculado, Bash (con sus reglas y el sandbox).
     if ((codigo || scripts) && HERRAMIENTAS_CODIGO.includes(h)) continue;
     if (HERRAMIENTAS_PROHIBIDAS.includes(h)) problemas.push(`herramienta prohibida: ${h}`);
+    else if ((perfil.prohibidas ?? []).some((r) => coincideNegada(h, r))) problemas.push(`herramienta negada en el chat del agente: ${h}`);
   }
   if (equipo) problemas.push(...revisarAgentesInit(evento, equipo));
   const modo = evento?.permissionMode;
