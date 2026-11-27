@@ -24,7 +24,7 @@ const DUO = {
   companies: [{ idCompany: 3, companyName: 'ONE LATAM PHARMA', isPrimary: true }],
   busy: false,
 };
-const CONVERSACION = {
+const CONVERSATION = {
   id: 101,
   kind: 'direct',
   title: null,
@@ -66,16 +66,16 @@ async function webrtcSimulado(page: Page) {
   });
 }
 
-async function simularVoz(page: Page) {
-  const acciones: string[] = [];
+async function simulateVoice(page: Page) {
+  const actions: string[] = [];
   await page.route(/\/api\/chat\/conversations\/\d+\/voice$/, (r) => {
     const body = r.request().postDataJSON() as { action: string };
-    acciones.push(body.action);
+    actions.push(body.action);
     if (body.action === 'offer') return r.fulfill({ json: { callId: 'llamada-e2e' } });
     if (body.action === 'close') return r.fulfill({ json: { ok: true } });
     return r.fulfill({ json: { sdp: 'v=0 fake-answer', error: null } });
   });
-  return acciones;
+  return actions;
 }
 
 test.describe('Chat · llamada de voz en segundo plano', () => {
@@ -93,11 +93,11 @@ test.describe('Chat · llamada de voz en segundo plano', () => {
       r.fulfill({ json: { canUseChat: true, canBroadcast: false, canCreateGroups: false, canMessagePeople: false, companies: DUO.companies, agents: [DUO] } })
     );
     await page.route('**/api/chat/conversations', (r) =>
-      r.fulfill({ json: r.request().method() === 'GET' ? { conversations: [CONVERSACION] } : { conversation: CONVERSACION } })
+      r.fulfill({ json: r.request().method() === 'GET' ? { conversations: [CONVERSATION] } : { conversation: CONVERSATION } })
     );
-    await page.route(/\/api\/chat\/conversations\/\d+$/, (r) => r.fulfill({ json: { conversation: CONVERSACION } }));
+    await page.route(/\/api\/chat\/conversations\/\d+$/, (r) => r.fulfill({ json: { conversation: CONVERSATION } }));
     await webrtcSimulado(page);
-    const acciones = await simularVoz(page);
+    const actions = await simulateVoice(page);
 
     await page.goto('/process/chat?agent=duo');
     await expect(hilo(page).getByText('quedó en SharePoint')).toBeVisible();
@@ -107,7 +107,7 @@ test.describe('Chat · llamada de voz en segundo plano', () => {
     // On the call's own conversation the composer mic holds the controls.
     await expect(page.getByRole('status').getByText('Voz conectada')).toBeVisible();
     await expect(barra).toHaveCount(0);
-    expect(acciones.slice(0, 2)).toEqual(['offer', 'poll']);
+    expect(actions.slice(0, 2)).toEqual(['offer', 'poll']);
     await page.keyboard.press('Escape');
 
     // Another SynerLink section (client navigation): the chat unmounts, the call stays.
@@ -116,11 +116,11 @@ test.describe('Chat · llamada de voz en segundo plano', () => {
     await expect(hilo(page)).toHaveCount(0);
     await expect(barra.getByText('Llamada con Duo')).toBeVisible();
     await expect(barra.getByRole('button', { name: 'Volver al chat' })).toBeVisible();
-    expect(acciones).not.toContain('close');
+    expect(actions).not.toContain('close');
     expect(await page.evaluate(() => (window as unknown as { __pcs: { closed: boolean }[] }).__pcs.every((pc) => !pc.closed))).toBe(true);
 
     // Hidden tab and back: never hangs up; coming back refreshes the call at once.
-    const polls = () => acciones.filter((a) => a === 'poll').length;
+    const polls = () => actions.filter((a) => a === 'poll').length;
     const antes = polls();
     await page.evaluate(() => {
       const fijar = (v: string) => {
@@ -134,7 +134,7 @@ test.describe('Chat · llamada de voz en segundo plano', () => {
     });
     await expect.poll(polls).toBeGreaterThan(antes);
     await expect(barra.getByText('Llamada con Duo')).toBeVisible();
-    expect(acciones).not.toContain('close');
+    expect(actions).not.toContain('close');
 
     // Mute from the bar.
     await barra.getByRole('button', { name: 'Silenciar' }).click();
@@ -146,7 +146,7 @@ test.describe('Chat · llamada de voz en segundo plano', () => {
     await expect(barra).toHaveCount(0);
     const mic = page.getByRole('button', { name: 'Controles de llamada' });
     await expect(mic).toBeVisible();
-    expect(acciones).not.toContain('close');
+    expect(actions).not.toContain('close');
 
     // Closing the page asks first while in a call.
     const dialogo = page.waitForEvent('dialog');
@@ -160,6 +160,6 @@ test.describe('Chat · llamada de voz en segundo plano', () => {
     await mic.click();
     await page.getByRole('button', { name: 'Colgar' }).click();
     await expect(page.getByRole('button', { name: 'Hablar en tiempo real' })).toBeVisible();
-    expect(acciones).toContain('close');
+    expect(actions).toContain('close');
   });
 });

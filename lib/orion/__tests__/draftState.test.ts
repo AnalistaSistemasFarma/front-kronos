@@ -481,12 +481,12 @@ describe('preparación Word: revisión del cliente', () => {
       ['beto@x.com', 'APROBADO', 'v0.2'],
     ]);
     // Un validador nuevo sí revisa; los anteriores conservan su validación.
-    const conNuevo = applyDraftSubmitInternal(corregido, {
+    const withNew = applyDraftSubmitInternal(corregido, {
       actor: elaborador,
       validators: [...validators, { userId: 'u-caro', email: 'caro@x.com', name: 'Caro', order: 3 }],
     });
-    expect(conNuevo.status).toBe('EN_VALIDACION_INTERNA');
-    expect(pendingDraftValidators(conNuevo).map((a) => a.email)).toEqual(['caro@x.com']);
+    expect(withNew.status).toBe('EN_VALIDACION_INTERNA');
+    expect(pendingDraftValidators(withNew).map((a) => a.email)).toEqual(['caro@x.com']);
     const ronda2 = applyDraftSendClient(s, {
       actor: elaborador,
       reviewers: clientes,

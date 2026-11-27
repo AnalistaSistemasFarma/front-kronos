@@ -20,21 +20,21 @@ import {
  * sin firma registrada no se pueden guardar los datos del sello.
  */
 
-export const DATOS_SELLO_AUDIT_ACTION = 'GSS_FIRMA_DATOS_SELLO';
+export const SEAL_DATA_AUDIT_ACTION = 'GSS_FIRMA_DATOS_SELLO';
 
-export interface DatosSello {
+export interface SealData {
   fullName: string;
   idDocumentType: SignerIdDocumentType;
   idNumber: string;
   jobTitle: string;
 }
 
-export interface DatosSelloInput extends DatosSello {
+export interface SealDataInput extends SealData {
   /** Acepta las condiciones de firma electrónica a nivel persona (solo si aún no las tenía). */
   acceptedTerms: boolean;
 }
 
-export class DatosSelloError extends Error {
+export class SealDataError extends Error {
   status: number;
   constructor(message: string, status = 400) {
     super(message);
@@ -42,11 +42,11 @@ export class DatosSelloError extends Error {
   }
 }
 
-const TIPOS = new Set<string>(SIGNER_ID_DOCUMENT_OPTIONS.map((o) => o.value));
+const DOCUMENT_TYPES = new Set<string>(SIGNER_ID_DOCUMENT_OPTIONS.map((o) => o.value));
 
-/** Lee y valida los datos del sello de un cuerpo JSON. Lanza DatosSelloError (400). */
-export function parseDatosSello(raw: unknown): DatosSelloInput {
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new DatosSelloError('Petición inválida.');
+/** Reads and validates the seal data of a JSON body. Throws SealDataError (400). */
+export function parseSealData(raw: unknown): SealDataInput {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new SealDataError('Petición inválida.');
   const r = raw as Record<string, unknown>;
   const text = (v: unknown, max: number) => (typeof v === 'string' ? v.trim().replace(/\s+/g, ' ').slice(0, max) : '');
   const fullName = text(r.fullName, 80);
@@ -56,14 +56,14 @@ export function parseDatosSello(raw: unknown): DatosSelloInput {
 
   // Documento y cargo son OPCIONALES, igual que en el modal de firma (Juan, 2026-11-20):
   // solo se estampan si la persona los registra. El nombre sí es obligatorio.
-  if (!TIPOS.has(idDocumentType)) throw new DatosSelloError('Elija el tipo de documento.');
+  if (!DOCUMENT_TYPES.has(idDocumentType)) throw new SealDataError('Elija el tipo de documento.');
   const error = validateSignerIdentity({
     fullName,
     idDocumentType: idDocumentType as SignerIdDocumentType,
     idNumber,
     jobTitle,
   });
-  if (error) throw new DatosSelloError(error);
+  if (error) throw new SealDataError(error);
 
   return {
     fullName,
@@ -74,67 +74,67 @@ export function parseDatosSello(raw: unknown): DatosSelloInput {
   };
 }
 
-export interface DatosSelloActuales extends Partial<Record<keyof DatosSello, string | null>> {
+export interface CurrentSealData extends Partial<Record<keyof SealData, string | null>> {
   hasSigningLegalConsent: boolean;
 }
 
-export interface DatosSelloDeps {
+export interface SealDataDeps {
   /** Rúbrica registrada en GSS Firma (Orión exige reenviarla). */
-  leerFirma: (email: string) => Promise<{ dataUrl: string | null; method: string | null }>;
+  readSignature: (email: string) => Promise<{ dataUrl: string | null; method: string | null }>;
   /** Datos actuales del sello y consentimiento (para auditar qué cambió). */
-  leerActuales: (email: string) => Promise<DatosSelloActuales>;
-  guardar: (
+  readCurrent: (email: string) => Promise<CurrentSealData>;
+  save: (
     email: string,
     dataUrl: string,
     method: 'drawn' | 'uploaded',
-    datos: DatosSello
+    datos: SealData
   ) => Promise<{ ok: boolean; error?: string }>;
-  guardarConsentimiento: (email: string) => Promise<{ ok: boolean; error?: string }>;
+  saveConsent: (email: string) => Promise<{ ok: boolean; error?: string }>;
   auditar: (row: { user_id: string; action: string; performed_by: string; details: string }) => Promise<unknown>;
 }
 
-export interface GuardarDatosSelloInput {
+export interface SaveSealDataInput {
   idUser: string;
   email: string;
-  datos: DatosSelloInput;
+  data: SealDataInput;
   ip: string | null;
   userAgent?: string | null;
 }
 
-export async function guardarDatosSello(
-  deps: DatosSelloDeps,
-  input: GuardarDatosSelloInput
-): Promise<{ consentimientoGuardado: boolean }> {
-  const firma = await deps.leerFirma(input.email);
-  if (!firma.dataUrl) {
-    throw new DatosSelloError('Registre primero su firma: los datos del sello se guardan junto a ella.', 409);
+export async function saveSealData(
+  deps: SealDataDeps,
+  input: SaveSealDataInput
+): Promise<{ consentSaved: boolean }> {
+  const signature = await deps.readSignature(input.email);
+  if (!signature.dataUrl) {
+    throw new SealDataError('Registre primero su firma: los datos del sello se guardan junto a ella.', 409);
   }
-  const antes = await deps.leerActuales(input.email).catch(() => null);
-  const { acceptedTerms, ...datos } = input.datos;
+  const previous = await deps.readCurrent(input.email).catch(() => null);
+  const { acceptedTerms, ...data } = input.data;
 
-  const r = await deps.guardar(input.email, firma.dataUrl, firma.method === 'uploaded' ? 'uploaded' : 'drawn', datos);
-  if (!r.ok) throw new DatosSelloError(`No se pudieron guardar en GSS Firma: ${r.error ?? 'sin respuesta'}`, 502);
+  const r = await deps.save(input.email, signature.dataUrl, signature.method === 'uploaded' ? 'uploaded' : 'drawn', data);
+  if (!r.ok) throw new SealDataError(`No se pudieron guardar en GSS Firma: ${r.error ?? 'sin respuesta'}`, 502);
 
-  let consentimientoGuardado = false;
-  if (acceptedTerms && !antes?.hasSigningLegalConsent) {
-    const c = await deps.guardarConsentimiento(input.email).catch(() => ({ ok: false }));
-    consentimientoGuardado = c.ok;
+  let consentSaved = false;
+  if (acceptedTerms && !previous?.hasSigningLegalConsent) {
+    const c = await deps.saveConsent(input.email).catch(() => ({ ok: false }));
+    consentSaved = c.ok;
   }
 
-  const campos = (Object.keys(datos) as Array<keyof DatosSello>).filter(
-    (k) => !antes || String(antes[k] ?? '') !== String(datos[k] ?? '')
+  const fields = (Object.keys(data) as Array<keyof SealData>).filter(
+    (k) => !previous || String(previous[k] ?? '') !== String(data[k] ?? '')
   );
   await deps.auditar({
     user_id: input.idUser,
-    action: DATOS_SELLO_AUDIT_ACTION,
+    action: SEAL_DATA_AUDIT_ACTION,
     performed_by: input.email,
     details: JSON.stringify({
-      camposCambiados: campos,
-      consentimientoAceptado: consentimientoGuardado,
+      camposCambiados: fields,
+      consentimientoAceptado: consentSaved,
       origen: 'perfil',
       ip: input.ip,
       userAgent: input.userAgent ? input.userAgent.slice(0, 200) : null,
     }),
   });
-  return { consentimientoGuardado };
+  return { consentSaved };
 }

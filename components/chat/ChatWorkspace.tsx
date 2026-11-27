@@ -82,10 +82,10 @@ import {
   CHAT_RAIL_OPEN_EVENT,
   agentKey,
   chatCreateOptions,
-  consumirRutaAntesDeChat,
+  consumeRouteBeforeChat,
   conversationKey,
-  guardarRutaAntesDeChat,
-  mirarRutaAntesDeChat,
+  saveRouteBeforeChat,
+  peekRouteBeforeChat,
   isChatCreateKind,
   sortConversationsByActivity,
   type ChatCreateDetail,
@@ -412,7 +412,7 @@ export default function ChatWorkspace({
   useEffect(() => {
     const from = searchParams.get('from');
     if (!from) return;
-    guardarRutaAntesDeChat(from);
+    saveRouteBeforeChat(from);
     if (typeof window === 'undefined') return;
     const u = new URL(window.location.href);
     if (!u.searchParams.has('from')) return;
@@ -534,7 +534,7 @@ export default function ChatWorkspace({
 
   const [expandido, setExpandido] = useState(false);
   // La animación de cerrar la conversación está en curso (evita dos cierres con doble clic).
-  const cerrandoConversacion = useRef(false);
+  const closingConversationRef = useRef(false);
   useEffect(() => {
     try {
       setExpandido(localStorage.getItem(CHAT_EXPANDIDO_KEY) === '1');
@@ -544,7 +544,7 @@ export default function ChatWorkspace({
     }
   }, []);
   const alternarExpandido = () => {
-    const cambiar = () =>
+    const switchView = () =>
       setExpandido((previo) => {
         const siguiente = !previo;
         try {
@@ -555,12 +555,12 @@ export default function ChatWorkspace({
     // Zoom tipo macOS: la ventana del chat crece hasta la pantalla completa (o vuelve a su
     // tamaño) con una transición de vista. Sin soporte o con menos movimiento, cambia de una.
     if (typeof document.startViewTransition !== 'function' || prefersReducedMotion()) {
-      cambiar();
+      switchView();
       return;
     }
     const html = document.documentElement;
     html.classList.add('chat-ventana-animando');
-    const transicion = document.startViewTransition(() => flushSync(cambiar));
+    const transicion = document.startViewTransition(() => flushSync(switchView));
     void transicion.finished.finally(() => html.classList.remove('chat-ventana-animando'));
   };
 
@@ -1243,12 +1243,12 @@ export default function ChatWorkspace({
   const cerrarConversacion = () => {
     // Si amplió el chat desde Solicitudes (u otra pantalla), vuelve YA —sin pasar
     // por la lista de carpetas (si no, se veía un instante /process/chat).
-    const volver = consumirRutaAntesDeChat();
-    if (volver) {
-      router.push(volver);
+    const backTo = consumeRouteBeforeChat();
+    if (backTo) {
+      router.push(backTo);
       return;
     }
-    const cambiar = () => {
+    const switchView = () => {
       setSeleccion(null);
       setSoloConversacion(false);
       verEnLaUrl('/process/chat');
@@ -1260,15 +1260,15 @@ export default function ChatWorkspace({
       ? document.querySelector<HTMLElement>('.chat-escritorio__principal')
       : null;
     if (!panel || typeof panel.animate !== 'function' || prefersReducedMotion()) {
-      cambiar();
+      switchView();
       return;
     }
-    if (cerrandoConversacion.current) return;
-    cerrandoConversacion.current = true;
-    const filaDeLista = document
+    if (closingConversationRef.current) return;
+    closingConversationRef.current = true;
+    const listRow = document
       .querySelector<HTMLElement>('.chat-escritorio__lateral .chat-agent-card--selected')
       ?.getBoundingClientRect();
-    const claveAbierta = selectedAgent
+    const openKey = selectedAgent
       ? agentKey(selectedAgent.idAgent)
       : selectedGroup
         ? conversationKey(selectedGroup.id)
@@ -1276,25 +1276,25 @@ export default function ChatWorkspace({
           ? conversationKey(selectedPersona.id)
           : null;
     // Si la fila de la lista no se ve (mide 0), se usa el ícono de la barra de chats.
-    const fila =
-      filaDeLista && filaDeLista.width > 0
-        ? filaDeLista
-        : (findChatLauncher(claveAbierta)?.getBoundingClientRect() ?? null);
-    const animacion = panel.animate(genieCloseFrames(panel.getBoundingClientRect(), fila), {
+    const row =
+      listRow && listRow.width > 0
+        ? listRow
+        : (findChatLauncher(openKey)?.getBoundingClientRect() ?? null);
+    const animacion = panel.animate(genieCloseFrames(panel.getBoundingClientRect(), row), {
       duration: GENIE_CLOSE_MS,
       easing: GENIE_CLOSE_EASING,
       fill: 'forwards',
     });
     const terminar = () => {
-      cerrandoConversacion.current = false;
+      closingConversationRef.current = false;
       // Primero se cierra (sincrónico) y luego se suelta la animación: así no se alcanza a
       // ver un cuadro de la conversación de vuelta en su lugar.
-      flushSync(cambiar);
+      flushSync(switchView);
       animacion.cancel();
     };
     animacion.onfinish = terminar;
     animacion.oncancel = () => {
-      cerrandoConversacion.current = false;
+      closingConversationRef.current = false;
     };
   };
 
@@ -1481,14 +1481,14 @@ export default function ChatWorkspace({
   );
   // Si amplió el chat desde Solicitudes (u otra pantalla), este botón vuelve ahí;
   // si entró por el menú de chats, vuelve a la lista de carpetas.
-  const etiquetaVolver = mirarRutaAntesDeChat() ? 'Volver a donde estaba' : 'Volver a las carpetas';
+  const backLabel = peekRouteBeforeChat() ? 'Volver a donde estaba' : 'Volver a las carpetas';
   const botonVolver = (
-    <Tooltip label={etiquetaVolver} withArrow>
+    <Tooltip label={backLabel} withArrow>
       <ActionIcon
         variant='subtle'
         color='gray'
         onClick={cerrarConversacion}
-        aria-label={etiquetaVolver}
+        aria-label={backLabel}
       >
         <IconArrowLeft size={18} />
       </ActionIcon>

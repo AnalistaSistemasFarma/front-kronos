@@ -59,7 +59,7 @@ export interface PdfOffer {
   lines: Line[];
   numeroOrdenCompra: string;
   fechaEntrega: string;
-  avisos: string[];
+  warnings: string[];
   /** Líneas que la IA leyó del PDF (para comparar con las que quedaron en la oferta). */
   leidas?: number;
 }
@@ -152,8 +152,8 @@ export default function SalesPdfImport({ companyId, companyName, cardCode, onLoa
   /** Rows of the simulation table, to jump to the next Baja line. */
   const rowRefs = useRef<(HTMLTableRowElement | null)[]>([]);
   const lowCursor = useRef(-1);
-  const jumpToLow = (bajas: number[]) => {
-    const next = bajas.find((i) => i > lowCursor.current) ?? bajas[0];
+  const jumpToLow = (lowIndexes: number[]) => {
+    const next = lowIndexes.find((i) => i > lowCursor.current) ?? lowIndexes[0];
     lowCursor.current = next;
     if (next >= simShown) setSimShown(next + 1);
     setTimeout(() => rowRefs.current[next]?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 50);
@@ -219,8 +219,8 @@ export default function SalesPdfImport({ companyId, companyName, cardCode, onLoa
       .then((d) => {
         if (cancelled || !d?.canUseChat) return;
         // Primero los de la empresa de la oferta; después los demás.
-        const delaEmpresa = (a: ChatAgent) => a.companies?.some((c) => String(c.idCompany) === String(companyId));
-        setAgents([...((d.agents ?? []) as ChatAgent[])].sort((x, y) => Number(delaEmpresa(y)) - Number(delaEmpresa(x))));
+        const isFromCompany = (a: ChatAgent) => a.companies?.some((c) => String(c.idCompany) === String(companyId));
+        setAgents([...((d.agents ?? []) as ChatAgent[])].sort((x, y) => Number(isFromCompany(y)) - Number(isFromCompany(x))));
       })
       .catch(() => undefined);
     return () => {
@@ -320,7 +320,7 @@ export default function SalesPdfImport({ companyId, companyName, cardCode, onLoa
   };
 
   /** Con lo leído del PDF (por la IA del navegador o por el agente): cliente y artículos en SAP, y la simulación. */
-  const resolveAndSimulate = async (r: PdfOrderResult, avisosPrevios: string[]) => {
+  const resolveAndSimulate = async (r: PdfOrderResult, previousWarnings: string[]) => {
       if (!r.lineas.length) throw new Error('No se encontraron líneas de productos en el PDF. Revise el archivo o use el cargue desde Excel.');
       setPhase('montando');
       const res = await fetch('/api/sales/pdf-resolve', {
@@ -330,12 +330,12 @@ export default function SalesPdfImport({ companyId, companyName, cardCode, onLoa
       });
       const d = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(d.error || 'No se pudo montar la oferta con los datos del PDF');
-      if (!d.customer) throw new Error((d.avisos ?? []).join(' ') || 'No se identificó el cliente del PDF.');
-      if (!(d.lines ?? []).length) throw new Error(`Se identificó el cliente ${d.customer.CardName}, pero ninguna línea del PDF se encontró en SAP. ${(d.avisos ?? []).join(' ')}`);
+      if (!d.customer) throw new Error((d.warnings ?? []).join(' ') || 'No se identificó el cliente del PDF.');
+      if (!(d.lines ?? []).length) throw new Error(`Se identificó el cliente ${d.customer.CardName}, pero ninguna línea del PDF se encontró en SAP. ${(d.warnings ?? []).join(' ')}`);
       setSimShown(100);
       setSim({
         customer: d.customer, lines: (d.lines as Line[]).map((l) => ({ ...l, include: Boolean(l.ItemCode) })), numeroOrdenCompra: r.numeroOrdenCompra,
-        fechaEntrega: r.fechaEntrega, avisos: [...avisosPrevios, ...(d.avisos ?? [])], leidas: r.lineas.length,
+        fechaEntrega: r.fechaEntrega, warnings: [...previousWarnings, ...(d.warnings ?? [])], leidas: r.lineas.length,
       });
       setPhase('simulacion');
   };
@@ -427,8 +427,8 @@ export default function SalesPdfImport({ companyId, companyName, cardCode, onLoa
       const r = parsePdfOrder(reply);
       const leidas = rawLineCount(reply);
       const descartadas = leidas - r.lineas.length;
-      const avisos = descartadas > 0 ? [`${a.displayName} leyó ${leidas} líneas; ${descartadas} se descartaron por no tener cantidad válida o descripción/código.`] : [];
-      await resolveAndSimulate(r, avisos);
+      const warnings = descartadas > 0 ? [`${a.displayName} leyó ${leidas} líneas; ${descartadas} se descartaron por no tener cantidad válida o descripción/código.`] : [];
+      await resolveAndSimulate(r, warnings);
     } catch (e) {
       setLive(null);
       setError((e as Error).message);
@@ -585,23 +585,23 @@ export default function SalesPdfImport({ companyId, companyName, cardCode, onLoa
     const saved: LearnedEntry[] = [];
     const rowIndex = (n: number) => sim.lines.findIndex((l, i) => Number(l.row ?? i + 1) === n);
     let fails = 0;
-    for (const ch of patch.cambios) {
-      const i = rowIndex(ch.linea);
+    for (const ch of patch.changes) {
+      const i = rowIndex(ch.line);
       if (i < 0) continue;
       const l = sim.lines[i];
       const m = matchOf(l);
       if (ch.itemCode) {
-        const v = await chooseSearched(i, { ItemCode: ch.itemCode }, source === 'agente' ? `Indicado por ${agent?.displayName ?? 'el agente'}` : 'Indicado por el usuario', { factor: ch.factor ?? l.factor ?? 1, remember: ch.recordar !== false, patched: source });
+        const v = await chooseSearched(i, { ItemCode: ch.itemCode }, source === 'agente' ? `Indicado por ${agent?.displayName ?? 'el agente'}` : 'Indicado por el usuario', { factor: ch.factor ?? l.factor ?? 1, remember: ch.remember !== false, patched: source });
         if (!v) { fails++; continue; }
-        if (ch.recordar !== false) { const e = entryOf(l, v, ch.factor ?? l.factor ?? 1); if (e) saved.push(e); }
+        if (ch.remember !== false) { const e = entryOf(l, v, ch.factor ?? l.factor ?? 1); if (e) saved.push(e); }
       } else if (ch.factor && m) {
         const f = ch.factor;
         setLine(i, (x) => ({ ...x, factor: f, Quantity: Number(m.source.quantity) * f, UnitPrice: m.source.price == null ? x.UnitPrice : Math.round((Number(m.source.price) / f) * 10000) / 10000, patched: source }));
-        if (ch.recordar && l.ItemCode) { const e = entryOf(l, undefined, f); if (e) saved.push(e); }
+        if (ch.remember && l.ItemCode) { const e = entryOf(l, undefined, f); if (e) saved.push(e); }
       }
-      if (ch.cantidad != null) setLine(i, (x) => ({ ...x, Quantity: ch.cantidad, patched: source }));
-      if (ch.precio != null) setLine(i, (x) => ({ ...x, UnitPrice: ch.precio, patched: source }));
-      if (ch.incluir !== undefined) setLine(i, (x) => ({ ...x, include: ch.incluir as boolean, patched: source }));
+      if (ch.quantity != null) setLine(i, (x) => ({ ...x, Quantity: ch.quantity, patched: source }));
+      if (ch.price != null) setLine(i, (x) => ({ ...x, UnitPrice: ch.price, patched: source }));
+      if (ch.include !== undefined) setLine(i, (x) => ({ ...x, include: ch.include as boolean, patched: source }));
     }
     setUndoStack((u) => [...u.slice(-9), { lines: before, saved, source }]);
     if (fails) say('sistema', `${fails} cambio(s) no se aplicaron: el artículo no se encontró o no se pudo validar en SAP.`);
@@ -632,7 +632,7 @@ export default function SalesPdfImport({ companyId, companyName, cardCode, onLoa
       setChatBusy('Aplicando…');
       try {
         await applyPatch(local, 'usuario');
-        say('sistema', local.mensaje);
+        say('sistema', local.message);
       } finally {
         setChatBusy(null);
       }
@@ -656,15 +656,15 @@ export default function SalesPdfImport({ companyId, companyName, cardCode, onLoa
       }
       const form = new FormData();
       form.append('body', agentPatchInstruction(companyName ?? `empresa ${companyId}`, sim.customer, text));
-      form.append('files', new File([JSON.stringify({ cliente: sim.customer, lineas: patchContext(sim.lines) }, null, 1)], 'contexto-oferta.json', { type: 'application/json' }));
+      form.append('files', new File([JSON.stringify({ customer: sim.customer, lines: patchContext(sim.lines) }, null, 1)], 'contexto-oferta.json', { type: 'application/json' }));
       const r = await fetch(`/api/chat/conversations/${convId}/messages`, { method: 'POST', body: form });
       const md = await r.json().catch(() => ({}));
       if (!r.ok || !md.message?.id) throw new Error(md.error || `No se pudo enviar la instrucción a ${a.displayName}.`);
       const json = await pollAgentJson(convId, Number(md.message.id), 10 * 60 * 1000);
       if (!json) throw new Error(`${a.displayName} no respondió en 10 minutos. Revise la conversación en el chat.`);
       const patch = cleanPatch(JSON.parse(json), rows);
-      say('agente', patch.mensaje || (patch.cambios.length ? `${patch.cambios.length} cambio(s).` : 'Sin cambios.'));
-      if (patch.cambios.length) await applyPatch(patch, 'agente');
+      say('agente', patch.message || (patch.changes.length ? `${patch.changes.length} cambio(s).` : 'Sin cambios.'));
+      if (patch.changes.length) await applyPatch(patch, 'agente');
     } catch (e) {
       say('sistema', (e as Error).message);
     } finally {
@@ -681,8 +681,8 @@ export default function SalesPdfImport({ companyId, companyName, cardCode, onLoa
     });
     if (!lines.length) return;
     // The review notices of the simulation no longer apply once the lines go to the offer.
-    const avisos = sim.avisos.filter((a) => !/por confirmar: revise|confianza Baja: rev|sin artículo en SAP: búsquelo/.test(a));
-    onLoaded({ ...sim, avisos, lines });
+    const warnings = sim.warnings.filter((a) => !/por confirmar: revise|confianza Baja: rev|sin artículo en SAP: búsquelo/.test(a));
+    onLoaded({ ...sim, warnings, lines });
     setSim(null);
     setDocFile(null);
     setChatLog([]);
@@ -806,7 +806,7 @@ export default function SalesPdfImport({ companyId, companyName, cardCode, onLoa
                 </Button>
               )}
             </Group>
-            {sim.avisos.length > 0 && <Alert color="orange" variant="light">{sim.avisos.map((a, i) => <Text key={i} size="xs">{a}</Text>)}</Alert>}
+            {sim.warnings.length > 0 && <Alert color="orange" variant="light">{sim.warnings.map((a, i) => <Text key={i} size="xs">{a}</Text>)}</Alert>}
             <style>{'tr:hover > .po-row-num p { font-weight: 700; color: var(--mantine-color-violet-filled); }'}</style>
             {(() => {
               const linesTable = (
@@ -839,10 +839,10 @@ export default function SalesPdfImport({ companyId, companyName, cardCode, onLoa
                                 </>
                               );
                             }
-                            const fuente = [m.source.barcode && `EAN ${m.source.barcode}`, m.source.clientCode && `Ref. cliente ${m.source.clientCode}`, m.source.description, `${Number(m.source.quantity).toLocaleString('es-CO')} a ${money(m.source.price)}`].filter(Boolean).join(' · ');
+                            const sourceText = [m.source.barcode && `EAN ${m.source.barcode}`, m.source.clientCode && `Ref. cliente ${m.source.clientCode}`, m.source.description, `${Number(m.source.quantity).toLocaleString('es-CO')} a ${money(m.source.price)}`].filter(Boolean).join(' · ');
                             return (
                               <Stack gap={2}>
-                                <Text size="xs" c="dimmed">En la OC: {fuente || 'sin datos del artículo'}</Text>
+                                <Text size="xs" c="dimmed">En la OC: {sourceText || 'sin datos del artículo'}</Text>
                                 <Group gap={6} wrap="nowrap" align="center">
                                   <Badge size="sm" color={CONFIDENCE_COLOR[m.confidence]} variant={m.confidence === 'alta' ? 'filled' : 'light'} style={{ flexShrink: 0 }}>
                                     {CONFIDENCE_LABEL[m.confidence]}
@@ -978,19 +978,19 @@ export default function SalesPdfImport({ companyId, companyName, cardCode, onLoa
             </Group>
             <Group justify="space-between">
               {(() => {
-                const sinArticulo = blockingLines(sim.lines);
-                const bajas = lowConfidenceIndexes(sim.lines);
+                const blockingIndexes = blockingLines(sim.lines);
+                const lowIndexes = lowConfidenceIndexes(sim.lines);
                 return (
                   <Stack gap={2}>
-                    {sinArticulo > 0 ? (
-                      <Text size="xs" c="orange" fw={600}>Faltan {sinArticulo} línea(s) sin artículo: elija el artículo o desmárquelas.</Text>
+                    {blockingIndexes > 0 ? (
+                      <Text size="xs" c="orange" fw={600}>Faltan {blockingIndexes} línea(s) sin artículo: elija el artículo o desmárquelas.</Text>
                     ) : (
                       <Text size="xs" c="dimmed">Desmarque las líneas que no correspondan. Confianza Alta: código de barras, código o catálogo del cliente, o historial claro.</Text>
                     )}
-                    {bajas.length > 0 && (
+                    {lowIndexes.length > 0 && (
                       <Group gap={6}>
-                        <Text size="xs" c="red">{bajas.length} {bajas.length === 1 ? 'línea' : 'líneas'} con confianza Baja: revíselas.</Text>
-                        <Button size="compact-xs" variant="subtle" color="red" onClick={() => jumpToLow(bajas)}>Ir a la siguiente</Button>
+                        <Text size="xs" c="red">{lowIndexes.length} {lowIndexes.length === 1 ? 'línea' : 'líneas'} con confianza Baja: revíselas.</Text>
+                        <Button size="compact-xs" variant="subtle" color="red" onClick={() => jumpToLow(lowIndexes)}>Ir a la siguiente</Button>
                       </Group>
                     )}
                   </Stack>

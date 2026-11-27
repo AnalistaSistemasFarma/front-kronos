@@ -53,7 +53,7 @@ Causas encontradas:
    de la página (Chrome llega a uno por minuto). El heartbeat de 15 s se
    atrasaba más que la caducidad de 45 s y el puente cerraba la sesión.
 3. Con una versión nueva desplegada, el siguiente cambio de ruta recargaba la
-   página completa (`RecuperacionActualizacion`) y cortaba la llamada.
+   página completa (`UpdateRecovery`) y cortaba la llamada.
 4. Un solo heartbeat fallido o un estado WebRTC «disconnected» momentáneo
    colgaban de inmediato.
 

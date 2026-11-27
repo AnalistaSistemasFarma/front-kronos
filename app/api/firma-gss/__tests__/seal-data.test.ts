@@ -6,10 +6,10 @@ const m = vi.hoisted(() => ({
   getServerSession: vi.fn(),
   findFirst: vi.fn(),
   verificar: vi.fn(),
-  leerFirma: vi.fn(),
-  leerActuales: vi.fn(),
-  guardar: vi.fn(),
-  guardarConsentimiento: vi.fn(),
+  readSignature: vi.fn(),
+  readCurrent: vi.fn(),
+  save: vi.fn(),
+  saveConsent: vi.fn(),
   auditar: vi.fn(),
   consultar: vi.fn(),
 }));
@@ -19,14 +19,14 @@ vi.mock('../../auth/[...nextauth]/route', () => ({ authOptions: {} }));
 vi.mock('../../../../lib/prisma', () => ({ prisma: { user: { findFirst: m.findFirst } } }));
 vi.mock('../../../../lib/auth/verifyPassword', () => ({ synerlinkPasswordVerifier: () => m.verificar }));
 vi.mock('../../../../lib/firma-gss/server', () => ({
-  datosSelloDeps: () => ({
-    leerFirma: m.leerFirma,
-    leerActuales: m.leerActuales,
-    guardar: m.guardar,
-    guardarConsentimiento: m.guardarConsentimiento,
+  sealDataDeps: () => ({
+    readSignature: m.readSignature,
+    readCurrent: m.readCurrent,
+    save: m.save,
+    saveConsent: m.saveConsent,
     auditar: m.auditar,
   }),
-  consultarDatosSello: m.consultar,
+  getSealData: m.consultar,
 }));
 
 import * as ruta from '../datos-sello/route';
@@ -47,10 +47,10 @@ beforeEach(() => {
   m.getServerSession.mockResolvedValue({ user: { email: EMAIL } });
   m.findFirst.mockResolvedValue({ id: 'u1' });
   m.verificar.mockResolvedValue(true);
-  m.leerFirma.mockResolvedValue({ dataUrl: 'data:image/png;base64,AA==', method: 'uploaded' });
-  m.leerActuales.mockResolvedValue({ fullName: 'Ana María Pérez', idNumber: null, jobTitle: null, idDocumentType: null, hasSigningLegalConsent: false });
-  m.guardar.mockResolvedValue({ ok: true });
-  m.guardarConsentimiento.mockResolvedValue({ ok: true });
+  m.readSignature.mockResolvedValue({ dataUrl: 'data:image/png;base64,AA==', method: 'uploaded' });
+  m.readCurrent.mockResolvedValue({ fullName: 'Ana María Pérez', idNumber: null, jobTitle: null, idDocumentType: null, hasSigningLegalConsent: false });
+  m.save.mockResolvedValue({ ok: true });
+  m.saveConsent.mockResolvedValue({ ok: true });
   m.auditar.mockResolvedValue({});
 });
 
@@ -75,10 +75,10 @@ describe('Datos del sello (GSS Firma) · ruta', () => {
   it('PUT: guarda los PROPIOS tras la contraseña, reenviando la rúbrica registrada, y acepta el consentimiento', async () => {
     const res = await ruta.PUT(put({ ...DATOS, acceptedTerms: true, password: 'secreta' }));
     expect(res.status).toBe(200);
-    expect(await res.json()).toMatchObject({ ok: true, consentimientoGuardado: true });
+    expect(await res.json()).toMatchObject({ ok: true, consentSaved: true });
     expect(m.verificar).toHaveBeenCalledWith(EMAIL, 'secreta');
-    expect(m.guardar).toHaveBeenCalledWith(EMAIL, 'data:image/png;base64,AA==', 'uploaded', DATOS);
-    expect(m.guardarConsentimiento).toHaveBeenCalledWith(EMAIL);
+    expect(m.save).toHaveBeenCalledWith(EMAIL, 'data:image/png;base64,AA==', 'uploaded', DATOS);
+    expect(m.saveConsent).toHaveBeenCalledWith(EMAIL);
   });
 
   it('PUT: la auditoría dice QUÉ campos cambiaron, nunca los valores (Ley 1581)', async () => {
@@ -93,32 +93,32 @@ describe('Datos del sello (GSS Firma) · ruta', () => {
   });
 
   it('PUT: no vuelve a guardar el consentimiento si ya lo tenía', async () => {
-    m.leerActuales.mockResolvedValue({ hasSigningLegalConsent: true });
+    m.readCurrent.mockResolvedValue({ hasSigningLegalConsent: true });
     const res = await ruta.PUT(put({ ...DATOS, acceptedTerms: true, password: 'x' }));
-    expect((await res.json()).consentimientoGuardado).toBe(false);
-    expect(m.guardarConsentimiento).not.toHaveBeenCalled();
+    expect((await res.json()).consentSaved).toBe(false);
+    expect(m.saveConsent).not.toHaveBeenCalled();
   });
 
   it('PUT: datos de OTRA persona es 403 (el correo nunca sale del cuerpo)', async () => {
     expect((await ruta.PUT(put({ ...DATOS, email: 'otro@farmalogica.com', password: 'x' }))).status).toBe(403);
     expect(m.verificar).not.toHaveBeenCalled();
-    expect(m.guardar).not.toHaveBeenCalled();
+    expect(m.save).not.toHaveBeenCalled();
   });
 
   it('PUT: documento y cargo son opcionales; el nombre no', async () => {
     const res = await ruta.PUT(put({ fullName: 'Ana María Pérez', idNumber: '', jobTitle: '', password: 'x' }));
     expect(res.status).toBe(200);
-    expect(m.guardar).toHaveBeenCalledWith(EMAIL, 'data:image/png;base64,AA==', 'uploaded', {
+    expect(m.save).toHaveBeenCalledWith(EMAIL, 'data:image/png;base64,AA==', 'uploaded', {
       fullName: 'Ana María Pérez',
       idDocumentType: 'CC',
       idNumber: '',
       jobTitle: '',
     });
-    m.guardar.mockClear();
+    m.save.mockClear();
     m.verificar.mockClear();
     expect((await ruta.PUT(put({ ...DATOS, fullName: '', password: 'x' }))).status).toBe(400);
     expect(m.verificar).not.toHaveBeenCalled();
-    expect(m.guardar).not.toHaveBeenCalled();
+    expect(m.save).not.toHaveBeenCalled();
   });
 
   it('PUT: datos inválidos es 400 y no pide contraseña', async () => {
@@ -126,24 +126,24 @@ describe('Datos del sello (GSS Firma) · ruta', () => {
     expect((await ruta.PUT(put({ ...DATOS, idDocumentType: 'XX', password: 'x' }))).status).toBe(400);
     expect((await ruta.PUT(put({ ...DATOS, idNumber: '12<script>', password: 'x' }))).status).toBe(400);
     expect(m.verificar).not.toHaveBeenCalled();
-    expect(m.guardar).not.toHaveBeenCalled();
+    expect(m.save).not.toHaveBeenCalled();
   });
 
   it('PUT: sin contraseña 400; incorrecta 403 sin guardar; a los 5 fallos 429', async () => {
     expect((await ruta.PUT(put(DATOS))).status).toBe(400);
     m.verificar.mockResolvedValue(false);
     for (let i = 0; i < 5; i++) expect((await ruta.PUT(put({ ...DATOS, password: 'mala' }))).status).toBe(403);
-    expect(m.guardar).not.toHaveBeenCalled();
+    expect(m.save).not.toHaveBeenCalled();
     m.verificar.mockResolvedValue(true);
     expect((await ruta.PUT(put({ ...DATOS, password: 'buena' }))).status).toBe(429);
   });
 
   it('PUT: sin firma registrada es 409; si GSS Firma falla es 502 sin auditar', async () => {
-    m.leerFirma.mockResolvedValue({ dataUrl: null, method: null });
+    m.readSignature.mockResolvedValue({ dataUrl: null, method: null });
     expect((await ruta.PUT(put({ ...DATOS, password: 'x' }))).status).toBe(409);
-    expect(m.guardar).not.toHaveBeenCalled();
-    m.leerFirma.mockResolvedValue({ dataUrl: 'data:image/png;base64,AA==', method: 'drawn' });
-    m.guardar.mockResolvedValue({ ok: false, error: 'Orión caído' });
+    expect(m.save).not.toHaveBeenCalled();
+    m.readSignature.mockResolvedValue({ dataUrl: 'data:image/png;base64,AA==', method: 'drawn' });
+    m.save.mockResolvedValue({ ok: false, error: 'Orión caído' });
     const res = await ruta.PUT(put({ ...DATOS, password: 'x' }));
     expect(res.status).toBe(502);
     expect((await res.json()).error).toContain('Orión caído');

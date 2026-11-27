@@ -183,7 +183,7 @@ describe('Correo · eliminar (buzón simulado)', () => {
     await expect(eliminarMensajes(sinEliminar, yo, ['mock-msg-0003AAAA'], { confirmarVinculados: false }, null)).rejects.toMatchObject({ status: 403 });
     expect(estadoConexion(sinEliminar, yo).eliminarHabilitado).toBe(false);
     const soloLectura = estadoConexion(deps({ ...tenant, CORREO_GSS_ENVIO: 'false' }), yo);
-    expect(soloLectura).toMatchObject({ envioHabilitado: false, envioRestringidoInquilino: true, etiquetarHabilitado: true, eliminarHabilitado: true });
+    expect(soloLectura).toMatchObject({ envioHabilitado: false, tenantSendRestricted: true, etiquetarHabilitado: true, eliminarHabilitado: true });
   });
 
   it('límites: sin ids, más de 100 o ids inválidos → 400', async () => {

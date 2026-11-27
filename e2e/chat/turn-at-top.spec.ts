@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { REMOTO, SECRET, abrirExpresiones, capturar, hilo, sesion, simularChat } from './chat-simulado';
+import { REMOTO, SECRET, openExpressions, capturar, hilo, sesion, simularChat } from './chat-simulado';
 
 /**
  * Chat · the turn just sent is pinned at the top (Nicolás, msg 39065, like
@@ -21,16 +21,16 @@ test.describe('Chat · turno arriba · celular', () => {
     const espaciador = page.locator('.chat-thread__espaciador-turno');
     await expect(espaciador).toHaveJSProperty('offsetHeight', 0);
 
-    await abrirExpresiones(page, { tocar: true });
+    await openExpressions(page, { tap: true });
     await page.locator('.chat-expresiones-hoja').getByRole('button', { name: /^Enviar sticker/ }).first().tap();
     await page.getByRole('button', { name: 'Volver al teclado' }).tap();
 
     const distancia = async () =>
       page.evaluate(() => {
         const vp = document.querySelector('.chat-thread__scroll .mantine-ScrollArea-viewport') as HTMLElement;
-        const propios = document.querySelectorAll('.chat-bubble--user');
-        const fila = propios[propios.length - 1].closest('.chat-msg') as HTMLElement;
-        return Math.round(fila.getBoundingClientRect().top - vp.getBoundingClientRect().top);
+        const ownBubbles = document.querySelectorAll('.chat-bubble--user');
+        const row = ownBubbles[ownBubbles.length - 1].closest('.chat-msg') as HTMLElement;
+        return Math.round(row.getBoundingClientRect().top - vp.getBoundingClientRect().top);
       });
     await expect.poll(distancia).toBeGreaterThanOrEqual(4);
     await expect.poll(distancia).toBeLessThanOrEqual(12);

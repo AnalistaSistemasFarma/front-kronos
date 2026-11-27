@@ -55,7 +55,7 @@ export function useAltoVisible(alCambiar?: () => void) {
     const raiz = document.documentElement;
     let ultimoAlto = -1;
     let ultimoOffset = -1;
-    const tecladoAbierto = createKeyboardDetector();
+    const keyboardDetector = createKeyboardDetector();
 
     const escribir = () => {
       // `Math.round` a propósito: los decimales del visual viewport hacen
@@ -70,14 +70,14 @@ export function useAltoVisible(alCambiar?: () => void) {
       // Keyboard open (the visual viewport lost more than 150 px against a
       // baseline that iOS does not shrink, see lib/chat/keyboard-open.ts): the
       // composer drops the home-indicator inset (see globals.css).
-      const abierto = tecladoAbierto({
+      const keyboardOpen = keyboardDetector({
         height: alto,
         scale: vv.scale,
         layoutWidth: raiz.clientWidth || window.innerWidth || 0,
         layoutHeight: raiz.clientHeight,
         windowHeight: window.innerHeight,
       });
-      if (abierto !== null) raiz.classList?.toggle('teclado-abierto', abierto);
+      if (keyboardOpen !== null) raiz.classList?.toggle('teclado-abierto', keyboardOpen);
       if (!usuarioInteractuando()) avisar.current?.();
     };
 

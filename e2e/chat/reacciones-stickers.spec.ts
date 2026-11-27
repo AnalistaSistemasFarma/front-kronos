@@ -1,6 +1,6 @@
 import { expect, test, type BrowserContext, type Page } from '@playwright/test';
 import { encode } from 'next-auth/jwt';
-import { abrirExpresiones } from './chat-simulado';
+import { openExpressions } from './chat-simulado';
 
 /**
  * Chat · reacciones, stickers y GIF (2026-10-20).
@@ -298,7 +298,7 @@ test.describe('Chat · reacciones, stickers y GIF · escritorio', () => {
     await page.goto('/process/chat?agent=horus');
     await expect(burbuja(page, 'quedó en SharePoint')).toBeVisible();
 
-    await abrirExpresiones(page);
+    await openExpressions(page);
     const selector = page.getByTestId('chat-expresiones');
     await expect(selector.getByRole('button', { name: 'Enviar sticker gracias' })).toBeVisible();
     await capturar(page, 'escritorio-5-selector-stickers');
@@ -306,7 +306,7 @@ test.describe('Chat · reacciones, stickers y GIF · escritorio', () => {
     await expect(hilo(page).getByRole('img', { name: 'Sticker: ¡Gracias!' })).toBeVisible();
     expect(estado.mediaEnviada.at(-1)).toEqual({ kind: 'sticker', code: 'gracias' });
 
-    await abrirExpresiones(page);
+    await openExpressions(page);
     await page.getByRole('tab', { name: 'GIF' }).click();
     await expect(selector.getByRole('button', { name: 'Enviar GIF GIF 1' })).toBeVisible();
     await expect(selector.getByText(/Con tecnología de GIPHY/)).toBeVisible();
@@ -364,7 +364,7 @@ test.describe('Chat · reacciones, stickers y GIF · celular', () => {
     await capturar(page, 'celular-3-reaccion-puesta');
 
     // Selector de stickers como hoja inferior (en el lugar del teclado).
-    await abrirExpresiones(page);
+    await openExpressions(page);
     const selector = page.getByTestId('chat-expresiones');
     await expect(selector).toBeVisible();
     const cajaSel = (await page.locator('.chat-expresiones-hoja').boundingBox())!;

@@ -64,11 +64,11 @@ function flag(v: string | undefined, def: boolean): boolean {
 }
 
 /**
- * Can mail be sent from SynerLink for this mailbox? Same rule as capacidadesCorreo in the front:
+ * Can mail be sent from SynerLink for this mailbox? same rule as mailCapabilities in the front:
  * global CORREO_ENVIO_HABILITADO AND the tenant's CORREO_<K>_ENVIO. A read-only tenant (e.g. OLP,
  * whose app has no Mail.Send) gets false, so the agent must not propose replies there.
  */
-export function envioPermitido(mailbox: string, cfg: CorreoMcpConfig = readCorreoMcpConfig()): boolean {
+export function sendAllowed(mailbox: string, cfg: CorreoMcpConfig = readCorreoMcpConfig()): boolean {
   if (cfg.envioHabilitado === false) return false;
   if (cfg.modo === 'off') return true;
   return inquilinoDe(cfg, mailbox)?.envio !== false;

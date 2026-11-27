@@ -413,7 +413,7 @@ export function chatCreateHref(tipo: ChatCreateKind): string {
  * Solicitudes u otra pantalla, al cerrar debe volver ahí —no a la lista de
  * chats (pedido de Juan, 2026-11-26).
  */
-const CHAT_RUTA_ANTES_KEY = 'synerlink:chat-ruta-antes';
+const CHAT_ROUTE_BEFORE_KEY = 'synerlink:chat-ruta-antes';
 
 /**
  * ¿Es una ruta interna de SynerLink fuera del módulo de chats?
@@ -421,7 +421,7 @@ const CHAT_RUTA_ANTES_KEY = 'synerlink:chat-ruta-antes';
  * (`//x`, `/\x`, tabuladores o saltos de línea que el parser de URL descarta) para que
  * `router.push` nunca saque al usuario de SynerLink (redirección abierta).
  */
-export function esRutaFueraDeChat(url: string): boolean {
+export function isRouteOutsideChat(url: string): boolean {
   if (!url.startsWith('/') || /[\\\u0000-\u001f\u007f]/.test(url)) return false;
   const path = url.split(/[?#]/)[0] ?? '';
   if (path.startsWith('//') || path.startsWith('/process/chat')) return false;
@@ -434,33 +434,33 @@ export function esRutaFueraDeChat(url: string): boolean {
 }
 
 /** Guarda de dónde vino al abrir/ampliar el chat a página completa. */
-export function guardarRutaAntesDeChat(url: string | null | undefined): void {
-  if (typeof window === 'undefined' || !url || !esRutaFueraDeChat(url)) return;
+export function saveRouteBeforeChat(url: string | null | undefined): void {
+  if (typeof window === 'undefined' || !url || !isRouteOutsideChat(url)) return;
   try {
-    sessionStorage.setItem(CHAT_RUTA_ANTES_KEY, url);
+    sessionStorage.setItem(CHAT_ROUTE_BEFORE_KEY, url);
   } catch {
     /* modo privado / cuota */
   }
 }
 
 /** Mira la ruta guardada sin borrarla (para el texto del botón Volver). */
-export function mirarRutaAntesDeChat(): string | null {
+export function peekRouteBeforeChat(): string | null {
   if (typeof window === 'undefined') return null;
   try {
-    const url = sessionStorage.getItem(CHAT_RUTA_ANTES_KEY);
-    return url && esRutaFueraDeChat(url) ? url : null;
+    const url = sessionStorage.getItem(CHAT_ROUTE_BEFORE_KEY);
+    return url && isRouteOutsideChat(url) ? url : null;
   } catch {
     return null;
   }
 }
 
 /** Lee y borra la ruta guardada (una sola vez al cerrar). */
-export function consumirRutaAntesDeChat(): string | null {
+export function consumeRouteBeforeChat(): string | null {
   if (typeof window === 'undefined') return null;
   try {
-    const url = sessionStorage.getItem(CHAT_RUTA_ANTES_KEY);
-    sessionStorage.removeItem(CHAT_RUTA_ANTES_KEY);
-    return url && esRutaFueraDeChat(url) ? url : null;
+    const url = sessionStorage.getItem(CHAT_ROUTE_BEFORE_KEY);
+    sessionStorage.removeItem(CHAT_ROUTE_BEFORE_KEY);
+    return url && isRouteOutsideChat(url) ? url : null;
   } catch {
     return null;
   }

@@ -2,13 +2,13 @@
 
 import { useEffect, useState } from 'react';
 import PantallaActualizacion from '../components/errors/PantallaActualizacion';
-import { isChunkLoadError, recargarUnaVez, RECUPERACION_ACTIVA } from '../lib/chunk-recovery';
+import { isChunkLoadError, recargarUnaVez, RECOVERY_ENABLED } from '../lib/chunk-recovery';
 
 // Reemplaza el layout raíz cuando falla algo que error.tsx no alcanza a atrapar.
 // Antes mostraba <NextError statusCode={0} /> ("Application error: a client-side
 // exception has occurred"); ahora, la pantalla amable de SynerLink.
 export default function GlobalError({ error }: { error: Error & { digest?: string } }) {
-  const esActualizacion = RECUPERACION_ACTIVA && isChunkLoadError(error);
+  const esActualizacion = RECOVERY_ENABLED && isChunkLoadError(error);
   const [recargando, setRecargando] = useState(false);
 
   useEffect(() => {

@@ -157,7 +157,7 @@ export async function GET(request: NextRequest) {
     if (rcursor === 0) rcursor = await maxReaccion();
 
     // Agent replies in my direct threads and new messages in my groups (in-app notifications).
-    const conAgentes = Boolean(conChat) && request.nextUrl.searchParams.get('ag') === '1';
+    const withAgents = Boolean(conChat) && request.nextUrl.searchParams.get('ag') === '1';
 
     if (since === 0) {
       return jsonNoStore({ cursor: await maxActual(), events: [], ...extra(), ...(rcursor !== null ? { rcursor } : {}) });
@@ -179,7 +179,7 @@ export async function GET(request: NextRequest) {
       ...(empresasProyectos.length > 0
         ? [{ ...whereMensajesQueCuentan(user.id), conversation: whereConversacionesVisibles(user.id, empresasProyectos) }]
         : []),
-      ...(conAgentes
+      ...(withAgents
         ? [
             { role: 'agent', conversation: { kind: 'direct', id_user: user.id, archived: false } },
             {
@@ -283,7 +283,7 @@ export async function GET(request: NextRequest) {
     // Proyecto: la puerta ya va en la consulta (miembro + módulo de hoy).
     const deProyecto = filas.filter((f) => f.conversation.kind === 'project');
     const dePersonas = filas.filter((f) => f.conversation.kind === 'people');
-    const deAgentes = filas.filter((f) => f.conversation.kind === 'direct' || f.conversation.kind === 'group');
+    const agentRows = filas.filter((f) => f.conversation.kind === 'direct' || f.conversation.kind === 'group');
 
     // La regla de acceso de HOY, y la preferencia de silencio de cada hilo.
     const visibles = new Set(dePersonas.length ? await visiblePeopleConversationIds(user.id) : []);
@@ -298,10 +298,10 @@ export async function GET(request: NextRequest) {
 
     // «Silenciar notificaciones» (2026-11-23): the event still arrives (the icon and the open thread
     // refresh) but flagged `muted`, so the browser does not play the sound.
-    const proyectosSilenciados = deProyecto.length > 0 ? await mutedProjectIds(user.id) : new Set<number>();
+    const mutedProjects = deProyecto.length > 0 ? await mutedProjectIds(user.id) : new Set<number>();
     // What the in-app card shows: message text (plain, short) and the project with its company.
     // Read only for rows that already passed the gate.
-    const detalleProyecto = deProyecto.length
+    const projectDetails = deProyecto.length
       ? await prisma.chatMessage.findMany({
           where: { id: { in: deProyecto.map((f) => f.id) } },
           select: {
@@ -313,10 +313,10 @@ export async function GET(request: NextRequest) {
           },
         })
       : [];
-    const detallePorId = new Map(detalleProyecto.map((d) => [d.id, d]));
+    const detailsById = new Map(projectDetails.map((d) => [d.id, d]));
     const eventosProyecto: ChatPulseEvent[] = deProyecto.map((f) => {
-      const detalle = detallePorId.get(f.id);
-      const proyecto = detalle?.conversation.project ?? null;
+      const detail = detailsById.get(f.id);
+      const project = detail?.conversation.project ?? null;
       const agente = f.role === 'agent' ? f.agentAuthor : null;
       return {
         type: 'project' as const,
@@ -327,10 +327,10 @@ export async function GET(request: NextRequest) {
             ? f.agentAuthor?.display_name?.trim() || 'El asistente'
             : f.userAuthor?.name?.trim() || f.userAuthor?.email || 'Alguien',
         createdAt: f.created_at.toISOString(),
-        muted: f.conversation.id_project !== null && proyectosSilenciados.has(f.conversation.id_project),
-        preview: detalle ? fragmentoMensaje(detalle.body) : undefined,
-        projectName: proyecto?.name,
-        companyName: proyecto?.company?.company ?? null,
+        muted: f.conversation.id_project !== null && mutedProjects.has(f.conversation.id_project),
+        preview: detail ? fragmentoMensaje(detail.body) : undefined,
+        projectName: project?.name,
+        companyName: project?.company?.company ?? null,
         authorAvatarUrl: agente
           ? agentAvatarSrc({
               code: agente.code,
@@ -339,12 +339,12 @@ export async function GET(request: NextRequest) {
             })
           : f.userAuthor?.image ?? null,
         authorAgentCode: agente?.code ?? null,
-        url: proyecto ? `/process/proyectos/${proyecto.id_project}?conversacion=${f.id_conversation}` : undefined,
+        url: project ? `/process/proyectos/${project.id_project}?conversacion=${f.id_conversation}` : undefined,
       };
     });
 
     // Agent replies / group messages: only a hint (no text). The inbox refresh re-checks access.
-    const eventosAgente: ChatPulseEvent[] = deAgentes.map((f) => ({
+    const agentEvents: ChatPulseEvent[] = agentRows.map((f) => ({
       type: 'agent' as const,
       idConversation: f.id_conversation,
       idMessage: f.id,
@@ -369,7 +369,7 @@ export async function GET(request: NextRequest) {
           muted: esZumbido && Boolean(silenciado.get(f.id_conversation)),
         };
       });
-    events.push(...eventosProyecto, ...eventosAgente);
+    events.push(...eventosProyecto, ...agentEvents);
     events.sort((a, b) => a.idMessage - b.idMessage);
     // Las reacciones van al final: solo le piden al hilo que pregunte.
     events.push(...eventosReaccion);

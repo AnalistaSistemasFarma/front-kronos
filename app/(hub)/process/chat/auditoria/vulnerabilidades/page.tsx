@@ -68,7 +68,7 @@ export default function VulnerabilidadesPage() {
   useEffect(() => {
     if (new URLSearchParams(window.location.search).get("tab") === "criticas") setTab("criticas");
   }, []);
-  const cambiarTab = (v: string | null) => {
+  const changeTab = (v: string | null) => {
     const t = v ?? "codigo";
     setTab(t);
     const u = new URL(window.location.href);
@@ -279,7 +279,7 @@ export default function VulnerabilidadesPage() {
             Vulnerabilidades
           </Title>
         </Group>
-        <Tabs value={tab} onChange={cambiarTab} mb="md">
+        <Tabs value={tab} onChange={changeTab} mb="md">
           <Tabs.List>
             <Tabs.Tab value="codigo" leftSection={<IconCode size={14} />}>
               Nuestro código

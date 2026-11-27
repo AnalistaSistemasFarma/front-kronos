@@ -411,7 +411,7 @@ describe('Correo · buzón de la sesión con la app de aplicación (modo graph)'
       CORREO_GSS_ENVIO: 'false',
     };
     const d = deps({ cfg: readCorreoConfig(env) });
-    expect(estadoConexion(d, yo)).toMatchObject({ envioHabilitado: false, envioRestringidoInquilino: true, etiquetarHabilitado: true });
+    expect(estadoConexion(d, yo)).toMatchObject({ envioHabilitado: false, tenantSendRestricted: true, etiquetarHabilitado: true });
     await expect(responder(d, yo, { mensajeId: 'mock-msg-0001AAAA', texto: 'x', todos: false, adjuntos: [], ip: null })).rejects.toMatchObject({ status: 403, message: expect.stringMatching(/solo lectura/) });
     expect(enviadosSimulados(yo.email)).toEqual([]);
     const r = await crearDesdeFila(d, yo, filaBase, null);

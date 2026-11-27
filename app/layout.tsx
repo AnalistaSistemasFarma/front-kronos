@@ -8,7 +8,7 @@ import { ThemeInitScript } from '../components/theme/ThemeInitScript';
 import { FONT_FACE_VARIABLES } from '../lib/theme/fontFaces';
 import AppToaster from '../components/ui/AppToaster';
 import ServiceWorkerRegistrar from '../components/ServiceWorkerRegistrar';
-import RecuperacionActualizacion from '../components/errors/RecuperacionActualizacion';
+import UpdateRecovery from '../components/errors/UpdateRecovery';
 import { ICONOS_PRUEBAS, esEntornoPruebas, tituloSegunEntorno } from '../lib/entorno';
 import FranjaEntornoPruebas from '../components/entorno/FranjaEntornoPruebas';
 
@@ -78,7 +78,7 @@ export default async function RootLayout({
         <Providers session={session}>{children}</Providers>
         <AppToaster />
         <ServiceWorkerRegistrar />
-        <RecuperacionActualizacion />
+        <UpdateRecovery />
       </body>
     </html>
   );

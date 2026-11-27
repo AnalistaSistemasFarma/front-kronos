@@ -25,7 +25,7 @@ import {
   type ChatParticipantDto,
   type ChatStatusDto,
 } from '../../lib/chat/client';
-import { agentKey, conversationKey, guardarRutaAntesDeChat } from '../../lib/chat/rail';
+import { agentKey, conversationKey, saveRouteBeforeChat } from '../../lib/chat/rail';
 import { Z_INDEX } from '../../lib/ui/zIndex';
 
 /**
@@ -45,11 +45,11 @@ import { Z_INDEX } from '../../lib/ui/zIndex';
  * Dónde queda la conversación en la página de chats: debajo de la cabecera de SynerLink y a la
  * derecha de la barra de chats. Maximizar crece hasta ahí para que el paso a la página no salte.
  */
-function areaDePaginaDeChats(): { left: number; top: number; width: number; height: number } {
-  const raiz = getComputedStyle(document.documentElement);
-  const valor = raiz.getPropertyValue('--app-header-height').trim();
-  const numero = parseFloat(valor);
-  const top = Number.isFinite(numero) ? (valor.endsWith('rem') ? numero * parseFloat(raiz.fontSize) : numero) : 0;
+function chatsPageArea(): { left: number; top: number; width: number; height: number } {
+  const rootStyle = getComputedStyle(document.documentElement);
+  const rawValue = rootStyle.getPropertyValue('--app-header-height').trim();
+  const parsedValue = parseFloat(rawValue);
+  const top = Number.isFinite(parsedValue) ? (rawValue.endsWith('rem') ? parsedValue * parseFloat(rootStyle.fontSize) : parsedValue) : 0;
   const barra = document.querySelector<HTMLElement>('.chat-rail--fija')?.getBoundingClientRect();
   const left = barra && barra.width > 0 ? barra.right : 0;
   return { left, top, width: window.innerWidth - left, height: window.innerHeight - top };
@@ -85,37 +85,37 @@ export default function AgentChatPanel({
 }) {
   const router = useRouter();
   const pathname = usePathname();
-  const abierto = opened && (agent !== null || conversation !== null);
+  const isOpen = opened && (agent !== null || conversation !== null);
 
   // Durante la animación de cierre el padre ya pasó `agent = null`: se conserva el último
   // chat para seguir pintando la ventana mientras se "absorbe" hacia su ícono.
-  const [agenteVisible, setAgenteVisible] = useState<ChatAgentDto | null>(agent);
-  const [conversacionVisible, setConversacionVisible] = useState<FloatingConversation | null>(conversation);
-  if (abierto && (agent !== agenteVisible || conversation !== conversacionVisible)) {
-    setAgenteVisible(agent);
-    setConversacionVisible(agent ? null : conversation);
+  const [visibleAgent, setVisibleAgent] = useState<ChatAgentDto | null>(agent);
+  const [visibleConversation, setVisibleConversation] = useState<FloatingConversation | null>(conversation);
+  if (isOpen && (agent !== visibleAgent || conversation !== visibleConversation)) {
+    setVisibleAgent(agent);
+    setVisibleConversation(agent ? null : conversation);
   }
-  const [montado, setMontado] = useState(abierto);
-  if (abierto && !montado) setMontado(true);
+  const [montado, setMontado] = useState(isOpen);
+  if (isOpen && !montado) setMontado(true);
 
   const view = describeAgentStatus(status);
   // Lo que pinta la ventana, sea agente, persona o grupo.
-  const ventana = agenteVisible
+  const panelWindow = visibleAgent
     ? {
-        clave: agentKey(agenteVisible.idAgent),
-        nombre: agenteVisible.displayName,
+        clave: agentKey(visibleAgent.idAgent),
+        nombre: visibleAgent.displayName,
         detalle: view.label,
-        destino: `/process/chat?agent=${encodeURIComponent(agenteVisible.code)}`,
+        destino: `/process/chat?agent=${encodeURIComponent(visibleAgent.code)}`,
       }
-    : conversacionVisible
+    : visibleConversation
       ? {
-          clave: conversationKey(conversacionVisible.idConversation),
-          nombre: conversacionVisible.name,
-          detalle: conversacionVisible.kind === 'group' ? 'Grupo' : 'Conversación privada',
+          clave: conversationKey(visibleConversation.idConversation),
+          nombre: visibleConversation.name,
+          detalle: visibleConversation.kind === 'group' ? 'Grupo' : 'Conversación privada',
           destino:
-            conversacionVisible.kind === 'group'
-              ? `/process/chat/grupo/${conversacionVisible.idConversation}`
-              : `/process/chat/persona/${conversacionVisible.idConversation}`,
+            visibleConversation.kind === 'group'
+              ? `/process/chat/grupo/${visibleConversation.idConversation}`
+              : `/process/chat/persona/${visibleConversation.idConversation}`,
         }
       : null;
 
@@ -131,20 +131,20 @@ export default function AgentChatPanel({
   // ── Animaciones (genio al abrir/cerrar, zoom al maximizar) ──
   const paperRef = useRef<HTMLDivElement | null>(null);
   const animacionRef = useRef<Animation | null>(null);
-  const abiertoPrevio = useRef(false);
+  const wasOpenRef = useRef(false);
   // Al maximizar, la ventana ya creció hasta cubrir la pantalla: se cierra sin genio.
   const maximizandoRef = useRef(false);
-  // Apertura pedida cuando la ventana todavía no estaba en el DOM (ver `asignarPaper`).
-  const aperturaPendiente = useRef(false);
+  // Open requested while the window was not in the DOM yet (see `setPaperNode`).
+  const pendingOpenRef = useRef(false);
   // Lo último pintado, para animar desde el ref de la ventana (fuera del efecto).
-  const ultimoRef = useRef({ aPantallaCompleta, clave: ventana?.clave ?? null });
+  const lastRef = useRef({ aPantallaCompleta, clave: panelWindow?.clave ?? null });
   useLayoutEffect(() => {
-    ultimoRef.current = { aPantallaCompleta, clave: ventana?.clave ?? null };
+    lastRef.current = { aPantallaCompleta, clave: panelWindow?.clave ?? null };
   });
 
   /** Genio (o deslizamiento en el celular) al abrir o cerrar la ventana `el`. */
   const animar = (el: HTMLDivElement, abriendo: boolean) => {
-    const { aPantallaCompleta: completa, clave } = ultimoRef.current;
+    const { aPantallaCompleta: completa, clave } = lastRef.current;
     const rect = el.getBoundingClientRect();
     const icono = clave ? findChatLauncher(clave)?.getBoundingClientRect() ?? null : null;
     const cuadros = completa
@@ -188,47 +188,47 @@ export default function AgentChatPanel({
    * Este ref se llama justo cuando la ventana entra al DOM (antes de pintarse): ahí arranca la
    * apertura que quedó pendiente, sin que se alcance a ver la ventana grande un instante.
    */
-  const asignarPaper = (node: HTMLDivElement | null) => {
+  const setPaperNode = (node: HTMLDivElement | null) => {
     paperRef.current = node;
-    if (node && aperturaPendiente.current) {
-      aperturaPendiente.current = false;
+    if (node && pendingOpenRef.current) {
+      pendingOpenRef.current = false;
       if (typeof node.animate === 'function') animar(node, true);
     }
   };
 
   useLayoutEffect(() => {
-    if (abierto === abiertoPrevio.current) return;
-    abiertoPrevio.current = abierto;
+    if (isOpen === wasOpenRef.current) return;
+    wasOpenRef.current = isOpen;
     const el = paperRef.current;
     animacionRef.current?.cancel();
     animacionRef.current = null;
-    aperturaPendiente.current = false;
+    pendingOpenRef.current = false;
 
     const sinAnimacion =
       typeof window === 'undefined' ||
       typeof Element.prototype.animate !== 'function' ||
       prefersReducedMotion() ||
-      (!abierto && maximizandoRef.current);
-    if (sinAnimacion || (!el && !abierto)) {
+      (!isOpen && maximizandoRef.current);
+    if (sinAnimacion || (!el && !isOpen)) {
       maximizandoRef.current = false;
-      if (!abierto) setMontado(false);
+      if (!isOpen) setMontado(false);
       return;
     }
     if (!el) {
-      // Abriendo y la ventana aún no está en el DOM (primera vez): la anima `asignarPaper`.
-      aperturaPendiente.current = true;
+      // Opening and the window is not in the DOM yet (first time): `setPaperNode` animates it.
+      pendingOpenRef.current = true;
       return;
     }
-    animar(el, abierto);
-    // Solo importa el cambio de `abierto`; lo demás se lee de `ultimoRef`.
-  }, [abierto]);
+    animar(el, isOpen);
+    // Only the change of `isOpen` matters; the rest is read from `lastRef`.
+  }, [isOpen]);
 
   useEffect(() => () => animacionRef.current?.cancel(), []);
 
   // Maximizar: la ventana crece hasta ocupar el lugar de la página de chats (debajo de la
   // cabecera y al lado de la barra de chats) y luego se abre esa página. Se cierra solo cuando
   // la página ya pintó su conversación, para no dejar ver un instante la pantalla de atrás.
-  const destinoMaximizar = ventana?.destino ?? '';
+  const destinoMaximizar = panelWindow?.destino ?? '';
   const maximizar = (e: MouseEvent<HTMLAnchorElement>) => {
     // Ctrl/Cmd/Shift o botón del medio: que el enlace haga lo suyo (pestaña nueva, etc.).
     if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
@@ -237,36 +237,36 @@ export default function AgentChatPanel({
     maximizandoRef.current = true;
     if (el && typeof el.animate === 'function' && !prefersReducedMotion()) {
       animacionRef.current?.cancel();
-      const desde = el.getBoundingClientRect();
+      const fromRect = el.getBoundingClientRect();
       // Se suelta del Affix (anclado abajo a la derecha) para poder crecer hasta los cuatro
       // bordes con su tamaño real. React no maneja `position`, así que no lo pisa; la ventana
       // se desmonta al cerrar.
       el.style.position = 'fixed';
-      const animacion = el.animate(zoomFrames(desde, areaDePaginaDeChats()), {
+      const animacion = el.animate(zoomFrames(fromRect, chatsPageArea()), {
         duration: 320,
         easing: 'cubic-bezier(0.2, 0.8, 0.2, 1)',
         fill: 'forwards',
       });
       animacionRef.current = animacion;
-      animacion.onfinish = () => irAPaginaDeChats();
+      animacion.onfinish = () => goToChatsPage();
     } else {
-      irAPaginaDeChats();
+      goToChatsPage();
     }
   };
-  const irAPaginaDeChats = () => {
+  const goToChatsPage = () => {
     // Si venía de Solicitudes (u otra pantalla), al cerrar el chat ampliado vuelve ahí.
     // Se guarda en sessionStorage y también en ?from= por si el almacenamiento falla.
-    const desde = `${window.location.pathname}${window.location.search}`;
+    const fromUrl = `${window.location.pathname}${window.location.search}`;
     let destino = destinoMaximizar;
-    if (!pathname.startsWith('/process/chat') && desde.startsWith('/') && !desde.startsWith('/process/chat')) {
-      guardarRutaAntesDeChat(desde);
+    if (!pathname.startsWith('/process/chat') && fromUrl.startsWith('/') && !fromUrl.startsWith('/process/chat')) {
+      saveRouteBeforeChat(fromUrl);
       const sep = destino.includes('?') ? '&' : '?';
-      destino = `${destino}${sep}from=${encodeURIComponent(desde)}`;
+      destino = `${destino}${sep}from=${encodeURIComponent(fromUrl)}`;
     }
     router.push(destino);
     // Ya en la página de chats solo cambia la consulta (la ruta no): no hay cambio de ruta
     // que esperar.
-    if (pathname.startsWith('/process/chat')) cerrarCuandoPinteLaPagina();
+    if (pathname.startsWith('/process/chat')) closeWhenPagePainted();
     // Respaldo: si la navegación no llega, la ventana no se queda tapando la pantalla.
     window.setTimeout(() => {
       if (maximizandoRef.current) onClose();
@@ -274,7 +274,7 @@ export default function AgentChatPanel({
   };
   useEffect(() => {
     if (!maximizandoRef.current || !pathname.startsWith('/process/chat')) return;
-    cerrarCuandoPinteLaPagina();
+    closeWhenPagePainted();
     // Solo importa la llegada a la página de chats.
   }, [pathname]);
 
@@ -284,17 +284,17 @@ export default function AgentChatPanel({
    * después el chat. Ahora espera a que aparezca el marco de la conversación (`.chat-escritorio`)
    * y se desvanece encima de él. Si no aparece en 5 s, se cierra igual.
    */
-  const cerrarCuandoPinteLaPagina = () => {
+  const closeWhenPagePainted = () => {
     const inicio = performance.now();
-    const revisar = () => {
+    const check = () => {
       if (!maximizandoRef.current) return;
-      const pagina = document.querySelector('.chat-escritorio');
-      if (!pagina && performance.now() - inicio < 5000) {
-        requestAnimationFrame(revisar);
+      const pageEl = document.querySelector('.chat-escritorio');
+      if (!pageEl && performance.now() - inicio < 5000) {
+        requestAnimationFrame(check);
         return;
       }
       const el = paperRef.current;
-      if (!pagina || !el || typeof el.animate !== 'function' || prefersReducedMotion()) {
+      if (!pageEl || !el || typeof el.animate !== 'function' || prefersReducedMotion()) {
         onClose();
         return;
       }
@@ -308,7 +308,7 @@ export default function AgentChatPanel({
         fundido.onfinish = () => onClose();
       });
     };
-    requestAnimationFrame(revisar);
+    requestAnimationFrame(check);
   };
 
   // Con el chat a pantalla completa, el documento de atrás no debe desplazarse:
@@ -331,9 +331,9 @@ export default function AgentChatPanel({
       // Below every modal: previews and dialogs must cover the panel (lib/ui/zIndex.ts).
       zIndex={Z_INDEX.agentChatPanel}
     >
-      {montado && ventana ? (
+      {montado && panelWindow ? (
             <Paper
-              ref={asignarPaper}
+              ref={setPaperNode}
               style={{
                 // dvh y no vh en los dos casos: con el teclado del móvil
                 // abierto, `vh` sigue midiendo la pantalla completa y el
@@ -375,7 +375,7 @@ export default function AgentChatPanel({
               radius={aPantallaCompleta ? 0 : 'lg'}
               withBorder
               role='dialog'
-              aria-label={`Conversación con ${ventana.nombre}`}
+              aria-label={`Conversación con ${panelWindow.nombre}`}
             >
               <Group
                 justify='space-between'
@@ -394,21 +394,21 @@ export default function AgentChatPanel({
                       <IconArrowLeft size={20} />
                     </ActionIcon>
                   )}
-                  {agenteVisible ? (
+                  {visibleAgent ? (
                     <AgentAvatar
-                      code={agenteVisible.code}
-                      working={agenteVisible.busy}
-                      displayName={agenteVisible.displayName}
-                      avatarUrl={agenteVisible.avatarUrl}
+                      code={visibleAgent.code}
+                      working={visibleAgent.busy}
+                      displayName={visibleAgent.displayName}
+                      avatarUrl={visibleAgent.avatarUrl}
                       status={status}
                       size={34}
                       withTooltip={false}
                     />
-                  ) : conversacionVisible ? (
+                  ) : visibleConversation ? (
                     <AgentAvatar
-                      code={conversacionVisible.avatarCode}
-                      displayName={conversacionVisible.name}
-                      avatarUrl={conversacionVisible.avatarUrl}
+                      code={visibleConversation.avatarCode}
+                      displayName={visibleConversation.name}
+                      avatarUrl={visibleConversation.avatarUrl}
                       size={34}
                       showStatus={false}
                       withTooltip={false}
@@ -416,10 +416,10 @@ export default function AgentChatPanel({
                   ) : null}
                   <Box style={{ minWidth: 0 }}>
                     <Text fw={600} size='sm' lineClamp={1}>
-                      {ventana.nombre}
+                      {panelWindow.nombre}
                     </Text>
                     <Text size='xs' lineClamp={1} className='chat-text-muted'>
-                      {ventana.detalle}
+                      {panelWindow.detalle}
                     </Text>
                   </Box>
                 </Group>
@@ -455,28 +455,28 @@ export default function AgentChatPanel({
               </Group>
 
               {/* `key`: al pasar de un chat a otro, el hilo arranca limpio. */}
-              <Box key={ventana.clave} style={{ flex: 1, minHeight: 0, display: 'flex' }}>
-                {agenteVisible ? (
-                  <ChatThread agent={agenteVisible} active={abierto} />
-                ) : conversacionVisible?.kind === 'group' ? (
+              <Box key={panelWindow.clave} style={{ flex: 1, minHeight: 0, display: 'flex' }}>
+                {visibleAgent ? (
+                  <ChatThread agent={visibleAgent} active={isOpen} />
+                ) : visibleConversation?.kind === 'group' ? (
                   <ChatThread
                     group={{
-                      idConversation: conversacionVisible.idConversation,
-                      title: conversacionVisible.name,
-                      participants: conversacionVisible.participants,
+                      idConversation: visibleConversation.idConversation,
+                      title: visibleConversation.name,
+                      participants: visibleConversation.participants,
                     }}
                     currentUserId={currentUserId}
-                    active={abierto}
+                    active={isOpen}
                   />
-                ) : conversacionVisible ? (
+                ) : visibleConversation ? (
                   <ChatThread
                     person={{
-                      idConversation: conversacionVisible.idConversation,
-                      name: conversacionVisible.name,
-                      nudgesMuted: Boolean(conversacionVisible.nudgesMuted),
+                      idConversation: visibleConversation.idConversation,
+                      name: visibleConversation.name,
+                      nudgesMuted: Boolean(visibleConversation.nudgesMuted),
                     }}
                     currentUserId={currentUserId}
-                    active={abierto}
+                    active={isOpen}
                   />
                 ) : null}
               </Box>

@@ -182,7 +182,7 @@ export interface MencionCandidato {
 
 const ChatComposer = forwardRef<ChatComposerHandle, {
   /** Devuelve lo que quiera (p. ej. si el envío tuvo éxito); aquí solo se espera. */
-  onSend: (body: string, files: File[], opciones?: { voiceDurationMs?: number }) => void | Promise<unknown>;
+  onSend: (body: string, files: File[], options?: { voiceDurationMs?: number }) => void | Promise<unknown>;
   disabled?: boolean;
   sending?: boolean;
   placeholder?: string;
@@ -542,17 +542,17 @@ const ChatComposer = forwardRef<ChatComposerHandle, {
   }, [value]);
 
   /* ─────────── Voice notes (2026-11-26, Nicolás, conv 1 msg 41101) ─────────── */
-  const enviarNotaDeVoz = useCallback(
+  const sendVoiceNote = useCallback(
     async (note: RecordedVoiceNote | null) => {
       if (!note) return;
       await onSend('', [note.file], { voiceDurationMs: note.durationMs });
     },
     [onSend]
   );
-  const grabadora = useVoiceRecorder((note) => void enviarNotaDeVoz(note));
+  const grabadora = useVoiceRecorder((note) => void sendVoiceNote(note));
   const grabando = grabadora.state !== 'idle';
   // Like WhatsApp/Teams: with nothing written, the send slot is the mic.
-  const mostrarMicrofono = !disabled && !sending && value.trim().length === 0 && files.length === 0 && !preview;
+  const showMicrophone = !disabled && !sending && value.trim().length === 0 && files.length === 0 && !preview;
 
   const submit = useCallback(async () => {
     if (!canSend) return;
@@ -780,7 +780,7 @@ const ChatComposer = forwardRef<ChatComposerHandle, {
   }, [enCelular]);
 
   // Opened from the «+» menu. On the phone the sheet replaces the keyboard.
-  const abrirExpresiones = useCallback(() => {
+  const openExpressions = useCallback(() => {
     if (!expresiones) alternarExpresiones();
   }, [expresiones, alternarExpresiones]);
 
@@ -819,7 +819,7 @@ const ChatComposer = forwardRef<ChatComposerHandle, {
         {onEnviarMedia && (
           <Menu.Item
             leftSection={<IconMoodSmile size={14} />}
-            onClick={abrirExpresiones}
+            onClick={openExpressions}
             data-testid='chat-boton-expresiones'
           >
             Emojis, stickers y GIF
@@ -849,7 +849,7 @@ const ChatComposer = forwardRef<ChatComposerHandle, {
 
   // Phone only: while the sheet replaces the keyboard, the «+» turns into a
   // keyboard button that brings the keyboard back (WhatsApp/Telegram).
-  const botonTeclado = (
+  const keyboardButton = (
     <ActionIcon
       className='chat-composer__plus'
       variant='light'
@@ -866,7 +866,7 @@ const ChatComposer = forwardRef<ChatComposerHandle, {
 
   /* Send: filled circle in the accent color, greyed out while there is nothing
      to send. The Enter / Shift+Enter hint lives in its tooltip. */
-  const botonMicrofono = (
+  const microphoneButton = (
     <Tooltip label='Grabar una nota de voz' withArrow>
       <ActionIcon
         className='chat-composer__send chat-composer__send--microfono'
@@ -887,7 +887,7 @@ const ChatComposer = forwardRef<ChatComposerHandle, {
     </Tooltip>
   );
 
-  const botonEnviar = mostrarMicrofono ? botonMicrofono : (
+  const botonEnviar = showMicrophone ? microphoneButton : (
     <Tooltip
       label={
         tecladoTactil
@@ -996,7 +996,7 @@ const ChatComposer = forwardRef<ChatComposerHandle, {
         }
       }}
     >
-      {panelAbiertoEnCelular ? botonTeclado : menuMas}
+      {panelAbiertoEnCelular ? keyboardButton : menuMas}
       {preview ? (
         <Box className='chat-composer__preview chat-composer__texto' onDoubleClick={() => setPreview(false)}>
           <ChatMarkdown content={value} />
@@ -1221,7 +1221,7 @@ const ChatComposer = forwardRef<ChatComposerHandle, {
           levels={grabadora.levels}
           starting={grabadora.state === 'starting'}
           onCancel={grabadora.cancel}
-          onSend={() => void grabadora.stop().then(enviarNotaDeVoz)}
+          onSend={() => void grabadora.stop().then(sendVoiceNote)}
         />
       ) : (
         pillConExpresiones

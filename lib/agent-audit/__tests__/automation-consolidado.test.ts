@@ -8,9 +8,9 @@ vi.mock('../inventory', () => ({ ocultarSecretos: (x: unknown) => x }));
 import {
   armarDetalleSemana,
   armarGraficos,
-  armarSemanaRelevante,
+  buildTopWeek,
   consolidarDepartamentos,
-  semanaAnterior,
+  previousWeek,
   type AgenteIndicadorDto,
 } from '../automation-db';
 
@@ -87,18 +87,18 @@ describe('armarDetalleSemana (clic en una celda del mapa de calor, 2026-11-10)',
   });
 });
 
-describe('semanaAnterior', () => {
+describe('previousWeek', () => {
   it('returns the last full Monday-Sunday week before the cut', () => {
-    expect(semanaAnterior('2026-11-23')).toEqual({ desde: '2026-11-16', hasta: '2026-11-22' });
-    expect(semanaAnterior('2026-11-26')).toEqual({ desde: '2026-11-16', hasta: '2026-11-22' });
-    expect(semanaAnterior('2026-11-22')).toEqual({ desde: '2026-11-09', hasta: '2026-11-15' });
+    expect(previousWeek('2026-11-23')).toEqual({ desde: '2026-11-16', hasta: '2026-11-22' });
+    expect(previousWeek('2026-11-26')).toEqual({ desde: '2026-11-16', hasta: '2026-11-22' });
+    expect(previousWeek('2026-11-22')).toEqual({ desde: '2026-11-09', hasta: '2026-11-15' });
   });
 });
 
-describe('armarSemanaRelevante', () => {
+describe('buildTopWeek', () => {
   const sem = (n: number, inicio = '2026-11-16') => JSON.stringify([{ inicio: '2026-11-09', ocurrencias: 50 }, { inicio, ocurrencias: n }]);
   it('picks one case per agent by hours freed in the previous week weighted by confidence', () => {
-    const r = armarSemanaRelevante(
+    const r = buildTopWeek(
       [
         agente({ idAgent: 1, code: 'doki', displayName: 'Doki', empresa: 'ONELATAMPHARMA', departamento: 'Dirección técnica' }),
         agente({ idAgent: 2, code: 'luna', displayName: 'Luna' }),
