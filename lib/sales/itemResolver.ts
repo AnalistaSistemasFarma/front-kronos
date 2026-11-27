@@ -27,7 +27,7 @@ const ITEM_FIELDS = 'ItemCode,ItemName,Frozen,SalesItem,SalesQtyPerPackUnit,BarC
 export function toItemInfo(r: RawItem): ItemInfo {
   const name = String(r.ItemName ?? '');
   const pack = Number(r.SalesQtyPerPackUnit) > 1 ? Number(r.SalesQtyPerPackUnit) : packFromName(name);
-  return { ItemCode: String(r.ItemCode), ItemName: name, active: r.Frozen !== 'tYES' && r.SalesItem === 'tYES', pack };
+  return { ItemCode: String(r.ItemCode), ItemName: name, active: r.Frozen !== 'tYES' && r.SalesItem === 'tYES', pack, ...(r.BarCode ? { barcode: String(r.BarCode) } : {}) };
 }
 
 /** Date YYYY-MM-DD `months` before `today`. PURE. */
@@ -38,6 +38,9 @@ export function monthsBefore(today: string, months: number): string {
 }
 
 /** Customer history from crossjoin rows (Orders or Invoices × lines). Merges into `acc`. PURE. */
+/** Distinct recent prices kept per item. */
+const MAX_PRICES = 6;
+
 export function mergeHistory(acc: Map<string, HistoryInfo & { docs: Set<string> }>, rows: Record<string, unknown>[], doc: 'Orders' | 'Invoices') {
   const source = doc === 'Orders' ? 'pedido' : 'factura';
   for (const row of rows) {
@@ -49,10 +52,13 @@ export function mergeHistory(acc: Map<string, HistoryInfo & { docs: Set<string> 
     const docKey = `${doc}:${h.DocEntry}`;
     const price = l.UnitPrice == null ? null : Number(l.UnitPrice);
     const prev = acc.get(code);
+    // Lines at $0/$1 are free goods: they say nothing about the price.
+    const realPrice = price != null && price > 1 ? price : null;
     if (!prev) {
-      acc.set(code, { ItemCode: code, ItemName: String(l.ItemDescription ?? ''), lastDate: date, lastPrice: price, times: 1, source, docs: new Set([docKey]) });
+      acc.set(code, { ItemCode: code, ItemName: String(l.ItemDescription ?? ''), lastDate: date, lastPrice: price, prices: realPrice ? [realPrice] : [], times: 1, source, docs: new Set([docKey]) });
       continue;
     }
+    if (realPrice && !prev.prices!.includes(realPrice) && prev.prices!.length < MAX_PRICES) prev.prices!.push(realPrice);
     if (date > prev.lastDate || (date === prev.lastDate && price != null && (prev.lastPrice == null || price > prev.lastPrice))) {
       prev.lastDate = date;
       prev.lastPrice = price;
@@ -108,8 +114,13 @@ export async function resolveItems(sap: SapSession, a: { cardCode: string; input
 
   // 1) Codes written on the PO (ours or the customer's reference), and the items with those barcodes.
   const codes = [...new Set(keys.flatMap((k) => [k.code, k.clientRef]).filter(Boolean))];
-  const barcodes = [...new Set(keys.map((k) => k.barcode).filter(Boolean))];
   await loadItems(codes.map((c) => `ItemCode eq ${q(c)}`));
+  // An inactive code written on the PO: its barcode finds the active twin (e.g. 10005 → 11117).
+  const twinBarcode = (code: string) => {
+    const it = code ? items.get(code) : undefined;
+    return it && !it.active && it.barcode ? it.barcode : '';
+  };
+  const barcodes = [...new Set(keys.flatMap((k) => [k.barcode, twinBarcode(k.code), twinBarcode(k.clientRef)]).filter(Boolean))];
   const byBarcode = new Map<string, Set<string>>();
   const addBc = (bc: string, code: string) => byBarcode.set(bc, new Set([...(byBarcode.get(bc) ?? []), code]));
   // Main barcode (OITM.CodeBars) is in the item; additional barcodes (OBCD) in the BarCodes entity.
@@ -164,7 +175,7 @@ export async function resolveItems(sap: SapSession, a: { cardCode: string; input
     const k = keys[i];
     const signals: LineSignals = {
       exact: k.code && items.has(k.code) ? k.code : undefined,
-      barcode: [...(k.barcode ? byBarcode.get(k.barcode) ?? [] : [])],
+      barcode: [...new Set([k.barcode, twinBarcode(k.code), twinBarcode(k.clientRef)].filter(Boolean).flatMap((b) => [...(byBarcode.get(b) ?? [])]))],
       catalog: [...new Set([k.clientRef, k.barcode, k.code].filter(Boolean).flatMap((c) => [...(byCatalog.get(c) ?? [])]))],
       clientRef: k.clientRef && items.has(k.clientRef) ? k.clientRef : undefined,
       master: l.ItemDescription ? masterByKey.get(searchTerms(l.ItemDescription).join('|')) ?? [] : [],
