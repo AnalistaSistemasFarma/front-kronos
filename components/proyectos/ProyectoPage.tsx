@@ -180,6 +180,8 @@ export default function ProyectoPage({ idProject }: { idProject: number }) {
   // les puede escribir; se mencionan con @ en el hilo (el servidor revalida).
   const mencionables = useMemo(() => {
     if (!proyecto || !conversacion || conversacion.soloLectura) return [];
+    // Sin el asistente de la conversación asignado (2026-11-27): no menciona asistentes.
+    if (conversacion.sinAsistente) return [];
     return proyecto.agents
       .filter((a) => a.puedoEscribir && a.idAgent !== conversacion.agent.idAgent)
       .map((a) => ({ valor: a.code, nombre: a.displayName, avatarUrl: a.avatarUrl }));
@@ -524,7 +526,7 @@ export default function ProyectoPage({ idProject }: { idProject: number }) {
         <ChatThread
           key={conversacion.id}
           agent={agenteConversacion}
-          project={{ idConversation: conversacion.id, name: proyecto.name, readOnly: conversacion.soloLectura, mencionables }}
+          project={{ idConversation: conversacion.id, name: proyecto.name, readOnly: conversacion.soloLectura, agentNote: conversacion.sinAsistente, mencionables }}
           currentUserId={miId}
           active
         />

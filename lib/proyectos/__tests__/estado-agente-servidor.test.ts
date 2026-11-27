@@ -76,7 +76,7 @@ function fila(p: { id?: number; agente?: number; dueno?: number; state?: string;
 const PUERTA = {
   kind: 'project',
   archived: false,
-  project: { archived: false, id_company: { in: [3] }, members: { some: { id_user: 'u-ana' } } },
+  project: { archived: false, members: { some: { id_user: 'u-ana' } } },
 };
 
 beforeEach(() => {
