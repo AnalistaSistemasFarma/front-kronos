@@ -231,9 +231,9 @@ async function ejecutar(user: ProjectUser, project: ProjectAccess, payload: Payl
       return `Conversación #${r.idConversation} abierta.`;
     }
     case 'miembro_invitar': {
-      const candidatos = await eligibleProjectUsers(project.idCompany, undefined, project.idProject);
+      const candidatos = await eligibleProjectUsers({ email: payload.email });
       const u = candidatos.find((c) => c.email.toLowerCase() === payload.email);
-      if (!u) throw new ProyectoError(`${payload.email} no cumple las condiciones para entrar al proyecto (permiso «Proyectos» y, si es de otra empresa, uno de sus asistentes asignado).`, 409);
+      if (!u) throw new ProyectoError(`${payload.email} no cumple las condiciones para entrar al proyecto (activa y con el permiso Proyectos en alguna empresa).`, 409);
       const r = await invitarMiembros(user, project, [u.id], payload.role);
       return r.added === 0 ? 'Esa persona ya era miembro.' : `${u.name} agregada como ${payload.role === 'reader' ? 'lector' : 'editor'}.`;
     }

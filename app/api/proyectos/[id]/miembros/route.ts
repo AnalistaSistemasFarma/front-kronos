@@ -18,7 +18,8 @@ export const dynamic = 'force-dynamic';
  * MIEMBROS de un proyecto. El DUEÑO administra quién entra y con qué rol.
  *
  *   GET    ?candidatos=1  personas que se pueden invitar (solo el dueño):
- *          activas y con el permiso del módulo en la empresa del proyecto.
+ *          activas, no proveedoras y con el permiso del módulo en ALGUNA
+ *          empresa (2026-11-27, multiempresa), con sus empresas como etiqueta.
  *   POST   { idUsers: [...], role: 'editor' | 'reader' }  invita (solo el dueño).
  *   PATCH  { idUser, role: 'editor' | 'reader' }  cambia el rol (solo el dueño).
  *   DELETE ?idUser=<id>  retira: el dueño a cualquiera menos a sí mismo; un
@@ -34,12 +35,12 @@ export async function GET(_request: NextRequest, { params }: Ctx) {
     if (!capabilitiesFor(guard.project.role).manageMembers) return forbidden('Solo el dueño del proyecto puede invitar.');
 
     const [elegibles, actuales] = await Promise.all([
-      eligibleProjectUsers(guard.project.idCompany, undefined, guard.project.idProject),
+      eligibleProjectUsers(),
       prisma.chatProjectMember.findMany({ where: { id_project: guard.project.idProject }, select: { id_user: true } }),
     ]);
     const yaEstan = new Set(actuales.map((m) => m.id_user));
     return jsonNoStore({
-      users: elegibles.filter((u) => !yaEstan.has(u.id)).map((u) => ({ id: u.id, name: u.name, email: u.email })),
+      users: elegibles.filter((u) => !yaEstan.has(u.id)).map((u) => ({ id: u.id, name: u.name, email: u.email, companies: u.companies })),
     });
   } catch (error) {
     return serverError('GET /api/proyectos/[id]/miembros', error);

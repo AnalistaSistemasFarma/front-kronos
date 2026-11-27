@@ -88,13 +88,17 @@ beforeEach(() => {
 });
 
 describe('la puerta del contador', () => {
-  it('el filtro de conversaciones exige miembro + módulo en la empresa + nada archivado, sin mirar el rol', () => {
+  it('el filtro de conversaciones exige miembro + módulo en alguna empresa + nada archivado, sin mirar el rol ni la empresa del proyecto', () => {
     const w = whereConversacionesVisibles('u-ana', [3, 8]);
     expect(w).toEqual({
       kind: 'project',
       archived: false,
-      project: { archived: false, id_company: { in: [3, 8] }, members: { some: { id_user: 'u-ana' } } },
+      project: { archived: false, members: { some: { id_user: 'u-ana' } } },
     });
+    // Multiempresa (2026-11-27): la pertenencia da la visibilidad, no la empresa del proyecto.
+    expect(JSON.stringify(w)).not.toMatch(/id_company/);
+    // Sin el módulo en ninguna empresa: no coincide nada.
+    expect(whereConversacionesVisibles('u-ana', [])).toMatchObject({ id: { in: [] } });
     // Un LECTOR es miembro: el filtro no pide dueño ni editor.
     expect(JSON.stringify(w)).not.toMatch(/role/);
   });

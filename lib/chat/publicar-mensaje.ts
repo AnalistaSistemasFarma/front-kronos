@@ -63,6 +63,14 @@ export async function publicarMensajeDePersona(
     }
   }
 
+  // MIEMBRO SIN EL ASISTENTE (2026-11-27, proyectos multiempresa): escribe como
+  // miembro humano. Su mensaje no despierta al principal ni a ningún asistente
+  // (ni por mención): nace entregado.
+  if (guard.kind === 'project' && guard.projectWritable.ok && guard.projectWritable.soloPersonas) {
+    principalAtiende = false;
+    entregas.idAgents = [];
+  }
+
   // MESA DE DISCUSIÓN (2026-11-04): lo que escribe una persona en una mesa NO
   // despierta al moderador fuera de turno; todos lo leen en su siguiente turno.
   // Si mencionó a alguien con @, se respeta la mención (como en cualquier hilo).
