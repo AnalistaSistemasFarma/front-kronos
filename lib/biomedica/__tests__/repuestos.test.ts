@@ -94,7 +94,7 @@ describe('Biomédica · repuestos · SQL', () => {
   const leer = (p: string) => readFileSync(path.join(root, p), 'utf8');
   const bloque = (s: string) => s.slice(s.indexOf('SET XACT_ABORT ON;'), s.indexOf('/* BLOQUE-DDL-FIN */'));
   it('PRUEBAS y PROD llevan el bloque de la migración, con su guarda; movimientos solo inserción; reversa con bandera', () => {
-    const mig = leer('prisma/migrations/20261126150000_biomedica_repuestos/migration.sql');
+    const mig = leer('prisma/migrations/20261126190000_biomedica_repuestos/migration.sql');
     const pr = leer('prisma/manual/2026-11-26-biomedica-repuestos-PRUEBAS.sql');
     const pd = leer('prisma/manual/2026-11-26-biomedica-repuestos-PROD.sql');
     const rv = leer('prisma/manual/2026-11-26-biomedica-repuestos-reversa.sql');

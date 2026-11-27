@@ -1,7 +1,7 @@
 /*
   PASE MANUAL (PRUEBAS) — Ingeniería biomédica · repuestos e insumos (2026-11-26).
   QUÉ HACE (idempotente; no toca datos existentes): el MISMO bloque DDL de
-  prisma/migrations/20261126150000_biomedica_repuestos/migration.sql. Usa el permiso del módulo de Ingeniería biomédica.
+  prisma/migrations/20261126190000_biomedica_repuestos/migration.sql. Usa el permiso del módulo de Ingeniería biomédica.
   ORDEN: ANTES del código. CÓMO CORRERLO: script Node con `mssql` o SSMS, con respaldo COPY_ONLY antes.
   REVERSA: prisma/manual/2026-11-26-biomedica-repuestos-reversa.sql
 */
