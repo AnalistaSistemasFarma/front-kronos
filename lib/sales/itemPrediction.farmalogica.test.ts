@@ -29,6 +29,11 @@ const ITEMS: RawItem[] = [
   item('MEET0030', 'ETIQUETA CEFAZOLINA 1 g', 111, 772500, false, false),
   item('PTPT0121', 'PIPERACILINA Y TAZOBACTAM 4.5g (10 UNID. X PLEGADIZA)', 139, 50000),
   item('PTSB0121', 'AMPICILINA Y SULBACTAM 1.5g (10 UNID. X PLEGADIZA)', 139, 40000),
+  // Brand and twin items that the description also finds (testing regression 2026-11-27 14:22).
+  item('PTPN0110', 'PENIBECTAM 4.5g (PIPERACILINA Y TAZOBACTAM 4,5) (10 UNID. X PLEGADIZA)', 139, 10360),
+  item('PTPT0111', 'PIPERACILINA Y TAZOBACTAM 4.5g (10 UNID. X PLEGADIZA)', 139, 0),
+  item('PTBS0110', 'BIOSABACTAM (AMPICILINA Y SULBACTAM 1.5g) (10 UNID. X PLEGADIZA)', 139, 0),
+  item('PTSB0111', 'AMPICILINA Y SULBACTAM 1.5g (10 UNID. X PLEGADIZA)', 139, 90030),
 ];
 const GROUPS = [
   { Number: 100, GroupName: 'Artículos' }, { Number: 111, GroupName: 'ETIQUETAS' }, { Number: 133, GroupName: 'PT Cefalosporinas' },
@@ -44,6 +49,10 @@ const COMPANY_INVOICES: [string, string, number][] = [
   ...Array.from({ length: 40 }, (_v, i) => ['PTCZ0121', '2026-11-20', [1500, 1600, 1490, 1900, 1650][i % 5]] as [string, string, number]),
   ['PTCZ0111EXP', '2026-09-10', 2100], ['PTCZ0111EXP', '2026-08-10', 2100],
   ['PTZB0110A', '2026-10-01', 2600], ['PTZB0110A', '2026-07-01', 2600],
+  // Brands sold more than the customer's own items, at the PO price.
+  ...Array.from({ length: 12 }, () => ['PTPN0110', '2026-11-10', 6300] as [string, string, number]),
+  ...Array.from({ length: 10 }, () => ['PTBS0110', '2026-11-10', 1800] as [string, string, number]),
+  ['PTSB0111', '2026-11-01', 1800],
 ];
 
 const calls: string[] = [];
@@ -127,10 +136,15 @@ describe('item prediction: Farmalogica PO 11619', () => {
     expect(r.lineas).toHaveLength(3);
     const out = await resolveItems({ baseUrl: 'x', companyDB: 'FARMALOGICA' } as never, { cardCode: '901714987', input: r.lineas, today: '2026-11-27' });
 
+    // Regression: the customer's own history always goes first, even when a brand sells more company-wide.
     expect(out[0].prediction.candidates[0].ItemCode).toBe('PTPT0121');
+    expect(out[0].prediction.candidates[0].reason).toMatch(/^Factura anterior del cliente 2026-10-07/);
+    expect(out[0].prediction.candidates[0].history).toBe(true);
     expect(out[0].prediction.confidence).toBe('media');
     expect(out[2].prediction.candidates[0].ItemCode).toBe('PTSB0121');
+    expect(out[2].prediction.candidates[0].reason).toMatch(/^Factura anterior del cliente 2026-10-07/);
     expect(out[2].prediction.confidence).toBe('media');
+    expect(out[0].prediction.candidates.find((c) => c.ItemCode === 'PTPN0110')?.reason).toMatch(/Marca comercial/);
 
     const cz = out[1].prediction;
     expect(cz.candidates[0].ItemCode).toBe('PTCZ0121');
@@ -164,6 +178,27 @@ describe('item prediction: Farmalogica PO 11619', () => {
     expect(p.candidates[0].reason).toMatch(/Pedido anterior del cliente 2026-10-09 · Coincide principio activo y concentración/);
     expect(p.candidates[1].ItemCode).toBe('PTCZ0121');
     expect(p.confidence).toBe('media');
+  });
+
+  it('without customer history the generic item beats a brand that sells as much at the same price', async () => {
+    const { rankLine } = await import('./itemPrediction');
+    const { toItemInfo } = await import('./itemResolver');
+    const items = new Map(ITEMS.map((x) => [x.ItemCode, toItemInfo(x, new Set([151]))]));
+    const master = ITEMS.filter((x) => x.Frozen === 'tNO' && x.SalesItem === 'tYES' && x.ItemName.includes('CEFAZOLINA')).map((x) => x.ItemCode);
+    const sales = new Map([['PTCZ0121', { docs: 10, prices: [1500], lastDate: '2026-11-20' }], ['PTZB0110A', { docs: 10, prices: [1450], lastDate: '2026-11-20' }]]);
+    const p = rankLine({ ItemDescription: 'CEFAZOLINA 1G POLVO PARA SOLUCION INYECTABLE VIAL', Quantity: 6000, UnitPrice: 1450 }, { barcode: [], catalog: [], master }, items, new Map(), sales);
+    expect(p.candidates[0].ItemCode).toBe('PTCZ0121');
+    expect(p.candidates.find((c) => c.ItemCode === 'PTZB0110A')?.reason).toMatch(/Marca comercial/);
+    // A PO that names the brand keeps it.
+    const b = rankLine({ ItemDescription: 'ZOLIBIOS CEFAZOLINA 1G', Quantity: 6000, UnitPrice: 1450 }, { barcode: [], catalog: [], master }, items, new Map(), sales);
+    expect(b.candidates[0].ItemCode).toBe('PTZB0110A');
+  });
+
+  it('price list order: history first, then items with a list price (stable)', async () => {
+    const { preferPriceList } = await import('./itemPrediction');
+    const c = (ItemCode: string, ListPrice: number, history = false) => ({ ItemCode, reason: 'r', line: { ListPrice }, ...(history ? { history } : {}) });
+    expect(preferPriceList([c('B', 0), c('H', 0, true), c('L', 1450), c('Z', 0)]).map((x) => x.ItemCode)).toEqual(['H', 'L', 'B', 'Z']);
+    expect(preferPriceList([c('B', 0), c('L', 1450)])[0].reason).toBe('r · En lista de precios');
   });
 
   it('without any sales or price evidence the description still yields top-3 with confidence Baja', async () => {
