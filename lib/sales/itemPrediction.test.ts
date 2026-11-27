@@ -193,6 +193,9 @@ describe('item prediction: rules', () => {
     expect(priceFactor(8366, 279, 30)).toBe(30);
     expect(priceFactor(26320, 28000, 1)).toBe(1);
     expect(priceFactor(5000, 279, 30)).toBeNull();
+    // Discounted invoice price (2272 x 0.88) still recognizes the box of 5.
+    expect(priceFactor(11360, 1999.4, 5)).toBe(5);
+    expect(priceFactor(8500, 2000, 5)).toBeNull();
     expect(convertLine(462, 8366, 30)).toEqual({ Quantity: 13860, UnitPrice: 278.8667 });
   });
 });
