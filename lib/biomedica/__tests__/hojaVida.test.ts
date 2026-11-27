@@ -121,6 +121,18 @@ describe('Biomédica · inspección de equipos nuevos → inventario', () => {
   });
 });
 
+describe('Biomédica · liberación de equipos (2026-11-26)', () => {
+  it('al cerrar el formato de liberación ligado a un equipo disponible, queda el evento «liberacion» en su trazabilidad', async () => {
+    const db = fakeDb('Liberación de equipos');
+    db.nuevoEquipo({ id_company: 3, equipo: 'Bomba', serie: 'S-5', created_by: 'x', estado: 'bodega' });
+    const { id } = await createRegistro(db as never, acceso, { idFormato: 1, equipo: 'Bomba', serial: 'S-5' }, actor);
+    await saveAnotaciones(db as never, acceso, id, anotacion, actor);
+    expect(await closeRegistro(db as never, acceso, id, actor)).toEqual({ closed: true, liberado: true });
+    expect(db.st.eventos.at(-1)).toMatchObject({ accion: 'liberacion', id_biomed_equipo: 1, justificacion: 'Liberado tras acondicionamiento: OLP-GCC-04-FR-020 · registro #1' });
+    expect(db.st.equipos[0]).toMatchObject({ estado: 'bodega' });
+  });
+});
+
 describe('Biomédica · hoja de vida y mantenimientos', () => {
   it('fechas, meses y lista de chequeo se validan', () => {
     expect(sumarMeses(new Date('2026-01-31T00:00:00Z'), 1).toISOString().slice(0, 10)).toBe('2026-02-28');
