@@ -1,4 +1,4 @@
--- ROLLBACK of 2026-11-27-sales-price-lists (PRUEBAS or PROD). Stops if price update requests already exist.
+-- ROLLBACK of 2026-11-27-sales-price-lists (TEST or PROD). Stops if price update requests already exist.
 SET XACT_ABORT ON; SET NOCOUNT ON;
 IF OBJECT_ID(N'dbo.price_update', N'U') IS NOT NULL AND EXISTS (SELECT 1 FROM dbo.price_update)
   THROW 51701, N'Price update requests exist: rollback aborted.', 1;

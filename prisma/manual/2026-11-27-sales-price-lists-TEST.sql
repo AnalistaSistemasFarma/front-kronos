@@ -1,4 +1,4 @@
--- Sales · customer price list updates (PRUEBAS). 2026-11-27.
+-- Sales · customer price list updates (TEST, KRONOSDB_PRUEBAS). 2026-11-27.
 -- Requested by Nicolás Rivera after the Farmalógica meeting: prices renegotiated with each customer are requested in
 -- SynerLink, approved, and a SAP task writes them to SAP (the customer's own price list, or a special price when the
 -- list is shared). Additive and idempotent. Rollback: 2026-11-27-sales-price-lists-rollback.sql

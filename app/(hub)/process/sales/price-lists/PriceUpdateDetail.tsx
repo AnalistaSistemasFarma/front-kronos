@@ -45,7 +45,7 @@ export default function PriceUpdateDetail({ requestId, onLoaded, mb }: { request
       <ScrollArea.Autosize mah={420}>
         <Table striped withTableBorder verticalSpacing={4}>
           <Table.Thead>
-            <Table.Tr><Table.Th>Artículo</Table.Th><Table.Th style={{ textAlign: 'right' }}>Precio actual</Table.Th><Table.Th style={{ textAlign: 'right' }}>Precio nuevo</Table.Th><Table.Th style={{ textAlign: 'right' }}>Variación</Table.Th><Table.Th>En SAP</Table.Th></Table.Tr>
+            <Table.Tr><Table.Th>{'Artículo'}</Table.Th><Table.Th style={{ textAlign: 'right' }}>Precio actual</Table.Th><Table.Th style={{ textAlign: 'right' }}>Precio nuevo</Table.Th><Table.Th style={{ textAlign: 'right' }}>Variación</Table.Th><Table.Th>En SAP</Table.Th></Table.Tr>
           </Table.Thead>
           <Table.Tbody>
             {u.lines.map((l) => {

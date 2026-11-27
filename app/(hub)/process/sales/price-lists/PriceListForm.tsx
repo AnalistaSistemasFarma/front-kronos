@@ -175,7 +175,7 @@ export default function PriceListForm({ companyId, onDone }: { companyId: string
           <Table.Thead>
             <Table.Tr>
               <Table.Th style={{ width: 40 }}>#</Table.Th><Table.Th style={{ minWidth: 200 }}>Artículo</Table.Th><Table.Th>Descripción</Table.Th>
-              <Table.Th style={{ textAlign: 'right' }}>Precio actual</Table.Th><Table.Th style={{ minWidth: 150 }}>Precio nuevo</Table.Th><Table.Th style={{ textAlign: 'right' }}>Variación</Table.Th><Table.Th />
+              <Table.Th style={{ textAlign: 'right' }}>Precio actual</Table.Th><Table.Th style={{ minWidth: 150 }}>Precio nuevo</Table.Th><Table.Th style={{ textAlign: 'right' }}>{'Variación'}</Table.Th><Table.Th />
             </Table.Tr>
           </Table.Thead>
           <Table.Tbody>
