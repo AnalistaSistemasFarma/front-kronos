@@ -22,7 +22,10 @@ export interface CompanyInternetInput {
   publicIp: string;
   subnetMask: string;
   gateway: string;
+  /** DNS 1 (column dns_servers). */
   dnsServers: string;
+  /** DNS 2 (column dns_secondary, 2026-11-27). */
+  dns2: string;
   bandwidth: string;
   channelType: ChannelType | '';
   connectionType: ConnectionType | '';
@@ -44,6 +47,7 @@ export const EMPTY_INTERNET_INPUT: CompanyInternetInput = {
   subnetMask: '',
   gateway: '',
   dnsServers: '',
+  dns2: '',
   bandwidth: '',
   channelType: '',
   connectionType: '',
@@ -55,7 +59,8 @@ export const INTERNET_FIELD_LIMITS: Record<keyof CompanyInternetInput, number> =
   publicIp: 45,
   subnetMask: 45,
   gateway: 45,
-  dnsServers: 200,
+  dnsServers: 45,
+  dns2: 45,
   bandwidth: 50,
   channelType: 20,
   connectionType: 20,
@@ -82,6 +87,7 @@ export function validateInternetInput(body: unknown): InternetValidation {
     subnetMask: asText(src.subnetMask),
     gateway: asText(src.gateway),
     dnsServers: asText(src.dnsServers),
+    dns2: asText(src.dns2),
     bandwidth: asText(src.bandwidth),
     channelType: asText(src.channelType),
     connectionType: asText(src.connectionType),
@@ -97,13 +103,8 @@ export function validateInternetInput(body: unknown): InternetValidation {
     errors.subnetMask = 'Use 255.255.255.248 o /29';
   }
   if (raw.gateway && !errors.gateway && !isIpAddress(raw.gateway)) errors.gateway = 'Dirección IP no válida';
-  if (raw.dnsServers && !errors.dnsServers) {
-    const bad = raw.dnsServers
-      .split(/[,;\s]+/)
-      .filter(Boolean)
-      .some((ip) => !isIpAddress(ip));
-    if (bad) errors.dnsServers = 'Separe las IP con comas';
-  }
+  if (raw.dnsServers && !errors.dnsServers && !isIpAddress(raw.dnsServers)) errors.dnsServers = 'Dirección IP no válida';
+  if (raw.dns2 && !errors.dns2 && !isIpAddress(raw.dns2)) errors.dns2 = 'Dirección IP no válida';
   if (raw.channelType && !CHANNEL_TYPES.some((c) => c.value === raw.channelType)) {
     errors.channelType = 'Elija Dedicado o Banda ancha';
   }

@@ -9,7 +9,8 @@ describe('validateInternetInput', () => {
       publicIp: '190.85.10.20',
       subnetMask: '255.255.255.248',
       gateway: '190.85.10.17',
-      dnsServers: '8.8.8.8; 1.1.1.1',
+      dnsServers: '8.8.8.8',
+      dns2: '1.1.1.1',
       bandwidth: '300 Mbps',
       channelType: 'dedicado',
       connectionType: 'fibra',
@@ -24,7 +25,8 @@ describe('validateInternetInput', () => {
       publicIp: '1.2.3',
       subnetMask: 'abc',
       gateway: '999.0.0.1',
-      dnsServers: '8.8.8.8, x',
+      dnsServers: '8.8.8.8, 1.1.1.1',
+      dns2: 'x',
       channelType: 'satelital',
       connectionType: 'cobre',
       bandwidth: 'x'.repeat(51),
@@ -32,7 +34,7 @@ describe('validateInternetInput', () => {
     expect(r.ok).toBe(false);
     if (!r.ok) {
       expect(Object.keys(r.errors).sort()).toEqual(
-        ['bandwidth', 'channelType', 'connectionType', 'dnsServers', 'gateway', 'publicIp', 'subnetMask'].sort()
+        ['bandwidth', 'channelType', 'connectionType', 'dns2', 'dnsServers', 'gateway', 'publicIp', 'subnetMask'].sort()
       );
     }
   });

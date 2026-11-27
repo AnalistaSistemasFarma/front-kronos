@@ -6,6 +6,7 @@ import { IconCpu, IconFileInvoice, IconUser } from '@tabler/icons-react';
 import type { ItAssetListItem } from '../../lib/it-dashboard/db';
 import { isServerType } from '../../lib/it-dashboard/server';
 import ServerPanel from './ServerPanel';
+import AssetPhoto from './AssetPhoto';
 import { formatDate, formatMoney, isHttpUrl, statusColor, text } from './assetFormat';
 import { iconForAssetType } from './assetTypeIcons';
 
@@ -93,6 +94,7 @@ export default function AssetDetailModal({
         <Grid gutter='lg' align='stretch'>
         <Grid.Col span={{ base: 12, md: isServer ? 7 : 12 }}>
         <Stack gap='lg'>
+          <Group justify='space-between' align='flex-start' wrap='nowrap' gap='md'>
           <Group gap='xs'>
             <Badge variant='light' color={statusColor(asset.status)}>
               {text(asset.status)}
@@ -105,6 +107,9 @@ export default function AssetDetailModal({
                 Renovación {asset.renewalDate ? formatDate(asset.renewalDate) : ''}
               </Badge>
             ) : null}
+          </Group>
+          {/* Picture of the asset (top-right, requested 2026-11-27). */}
+          <AssetPhoto assetId={asset.id} typeName={asset.type} />
           </Group>
 
           <Section title='Identificación' icon={IconFileInvoice}>

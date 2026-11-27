@@ -36,7 +36,8 @@ const TEXT_FIELDS: Array<{ key: keyof CompanyInternetInput; label: string; place
   { key: 'publicIp', label: 'IP pública', placeholder: '190.0.0.10' },
   { key: 'subnetMask', label: 'Máscara', placeholder: '255.255.255.248' },
   { key: 'gateway', label: 'Gateway', placeholder: '190.0.0.9' },
-  { key: 'dnsServers', label: 'DNS', placeholder: '8.8.8.8, 1.1.1.1' },
+  { key: 'dnsServers', label: 'DNS 1', placeholder: '8.8.8.8' },
+  { key: 'dns2', label: 'DNS 2', placeholder: '1.1.1.1' },
   { key: 'bandwidth', label: 'Ancho de banda', placeholder: '300 Mbps' },
 ];
 
@@ -99,6 +100,7 @@ function CompanyInternetDetail({
       subnetMask: item.subnetMask,
       gateway: item.gateway,
       dnsServers: item.dnsServers,
+      dns2: item.dns2,
       bandwidth: item.bandwidth,
       channelType: item.channelType,
       connectionType: item.connectionType,
