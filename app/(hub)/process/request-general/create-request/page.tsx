@@ -14,6 +14,7 @@ import { useUiPreference } from '../../../../../components/ui/useUiPreference';
 import { PREF_COMPANY_COLORS } from '../../../../../lib/ui/preferences';
 import { companyRowStyle } from '../../../../../lib/ui/companyColors';
 import SalesInlineForm from '../../sales/SalesInlineForm';
+import PriceListForm from '../../sales/precios/PriceListForm';
 import {
   Avatar,
   Paper,
@@ -239,7 +240,9 @@ function RequestBoard() {
   const [isSalesProcess, setIsSalesProcess] = useState(false);
   /** «Pedido directo de venta» abre el mismo formulario de Ventas con esa opción ya elegida. */
   const [salesModo, setSalesModo] = useState<'enviar' | 'directo'>('enviar');
-  const isSapFormProcess = isPurchaseProcess || isSalesProcess;
+  /** Actualización de lista de precios por socio de negocio (sales_company_config.id_process_category_precios_lista). */
+  const [isPricesProcess, setIsPricesProcess] = useState(false);
+  const isSapFormProcess = isPurchaseProcess || isSalesProcess || isPricesProcess;
   const [purchaseNotice, setPurchaseNotice] = useState<{ ok: boolean; message: string } | null>(null);
   const [previousOpen, setPreviousOpen] = useState(false);
   /** Preferencias del usuario: fondo por compañía en la tabla y anchos de columna (Perfil). */
@@ -1011,6 +1014,21 @@ function RequestBoard() {
       .catch(() => {
         if (!cancelled) setIsPurchaseProcess(false);
       });
+    return () => {
+      cancelled = true;
+    };
+  }, [formData.company, formData.process]);
+
+  useEffect(() => {
+    if (!formData.company || !formData.process) {
+      setIsPricesProcess(false);
+      return;
+    }
+    let cancelled = false;
+    fetch(`/api/prices/entry?companyId=${formData.company}&processId=${formData.process}`)
+      .then((r) => r.json())
+      .then((d) => { if (!cancelled) setIsPricesProcess(Boolean(d?.isPrices)); })
+      .catch(() => { if (!cancelled) setIsPricesProcess(false); });
     return () => {
       cancelled = true;
     };
@@ -2082,6 +2100,19 @@ function RequestBoard() {
               <PurchaseInlineForm
                 companyId={formData.company}
                 subject={formData.subject}
+                onDone={({ ok, message }) => {
+                  setModalOpened(false);
+                  setFormData({ company: '', subject: '', category: '', process: '', descripcion: '', url: '' });
+                  setPurchaseNotice({ ok, message });
+                  fetchTickets();
+                }}
+              />
+            )}
+
+            {isPricesProcess && (
+              <PriceListForm
+                key={formData.company}
+                companyId={formData.company}
                 onDone={({ ok, message }) => {
                   setModalOpened(false);
                   setFormData({ company: '', subject: '', category: '', process: '', descripcion: '', url: '' });

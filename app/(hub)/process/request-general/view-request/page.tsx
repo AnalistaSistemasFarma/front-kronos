@@ -5,6 +5,7 @@ import TaskReminderButton from '../../../../../components/request-general/TaskRe
 import ViewOnlyAttachmentButton from '../../../../../components/request-general/attachments/ViewOnlyAttachmentButton';
 import PurchaseRequestDetail from '../../purchases/PurchaseRequestDetail';
 import SalesOfferDetail from '../../sales/SalesOfferDetail';
+import PriceUpdateDetail from '../../sales/precios/PriceUpdateDetail';
 import { useSearchParams, useRouter } from 'next/navigation';
 import axios from 'axios';
 import JSZip from 'jszip';
@@ -2280,6 +2281,7 @@ function ViewRequestPage() {
 
         {/* Ventas: oferta en SAP (datos, cupo y cartera, mapa de relaciones y líneas), encima de la información de la solicitud. */}
         <SalesOfferDetail requestId={request.id} mb='lg' />
+        <PriceUpdateDetail requestId={request.id} mb='lg' />
 
         {/* Compras: solicitud de compra en SAP (datos, anexos, trazabilidad, historial y líneas), a todo el ancho como Ventas. */}
         <PurchaseRequestDetail requestId={request.id} mb='lg' />
