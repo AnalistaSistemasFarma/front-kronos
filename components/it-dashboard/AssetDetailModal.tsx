@@ -9,6 +9,8 @@ import ServerPanel from './ServerPanel';
 import AssetPhoto from './AssetPhoto';
 import DvrCamerasPanel from './DvrCamerasPanel';
 import { isDvrType } from '../../lib/it-dashboard/cameras';
+import { isComputerType } from '../../lib/it-dashboard/maintenance';
+import MaintenancePanel from './MaintenancePanel';
 import { formatDate, formatMoney, isHttpUrl, statusColor, text } from './assetFormat';
 import { iconForAssetType } from './assetTypeIcons';
 
@@ -66,12 +68,13 @@ export default function AssetDetailModal({
   const cost = asset?.cost == null ? null : Number(asset.cost);
   const isServer = isServerType(asset?.type);
   const isDvr = isDvrType(asset?.type);
+  const isComputer = isComputerType(asset?.type);
 
   return (
     <Modal
       opened={asset != null}
       onClose={onClose}
-      size={isServer ? '80rem' : isDvr ? '60rem' : 'xl'}
+      size={isServer ? '80rem' : isDvr || isComputer ? '60rem' : 'xl'}
       radius='md'
       zIndex={400}
       centered
@@ -152,6 +155,9 @@ export default function AssetDetailModal({
 
           {/* Cameras registered in the DVR (requested 2026-11-27). */}
           {isDvr ? <DvrCamerasPanel dvrId={asset.id} /> : null}
+
+          {/* Maintenance and its log for computers (requested 2026-11-27). */}
+          {isComputer ? <MaintenancePanel assetId={asset.id} /> : null}
         </Stack>
         </Grid.Col>
         {isServer ? (
