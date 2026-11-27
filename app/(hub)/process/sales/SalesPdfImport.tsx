@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { Alert, Badge, Button, Checkbox, Group, Menu, Modal, Progress, ScrollArea, Select, Stack, Table, Text, Tooltip } from '@mantine/core';
+import { useMediaQuery } from '@mantine/hooks';
 import { IconAlertCircle, IconCircleCheck, IconLoader2, IconRobot, IconSearch, IconSparkles } from '@tabler/icons-react';
 import toast from 'react-hot-toast';
 import SalesSearchModal from './SalesSearchModal';
@@ -110,6 +111,7 @@ async function readPdf(file: File): Promise<{ pages: string[]; images: Blob[] }>
 export default function SalesPdfImport({ companyId, companyName, cardCode, onLoaded }: Props) {
   const [support, setSupport] = useState<Support>('checking');
   const [phase, setPhase] = useState<Phase>('idle');
+  const isMobile = useMediaQuery('(max-width: 48em)');
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState('');
   /** Simulación: lo que se montaría, antes de agregarlo a la oferta (Nicolás Rivera, 2026-11-09). */
@@ -462,7 +464,13 @@ export default function SalesPdfImport({ companyId, companyName, cardCode, onLoa
         </>
       )}
 
-      <Modal opened={phase !== 'idle' && !(phase === 'agente' && minimized)} onClose={() => (phase === 'agente' ? setMinimized(true) : !working && setPhase('idle'))} size={phase === 'simulacion' ? 'xl' : 'md'} title={<Group gap={6}><IconSparkles size={18} /><Text fw={700}>{agent && (phase === 'agente' || conversationId) ? `Oferta desde el PDF (con ${agent.displayName})` : 'Oferta desde el PDF (IA local)'}</Text></Group>}
+      <Modal opened={phase !== 'idle' && !(phase === 'agente' && minimized)} onClose={() => (phase === 'agente' ? setMinimized(true) : !working && setPhase('idle'))} size={phase === 'simulacion' ? '95vw' : 'md'} fullScreen={phase === 'simulacion' && Boolean(isMobile)}
+        styles={phase === 'simulacion' ? {
+          // Large review layout: the lines table fills the height; summary, warnings, total and buttons stay visible.
+          content: { maxWidth: isMobile ? undefined : 1600, height: isMobile ? undefined : '90vh', display: 'flex', flexDirection: 'column' },
+          body: { flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' },
+        } : undefined}
+        title={<Group gap={6}><IconSparkles size={18} /><Text fw={700}>{agent && (phase === 'agente' || conversationId) ? `Oferta desde el PDF (con ${agent.displayName})` : 'Oferta desde el PDF (IA local)'}</Text></Group>}
         closeOnClickOutside={!working || phase === 'agente'} withCloseButton={!working || phase === 'agente'} zIndex={1300}>
         {phase === 'agente' && live && (
           <Stack gap={6} mb="sm">
@@ -510,7 +518,7 @@ export default function SalesPdfImport({ companyId, companyName, cardCode, onLoa
           <Text size="xs" c="dimmed" mt="xs">La conversación queda en su chat con {agent?.displayName}: <a href={`/process/chat?agent=${encodeURIComponent(agent?.code ?? "")}`} target="_blank" rel="noreferrer">abrirla</a>.</Text>
         )}
         {phase === 'simulacion' && sim && (
-          <Stack gap="sm">
+          <Stack gap="sm" style={{ flex: 1, minHeight: 0 }}>
             <Text size="sm" c="dimmed">Simulación: así quedaría la oferta con lo que la IA leyó del PDF. Nada se agrega hasta que confirme.</Text>
             <Group gap="lg" wrap="wrap">
               <Text size="sm"><Text span c="dimmed">Cliente: </Text><b>{sim.customer.CardName}</b> ({sim.customer.CardCode})</Text>
@@ -519,13 +527,13 @@ export default function SalesPdfImport({ companyId, companyName, cardCode, onLoa
               <Text size="sm"><Text span c="dimmed">Líneas: </Text>{sim.lines.length}{sim.leidas && sim.leidas !== sim.lines.length ? ` de ${sim.leidas} leídas en el PDF` : ''}</Text>
             </Group>
             {sim.avisos.length > 0 && <Alert color="orange" variant="light">{sim.avisos.map((a, i) => <Text key={i} size="xs">{a}</Text>)}</Alert>}
-            <ScrollArea.Autosize mah={420}>
-              <Table striped withTableBorder verticalSpacing={4}>
+            <ScrollArea style={{ flex: 1, minHeight: 200 }} type="auto" offsetScrollbars>
+              <Table striped withTableBorder stickyHeader verticalSpacing={4} miw={900}>
                 <Table.Thead>
                   <Table.Tr>
                     <Table.Th><Checkbox checked={sim.lines.every((l) => l.include)} indeterminate={sim.lines.some((l) => l.include) && !sim.lines.every((l) => l.include)}
                       onChange={(e) => { const c = e.currentTarget.checked; setSim({ ...sim, lines: sim.lines.map((l) => ({ ...l, include: c })) }); }} /></Table.Th>
-                    <Table.Th title="Renglón de la OC">#</Table.Th><Table.Th>Artículo en SAP</Table.Th><Table.Th style={{ textAlign: 'right' }}>Cantidad</Table.Th>
+                    <Table.Th title="Renglón de la OC">#</Table.Th><Table.Th style={{ minWidth: 480, width: '55%' }}>Artículo en SAP</Table.Th><Table.Th style={{ textAlign: 'right' }}>Cantidad</Table.Th>
                     <Table.Th style={{ textAlign: 'right' }}>Precio OC</Table.Th><Table.Th style={{ textAlign: 'right' }}>Precio lista</Table.Th>
                     <Table.Th style={{ textAlign: 'right' }}>Total línea</Table.Th>
                   </Table.Tr>
@@ -557,8 +565,9 @@ export default function SalesPdfImport({ companyId, companyName, cardCode, onLoa
                                 </Badge>
                                 {m.candidates.length > 0 ? (
                                   <Select
-                                    size="xs" style={{ flex: 1, minWidth: 220 }} comboboxProps={{ zIndex: 1400, withinPortal: true }} allowDeselect={false}
+                                    size="xs" style={{ flex: 1, minWidth: 320 }} comboboxProps={{ zIndex: 1400, withinPortal: true, width: 'max-content', position: 'bottom-start' }} allowDeselect={false}
                                     aria-label="Artículo sugerido"
+                                    title={(() => { const c = m.candidates.find((x) => x.ItemCode === String(l.ItemCode || '')); return c ? `${c.ItemCode} · ${c.ItemName}` : undefined; })()}
                                     value={String(l.ItemCode || '') || null}
                                     data={m.candidates.map((c) => ({ value: c.ItemCode, label: `${c.ItemCode} · ${c.ItemName}${c.score ? ` (${Math.round(c.score * 100)} %)` : ''}` }))}
                                     onChange={(v) => chooseCandidate(i, v)}
@@ -594,7 +603,7 @@ export default function SalesPdfImport({ companyId, companyName, cardCode, onLoa
                   </Button>
                 </Group>
               )}
-            </ScrollArea.Autosize>
+            </ScrollArea>
             <Group justify="flex-end">
               <Text fw={700}>
                 Total del documento (antes de impuestos): {money(sim.lines.filter((l) => l.include).reduce((a, l) => a + Number(l.Quantity ?? 0) * Number(l.UnitPrice ?? 0), 0))}
