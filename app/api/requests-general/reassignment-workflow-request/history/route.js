@@ -36,7 +36,10 @@ export async function GET(req) {
             wtr.user_removed, urm.name AS user_removed_name,
             wtr.user_new, unw.name AS user_new_name,
             CONVERT(varchar(10), wtr.date_to_return, 23) AS date_to_return,
-            wtr.returned_at, wtr.active
+            wtr.returned_at, wtr.active,
+            CASE WHEN EXISTS (
+                SELECT 1 FROM workflow_task_reassignment_detail wtd WHERE wtd.id_reassignment = wtr.id
+            ) THEN 1 ELSE 0 END AS has_detail
         FROM workflow_task_reassignment wtr
         LEFT JOIN [user] ucb ON ucb.id = wtr.created_by
         LEFT JOIN [user] urm ON urm.id = wtr.user_removed

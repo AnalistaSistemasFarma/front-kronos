@@ -252,7 +252,7 @@ export function evaluateItem(cve: ThreatCve, item: InventoryItem): ItemMatch {
         reason: 'El producto coincide, pero NVD no publica rangos de versión para este CVE: confirmar que la actualización del fabricante esté aplicada.',
       };
     if (relevant.some(isMarketingVersion) && !relevant.some((m) => m.si || m.se || m.ei || m.ee))
-      return { ...base, status: 'revisar', reason: 'NVD identifica el producto por su nombre comercial (por ejemplo «2014»), no por compilación: confirmar con el fabricante.' };
+      return { ...base, status: 'revisar', reason: 'NVD identifica el producto por su nombre comercial (por ejemplo 2014), no por compilación: confirmar con el fabricante.' };
     const low = lowestLowerBound(relevant);
     if (low && compareVersions(item.version, low) < 0)
       return {
@@ -546,9 +546,9 @@ export function parseInventoryInput(body: unknown): InventoryInput {
   const cpe = (clean(b.cpe, 400) ?? '').toLowerCase();
   if (!product) throw new InventoryValidationError('Falta el producto.');
   if (!vendor) throw new InventoryValidationError('Falta el fabricante.');
-  if (!role) throw new InventoryValidationError('Falta el rol del equipo (por ejemplo «Servidor SAP»).');
+  if (!role) throw new InventoryValidationError('Falta el rol del equipo (por ejemplo Servidor SAP).');
   if (!cpe || !validCpeKeys(cpe))
-    throw new InventoryValidationError('La clave CPE debe ser «fabricante:producto» (varias separadas por coma), por ejemplo «apache:tomcat».');
+    throw new InventoryValidationError('La clave CPE debe ser fabricante:producto (varias separadas por coma), por ejemplo apache:tomcat.');
   const version = clean(b.version, 80);
   const keywords = clean(b.keywords, 300);
   const notes = clean(b.notes, 500);

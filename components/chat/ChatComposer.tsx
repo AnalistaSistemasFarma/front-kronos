@@ -35,6 +35,7 @@ import {
   IconLink,
   IconList,
   IconListNumbers,
+  IconMicrophone,
   IconMoodSmile,
   IconPaperclip,
   IconPlus,
@@ -47,6 +48,7 @@ import AgentAvatar from './AgentAvatar';
 import ChatMarkdown from './ChatMarkdown';
 import ComposerLetterFx from './ComposerLetterFx';
 import { MAX_USER_MESSAGE_CHARS } from '../../lib/chat/constants';
+import { clipboardHtmlToMarkdown } from '../../lib/chat/paste-links';
 import {
   MAX_CHAT_ATTACHMENTS_PER_MESSAGE,
   formatBytes,
@@ -54,6 +56,8 @@ import {
 } from '../../lib/chat/attachments';
 import { MAX_UPLOAD_REQUEST_BYTES } from '../../lib/attachments/uploadRules';
 import ChatVoice from './ChatVoice';
+import ChatVoiceRecorderBar from './ChatVoiceRecorderBar';
+import { useVoiceRecorder, type RecordedVoiceNote } from './useVoiceRecorder';
 import ChatExpresiones from './ChatExpresiones';
 import ChatMisStickers from './ChatMisStickers';
 import type { MediaParaEnviar } from './useChatConversation';
@@ -178,7 +182,7 @@ export interface MencionCandidato {
 
 const ChatComposer = forwardRef<ChatComposerHandle, {
   /** Devuelve lo que quiera (p. ej. si el envío tuvo éxito); aquí solo se espera. */
-  onSend: (body: string, files: File[]) => void | Promise<unknown>;
+  onSend: (body: string, files: File[], opciones?: { voiceDurationMs?: number }) => void | Promise<unknown>;
   disabled?: boolean;
   sending?: boolean;
   placeholder?: string;
@@ -459,11 +463,28 @@ const ChatComposer = forwardRef<ChatComposerHandle, {
     (event: React.ClipboardEvent<HTMLTextAreaElement>) => {
       if (disabled) return;
       const pegados = Array.from(event.clipboardData?.files ?? []);
-      if (pegados.length === 0) return;
+      if (pegados.length > 0) {
+        event.preventDefault();
+        addFiles(pegados);
+        return;
+      }
+      // Links copied from Teams, GitHub or a browser carry their URL only in
+      // text/html; text/plain has just the title. Keep it as a Markdown link.
+      const markdown = clipboardHtmlToMarkdown(event.clipboardData?.getData('text/html'));
+      if (!markdown) return;
       event.preventDefault();
-      addFiles(pegados);
+      const el = event.currentTarget;
+      const start = el.selectionStart ?? value.length;
+      const end = el.selectionEnd ?? value.length;
+      const next = value.slice(0, start) + markdown + value.slice(end);
+      const cursor = start + markdown.length;
+      setValue(next);
+      requestAnimationFrame(() => {
+        el.focus();
+        el.setSelectionRange(cursor, cursor);
+      });
     },
-    [addFiles, disabled]
+    [addFiles, disabled, value]
   );
 
   /**
@@ -519,6 +540,19 @@ const ChatComposer = forwardRef<ChatComposerHandle, {
       el.setSelectionRange(cursorStart, cursorEnd);
     });
   }, [value]);
+
+  /* ─────────── Voice notes (2026-11-26, Nicolás, conv 1 msg 41101) ─────────── */
+  const enviarNotaDeVoz = useCallback(
+    async (note: RecordedVoiceNote | null) => {
+      if (!note) return;
+      await onSend('', [note.file], { voiceDurationMs: note.durationMs });
+    },
+    [onSend]
+  );
+  const grabadora = useVoiceRecorder((note) => void enviarNotaDeVoz(note));
+  const grabando = grabadora.state !== 'idle';
+  // Like WhatsApp/Teams: with nothing written, the send slot is the mic.
+  const mostrarMicrofono = !disabled && !sending && value.trim().length === 0 && files.length === 0 && !preview;
 
   const submit = useCallback(async () => {
     if (!canSend) return;
@@ -832,7 +866,28 @@ const ChatComposer = forwardRef<ChatComposerHandle, {
 
   /* Send: filled circle in the accent color, greyed out while there is nothing
      to send. The Enter / Shift+Enter hint lives in its tooltip. */
-  const botonEnviar = (
+  const botonMicrofono = (
+    <Tooltip label='Grabar una nota de voz' withArrow>
+      <ActionIcon
+        className='chat-composer__send chat-composer__send--microfono'
+        size={40}
+        radius='xl'
+        variant='filled'
+        color='blue'
+        onMouseDown={(event) => event.preventDefault()}
+        onClick={() => {
+          grabadora.clearError();
+          void grabadora.start();
+        }}
+        aria-label='Grabar una nota de voz'
+        data-testid='chat-nota-voz-grabar'
+      >
+        <IconMicrophone size={22} stroke={2} />
+      </ActionIcon>
+    </Tooltip>
+  );
+
+  const botonEnviar = mostrarMicrofono ? botonMicrofono : (
     <Tooltip
       label={
         tecladoTactil
@@ -1118,6 +1173,12 @@ const ChatComposer = forwardRef<ChatComposerHandle, {
         </Text>
       )}
 
+      {grabadora.error && (
+        <Text size='xs' c='red' mb={4} role='alert' data-testid='chat-nota-voz-error'>
+          {grabadora.error}
+        </Text>
+      )}
+
       {/* La cita, encima de la caja y cancelable. Va ARRIBA y no dentro de la
           caja para no robarle renglones al texto: el compositor arranca en una
           sola fila y así se queda. */}
@@ -1154,7 +1215,17 @@ const ChatComposer = forwardRef<ChatComposerHandle, {
 
       {barraFormato}
 
-      {pillConExpresiones}
+      {grabando ? (
+        <ChatVoiceRecorderBar
+          elapsedMs={grabadora.elapsedMs}
+          levels={grabadora.levels}
+          starting={grabadora.state === 'starting'}
+          onCancel={grabadora.cancel}
+          onSend={() => void grabadora.stop().then(enviarNotaDeVoz)}
+        />
+      ) : (
+        pillConExpresiones
+      )}
 
       {/* Hoja del celular: ocupa el lugar del teclado, debajo de la caja. */}
       {panelAbiertoEnCelular && (

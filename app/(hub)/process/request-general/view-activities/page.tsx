@@ -1,6 +1,7 @@
 'use client';
 
 import { Suspense, useEffect, useState, useRef, useMemo, useCallback } from 'react';
+import LinkedRequestsList from '../../../../../components/request-general/LinkedRequestsList';
 import { useSearchParams, useRouter } from 'next/navigation';
 import axios from 'axios';
 import JSZip from 'jszip';
@@ -164,6 +165,9 @@ interface Request {
   executor_final: string;
   id_linked_process?: number | null;
   linked_process_label?: string | null;
+  /** 2026-11-26: la tarea admite varias solicitudes vinculadas (una NC por hallazgo); la cierra su responsable. */
+  linked_multiple?: boolean | null;
+  linked_requests_json?: string | null;
   linked_request_id?: number | null;
   linked_request_status?: number | null;
 }
@@ -2052,6 +2056,20 @@ function ViewRequestPage() {
                       Flujo vinculado
                     </Title>
                     <Card withBorder radius='md' p='md' bg='gray.0'>
+                      {request.linked_multiple ? (
+                        <LinkedRequestsList
+                          label={request.linked_process_label || 'vinculado'}
+                          json={request.linked_requests_json}
+                          canCreate={!currentTaskLocked && !isRequestResolved() && !!canEdit && ![2, 3].includes(Number(request.id_status))}
+                          onCreate={() =>
+                            router.push(
+                              `/process/request-general/create-request?linkedProcess=${request.id_linked_process}&originTask=${request.id}&company=${request.id_company}`
+                            )
+                          }
+                          onOpen={(id) => router.push(`/process/request-general/view-request?id=${id}`)}
+                        />
+                      ) : (
+                      <>
                       <Text size='sm' mb='xs'>
                         Esta tarea se completa creando una solicitud del flujo{' '}
                         <b>{request.linked_process_label || 'vinculado'}</b>. La tarea se cerrará
@@ -2103,11 +2121,13 @@ function ViewRequestPage() {
                           Crear solicitud del flujo
                         </Button>
                       )}
+                      </>
+                      )}
                     </Card>
                   </div>
                 )}
 
-                {!request.id_linked_process && (
+                {(!request.id_linked_process || request.linked_multiple) && (
                 <div>
                   <Title order={4} mb='md' className='flex items-center gap-2'>
                     <IconProgress size={18} className='text-blue-6' />
@@ -2146,7 +2166,7 @@ function ViewRequestPage() {
                 </div>
                 )}
 
-                {!request.id_linked_process && <Divider />}
+                {(!request.id_linked_process || request.linked_multiple) && <Divider />}
 
                 <div>
                   <Group justify='space-between' mb='md'>
@@ -2211,7 +2231,7 @@ function ViewRequestPage() {
                           color='blue'
                           onClick={handleStartEditing}
                           leftSection={<IconTicket size={16} />}
-                          disabled={isRequestResolved() || currentTaskLocked || !canEdit || !!request.id_linked_process}
+                          disabled={isRequestResolved() || currentTaskLocked || !canEdit || (!!request.id_linked_process && !request.linked_multiple)}
                         >
                           Editar Tarea
                         </Button>
@@ -2875,7 +2895,7 @@ function ViewRequestPage() {
                   color='blue'
                   onClick={handleStartEditing}
                   leftSection={<IconTicket size={16} />}
-                  disabled={isRequestResolved() || currentTaskLocked || !canEdit || !!request.id_linked_process}
+                  disabled={isRequestResolved() || currentTaskLocked || !canEdit || (!!request.id_linked_process && !request.linked_multiple)}
                 >
                   Editar Tarea
                 </Button>

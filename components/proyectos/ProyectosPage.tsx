@@ -245,7 +245,7 @@ export default function ProyectosPage() {
             </ThemeIcon>
             <Text fw={600}>Proyectos no está habilitado para usted</Text>
             <Text size='sm' c='dimmed' ta='center' maw={420}>
-              Pida a Tecnología el permiso «Proyectos» en Administración → Usuarios, para la empresa donde va a trabajar.
+              Pida a Tecnología el permiso Proyectos en Administración → Usuarios, para la empresa donde va a trabajar.
             </Text>
           </Stack>
         ) : cargando && !datos ? (

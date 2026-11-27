@@ -14,6 +14,7 @@ const h = vi.hoisted(() => ({
   inserts: [] as { id_task: number; id_user: unknown }[],
   notified: [] as unknown[],
   sapRuns: [] as unknown[],
+  optionAssignees: [] as { id_task: number; id_user: string; email: string }[],
 }));
 
 vi.mock('mssql', () => {
@@ -24,6 +25,8 @@ vi.mock('mssql', () => {
       return this;
     }
     async query(q: string) {
+      // Reglas por opción (2026-11-24): responsables según la opción elegida.
+      if (/task_option_assignee/.test(q)) return { recordset: h.optionAssignees };
       if (/FROM requests_general rg/.test(q)) return { recordset: [{ id_process_category: 5, subject_request: 'QA' }] };
       if (/FROM task_condition_option/.test(q)) return { recordset: h.conds };
       if (/FROM request_form_value/.test(q)) return { recordset: h.selected };
@@ -65,6 +68,7 @@ beforeEach(() => {
   h.selected = [];
   h.existing = new Set();
   h.inserts = [];
+  h.optionAssignees = [];
   h.notified = [];
   h.sapRuns = [];
 });
@@ -108,6 +112,17 @@ describe('tareas condicionadas al editar un campo (#805) con Workflow SAP', () =
     expect(created[0]).toMatchObject({ id_task: 12, userId: 'u2', sapExecutor: false });
     expect(h.notified).toHaveLength(1);
     expect(h.sapRuns).toEqual([]);
+  });
+
+  it('reglas por opción: el responsable elegido por la opción (líder del área) reemplaza al de la plantilla', async () => {
+    h.tasks = [{ id_task: 12, task: 'Plan de acción', is_sequential: false, display_order: 1, is_authorization: 0, task_kind: 'normal', id_user: 'u2', email: 'b@x' }];
+    h.conds = [{ id_task: 12, id_option: 5 }];
+    h.selected = [{ id_option: 5 }];
+    h.optionAssignees = [{ id_task: 12, id_user: 'lider-produccion', email: 'lider@x' }];
+    const created = await fireConditionalTasksForRequest({}, { requestId: 7 });
+    await flush();
+    expect(h.inserts).toEqual([{ id_task: 12, id_user: 'lider-produccion' }]);
+    expect(created[0]).toMatchObject({ id_task: 12, userId: 'lider-produccion' });
   });
 
   it('una tarea normal sin responsable se sigue omitiendo; la autorización sin responsable se crea con NULL', async () => {

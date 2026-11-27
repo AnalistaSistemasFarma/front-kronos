@@ -828,7 +828,7 @@ export default function PortalContenido({
                       <p className='portal-th__estado'>
                         {extensiones.length === 0
                           ? 'Todavía no hay extensiones cargadas.'
-                          : `Ninguna extensión coincide con «${busquedaExtension.trim()}».`}
+                          : `Ninguna extensión coincide con ${busquedaExtension.trim()}.`}
                       </p>
                     ) : (
                       <>
@@ -913,7 +913,7 @@ export default function PortalContenido({
                   )}
                   {correosGrupos && busquedaCorreo.trim() && correosFiltrados.length === 0 && (
                     <p className='portal-th__estado'>
-                      Ningún correo coincide con «{busquedaCorreo.trim()}».
+                      Ningún correo coincide con {busquedaCorreo.trim()}.
                     </p>
                   )}
                   {correosGrupos &&

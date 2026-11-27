@@ -262,7 +262,7 @@ function TranscriptModal({ id, onClose }: { id: string | null; onClose: () => vo
               </Group>
               <Text size='xs' c='dimmed'>
                 {data.lines.length} intervenciones
-                {filter ? ` · ${lines.length} con «${filter}»` : ''}
+                {filter ? ` · ${lines.length} con ${filter}` : ''}
               </Text>
               <Stack gap={8}>
                 {lines.map((l, i) => (
@@ -641,8 +641,8 @@ function MeetingsPage() {
         onDone={(r) => {
           const name = links?.projects.find((p) => p.idProject === r.idProject)?.name ?? 'el proyecto';
           const text = r.seriesRule
-            ? `Reunión asignada a «${name}» con toda su serie: las próximas quedarán asignadas solas.`
-            : `Reunión asignada a «${name}». El equipo del proyecto ya la ve en su sección «Reuniones».`;
+            ? `Reunión asignada a ${name} con toda su serie: las próximas quedarán asignadas solas.`
+            : `Reunión asignada a ${name}. El equipo del proyecto ya la ve en su sección Reuniones.`;
           setNotice(text);
           toast.success(text);
           setAssign(null);

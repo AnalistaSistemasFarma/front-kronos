@@ -111,7 +111,7 @@ test('config: HILOS_CONECTORES_AGENTE_* validan rutas y no aceptan el config ais
   assert.throws(() => cargarConfig({ ...base, HILOS_CONECTORES_AGENTE_CONFIG_DIR: conf, HILOS_CONECTORES_AGENTE_ENGRAM_PROYECTO: '../x y' }), /ENGRAM_PROYECTO/);
   const listo = conectoresAgenteListo(cfg);
   assert.match(listo, /^engram, mi-api, playwright \(de /);
-  assert.ok(!listo.includes('llave-secreta'), 'la línea «listo:» no lleva valores');
+  assert.ok(!listo.includes('llave-secreta'), 'la línea listo: no lleva valores');
 });
 
 // ---------- Integración con el puente (correr falso) ----------
@@ -218,4 +218,37 @@ test('engram: el servidor del agente queda fijado a la memoria de su chat (repo 
   assert.match(t, /mem_save/);
   assert.match(t, /NUNCA guarde/);
   assert.doesNotMatch(textoConectoresAgente({ agente: 'Play', servidores: ['playwright'] }), /mem_save/);
+});
+
+test('agent chat MCP denies go to --disallowedTools and are checked in the init event', () => {
+  const d = tmp();
+  const { conf, env, vault } = configAgente(d);
+  const settings = JSON.parse(readFileSync(path.join(conf, 'settings.json'), 'utf8'));
+  settings.permissions = { deny: ['mcp__mi-api__borrar_todo', 'mcp__otro-servidor__x', 'Bash(rm:*)', 'mcp__mi-api__../x'] };
+  writeFileSync(path.join(conf, 'settings.json'), JSON.stringify(settings));
+  writeFileSync(path.join(conf, 'settings.local.json'), JSON.stringify({ permissions: { deny: ['mcp__engram__mem_delete'] } }));
+  const cfg = { hilosDir: path.join(d, 'puente'), conectoresAgente: { configDir: conf, envArchivo: env, proyectoDir: vault, excluir: [] } };
+  const a = prepararConectoresAgente({ cfg, idConversation: 5, perfilServidores: {}, ahora: 2 });
+  assert.deepEqual(a.prohibidas, ['mcp__engram__mem_delete', 'mcp__mi-api__borrar_todo'], 'only MCP rules of servers in the turn');
+  assert.deepEqual(a.herramientas, ['mcp__engram', 'mcp__mi-api', 'mcp__playwright'], 'servers still allowed whole');
+  const perfil = perfilConAgente({ mcpServers: {}, herramientas: [], web: false }, a);
+  const args = armarArgumentos({ perfil, sesion: { id: '11111111-1111-1111-1111-111111111111', nueva: true }, rutaMcp: a.rutaMcp, rutaSistema: '/x/sistema.md' });
+  const dis = args.slice(args.indexOf('--disallowedTools') + 1, args.indexOf('--strict-mcp-config'));
+  assert.ok(dis.includes('mcp__mi-api__borrar_todo') && dis.includes('mcp__engram__mem_delete'));
+  assert.deepEqual(revisarInit({ tools: ['Read', 'mcp__mi-api__leer'], mcp_servers: [{ name: 'mi-api' }] }, perfil), []);
+  assert.deepEqual(revisarInit({ tools: ['mcp__mi-api__borrar_todo'], mcp_servers: [{ name: 'mi-api' }] }, perfil), ['herramienta negada en el chat del agente: mcp__mi-api__borrar_todo']);
+  assert.match(textoConectoresAgente({ agente: 'Play', servidores: a.servidores, denegadas: a.prohibidas }), /bloqueadas: `mcp__engram__mem_delete`/);
+  // Unreadable settings: fails closed (the caller runs the turn without the agent connectors).
+  writeFileSync(path.join(conf, 'settings.local.json'), '{ no json');
+  assert.throws(() => prepararConectoresAgente({ cfg, idConversation: 5, perfilServidores: {}, ahora: 3 }), /settings\.local\.json/);
+});
+
+test('coincideNegada: exact tool, whole server and wildcard', async () => {
+  const { coincideNegada } = await import('../src/conectores-agente.mjs');
+  assert.ok(coincideNegada('mcp__sp__a', 'mcp__sp__a'));
+  assert.ok(coincideNegada('mcp__sp__a', 'mcp__sp'));
+  assert.ok(!coincideNegada('mcp__sp2__a', 'mcp__sp'));
+  assert.ok(coincideNegada('mcp__sp__usuarios_x', 'mcp__sp__usuarios_*'));
+  assert.ok(!coincideNegada('mcp__sp__correo', 'mcp__sp__usuarios_*'));
+  assert.ok(!coincideNegada('mcp__sp__b', 'mcp__sp__a'));
 });

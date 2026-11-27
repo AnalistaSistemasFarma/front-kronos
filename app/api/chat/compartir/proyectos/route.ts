@@ -30,7 +30,7 @@ export async function GET() {
         archived: false,
         project: {
           archived: false,
-          id_company: { in: empresas.map((e) => e.idCompany) },
+          // Multiempresa (2026-11-27): basta ser miembro (con el módulo en alguna empresa).
           members: { some: { id_user: user.id, role: { in: ['owner', 'editor', 'member'] } } },
         },
       },

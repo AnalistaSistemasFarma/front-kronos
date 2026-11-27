@@ -217,7 +217,7 @@ export function normalizarMiembro(
   if (fuera.length > 0 && !opciones.tolerante) return { ok: false, error: `Herramienta fuera del catálogo: ${fuera[0]}.` };
   const noAdmitidas = pedidas.filter((t) => (HERRAMIENTAS_EQUIPO as readonly string[]).includes(t) && !disponibles.includes(t as HerramientaEquipo));
   if (noAdmitidas.length > 0 && !opciones.tolerante) {
-    return { ok: false, error: `El perfil del proyecto no admite «${HERRAMIENTA_INFO[noAdmitidas[0] as HerramientaEquipo].label}».` };
+    return { ok: false, error: `El perfil del proyecto no admite ${HERRAMIENTA_INFO[noAdmitidas[0] as HerramientaEquipo].label}.` };
   }
   const tools = HERRAMIENTAS_EQUIPO.filter((t) => t === 'archivos' || (pedidas.includes(t) && disponibles.includes(t)));
 

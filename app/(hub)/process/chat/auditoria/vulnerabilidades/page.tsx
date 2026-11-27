@@ -124,7 +124,7 @@ export default function VulnerabilidadesPage() {
       });
       const j = await r.json();
       if (!r.ok) throw new Error(j?.error ?? "No se pudo guardar.");
-      setAviso(`${h.vulnId} en ${h.paquete}: «${ESTADOS_VULN[estado]}».`);
+      setAviso(`${h.vulnId} en ${h.paquete}: ${ESTADOS_VULN[estado]}.`);
       window.scrollTo({ top: 0, behavior: "smooth" });
       await cargar();
     } catch (e) {

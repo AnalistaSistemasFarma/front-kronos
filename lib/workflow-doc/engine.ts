@@ -1,4 +1,5 @@
 import sql from 'mssql';
+import { logFlowChange } from '../workflow/flowChangeLog';
 import sqlConfig from '../../dbconfig.js';
 import { prisma } from '../prisma';
 import { useGetMicrosoftToken as getMicrosoftToken } from '../../components/microsoft-365/useGetMicrosoftToken';
@@ -9,6 +10,8 @@ import {
   listOneDriveFolderFileNames,
   uniqueOneDriveFileName,
   uploadFileToOneDriveFolder,
+  listOneDriveFolderFiles,
+  downloadOneDriveItemContent,
 } from '../onedrive/graphFolderUpload';
 import { sanitizeOneDriveName } from '../onedriveName';
 import { downloadSgcFile, sgcOfficeConverter } from '../sgc/onedrive';
@@ -22,6 +25,7 @@ import { finishStep, startStep, type TriggeredBy } from '../workflow-sap/executi
 import { buildFileName, buildMarkerCatalog, resolveMarkerValues, type DocFormValue } from './fields';
 import { fillHtml } from './fillHtml';
 import { fillDocx } from './fillDocx';
+import { MAX_IMAGES, appendImagesToPdf, isAppendableImage } from './appendImages';
 
 /**
  * Motor de las tareas «Plantilla de documento» (task_kind = 'doc_template').
@@ -66,6 +70,8 @@ export interface DocTemplateConfig {
   output: 'pdf' | 'pdf_docx';
   mode: 'auto' | 'revisar';
   file_name_pattern: string | null;
+  /** 2026-11-26: anexar al PDF las imágenes adjuntas de la solicitud. */
+  append_images?: boolean | null;
   active: boolean;
   updated_by: string | null;
   updated_at: Date | null;
@@ -79,7 +85,7 @@ export async function getDocTemplateConfig(idTask: number): Promise<DocTemplateC
   const p = await pool();
   const r = await p.request().input('t', sql.Int, idTask).query<DocTemplateConfig>(`
     SELECT id, id_task, engine, source, id_sgc_document, id_sgc_version, source_item_id, source_file_name,
-           template_html, fields_json, output, mode, file_name_pattern, active, updated_by, updated_at
+           template_html, fields_json, output, mode, file_name_pattern, append_images, active, updated_by, updated_at
     FROM dbo.task_doc_template WHERE id_task = @t;`);
   return r.recordset[0] ?? null;
 }
@@ -160,6 +166,41 @@ export async function checkSgcSource(cfg: Pick<DocTemplateConfig, 'source' | 'id
   return `${doc.code} v${v?.version_number ?? '?'} (SGC)`;
 }
 
+/**
+ * 2026-11-24 (Calidad OLP: «si el documento se actualiza en el SGC, se actualiza en los módulos»): a Word template taken
+ * from the SGC FOLLOWS the current version on its own. If the SGC document is no longer current, the task stays blocked.
+ * Returns the configuration to use now and, if it moved to a newer version, that version to save after a clean fill.
+ */
+export async function followCurrentSgcVersion(cfg: DocTemplateConfig): Promise<{ cfg: DocTemplateConfig; followedTo: { versionNumber: number; code: string } | null }> {
+  if (cfg.source !== 'sgc' || cfg.engine !== 'word' || !cfg.id_sgc_document) return { cfg, followedTo: null };
+  const doc = await prisma.sgcDocument.findUnique({ where: { id_document: cfg.id_sgc_document }, select: { code: true, status: true, current_version_id: true } });
+  if (!doc || doc.status !== 'vigente' || !doc.current_version_id || doc.current_version_id === cfg.id_sgc_version) return { cfg, followedTo: null };
+  const v = await prisma.sgcDocumentVersion.findUnique({
+    where: { id_document_version: doc.current_version_id },
+    select: { id_document_version: true, version_number: true, source_item_id: true, source_file_name: true },
+  });
+  // Without its Word original the current version cannot be filled: stays blocked as before.
+  if (!v?.source_item_id || !/\.docx$/i.test(v.source_file_name ?? '')) return { cfg, followedTo: null };
+  return {
+    cfg: { ...cfg, id_sgc_version: v.id_document_version, source_item_id: v.source_item_id, source_file_name: v.source_file_name },
+    followedTo: { versionNumber: v.version_number, code: doc.code },
+  };
+}
+
+async function saveFollowedVersion(cfg: DocTemplateConfig, followedTo: { versionNumber: number; code: string }) {
+  const p = await pool();
+  await p
+    .request()
+    .input('id', sql.Int, cfg.id)
+    .input('v', sql.Int, cfg.id_sgc_version)
+    .input('item', sql.NVarChar(200), cfg.source_item_id)
+    .input('name', sql.NVarChar(260), cfg.source_file_name)
+    .query(`UPDATE dbo.task_doc_template SET id_sgc_version = @v, source_item_id = @item, source_file_name = @name, updated_by = N'sistema (versión vigente del SGC)', updated_at = GETDATE() WHERE id = @id;`);
+  const t = await p.request().input('t', sql.Int, cfg.id_task).query<{ id_process_category: number; task: string }>('SELECT id_process_category, task FROM task_process_category WHERE id = @t;');
+  const row = t.recordset[0];
+  if (row) await logFlowChange(row.id_process_category, 'sistema@synerlink', 'plantilla', `Tarea ${row.task}: pasó sola a ${followedTo.code} v${followedTo.versionNumber} (versión vigente del SGC).`);
+}
+
 async function graphToken(): Promise<string> {
   const t = await getMicrosoftToken();
   if (!t) throw new DocTemplateError('No se pudo obtener el token de OneDrive.', 502);
@@ -191,6 +232,8 @@ export interface RenderedDocument {
 export async function renderDocument(cfg: DocTemplateConfig, idRequest: number, idTaskRequest: number | null, editedHtml?: string | null): Promise<RenderedDocument> {
   const info = await loadRequestInfo(idRequest);
   if (!info) throw new DocTemplateError('Solicitud no encontrada.', 404);
+  const followed = await followCurrentSgcVersion(cfg);
+  cfg = followed.cfg;
   const sourceLabel = await checkSgcSource(cfg);
   const fields = await loadFormValues(idRequest);
   const catalog = buildMarkerCatalog(fields);
@@ -214,6 +257,16 @@ export async function renderDocument(cfg: DocTemplateConfig, idRequest: number, 
   if (!cfg.source_item_id) throw new DocTemplateError('La plantilla no tiene el Word de origen.');
   const bytes = await downloadSgcFile(cfg.source_item_id);
   const r = fillDocx(bytes, catalog, values);
+  if (followed.followedTo) {
+    // The new version is used only if every mark still has its field; otherwise the flow editors adjust the template.
+    if (r.unknown.length) {
+      throw new DocTemplateError(
+        `La versión vigente v${followed.followedTo.versionNumber} de ${followed.followedTo.code} trae marcas que el flujo no tiene (${r.unknown.slice(0, 5).join(', ')}): los editores del flujo deben ajustar la plantilla.`,
+        409
+      );
+    }
+    await saveFollowedVersion(cfg, followed.followedTo);
+  }
   return { fileBase, html: null, docx: r.bytes, unknown: r.unknown, sourceLabel };
 }
 
@@ -234,6 +287,22 @@ export interface EmittedDocument {
   pdfItemId: string;
   docxItemId: string | null;
   unknown: string[];
+}
+
+async function appendRequestImages(token: string, idRequest: number, pdf: Uint8Array): Promise<Uint8Array> {
+  try {
+    const files = await listOneDriveFolderFiles(token, [oneDriveRoot(), 'TEC', 'SG', `Request-${idRequest}`]);
+    const images: { name: string; bytes: Uint8Array }[] = [];
+    for (const f of files.filter((x) => isAppendableImage(String(x.name))).slice(0, MAX_IMAGES)) {
+      const d = await downloadOneDriveItemContent(token, String(f.id));
+      if (d) images.push({ name: String(f.name), bytes: new Uint8Array(d.buffer) });
+    }
+    return await appendImagesToPdf(pdf, images);
+  } catch (e) {
+    // The document is still produced without the annex.
+    console.error('[workflow-doc] no se pudieron anexar las imágenes de la solicitud', idRequest, e);
+    return pdf;
+  }
 }
 
 async function insertNote(idRequest: number, note: string, author: string | null): Promise<void> {
@@ -274,6 +343,8 @@ export async function emitDocument(params: EmitParams): Promise<EmittedDocument>
       pdf = await sgcOfficeConverter.bytes(`${oneDriveRoot()}/TEC/${DOC_TEMPLATES_FOLDER}`, `${rendered.fileBase}.docx`, docx);
     }
   }
+  // 2026-11-26: anexo con las imágenes adjuntas de la solicitud (p. ej. evidencias del informe de auditoría).
+  if (cfg.append_images) pdf = await appendRequestImages(token, params.idRequest, pdf);
   const pdfUp = await uploadToRequest(token, params.idRequest, fileName, pdf, 'application/pdf');
   fileName = pdfUp.name;
 
@@ -303,7 +374,7 @@ export async function emitDocument(params: EmitParams): Promise<EmittedDocument>
   const missing = rendered.unknown.length ? ` Marcas sin campo (quedaron vacías): ${rendered.unknown.join(', ')}.` : '';
   await insertNote(
     params.idRequest,
-    `Documento generado «${fileName}» (versión ${row.version}) desde la plantilla ${rendered.sourceLabel}.${missing}`,
+    `Documento generado ${fileName} (versión ${row.version}) desde la plantilla ${rendered.sourceLabel}.${missing}`,
     params.actorUserId ?? info?.note_author ?? null
   );
   const step = await startStep({
@@ -427,7 +498,7 @@ async function complete(task: PendingDocTask, idRequest: number, resolution: str
       await closeRequestGeneral(p, {
         requestId: idRequest,
         closedByUserId: null,
-        resolution: `Cerrada automáticamente al generar el documento de la tarea «${task.task}».`,
+        resolution: `Cerrada automáticamente al generar el documento de la tarea ${task.task}.`,
       });
     }
   }
@@ -439,7 +510,7 @@ async function markError(idRequest: number, task: PendingDocTask, error: string,
     idTaskRequest: task.id,
     idTask: task.id_task,
     stepKind: 'system',
-    stepName: `Tarea «${task.task}» quedó en error`,
+    stepName: `Tarea ${task.task} quedó en error`,
     actionKey: 'doc_template.emit',
     triggerEvent: 'on_execute',
     triggeredBy,

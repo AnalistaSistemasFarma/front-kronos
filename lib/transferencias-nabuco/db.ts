@@ -187,11 +187,11 @@ export function validarEntradaConfig(b: Record<string, unknown>, esNueva: boolea
   }
   const ruta_token = texto(b.ruta_token, 200, 'La ruta de token') ?? DEFAULTS.rutaToken;
   const ruta_solicitudes = texto(b.ruta_solicitudes, 200, 'La ruta de solicitudes') ?? DEFAULTS.rutaSolicitudes;
-  if (!RUTA_RE.test(ruta_token) || !RUTA_RE.test(ruta_solicitudes)) throw new NabucoError('Las rutas de Nabuco deben empezar por «/» y no llevar espacios.');
+  if (!RUTA_RE.test(ruta_token) || !RUTA_RE.test(ruta_solicitudes)) throw new NabucoError('Las rutas de Nabuco deben empezar por / y no llevar espacios.');
   const entidad_sap = String(b.entidad_sap ?? DEFAULTS.entidad);
   if (!esEntidadValida(entidad_sap)) throw new NabucoError('Entidad SAP no válida.');
   const desde_fecha = texto(b.desde_fecha, 10, 'La fecha');
-  if (desde_fecha && !/^\d{4}-\d{2}-\d{2}$/.test(desde_fecha)) throw new NabucoError('La fecha «enviar desde» debe tener formato AAAA-MM-DD.');
+  if (desde_fecha && !/^\d{4}-\d{2}-\d{2}$/.test(desde_fecha)) throw new NabucoError('La fecha enviar desde debe tener formato AAAA-MM-DD.');
   const marcar_udf = Boolean(b.marcar_udf);
   const udf_campo = texto(b.udf_campo, 100, 'El campo UDF');
   const udf_valor = texto(b.udf_valor, 100, 'El valor UDF');
@@ -206,7 +206,7 @@ export function validarEntradaConfig(b: Record<string, unknown>, esNueva: boolea
   const cron = texto(b.cron_expression, 100, 'La expresión cron') ?? DEFAULTS.cron;
   if (cron.split(/\s+/).length !== 5) throw new NabucoError('La expresión cron debe tener 5 campos.');
   const filtro = texto(b.filtro_odata, 1000, 'El filtro OData');
-  if (filtro && /[\r\n&?#]/.test(filtro)) throw new NabucoError('El filtro OData no puede contener «&», «?», «#» ni saltos de línea.');
+  if (filtro && /[\r\n&?#]/.test(filtro)) throw new NabucoError('El filtro OData no puede contener &, ?, # ni saltos de línea.');
   let mapeo_encabezado: FilaMapeo[];
   let mapeo_lineas: FilaMapeo[];
   try {

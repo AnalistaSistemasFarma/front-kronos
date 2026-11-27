@@ -156,7 +156,7 @@ export function SapsendConsumers({ logins, companyByDb }: { logins: SapsendLogin
               {personSource(l) ? ` (${personSource(l)})` : ''}
             </div>
           ))}
-          {personal.length > 6 && <div>y {personal.length - 6} más (filtre por «Personas»).</div>}
+          {personal.length > 6 && <div>y {personal.length - 6} más (filtre por Personas).</div>}
         </Alert>
       )}
 
@@ -166,7 +166,7 @@ export function SapsendConsumers({ logins, companyByDb }: { logins: SapsendLogin
             <h3 className={styles.cardTitle}>Quién consume más</h3>
             <p className={styles.cardHint}>
               Ordenado por CPU del SQL Server que gastan sus sesiones en las bases SAPSEND (equipo + usuario SQL).
-              «Acumulado» cuenta desde que cada sesión se conectó; «Ahora» solo desde la actualización anterior.
+              Acumulado cuenta desde que cada sesión se conectó; Ahora solo desde la actualización anterior.
             </p>
           </div>
           <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>

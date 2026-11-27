@@ -45,7 +45,7 @@ export function errorSinReintento(texto) {
 
 /** Mensaje final cuando ni el reintento automático pudo responder. */
 export const TEXTO_ERROR_FINAL =
-  'No pude completar la respuesta por un error del asistente, ni siquiera al reintentarlo automáticamente. Tecnología quedó con el registro. Escríbame «continúa» en unos minutos y retomo desde donde quedé (no se pierde lo avanzado).';
+  'No pude completar la respuesta por un error del asistente, ni siquiera al reintentarlo automáticamente. Tecnología quedó con el registro. Escríbame continúa en unos minutos y retomo desde donde quedé (no se pierde lo avanzado).';
 
 /**
  * Línea del encabezado de sistema: el tope del turno y cómo dejar el avance a salvo.
@@ -55,7 +55,7 @@ export function textoTiempoTurno({ topeMs, avisoMs = 0 }) {
   if (!topeMs) return '';
   return [
     `- TIEMPO: cada turno tiene un máximo de ${duracionLegible(topeMs)}; si se cumple, el puente detiene el proceso.${avisoMs ? ` Mientras trabaja, el puente le avisa a la persona en el hilo cada ${duracionLegible(avisoMs)} que usted sigue en ello (no lo haga usted).` : ''}`,
-    '  En tareas grandes, guarde el avance en ./trabajo a medida que avanza (no todo al final) y escriba de vez en cuando una frase corta de lo que va haciendo: si el turno se corta, eso es lo que la persona ve, y la sesión conserva su avance para cuando escriba «continúa».',
+    '  En tareas grandes, guarde el avance en ./trabajo a medida que avanza (no todo al final) y escriba de vez en cuando una frase corta de lo que va haciendo: si el turno se corta, eso es lo que la persona ve, y la sesión conserva su avance para cuando escriba continúa.',
     TEXTO_ESPERAS,
   ].join('\n');
 }
@@ -90,7 +90,7 @@ export function textoAvisoProgreso({ transcurridoMs, topeMs, actividad = null, u
   const lineas = [`⏳ Sigo trabajando en su pedido (lleva ${duracionLegible(transcurridoMs)}${topeMs ? `; el máximo por turno es ${duracionLegible(topeMs)}` : ''}). Le aviso al terminar.`];
   const avance = lineaCorta(ultimoTexto ?? '');
   const ahora = typeof actividad === 'string' ? actividad.trim() : '';
-  if (avance) lineas.push(`_Lo último: «${avance}»_`);
+  if (avance) lineas.push(`_Lo último: ${avance}_`);
   else if (ahora && ahora !== 'Pensando…' && ahora !== 'Trabajando…') lineas.push(`_Ahora: ${ahora}_`);
   return lineas.join('\n\n');
 }
@@ -150,7 +150,7 @@ export function textoCorte({ motivo, transcurridoMs, topeMs = null, presupuestoU
         : `⚠️ El trabajo se interrumpió por un error del asistente antes de terminar (llevaba ${duracionLegible(transcurridoMs)}).`;
   const lineas = [cabecera, '', '**Lo que alcancé a hacer:**'];
   const avance = lineaCorta(ultimoTexto ?? '', 400);
-  if (avance) lineas.push(`- Último avance: «${avance}»`);
+  if (avance) lineas.push(`- Último avance: ${avance}`);
   if (archivos.length > 0) {
     const muestra = archivos.slice(0, 10).map((a) => `\`${a}\``).join(', ');
     lineas.push(`- Archivos que creé o modifiqué: ${muestra}${archivos.length > 10 ? ` y ${archivos.length - 10} más` : ''}.`);
@@ -158,7 +158,7 @@ export function textoCorte({ motivo, transcurridoMs, topeMs = null, presupuestoU
   if (!avance && archivos.length === 0) lineas.push('- No alcancé a dejar texto ni archivos visibles; el trabajo estaba en curso (consultas y lecturas).');
   lineas.push(
     '',
-    'El avance no se pierde: la sesión de esta conversación lo conserva, igual que los archivos de `./trabajo`. Escriba **«continúa»** y retomo desde donde quedé.'
+    'El avance no se pierde: la sesión de esta conversación lo conserva, igual que los archivos de `./trabajo`. Escriba **continúa** y retomo desde donde quedé.'
   );
   return lineas.join('\n');
 }

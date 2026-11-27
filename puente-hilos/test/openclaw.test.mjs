@@ -186,7 +186,7 @@ const contexto = {
 test('encabezado: nombre, miembros, archivos con ruta absoluta, contexto, trabajo, tope e instrucciones', () => {
   const rutas = rutasDelHilo('/area', 21, 48);
   const t = textoEncabezadoOpenclaw({ agente: 'Duo', contexto, rutas, idConversation: 48, topeMs: 3_600_000, avisoMs: 600_000 });
-  assert.match(t, /PROYECTO «Duo — prueba del puente openclaw»/);
+  assert.match(t, /PROYECTO Duo — prueba del puente openclaw/);
   assert.match(t, /Miembros \(leen este hilo\): Nicolás Rivera/);
   assert.ok(t.includes('/area/proyectos/21/archivos/5-base.csv'));
   assert.ok(t.includes('/area/proyectos/21/conversaciones/48/contexto/cronograma.md'));
@@ -357,7 +357,7 @@ test('turno openclaw: contexto en el mensaje, sesión propia, adjunta + archiva,
   assert.match(clave, /^proyecto-pruebas-c48-[0-9a-f]{8}$/);
   assert.equal(c.args[c.args.indexOf('--agent') + 1], 'duo');
   assert.equal(c.timeoutMs, 60_000);
-  assert.match(c.mensaje, /PROYECTO «Duo — prueba del puente openclaw»/);
+  assert.match(c.mensaje, /PROYECTO Duo — prueba del puente openclaw/);
   assert.match(c.mensaje, /Hágame el resumen/);
   assert.ok(c.mensaje.includes(path.join(dir, 'proyectos', '21', 'conversaciones', '48', 'adjuntos', '501-base.xlsx')));
   assert.ok(existsSync(path.join(dir, 'proyectos', '21', 'archivos', '5-base.csv')), 'archivos del proyecto bajados');
@@ -409,7 +409,7 @@ test('turno openclaw cortado por tiempo: mensaje de corte, sesión conservada; e
   const r = s.llamadas.find((l) => l[0] === 'responder');
   assert.match(r[2], /Se cumplió el tiempo máximo/);
   assert.match(r[2], /continúa/);
-  assert.equal(estado.sesionDe(48).nueva, false, 'la sesión queda iniciada para «continúa»');
+  assert.equal(estado.sesionDe(48).nueva, false, 'la sesión queda iniciada para continúa');
 
   const s2 = synerlinkFalso();
   const { atender: a2 } = crearAtenderOpenclaw({ cfg: cfgOc(tmp()), synerlink: s2, estado: new Estado(tmp()), correr: async () => ({ codigo: 1, abortado: null, stderr: 'gateway closed', salida: null }) });
@@ -474,7 +474,7 @@ test('turno openclaw que cede el turno: espera el resultado dentro del mismo tur
   assert.match(s.llamadas.find((l) => l[0] === 'responder')[2], /Terminé en segundo plano\./);
 });
 
-test('turno openclaw: proyecto de otro perfil de conectores → corre igual (usa sus herramientas); «Sugerir equipo» → error claro', async () => {
+test('turno openclaw: proyecto de otro perfil de conectores → corre igual (usa sus herramientas); Sugerir equipo → error claro', async () => {
   const dir = tmp();
   const s = synerlinkFalso();
   s.contexto = async () => ({ ...contexto, project: { ...contexto.project, profile: { key: 'olp', label: 'OLP' } } });

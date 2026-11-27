@@ -59,7 +59,7 @@ export async function GET(request: NextRequest) {
 
     const archivados = request.nextUrl.searchParams.get('archivados') === '1';
     const data = await listProjectsForUser(user, { archivados });
-    if (!data) return jsonNoStore({ error: 'No tiene el módulo «Proyectos».' }, { status: 404 });
+    if (!data) return jsonNoStore({ error: 'No tiene el módulo Proyectos.' }, { status: 404 });
 
     const porEmpresa = await designableAgents(user.email);
     const designables: ListaProyectosDto['designables'] = {};
@@ -113,7 +113,7 @@ export async function POST(request: NextRequest) {
     // (b) permiso del módulo en esa empresa. Sin él: 404, como si no existiera.
     const empresas = await projectModuleCompanies(user.id);
     if (!empresas.some((e) => e.idCompany === idCompany)) {
-      return jsonNoStore({ error: 'No tiene el módulo «Proyectos» en esa empresa.' }, { status: 404 });
+      return jsonNoStore({ error: 'No tiene el módulo Proyectos en esa empresa.' }, { status: 404 });
     }
 
     // Agentes: asignados a la persona en esa empresa, habilitados y con el perfil.
@@ -148,7 +148,7 @@ export async function POST(request: NextRequest) {
       const esNinguno = typeof pedida === 'object' && pedida?.codeLevel === 'ninguno';
       if (!puede && !esNinguno) {
         return jsonNoStore(
-          { error: 'Solo la administración o quien tenga el permiso «Permisos de agentes en Proyectos» en esa empresa puede dar acceso a código.' },
+          { error: 'Solo la administración o quien tenga el permiso Permisos de agentes en Proyectos en esa empresa puede dar acceso a código.' },
           { status: 403 }
         );
       }

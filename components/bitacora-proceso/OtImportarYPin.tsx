@@ -67,7 +67,7 @@ export function OtImportarOperadores({ company, onImportado }: { company: OtComp
       <Modal opened={abierto} onClose={() => !busy && setAbierto(false)} title={<Text fw={700} size='lg'>Importar operarios</Text>} fullScreen={mobile} size='xl' radius={mobile ? 0 : 'md'}>
         <Stack gap='md'>
           <Text size='sm'>
-            Pegue la lista: <b>una persona por línea</b>, «Nombre completo; documento» (el documento es opcional; también sirve coma o tabulador, por ejemplo copiando dos columnas de Excel).
+            Pegue la lista: <b>una persona por línea</b>, Nombre completo; documento (el documento es opcional; también sirve coma o tabulador, por ejemplo copiando dos columnas de Excel).
             Primero verá la vista previa; los nombres que ya existen no se tocan.
           </Text>
           {error && <Alert color='red' icon={<IconAlertTriangle size={16} />} data-testid='ot-importar-error'>{error}</Alert>}
@@ -168,7 +168,7 @@ export function OtPinsEmpresa({ company }: { company: OtCompanyAccess }) {
         </Alert>
       )}
       <Text size='sm' c='dimmed'>
-        Cada supervisor y jefe de producción configura su propio PIN («Configurar PIN de bitácora», en la pantalla principal del módulo). Aquí solo se ve el estado y se restablece: nadie conoce ni fija el PIN de otra persona.
+        Cada supervisor y jefe de producción configura su propio PIN (Configurar PIN de bitácora, en la pantalla principal del módulo). Aquí solo se ve el estado y se restablece: nadie conoce ni fija el PIN de otra persona.
       </Text>
       <TextInput size='md' placeholder='Buscar persona' leftSection={<IconSearch size={18} />} value={filtro} onChange={(e) => setFiltro(e.currentTarget.value)} />
       {error && <Alert color='red'>{error}</Alert>}

@@ -215,7 +215,7 @@ export function inventoryAlerts(
     for (const c of scan.connectors) {
       if (c.access === 'escritura') {
         const tools = c.writeTools.length ? `: ${c.writeTools.slice(0, 5).join(', ')}${c.writeTools.length > 5 ? '…' : ''}` : '';
-        add('conector-escritura', c.classification === 'synerlink' ? 'info' : 'media', `El conector «${c.name}» puede escribir${tools}.`);
+        add('conector-escritura', c.classification === 'synerlink' ? 'info' : 'media', `El conector ${c.name} puede escribir${tools}.`);
       }
     }
   }
@@ -225,13 +225,13 @@ export function inventoryAlerts(
     const authorized = new Set(client.companyIds);
     for (const company of view.companies) {
       if (!authorized.has(company.id)) {
-        add('empresa-no-autorizada', 'info', `El agente trabaja en «${company.name}», que no está entre las empresas autorizadas del cliente.`);
+        add('empresa-no-autorizada', 'info', `El agente trabaja en ${company.name}, que no está entre las empresas autorizadas del cliente.`);
       }
     }
     const agentCompanies = new Set(view.companies.map((c) => c.id));
     for (const id of client.companyIds) {
       if (!agentCompanies.has(id)) {
-        add('empresa-sin-agente', 'info', `El cliente autoriza «${companyNames.get(id) ?? `empresa ${id}`}», pero el agente no está asignado a esa empresa.`);
+        add('empresa-sin-agente', 'info', `El cliente autoriza ${companyNames.get(id) ?? `empresa ${id}`}, pero el agente no está asignado a esa empresa.`);
       }
     }
     // Conectores con empresa (sapbo-<empresa>, sharepoint-<empresa>…) fuera de lo autorizado.
@@ -244,7 +244,7 @@ export function inventoryAlerts(
       seen.add(n);
       const covered = authorizedNames.some((a) => a && (a === n || a.includes(n) || n.includes(a)));
       if (!covered) {
-        add('empresa-no-autorizada', 'info', `El conector «${c.name}» es de «${c.company}», que no está entre las empresas autorizadas del cliente.`);
+        add('empresa-no-autorizada', 'info', `El conector ${c.name} es de ${c.company}, que no está entre las empresas autorizadas del cliente.`);
       }
     }
   }

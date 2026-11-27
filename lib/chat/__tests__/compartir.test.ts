@@ -55,7 +55,7 @@ describe('enlaceWhatsApp', () => {
     const url = enlaceWhatsApp('Informe & cierre.xlsx');
     expect(url.startsWith('https://wa.me/?text=')).toBe(true);
     const texto = decodeURIComponent(url.slice('https://wa.me/?text='.length));
-    expect(texto).toBe('Le comparto el archivo «Informe & cierre.xlsx».');
+    expect(texto).toBe('Le comparto el archivo Informe & cierre.xlsx.');
     expect(texto).not.toMatch(/https?:|sharepoint|onedrive/i);
   });
 });
@@ -97,8 +97,8 @@ describe('puedeCompartirArchivo', () => {
 
 describe('mensajeReenviado y normalizarBusqueda', () => {
   it('arma la confirmación según el tipo de destino', () => {
-    expect(mensajeReenviado('a.pdf', { tipo: 'persona', titulo: 'Laura' })).toBe('Se reenvió «a.pdf» a Laura.');
-    expect(mensajeReenviado('a.pdf', { tipo: 'grupo', titulo: 'Cierre' })).toBe('Se reenvió «a.pdf» a grupo «Cierre».');
+    expect(mensajeReenviado('a.pdf', { tipo: 'persona', titulo: 'Laura' })).toBe('Se reenvió a.pdf a Laura.');
+    expect(mensajeReenviado('a.pdf', { tipo: 'grupo', titulo: 'Cierre' })).toBe('Se reenvió a.pdf a grupo Cierre.');
     expect(normalizarBusqueda('  Ñandú ÁRBOL ')).toBe('nandu arbol');
   });
 });
@@ -183,7 +183,7 @@ describe('enlaceWhatsAppWeb', () => {
     const url = enlaceWhatsAppWeb('Acta 1.pdf');
     expect(url.startsWith('https://web.whatsapp.com/send?text=')).toBe(true);
     const texto = decodeURIComponent(url.slice('https://web.whatsapp.com/send?text='.length));
-    expect(texto).toBe('Le comparto el archivo «Acta 1.pdf».');
+    expect(texto).toBe('Le comparto el archivo Acta 1.pdf.');
     expect(texto).not.toMatch(/https?:|sharepoint|onedrive/i);
   });
 });

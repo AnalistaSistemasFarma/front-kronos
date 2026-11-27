@@ -99,7 +99,7 @@ function CatalogoActividades({ company }: { company: OtCompanyAccess }) {
     try {
       const siguiente = orden === '' ? (lista.length ? Math.max(...lista.map((a) => a.orden)) + 10 : 10) : Number(orden);
       await otSend('/api/bitacora-proceso/actividades', 'POST', { company: company.idCompany, nombre, orden: siguiente, icono, texto_libre: textoLibre });
-      const text = `Actividad «${nombre.trim()}» agregada.`;
+      const text = `Actividad ${nombre.trim()} agregada.`;
       setMsg({ ok: true, text });
       toast.success(text);
       setNombre('');
@@ -135,8 +135,8 @@ function CatalogoActividades({ company }: { company: OtCompanyAccess }) {
     if (!a || !b) return;
     const oa = a.orden === b.orden ? a.orden + dir : b.orden;
     const ob = a.orden === b.orden ? b.orden : a.orden;
-    await cambiar(a, { orden: oa }, `«${a.nombre}» movida.`);
-    await cambiar(b, { orden: ob }, `«${a.nombre}» movida.`);
+    await cambiar(a, { orden: oa }, `${a.nombre} movida.`);
+    await cambiar(b, { orden: ob }, `${a.nombre} movida.`);
   };
 
   return (
@@ -181,7 +181,7 @@ function CatalogoActividades({ company }: { company: OtCompanyAccess }) {
         Actividades <Badge variant='light' ml={4}>{lista.length}</Badge>
       </Title>
       <Text size='sm' c='dimmed'>
-        Las actividades no se borran: desactive las que ya no se usan. El orden define la posición de los botones en la pantalla de planta. La observación es opcional en todas; en las de «Texto libre» el operario escribe un texto obligatorio (máx. 500 caracteres). Los íconos son de una lista fija; más adelante se podrán cargar pictogramas propios.
+        Las actividades no se borran: desactive las que ya no se usan. El orden define la posición de los botones en la pantalla de planta. La observación es opcional en todas; en las de Texto libre el operario escribe un texto obligatorio (máx. 500 caracteres). Los íconos son de una lista fija; más adelante se podrán cargar pictogramas propios.
       </Text>
       {loading && !data ? (
         <Loader />
@@ -216,7 +216,7 @@ function CatalogoActividades({ company }: { company: OtCompanyAccess }) {
                   label='Activa'
                   checked={a.activo}
                   disabled={busy !== null}
-                  onChange={(e) => cambiar(a, { activo: e.currentTarget.checked }, `«${a.nombre}» ${e.currentTarget.checked ? 'activada' : 'desactivada'}.`)}
+                  onChange={(e) => cambiar(a, { activo: e.currentTarget.checked }, `${a.nombre} ${e.currentTarget.checked ? 'activada' : 'desactivada'}.`)}
                 />
                 <Switch
                   size='lg'
@@ -224,7 +224,7 @@ function CatalogoActividades({ company }: { company: OtCompanyAccess }) {
                   checked={a.texto_libre}
                   disabled={busy !== null}
                   onChange={(e) =>
-                    cambiar(a, { texto_libre: e.currentTarget.checked }, `«${a.nombre}» ${e.currentTarget.checked ? 'ahora pide texto libre' : 'ya no pide texto libre'}.`)
+                    cambiar(a, { texto_libre: e.currentTarget.checked }, `${a.nombre} ${e.currentTarget.checked ? 'ahora pide texto libre' : 'ya no pide texto libre'}.`)
                   }
                   data-testid='ot-catalogo-texto-libre-actividad'
                 />
@@ -236,7 +236,7 @@ function CatalogoActividades({ company }: { company: OtCompanyAccess }) {
                 placeholder='Sin ícono'
                 data={ICONOS_DATA}
                 value={a.icono}
-                onChange={(v) => cambiar(a, { icono: v }, `Ícono de «${a.nombre}» actualizado.`)}
+                onChange={(v) => cambiar(a, { icono: v }, `Ícono de ${a.nombre} actualizado.`)}
                 clearable
                 disabled={busy !== null}
                 leftSection={<OtIconoActividad icono={a.icono} size={20} />}

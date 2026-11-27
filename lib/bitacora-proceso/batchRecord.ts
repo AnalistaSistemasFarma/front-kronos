@@ -1,5 +1,17 @@
 import JSZip from 'jszip';
-import { OT_LIMITS, OT_METODO_LABEL, OT_ROL_LABEL, OT_SIGNIFICADO_CIERRE_JEFE, OT_TURNO_LABEL, type OtTurno } from './constants';
+import {
+  isOtPlanta,
+  isOtTipoPersonal,
+  OT_LIMITS,
+  OT_METODO_LABEL,
+  OT_PLANTA_LABEL,
+  OT_ROL_LABEL,
+  OT_SIGNIFICADO_CIERRE_JEFE,
+  OT_TIPO_PERSONAL_PLURAL,
+  OT_TIPOS_PERSONAL,
+  OT_TURNO_LABEL,
+  type OtTurno,
+} from './constants';
 import type { OrdenDetalle } from './db';
 import { OtError } from './rules';
 import { BATCH_RECORD_PLANTILLA_BASE64 } from './batchRecordPlantilla';
@@ -256,6 +268,24 @@ interface FilaNueva {
 }
 
 /**
+ * FIRMA DEL SUPERVISOR EN CADA TURNO (Farmalógica, 2026-11-26): una bitácora = un turno, y el
+ * batch record impreso lleva la firma a mano de quien CERRÓ ese turno (si sigue abierta, de quien
+ * la abrió). La del jefe de producción va una sola vez, al final (filasFirmaJefe).
+ */
+export function filaFirmaSupervisor(o: OrdenDetalle, e: EstilosBitacora): FilaNueva {
+  const nombre = o.cierre?.nombre ?? o.abiertaPor ?? '';
+  const rol = o.cierre?.como === 'JEFE_PROD' ? 'Cerró (jefe de producción)' : o.cierre ? 'Supervisor que cerró' : 'Supervisor que abrió';
+  return {
+    alto: 42,
+    celdas: [
+      { desde: 1, hasta: 4, texto: `${rol}: ${nombre}`, estilo: e.celda },
+      { desde: 5, hasta: 6, texto: 'Firma:', estilo: e.celda },
+      { desde: 7, hasta: 10, texto: 'Fecha:', estilo: e.celda },
+    ],
+  };
+}
+
+/**
  * FIRMA DEL JEFE DE PRODUCCIÓN al final del Excel (Farmalógica, 2026-11-25): espacio en blanco
  * para firmar a mano el batch record impreso. Nombre (precargado si todas las bitácoras tienen el
  * mismo jefe), firma y fecha; la fila es alta para que quepa la firma.
@@ -297,12 +327,16 @@ export function filasBitacora(ordenes: OrdenDetalle[], e: EstilosBitacora, gener
     filas.push({ alto: Math.max(minimo, Math.ceil(texto.length / porLinea) * 16), celdas: [{ desde: 1, hasta: 10, texto, estilo }] });
   for (const o of ordenes) {
     const turno = OT_TURNO_LABEL[o.turno as OtTurno] ?? o.turno;
-    ancho(`Bitácora ${codigo(o.consecutivo)}${o.sapOpDocNum ? ` · OP ${o.sapOpDocNum}` : ''} · Turno ${turno} · Inicio ${fmtFechaHora(o.abiertaEn)} · Final ${o.cerradaEn ? fmtFechaHora(o.cerradaEn) : 'abierta'}${o.area ? ` · Área ${o.area}` : ''}`, e.seccion, 110, 20);
+    ancho(`Bitácora ${codigo(o.consecutivo)}${isOtPlanta(o.planta) ? ` · ${OT_PLANTA_LABEL[o.planta].toUpperCase()}` : ''}${o.sapOpDocNum ? ` · OP ${o.sapOpDocNum}` : ''} · Turno ${turno} · Inicio ${fmtFechaHora(o.abiertaEn)} · Final ${o.cerradaEn ? fmtFechaHora(o.cerradaEn) : 'abierta'}${(o.areaCatalogo ?? o.area) ? ` · Área ${o.areaCatalogo ?? o.area}` : ''}`, e.seccion, 110, 20);
     const cerro = o.cierre ? `${o.cierre.nombre}${o.cierre.como === 'JEFE_PROD' ? ' (jefe de producción)' : ''}` : 'pendiente';
     // La cuenta que registró (casi siempre la de la tablet) va una vez aquí, no en cada fila.
     const cuentas = [...new Set(o.registros.map((x) => x.usuario))];
     ancho(`Abrió: ${o.abiertaPor} · Cerró: ${cerro} · Jefe de producción: ${o.jefe?.name ?? '—'}${cuentas.length ? ` · Registró en SynerLink: ${cuentas.join(', ')}` : ''}`, e.linea);
-    if (o.operadores.length) ancho(`Operarios: ${o.operadores.map((x) => x.nombre).join(', ')}`, e.linea);
+    // Personal del turno agrupado por tipo (2026-11-26): operarios, mantenimiento e inspectores de calidad.
+    for (const t of OT_TIPOS_PERSONAL) {
+      const del = o.operadores.filter((x) => (isOtTipoPersonal(x.tipo) ? x.tipo : 'OPERARIO') === t);
+      if (del.length) ancho(`${OT_TIPO_PERSONAL_PLURAL[t]}: ${del.map((x) => x.nombre).join(', ')}`, e.linea);
+    }
     if (o.observacionCierre) ancho(`Observación de cierre: ${o.observacionCierre}`, e.linea);
     filas.push({
       alto: 18,
@@ -317,9 +351,13 @@ export function filasBitacora(ordenes: OrdenDetalle[], e: EstilosBitacora, gener
     if (o.registros.length === 0) ancho('Sin registros.', e.linea);
     for (const reg of o.registros) {
       const quien = reg.operador ?? reg.usuario;
-      const obs = reg.observacion ? (reg.textoLibre ? `Texto libre: ${reg.observacion}` : reg.observacion) : '';
+      const base = reg.observacion ? (reg.textoLibre ? `Texto libre: ${reg.observacion}` : reg.observacion) : '';
+      // Notas de corrección (2026-11-26): el registro no cambia; la nota va debajo, con hora y quién.
+      const notas = (reg.notas ?? []).map((n) => `Nota ${fmtHora(n.creadaEn).slice(0, 5)} (${n.usuario}): ${n.texto}`);
+      const obs = [base, ...notas].filter(Boolean).join('\n');
       // Alto según el texto más largo (observación ≈ 30 caracteres por línea; actividad ≈ 48; operario ≈ 34).
-      const lineas = Math.max(1, Math.ceil(obs.length / 30), Math.ceil(reg.actividad.length / 48), Math.ceil(quien.length / 34));
+      const lineasObs = obs.split('\n').reduce((acc, t) => acc + Math.max(1, Math.ceil(t.length / 30)), 0);
+      const lineas = Math.max(1, obs ? lineasObs : 1, Math.ceil(reg.actividad.length / 48), Math.ceil(quien.length / 34));
       filas.push({
         alto: Math.max(17, lineas * 16),
         celdas: [
@@ -332,6 +370,7 @@ export function filasBitacora(ordenes: OrdenDetalle[], e: EstilosBitacora, gener
       });
     }
     ancho(`Vistos buenos — ${o.vistos.map((v) => textoVisto(o, v)).join(' · ')}`, e.linea);
+    filas.push(filaFirmaSupervisor(o, e));
     filas.push({ alto: 9, celdas: [] }); // separación entre bitácoras
   }
   filas.push(...filasFirmaJefe(ordenes, e));
@@ -397,7 +436,9 @@ export async function buildBatchRecordXlsx(enc: BatchRecordEncabezado, ordenes: 
   sheet = ponerTextoCelda(sheet, 'J4', enc.lote);
   sheet = ponerTextoCelda(sheet, 'F6', enc.op);
   sheet = ponerTextoCelda(sheet, 'C7', enc.loteMp);
-  const areas = [...new Set(lista.map((o) => (o.area ?? '').trim()).filter(Boolean))];
+  // Nombre ACTUAL del área en el catálogo (2026-11-26): el formato dice «Envase y grafado» aunque la
+  // bitácora se haya abierto cuando el catálogo decía «agrafado» (la copia de la bitácora no se edita).
+  const areas = [...new Set(lista.map((o) => (o.areaCatalogo ?? o.area ?? '').trim()).filter(Boolean))];
   sheet = ponerTextoCelda(sheet, 'C9', `BITACORA DE AREA ${(areas.join(' / ') || 'ENVASE Y GRAFADO').toUpperCase()}`);
 
   // Filas nuevas desde la 10, con sus celdas combinadas.

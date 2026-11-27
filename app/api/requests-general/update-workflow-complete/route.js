@@ -1,4 +1,5 @@
 import sql from 'mssql';
+import { logFlowChange, requireFlowEditor } from '../../../../lib/workflow/flowAccess';
 import sqlConfig from '../../../../dbconfig.js';
 import { validateTaskAction } from '../../../../lib/workflow-sap/catalog';
 
@@ -61,6 +62,10 @@ export async function POST(req) {
         { status: 400 }
       );
     }
+
+    // 2026-11-24: only who administers flows (and, if restricted, its editors) changes it.
+    const guard = await requireFlowEditor(id_process);
+    if (guard instanceof Response) return guard;
 
     // Determinar qué actualizar basándose en los flags o en la presencia de datos
     const shouldUpdateProcess = updateProcess !== false && (process !== undefined || id_user_assigned !== undefined || is_external !== undefined);
@@ -199,7 +204,7 @@ export async function POST(req) {
           const isDocTask = !taskIsAuthorization && taskKindIn === 'doc_template';
           if (isSapTask && (action === 'create' || action === 'update')) {
             const sapErrors = validateTaskAction({ taskKind: 'sap_executor', actionKey: String(taskSapActionKey || ''), trigger: taskSapTrigger });
-            if (sapErrors.length > 0) throw new Error(`Tarea SAP «${taskName}»: ${sapErrors.join(' ')}`);
+            if (sapErrors.length > 0) throw new Error(`Tarea SAP ${taskName}: ${sapErrors.join(' ')}`);
           }
 
           if (action === 'create') {
@@ -580,6 +585,12 @@ export async function POST(req) {
       }
 
       await transaction.commit();
+      await logFlowChange(
+        Number(id_process),
+        guard.email,
+        'edición',
+        [shouldUpdateProcess && 'datos del flujo', Array.isArray(tasks) && 'tareas', Array.isArray(files) && 'archivos', Array.isArray(formFields) && 'campos'].filter(Boolean).join(', ') || 'sin cambios'
+      );
 
       // Construir mensaje de respuesta
       const messages = [];

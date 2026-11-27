@@ -4,8 +4,8 @@ import { stampControlledCopy } from '../sgc/watermark';
 import type { BiomedAccess } from './access';
 import type { SealImageBytes } from '../orion/annotationStamp';
 import { sha256Hex } from '../sgc/storage';
-import { ACTIVIDAD_INSPECCION, hoyBogota } from './hojaVida';
-import { datosDe, type DatosEquipo } from './inventario';
+import { ACTIVIDAD_INSPECCION, ACTIVIDAD_LIBERACION, hoyBogota } from './hojaVida';
+import { datosDe, moverEquipos, type DatosEquipo } from './inventario';
 import { AnotacionInvalida, MAX_SELLOS, dibujarAnotaciones, leerDatos, normalizarAnotaciones, validarImagenSello, type BiomedAnotacion, type BiomedSello } from './anotaciones';
 
 /**
@@ -332,6 +332,20 @@ export async function closeRegistro(db: BiomedDb, access: BiomedAccess, idRegist
   }
   await db.biomedRegistro.update({ where: { id_biomed_registro: r.id_biomed_registro }, data: { estado: 'cerrado', closed_by: email, closed_at: now, updated_by: email, updated_at: now } });
   await evento(db, access.idCompany, 'registro.cerrado', actor, `${r.equipo}`, r.id_biomed_registro);
+  // 2026-11-26 (Calidad OLP): la LIBERACIÓN tras el acondicionamiento deja el equipo disponible. Si estaba dañado o
+  // faltante, vuelve a bodega (como «Reintegrar», sin cobro); en todo caso queda el evento en su trazabilidad.
+  if (r.formato.actividad === ACTIVIDAD_LIBERACION && r.id_biomed_equipo) {
+    const code = (await db.sgcDocument.findUnique({ where: { id_document: r.id_document }, select: { code: true } }))?.code ?? 'liberación';
+    const motivo = `Liberado tras acondicionamiento: ${code} · registro #${r.id_biomed_registro}`;
+    const eq = await db.biomedEquipo.findFirst({ where: { id_biomed_equipo: r.id_biomed_equipo, id_company: access.idCompany }, select: { estado: true } });
+    if (eq && (eq.estado === 'danado' || eq.estado === 'faltante')) {
+      await moverEquipos(db, access, { accion: 'reintegrar', ids: [r.id_biomed_equipo], observacion: motivo }, actor);
+    }
+    await db.biomedEquipoEvento.create({
+      data: { id_company: access.idCompany, id_biomed_equipo: r.id_biomed_equipo, accion: 'liberacion', despues: JSON.stringify({ registro: r.id_biomed_registro, estado: 'bodega' }), justificacion: motivo, actor_email: email, ip: actor.ip ?? null },
+    });
+    return { closed: true, liberado: true };
+  }
   return { closed: true };
 }
 

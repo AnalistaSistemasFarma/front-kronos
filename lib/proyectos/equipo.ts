@@ -400,12 +400,12 @@ export async function actualizarSubagente(
     for (const a of acciones) {
       const texto =
         a === 'editar'
-          ? `Editó el subagente «${despues.name}».`
+          ? `Editó el subagente ${despues.name}.`
           : a === 'aprobar'
-            ? `Aprobó el subagente «${despues.name}».`
+            ? `Aprobó el subagente ${despues.name}.`
             : a === 'descartar'
-              ? `Descartó el subagente «${despues.name}».`
-              : `Restauró el subagente «${despues.name}» como propuesto.`;
+              ? `Descartó el subagente ${despues.name}.`
+              : `Restauró el subagente ${despues.name} como propuesto.`;
       await registrarEventoEquipo(tx, {
         idProject: project.idProject,
         idSubagent: id,
@@ -591,7 +591,7 @@ export async function entregarSugerencia(agent: { idAgent: number; code: string 
           idProject: pedido.id_project,
           idSubagent: v.id_subagent,
           action: 'descartar',
-          detail: `«${v.name}» quedó descartado: lo reemplazó una sugerencia nueva.`,
+          detail: `${v.name} quedó descartado: lo reemplazó una sugerencia nueva.`,
           idAgent: agent.idAgent,
           via: 'puente',
         });
@@ -623,7 +623,7 @@ export async function entregarSugerencia(agent: { idAgent: number; code: string 
         idProject: pedido.id_project,
         idSubagent: creado.id_subagent,
         action: 'sugerir',
-        detail: `Sugirió el subagente «${v.name}».`,
+        detail: `Sugirió el subagente ${v.name}.`,
         changes: { tools: v.tools, model: v.model },
         idAgent: agent.idAgent,
         via: 'puente',

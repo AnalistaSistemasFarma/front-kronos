@@ -37,7 +37,7 @@ export function requireEmpresa(ctx: NabucoContext, idCompany: number | null, niv
   const ok = a && (nivel === 'admin' ? a.canAdministrar : a.canLeer);
   if (ok) return null;
   const permiso = nivel === 'admin' ? NABUCO_ADMIN_NAME : NABUCO_MODULE_NAME;
-  return jsonNoStore({ error: `No tiene el permiso «${permiso}» en esta empresa. Lo asigna un administrador en Administración → Usuarios.` }, 403);
+  return jsonNoStore({ error: `No tiene el permiso ${permiso} en esta empresa. Lo asigna un administrador en Administración → Usuarios.` }, 403);
 }
 
 export function parseId(raw: unknown): number | null {

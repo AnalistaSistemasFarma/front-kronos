@@ -24,6 +24,8 @@ interface Props {
   cardCode?: string;
   title?: string;
   onSelect?: (row: Row) => void;
+  /** Above another modal (e.g. the PDF simulation, zIndex 1300). */
+  zIndex?: number;
 }
 
 const num = (v: unknown, dec = 0) => (v == null || v === '' ? '—' : Number(v).toLocaleString('es-CO', { maximumFractionDigits: dec }));
@@ -79,7 +81,7 @@ const TITLES: Record<SearchKind, string> = {
   recent_orders: 'Pedidos recientes del cliente',
 };
 
-export default function SalesSearchModal({ opened, onClose, companyId, kind, initialQuery = '', itemCode, cardCode, title, onSelect }: Props) {
+export default function SalesSearchModal({ opened, onClose, companyId, kind, initialQuery = '', itemCode, cardCode, title, onSelect, zIndex = 1200 }: Props) {
   const [q, setQ] = useState(initialQuery);
   const [rows, setRows] = useState<Row[]>([]);
   /** Artículos facturados hace poco al cliente (solo búsqueda de artículos con cliente y sin texto). */
@@ -149,7 +151,7 @@ export default function SalesSearchModal({ opened, onClose, companyId, kind, ini
   const cols = COLUMNS[kind];
 
   return (
-    <Modal opened={opened} onClose={onClose} title={<Text fw={700}>{title ?? TITLES[kind]}</Text>} size="90%" zIndex={1200} centered>
+    <Modal opened={opened} onClose={onClose} title={<Text fw={700}>{title ?? TITLES[kind]}</Text>} size="90%" zIndex={zIndex} centered>
       {searchable && (
         <TextInput
           autoFocus

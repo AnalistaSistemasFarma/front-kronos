@@ -86,7 +86,7 @@ export function ProcessSlaCard({ processId }: { processId: number }) {
             <Group grow align='flex-end'>
               <NumberInput label='Valor' min={1} max={10000} allowDecimal={false} value={value} onChange={setValue} placeholder='Vacío = sin ANS' />
               <Select label='Unidad' data={UNITS} value={unit} onChange={(v) => setUnit(v || 'business_hours')} allowDeselect={false} />
-              <NumberInput label='Aviso «próximo a vencer» (%)' min={1} max={99} allowDecimal={false} value={warn} onChange={setWarn} placeholder='20' />
+              <NumberInput label='Aviso próximo a vencer (%)' min={1} max={99} allowDecimal={false} value={warn} onChange={setWarn} placeholder='20' />
             </Group>
             <Group justify='flex-end'>
               <Button variant='default' size='xs' onClick={() => { setEditing(false); void load(); }}>

@@ -1,4 +1,5 @@
 import { getServerSession } from 'next-auth';
+import { requireFlowEditor } from '../../../../lib/workflow/flowAccess';
 import { NextResponse } from 'next/server';
 import { authOptions } from '../../auth/[...nextauth]/route';
 import { sql, withMssqlPool } from '../../../../lib/mssqlPool';
@@ -21,6 +22,9 @@ export async function POST(req) {
 
     const body = await req.json().catch(() => ({}));
     const { id_origen, empresas, ensayo } = body;
+    // 2026-11-24: a restricted flow is replicated only by its editors (or a system administrator).
+    const guard = await requireFlowEditor(id_origen);
+    if (guard instanceof Response) return guard;
 
     const idOrigen = Number(id_origen);
     if (!Number.isInteger(idOrigen) || idOrigen <= 0) {

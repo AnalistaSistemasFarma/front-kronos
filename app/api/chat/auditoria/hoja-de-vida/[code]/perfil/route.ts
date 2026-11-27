@@ -33,7 +33,7 @@ export async function PUT(request: Request, { params }: { params: Promise<{ code
     if (!user) return unauthorized();
     if (!(await canConfigureAgents(user.email))) {
       return jsonNoStore(
-        { error: 'Editar la hoja de vida requiere el permiso «Auditoría de agentes · Configurar».' },
+        { error: 'Editar la hoja de vida requiere el permiso Auditoría de agentes · Configurar.' },
         { status: 403 }
       );
     }

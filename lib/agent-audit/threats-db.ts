@@ -10,7 +10,7 @@ import type { CpeMatch, InventoryInput, InventoryItem, Severity, ThreatCve } fro
 
 export class ThreatsUnavailable extends Error {
   constructor() {
-    super("La pestaña «Lo más reciente y crítico» aún no está habilitada en este ambiente.");
+    super("La pestaña Lo más reciente y crítico aún no está habilitada en este ambiente.");
   }
 }
 

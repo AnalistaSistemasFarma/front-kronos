@@ -224,7 +224,7 @@ export function resolverComando({ lote, catalogo = { skills: new Map(), excluida
   if (!c.plugin && SKILLS_INCLUIDAS[c.nombre] && negocio && SKILLS_SOLO_DESARROLLO.has(c.nombre)) return noDisponible(motivoSoloDesarrollo(agente ?? undefined));
   if (!c.plugin && SKILLS_INCLUIDAS[c.nombre]) return { accion: 'nativo', nombre: c.nombre, prompt: `/${c.nombre}${argumentosSkill(c.args, adjuntos)}` };
   if (!c.plugin && catalogo.excluidas.has(c.nombre)) return noDisponible(catalogo.excluidas.get(c.nombre));
-  return { accion: 'responder', texto: `No reconozco el comando **${etiqueta}** en los hilos de proyecto.\n\nEscriba **/ayuda** para ver los comandos disponibles. Si quería escribir un texto que empieza por «/», agréguele algo antes (por ejemplo, un espacio o una palabra).` };
+  return { accion: 'responder', texto: `No reconozco el comando **${etiqueta}** en los hilos de proyecto.\n\nEscriba **/ayuda** para ver los comandos disponibles. Si quería escribir un texto que empieza por /, agréguele algo antes (por ejemplo, un espacio o una palabra).` };
 }
 
 /** Argumentos de una skill: lo que escribió la persona y, si adjuntó archivos, dónde están. */
@@ -283,7 +283,7 @@ export function textoObjetivo(objetivo) {
     '',
     '## Objetivo activo de esta conversación (/goal)',
     '',
-    `Fijado por ${objetivo.autor ?? 'una persona del proyecto'} el ${String(objetivo.fijado ?? '').slice(0, 10) || '(sin fecha)'}: «${objetivo.condicion}».`,
+    `Fijado por ${objetivo.autor ?? 'una persona del proyecto'} el ${String(objetivo.fijado ?? '').slice(0, 10) || '(sin fecha)'}: ${objetivo.condicion}.`,
     '- Siga trabajando hacia él en cada turno, dentro de las mismas reglas y permisos de este hilo. Un evaluador revisa al final del turno si ya se cumplió.',
     '- Si no se puede cumplir con lo que tiene (permisos, datos, tiempo) o depende de que una persona haga algo (confirmar, aprobar, responder), dígalo claro y termine el turno con lo que falta, en lugar de dar vueltas.',
   ].join('\n');
@@ -291,7 +291,7 @@ export function textoObjetivo(objetivo) {
 
 /** Encabezado del turno (va antes de los mensajes) cuando hay objetivo activo. */
 export function encabezadoObjetivo(objetivo) {
-  return objetivo?.condicion ? `🎯 Objetivo activo de esta conversación (/goal): «${objetivo.condicion}»\n\n---\n\n` : '';
+  return objetivo?.condicion ? `🎯 Objetivo activo de esta conversación (/goal): ${objetivo.condicion}\n\n---\n\n` : '';
 }
 
 /**

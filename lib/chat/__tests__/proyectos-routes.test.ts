@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
  *   - un NO miembro recibe 404 en TODAS (no se confirma que el proyecto exista);
  *   - un lector lee, pero no escribe, no vincula ni carga archivos (403);
  *   - un editor no administra (403);
- *   - el dueño solo invita a quien tiene el permiso del módulo en la empresa.
+ *   - el dueño solo invita a quien tiene el permiso del módulo en alguna empresa.
  */
 const sessionUser = vi.hoisted(() => vi.fn());
 const resolveProject = vi.hoisted(() => vi.fn());
@@ -166,11 +166,12 @@ describe('un EDITOR', () => {
 describe('el DUEÑO', () => {
   beforeEach(() => resolveProject.mockResolvedValue(proyecto('owner')));
 
-  it('solo invita a quien tiene el permiso del módulo en la empresa del proyecto', async () => {
+  it('solo invita a quien tiene el permiso del módulo en alguna empresa (multiempresa)', async () => {
     eligible.mockResolvedValue([{ id: 'u2' }]);
     const r = await invitar(req('/api/proyectos/7/miembros', json('POST', { idUsers: ['u2', 'u-sin-permiso'], role: 'reader' })), params());
     expect(r.status).toBe(409);
-    expect(eligible).toHaveBeenCalledWith(3, ['u2', 'u-sin-permiso'], 7);
+    // Ni la empresa del proyecto ni sus agentes entran en la regla.
+    expect(eligible).toHaveBeenCalledWith({ ids: ['u2', 'u-sin-permiso'] });
     expect(createMembers).not.toHaveBeenCalled();
   });
 

@@ -86,5 +86,5 @@ export function empresaParam(url: string): number | null {
  */
 export function agenteApagado(): NextResponse | null {
   if (agenteCorreoHabilitado()) return null;
-  return jsonNoStore({ error: '«Consultar a un agente» no está habilitado en este ambiente.' }, 403);
+  return jsonNoStore({ error: 'Consultar a un agente no está habilitado en este ambiente.' }, 403);
 }

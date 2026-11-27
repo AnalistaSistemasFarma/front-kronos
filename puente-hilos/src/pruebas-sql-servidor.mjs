@@ -68,13 +68,13 @@ export async function abrirSesion({ driver, sec, modo, timeoutMs }) {
   try {
     const r0 = await pool.request().query('SELECT DB_NAME() AS db');
     const db0 = r0?.recordset?.[0]?.db;
-    if (String(db0).toUpperCase() !== BASE_PRUEBAS) throw new ErrorGuarda(`la conexión quedó en «${db0}», no en KRONOSDB_PRUEBAS: se aborta`);
+    if (String(db0).toUpperCase() !== BASE_PRUEBAS) throw new ErrorGuarda(`la conexión quedó en ${db0}, no en KRONOSDB_PRUEBAS: se aborta`);
     await pool.request().batch(`EXECUTE AS USER = N'${usuario}' WITH NO REVERT;`);
     const verificar = async () => {
       const r = await pool.request().query('SELECT DB_NAME() AS db, USER_NAME() AS u');
       const f = r?.recordset?.[0] ?? {};
-      if (String(f.db).toUpperCase() !== BASE_PRUEBAS) throw new ErrorGuarda(`la sesión está en «${f.db}», no en KRONOSDB_PRUEBAS: se aborta`);
-      if (String(f.u).toLowerCase() !== usuario) throw new ErrorGuarda(`la sesión no está suplantada como ${usuario} (está como «${f.u}»): se aborta`);
+      if (String(f.db).toUpperCase() !== BASE_PRUEBAS) throw new ErrorGuarda(`la sesión está en ${f.db}, no en KRONOSDB_PRUEBAS: se aborta`);
+      if (String(f.u).toLowerCase() !== usuario) throw new ErrorGuarda(`la sesión no está suplantada como ${usuario} (está como ${f.u}): se aborta`);
     };
     await verificar();
     return { pool, verificar, cerrar, usuario };

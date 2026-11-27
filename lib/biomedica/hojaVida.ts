@@ -131,8 +131,8 @@ export function checklistDe(raw: unknown): ItemChequeo[] {
     if (vistos.has(item.toLowerCase())) throw new SgcError(`Ítem repetido en la lista de chequeo: ${item}.`, 400);
     vistos.add(item.toLowerCase());
     const resultado = String(o.resultado ?? '') as ResultadoChequeo;
-    if (!RESULTADOS_CHEQUEO.includes(resultado)) throw new SgcError(`Marque el resultado de «${item}» (OK, No OK o N/A).`, 400);
-    out.push({ item, resultado, nota: textoOpcional(o.nota, `Nota de «${item}»`, 300) });
+    if (!RESULTADOS_CHEQUEO.includes(resultado)) throw new SgcError(`Marque el resultado de ${item} (OK, No OK o N/A).`, 400);
+    out.push({ item, resultado, nota: textoOpcional(o.nota, `Nota de ${item}`, 300) });
   }
   return out;
 }
@@ -413,4 +413,53 @@ ${h.registros.length ? `<table><thead><tr><th>Formato</th><th>Actividad</th><th>
 ${h.historial.length ? `<table><thead><tr><th>Fecha</th><th>Acción</th><th>Justificación</th><th>Quién</th></tr></thead><tbody>${hist}</tbody></table>` : '<p>Sin movimientos.</p>'}
 <div class="pie">Generado desde SynerLink por ${esc(meta.generadoPor)} el ${esc(fechaHoraCo(meta.generadoAt.toISOString()))}. Impreso o descargado fuera del sistema es copia no controlada.</div>
 </body></html>`;
+}
+
+// ── Cronograma de mantenimiento (2026-11-26) ───────────────────────────────
+
+export interface CronogramaItem {
+  id: number;
+  serie: string;
+  equipo: string;
+  modelo: string | null;
+  cliente: string | null;
+  estado: EstadoEquipo;
+  proximo: string;
+  vencido: boolean;
+  periodicidadMeses: number;
+}
+
+/**
+ * Cronograma de mantenimiento preventivo (Calidad OLP: «un cuadrito con las fechas en que toca hacerle mantenimiento a
+ * cada equipo»): los equipos con periodicidad, con su próximo preventivo (del último preventivo o del ingreso), vencidos
+ * primero. Con `year`, solo los que caen en ese año (o ya vencidos).
+ */
+export async function cronogramaMantenimiento(db: BiomedDb, access: BiomedAccess, year: number | null = null): Promise<CronogramaItem[]> {
+  puedeUsar(access);
+  const equipos = await db.biomedEquipo.findMany({
+    where: { id_company: access.idCompany, periodicidad_mant_meses: { not: null } },
+    select: { id_biomed_equipo: true, serie: true, equipo: true, modelo: true, cliente: true, estado: true, fecha_ingreso: true, vida_util_anios: true, periodicidad_mant_meses: true },
+    take: 20000,
+  });
+  if (!equipos.length) return [];
+  const ids = equipos.map((e) => e.id_biomed_equipo);
+  const ultimos = new Map<number, { fecha: Date; proximo: Date | null }>();
+  for (let i = 0; i < ids.length; i += 1000) {
+    const rows = await db.biomedMantenimiento.findMany({
+      where: { id_company: access.idCompany, id_biomed_equipo: { in: ids.slice(i, i + 1000) }, tipo: 'preventivo', estado: 'vigente' },
+      select: { id_biomed_equipo: true, fecha: true, proximo: true },
+      orderBy: { fecha: 'desc' },
+    });
+    for (const r of rows) if (!ultimos.has(r.id_biomed_equipo)) ultimos.set(r.id_biomed_equipo, { fecha: r.fecha, proximo: r.proximo });
+  }
+  const hoy = hoyBogota();
+  const out: CronogramaItem[] = [];
+  for (const e of equipos) {
+    const u = ultimos.get(e.id_biomed_equipo);
+    const f = fichaDe(e, u ? [{ fecha: iso(u.fecha)!, tipo: 'preventivo', estado: 'vigente', proximo: iso(u.proximo) }] : [], hoy);
+    if (!f.proximoMantenimiento) continue;
+    if (year && !f.vencido && !f.proximoMantenimiento.startsWith(String(year))) continue;
+    out.push({ id: e.id_biomed_equipo, serie: e.serie, equipo: e.equipo, modelo: e.modelo, cliente: e.cliente, estado: e.estado as EstadoEquipo, proximo: f.proximoMantenimiento, vencido: f.vencido, periodicidadMeses: e.periodicidad_mant_meses! });
+  }
+  return out.sort((a, b) => Number(b.vencido) - Number(a.vencido) || a.proximo.localeCompare(b.proximo));
 }

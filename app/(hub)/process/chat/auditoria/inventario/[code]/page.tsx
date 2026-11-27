@@ -704,7 +704,7 @@ export default function HojaDeVidaAgentePage() {
                 )}
                 {!datos.puedeConfigurar && (
                   <Text size='xs' c='dimmed' mt={6}>
-                    Para editarlos se necesita el permiso «Auditoría de agentes · Configurar».
+                    Para editarlos se necesita el permiso Auditoría de agentes · Configurar.
                   </Text>
                 )}
               </Card>

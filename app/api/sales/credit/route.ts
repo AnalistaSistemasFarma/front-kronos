@@ -24,7 +24,7 @@ export async function GET(request: NextRequest) {
     const r = await pool.request().input('r', sql.Int, requestId).query(
       `SELECT TOP 1 id_company, doc_entry FROM dbo.sales_authorization WHERE id_request_general = @r
        IF @@ROWCOUNT = 0
-         -- Oferta guardada en borrador (sin flujo todavía): su solicitud está «En Borrador».
+         -- Oferta guardada en borrador (sin flujo todavía): su solicitud está En Borrador.
          SELECT TOP 1 id_company, doc_entry FROM dbo.sales_offer_draft WHERE id_request_general = @r AND status = N'borrador';`
     );
     const sets = (r.recordsets as unknown as Record<string, unknown>[][]) ?? [];

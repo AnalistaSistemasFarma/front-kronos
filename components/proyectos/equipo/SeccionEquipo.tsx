@@ -176,7 +176,7 @@ function FilaCorrida({ c }: { c: CorridaSubagenteDto }) {
           <b>{c.name}</b> · {c.description}
         </Text>
         <Text size='xs' c='dimmed' className={cssP.truncar}>
-          {c.conversation?.title ? `«${c.conversation.title}» · ` : ''}
+          {c.conversation?.title ? `${c.conversation.title} · ` : ''}
           {fechaCorta(c.startedAt)}
         </Text>
       </div>
@@ -430,11 +430,11 @@ export default function SeccionEquipo({ proyecto, version, avisar }: { proyecto:
                   caps.aprobar ? (
                     <>
                       {escritorio ? (
-                        <Button variant='subtle' color='gray' size='xs' leftSection={<IconX size={14} />} loading={ocupado === s.id} onClick={() => void cambiar(s, { action: 'descartar' }, `«${s.name}» descartado.`)} data-testid='equipo-descartar'>
+                        <Button variant='subtle' color='gray' size='xs' leftSection={<IconX size={14} />} loading={ocupado === s.id} onClick={() => void cambiar(s, { action: 'descartar' }, `${s.name} descartado.`)} data-testid='equipo-descartar'>
                           Descartar
                         </Button>
                       ) : (
-                        <ActionIcon variant='default' size={44} radius='md' aria-label={`Descartar «${s.name}»`} loading={ocupado === s.id} onClick={() => void cambiar(s, { action: 'descartar' }, `«${s.name}» descartado.`)} data-testid='equipo-descartar' className={css.descartar}>
+                        <ActionIcon variant='default' size={44} radius='md' aria-label={`Descartar ${s.name}`} loading={ocupado === s.id} onClick={() => void cambiar(s, { action: 'descartar' }, `${s.name} descartado.`)} data-testid='equipo-descartar' className={css.descartar}>
                           <IconX size={18} />
                         </ActionIcon>
                       )}
@@ -443,7 +443,7 @@ export default function SeccionEquipo({ proyecto, version, avisar }: { proyecto:
                       </Button>
                       <Tooltip label={`El equipo admite ${datos.maxEquipo} aprobados.`} disabled={aprobados.length < datos.maxEquipo} withArrow>
                         <div>
-                          <Button color='green' size='xs' leftSection={<IconCheck size={14} />} loading={ocupado === s.id} disabled={aprobados.length >= datos.maxEquipo} onClick={() => void cambiar(s, { action: 'aprobar' }, `«${s.name}» aprobado: el asistente ya puede delegarle trabajo.`)} data-testid='equipo-aprobar'>
+                          <Button color='green' size='xs' leftSection={<IconCheck size={14} />} loading={ocupado === s.id} disabled={aprobados.length >= datos.maxEquipo} onClick={() => void cambiar(s, { action: 'aprobar' }, `${s.name} aprobado: el asistente ya puede delegarle trabajo.`)} data-testid='equipo-aprobar'>
                             Aprobar
                           </Button>
                         </div>
@@ -547,7 +547,7 @@ export default function SeccionEquipo({ proyecto, version, avisar }: { proyecto:
                     </Text>
                   </div>
                   {caps.aprobar && (
-                    <Button variant='subtle' size='xs' leftSection={<IconRestore size={14} />} loading={ocupado === s.id} onClick={() => void cambiar(s, { action: 'restaurar' }, `«${s.name}» volvió a propuestos.`)}>
+                    <Button variant='subtle' size='xs' leftSection={<IconRestore size={14} />} loading={ocupado === s.id} onClick={() => void cambiar(s, { action: 'restaurar' }, `${s.name} volvió a propuestos.`)}>
                       Restaurar
                     </Button>
                   )}
@@ -567,7 +567,7 @@ export default function SeccionEquipo({ proyecto, version, avisar }: { proyecto:
         onClose={() => setEditando(null)}
         onGuardar={async (cambios, aprobar) => {
           if (!editando) return false;
-          const ok = await cambiar(editando, aprobar ? { ...cambios, action: 'aprobar' } : { ...cambios }, aprobar ? `«${cambios.name}» guardado y aprobado.` : 'Cambios guardados. El asistente los usa desde su próxima respuesta.');
+          const ok = await cambiar(editando, aprobar ? { ...cambios, action: 'aprobar' } : { ...cambios }, aprobar ? `${cambios.name} guardado y aprobado.` : 'Cambios guardados. El asistente los usa desde su próxima respuesta.');
           if (ok) setEditando(null);
           return ok;
         }}
@@ -575,7 +575,7 @@ export default function SeccionEquipo({ proyecto, version, avisar }: { proyecto:
       <ConfirmarModal
         opened={retirando !== null}
         titulo='Retirar del equipo'
-        texto={`«${retirando?.name ?? ''}» deja de trabajar para el asistente desde su próxima respuesta. Queda en «Descartados» y se puede restaurar.`}
+        texto={`${retirando?.name ?? ''} deja de trabajar para el asistente desde su próxima respuesta. Queda en Descartados y se puede restaurar.`}
         accion='Retirar'
         color='red'
         cargando={retirando !== null && ocupado === retirando.id}
@@ -583,7 +583,7 @@ export default function SeccionEquipo({ proyecto, version, avisar }: { proyecto:
         onConfirmar={() => {
           const s = retirando;
           if (!s) return;
-          void cambiar(s, { action: 'descartar' }, `«${s.name}» retirado del equipo.`).then(() => setRetirando(null));
+          void cambiar(s, { action: 'descartar' }, `${s.name} retirado del equipo.`).then(() => setRetirando(null));
         }}
       />
     </Stack>

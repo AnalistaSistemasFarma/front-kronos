@@ -2,6 +2,7 @@
 
 export const ACTIVIDAD_INSPECCION = 'Inspección de equipos biomédicos nuevos';
 export const ACTIVIDAD_HOJA_VIDA = 'Elaboración y actualización de hojas de vida';
+export const ACTIVIDAD_LIBERACION = 'Liberación de equipos';
 
 export const TIPOS_MANTENIMIENTO = ['preventivo', 'correctivo', 'metrologico'] as const;
 export type TipoMantenimiento = (typeof TIPOS_MANTENIMIENTO)[number];
@@ -35,5 +36,6 @@ export const ACCION_HISTORIAL: Record<string, string> = {
   articulo_sap: 'Artículo de SAP',
   carga: 'Ingreso por cargue masivo',
   carga_cambio: 'Actualizado por cargue masivo',
+  liberacion: 'Liberado tras acondicionamiento',
 };
 export const etiquetaAccion = (a: string) => ACCION_HISTORIAL[a] ?? a.replace(/_/g, ' ');

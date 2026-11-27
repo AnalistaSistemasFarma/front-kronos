@@ -71,6 +71,10 @@ import TableColumnsEditor from '../_components/TableColumnsEditor';
 import WorkflowValidatorsModal from '../../../../../components/request-general/WorkflowValidatorsModal';
 import BotonMejoraContinua from '../../../../../components/request-general/BotonMejoraContinua';
 import { ProcessSlaCard } from '../../../../../components/request-general/sla/ProcessSlaCard';
+import { ProcessAccessCard } from '../../../../../components/request-general/flow-access/ProcessAccessCard';
+import { OptionRulesCard } from '../../../../../components/request-general/flow-access/OptionRulesCard';
+import { LinkedTasksCard } from '../../../../../components/request-general/flow-access/LinkedTasksCard';
+import { FollowupsCard } from '../../../../../components/request-general/flow-access/FollowupsCard';
 import { FlowConnector } from '../../../../../components/ui/flow/FlowConnector';
 import { SapTaskActionPicker, SapTaskCardInfo } from '../../../../../components/workflow-sap/SapTaskObject';
 import {
@@ -880,8 +884,8 @@ if (session?.user?.id) return session.user.id as unknown as number;
       type: 'success',
       text:
         tipo === 'paralelizar'
-          ? 'Mejora continua: el cambio quedó preparado (la tarea resaltada ya no es secuencial). Revíselo y pulse «Guardar cambios».'
-          : 'Mejora continua: la edición quedó abierta en la tarea resaltada. Haga el ajuste sugerido y pulse «Guardar cambios».',
+          ? 'Mejora continua: el cambio quedó preparado (la tarea resaltada ya no es secuencial). Revíselo y pulse Guardar cambios.'
+          : 'Mejora continua: la edición quedó abierta en la tarea resaltada. Haga el ajuste sugerido y pulse Guardar cambios.',
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tasks, loadingTasks, searchParams]);
@@ -1487,6 +1491,9 @@ if (session?.user?.id) return session.user.id as unknown as number;
 
   const getBreadcrumbHref = (from: string) => {
     switch (from) {
+      // Administración de flujos: vuelve a su lista, que conserva filtros y búsqueda.
+      case 'admin-workflow':
+        return '/process/request-general/admin-workflow';
       case 'workflows':
         return '/process/request-general/workflows';
       default:
@@ -1532,7 +1539,7 @@ if (session?.user?.id) return session.user.id as unknown as number;
           </Alert>
           <Button
             fullWidth
-            onClick={() => router.push('/process/request-general/workflows')}
+            onClick={() => router.push(getBreadcrumbHref(from))}
             leftSection={<IconArrowLeft size={16} />}
           >
             Volver a Flujos de Trabajo
@@ -1551,7 +1558,7 @@ if (session?.user?.id) return session.user.id as unknown as number;
           </Text>
           <Button
             fullWidth
-            onClick={() => router.push('/process/request-general/workflows')}
+            onClick={() => router.push(getBreadcrumbHref(from))}
             leftSection={<IconArrowLeft size={16} />}
           >
             Volver a Flujos de Trabajo
@@ -1809,6 +1816,14 @@ if (session?.user?.id) return session.user.id as unknown as number;
                   {/* SLA (ANS) of the subprocess: own load/save, independent of the edit mode. */}
                   <ProcessSlaCard processId={workflow.id} />
 
+                  <ProcessAccessCard processId={workflow.id} />
+
+                  <OptionRulesCard processId={workflow.id} />
+
+                  <LinkedTasksCard processId={workflow.id} />
+
+                  <FollowupsCard processId={workflow.id} />
+
                   {/* Formulario externo: expone este flujo en una página pública SIN login. */}
                   <Card withBorder radius='md' p='md'>
                     <Stack gap='sm'>
@@ -1997,7 +2012,7 @@ if (session?.user?.id) return session.user.id as unknown as number;
                         {startsCond && (
                           <ConditionalObject
                             label={condLabel}
-                            note={sapWhenLabel ? 'si no se cumple, la tarea queda «Omitida»' : undefined}
+                            note={sapWhenLabel ? 'si no se cumple, la tarea queda Omitida' : undefined}
                           />
                         )}
                         <Card
@@ -2911,7 +2926,7 @@ if (session?.user?.id) return session.user.id as unknown as number;
 
             <Button
               variant='outline'
-              onClick={() => router.push('/process/request-general/workflows')}
+              onClick={() => router.push(getBreadcrumbHref(from))}
               leftSection={<IconArrowLeft size={16} />}
             >
               Volver a Flujos de Trabajo
@@ -3153,7 +3168,7 @@ if (session?.user?.id) return session.user.id as unknown as number;
             {newTaskForm.task_kind === 'doc_template' && (
               <Alert color='violet' variant='light' icon={<IconFileText size={16} />}>
                 Genera un documento con los valores del formulario y lo deja en los adjuntos de la solicitud. En modo
-                automático no necesita responsable. Guarde el flujo y luego use «Configurar plantilla» en la tarjeta de
+                automático no necesita responsable. Guarde el flujo y luego use Configurar plantilla en la tarjeta de
                 la tarea.
               </Alert>
             )}

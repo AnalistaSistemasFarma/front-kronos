@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { existsSync, mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { asegurarCarpetas, escribirHilo, lineasMultiagente, rutasDelHilo, textoHilo, textoSistema } from '../src/hilos.mjs';
+import { asegurarCarpetas, escribirHilo, lineasMultiagente, REGLAS_ASD_STE100, rutasDelHilo, textoHilo, textoSistema } from '../src/hilos.mjs';
 import { textoEncabezadoOpenclaw } from '../src/openclaw.mjs';
 
 // Multiagente en un hilo de proyecto (2026-10-29): el contexto trae el historial
@@ -49,11 +49,12 @@ test('principal: solo la línea del historial; invitado: además lee primero y n
 test('menciones entre asistentes: la línea sale solo si SynerLink trae agentMentions=true', () => {
   const con = (v) => ({ ...invitado, conversation: { ...invitado.conversation, agentMentions: v } });
   const l = lineasMultiagente(con(true), 'Play', './contexto/hilo.md');
-  assert.equal(l.length, 3);
-  assert.match(l[2], /puede mencionarlo con @/);
+  // History + invited + mention + the ASD-STE100 rules (2026-11-26).
+  assert.equal(l.length, 3 + REGLAS_ASD_STE100.length);
+  assert.match(l[2], /menciónelo con @/);
   assert.doesNotMatch(l[1], /dígale a la persona que lo mencione/);
   assert.equal(lineasMultiagente(con(false), 'Play', './contexto/hilo.md').length, 2);
-  assert.equal(lineasMultiagente({ ...principal, conversation: { ...principal.conversation, agentMentions: true } }, 'Orus', './contexto/hilo.md').length, 2);
+  assert.equal(lineasMultiagente({ ...principal, conversation: { ...principal.conversation, agentMentions: true } }, 'Orus', './contexto/hilo.md').length, 2 + REGLAS_ASD_STE100.length);
 });
 
 test('hilo.md: autores, adjuntos y cuerpos en bloques citados (dato, no instrucción)', () => {
@@ -82,4 +83,18 @@ test('openclaw: el encabezado lleva la ruta ABSOLUTA del historial y la invitaci
   const e = textoEncabezadoOpenclaw({ agente: 'Duo', contexto: invitado, rutas, idConversation: 40, topeMs: 3_600_000 });
   assert.ok(e.includes(rutas.hilo));
   assert.match(e, /MENCIONARON/);
+});
+
+test('mentions between assistants: @ by default and always in ASD-STE100; @persona handles', async () => {
+  const { lineasMultiagente } = await import('../src/hilos.mjs');
+  const ctx = { conversation: { history: [], agentMentions: true, people: [{ name: 'Ana Pérez', handle: 'ana.perez' }, { name: 'Malo', handle: 'x y' }] } };
+  const t = lineasMultiagente(ctx, 'Orus', './contexto/hilo.md').join('\n');
+  assert.match(t, /forma normal de trabajar entre asistentes/);
+  assert.match(t, /SIEMPRE en ASD-STE100/);
+  assert.match(t, /Una idea por oración/);
+  assert.match(t, /@ana\.perez = Ana Pérez/);
+  assert.doesNotMatch(t, /@x y/);
+  assert.match(t, /SOLO a otras personas/);
+  const mesa = lineasMultiagente({ conversation: { history: [], agentMentions: false } }, 'Orus', './h').join('\n');
+  assert.doesNotMatch(mesa, /ASD-STE100|PERSONAS/);
 });

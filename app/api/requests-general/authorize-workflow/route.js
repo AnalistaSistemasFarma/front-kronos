@@ -1,4 +1,5 @@
 import sql from 'mssql';
+import { logFlowChange, requireFlowEditor } from '../../../../lib/workflow/flowAccess';
 import sqlConfig from '../../../../dbconfig.js';
 
 export async function POST(req) {
@@ -36,6 +37,10 @@ export async function POST(req) {
         { status: 400 }
       );
     }
+
+    // 2026-11-24: only who administers flows (and, if restricted, its editors) changes or activates it.
+    const guard = await requireFlowEditor(id_process);
+    if (guard instanceof Response) return guard;
 
     const pool = await sql.connect(sqlConfig);
     const transaction = new sql.Transaction(pool);
@@ -89,6 +94,7 @@ export async function POST(req) {
         .query(insertAssignedQuery);
 
       await transaction.commit();
+      await logFlowChange(Number(id_process), guard.email, 'datos del flujo', `Nombre ${process}, ${active === 0 || active === false ? 'inactivo' : 'activo'}, encargado ${id_user_assigned}.`);
 
       return new Response(
         JSON.stringify({

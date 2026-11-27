@@ -151,7 +151,7 @@ export default function VitrinaBandeja({ company, version, avisar }: { company: 
         <Card withBorder radius='md' p='lg'>
           <Text c='dimmed'>
             {data?.totalBandeja === 0
-              ? 'La bandeja está vacía. Use «Actualizar ahora» para leer SAP o «Importar carga inicial» para cargar las sugerencias.'
+              ? 'La bandeja está vacía. Use Actualizar ahora para leer SAP o Importar carga inicial para cargar las sugerencias.'
               : 'Ningún artículo coincide con los filtros.'}
           </Text>
         </Card>
@@ -251,7 +251,7 @@ function AsignarModal({ opened, onClose, idCompany, codigos, onSaved }: { opened
     setError(null);
     try {
       const r = await vitrinaSend<{ codigos: number }>(`/api/vitrina/gestion/presentaciones/${id}/codigos`, 'POST', { company: idCompany, codigos: codigos.map((c) => c.id) });
-      onSaved(`${r.codigos} código(s) agregados a «${opciones.find((o) => o.value === id)?.label ?? 'la presentación'}». Siguen sin activar.`);
+      onSaved(`${r.codigos} código(s) agregados a ${opciones.find((o) => o.value === id)?.label ?? 'la presentación'}. Siguen sin activar.`);
       setId(null);
     } catch (e) {
       setError(errorTexto(e));

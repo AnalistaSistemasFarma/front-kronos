@@ -86,6 +86,43 @@ function uniqueSortedOptions(values: (string | null | undefined)[]) {
     .map((v) => ({ value: v, label: v }));
 }
 
+/**
+ * Filtros, búsqueda y scroll de la lista guardados en sessionStorage, como en las listas de
+ * solicitudes (lib/requests-general/requestListNav.ts): al abrir un flujo y volver por el
+ * breadcrumb no se borran. La pestaña que abre el detalle (window.open) recibe una copia.
+ */
+const LIST_STATE_KEY = 'kronos:admin-workflow-list-state';
+const FILTER_KEYS = ['status', 'company', 'category', 'process', 'active'] as const;
+type WorkflowListFilters = Record<(typeof FILTER_KEYS)[number], string>;
+type WorkflowListState = { filters: WorkflowListFilters; search: string; scrollY?: number };
+
+function loadWorkflowListState(): WorkflowListState | null {
+  try {
+    const parsed = JSON.parse(window.sessionStorage.getItem(LIST_STATE_KEY) || 'null');
+    if (!parsed || typeof parsed !== 'object') return null;
+    const raw = (parsed.filters ?? {}) as Record<string, unknown>;
+    const filters = Object.fromEntries(
+      FILTER_KEYS.map((k) => [k, typeof raw[k] === 'string' ? raw[k] : ''])
+    ) as WorkflowListFilters;
+    const scrollY = Number(parsed.scrollY);
+    return {
+      filters,
+      search: typeof parsed.search === 'string' ? parsed.search : '',
+      scrollY: Number.isFinite(scrollY) && scrollY > 0 ? scrollY : undefined,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function saveWorkflowListState(state: WorkflowListState): void {
+  try {
+    window.sessionStorage.setItem(LIST_STATE_KEY, JSON.stringify(state));
+  } catch {
+    /* sin espacio o modo privado */
+  }
+}
+
 interface WorkFlow {
   id: number;
   id_category: number;
@@ -255,6 +292,48 @@ function RequestBoard() {
       ),
     [workFlows, filters.company, filters.category]
   );
+  // Al volver del detalle: restaura filtros y búsqueda, guarda cada cambio y, cuando la lista
+  // cargó, vuelve al scroll donde estaba (en efecto y no al iniciar el estado, para no romper
+  // la hidratación).
+  const [listStateRestored, setListStateRestored] = useState(false);
+  const savedScrollRef = useRef<number | null>(null);
+  useEffect(() => {
+    const saved = loadWorkflowListState();
+    if (saved) {
+      setFilters(saved.filters);
+      setSearchInput(saved.search);
+      if (Object.values(saved.filters).some(Boolean)) setFiltersExpanded(true);
+      savedScrollRef.current = saved.scrollY ?? null;
+    }
+    setListStateRestored(true);
+  }, []);
+  const listStateRef = useRef({ filters, search: searchInput });
+  listStateRef.current = { filters, search: searchInput };
+  useEffect(() => {
+    if (!listStateRestored) return;
+    saveWorkflowListState({ filters, search: searchInput, scrollY: window.scrollY });
+  }, [listStateRestored, filters, searchInput]);
+  useEffect(() => {
+    if (!listStateRestored) return;
+    let frame = 0;
+    const persistScroll = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() =>
+        saveWorkflowListState({ ...listStateRef.current, scrollY: window.scrollY })
+      );
+    };
+    window.addEventListener('scroll', persistScroll, { passive: true });
+    return () => {
+      cancelAnimationFrame(frame);
+      window.removeEventListener('scroll', persistScroll);
+    };
+  }, [listStateRestored]);
+  useEffect(() => {
+    const y = savedScrollRef.current;
+    if (!listStateRestored || loading || workFlows.length === 0 || y === null) return;
+    savedScrollRef.current = null;
+    window.setTimeout(() => window.scrollTo({ top: y, behavior: 'auto' }), 60);
+  }, [listStateRestored, loading, workFlows.length]);
   // Evita que una respuesta vieja pise una más nueva si se piden varias seguidas.
   const workflowsFetchSeqRef = useRef(0);
   const [refreshing, setRefreshing] = useState(false);
@@ -1604,7 +1683,7 @@ function RequestBoard() {
                       onClick={() => {
                         sessionStorage.setItem('selectedRequest', JSON.stringify(workflow));
                         window.open(
-                          `/process/request-general/view-workflows?id=${workflow.id}&from=workflows`
+                          `/process/request-general/view-workflows?id=${workflow.id}&from=admin-workflow`
                         );
                       }}
                     >

@@ -19,6 +19,10 @@ export interface ImportLine {
   UnitPrice: number | null;
   WarehouseCode: string;
   ItemDescription: string;
+  /** EAN/GTIN printed on the purchase order (PDF only). */
+  Barcode?: string;
+  /** Customer's own reference/SKU printed on the purchase order (PDF only). */
+  ClientCode?: string;
 }
 
 const norm = (v: unknown) =>

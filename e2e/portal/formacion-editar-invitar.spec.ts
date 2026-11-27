@@ -27,7 +27,7 @@ async function simularFormador(page: Page) {
     const { correo } = r.request().postDataJSON() as { correo: string };
     estado.invitaciones.push({ correo });
     if (correo.includes('gmail')) {
-      return r.fulfill({ status: 422, json: { error: 'Ese correo no está autorizado para entrar al portal: debe ser de un dominio del grupo o estar en «Cuentas Autorizadas».' } });
+      return r.fulfill({ status: 422, json: { error: 'Ese correo no está autorizado para entrar al portal: debe ser de un dominio del grupo o estar en Cuentas Autorizadas.' } });
     }
     estado.roster.push({ ...ana, correo, nombre: correo.split('@')[0].replace('.', ' ') });
     return r.fulfill({ json: { ok: true, correo, yaInscrito: false } });
@@ -42,12 +42,12 @@ async function abrirCursoFormador(page: Page) {
   await expect(page.getByRole('heading', { name: 'INDUCCIÓN SISTEMAS' })).toBeVisible();
 }
 
-test.describe('Portal TH · Formación · «Editar» e «Invitar al Curso»', () => {
+test.describe('Portal TH · Formación · Editar e Invitar al Curso', () => {
   test('la ruta de invitar exige sesión', async ({ request }) => {
     expect((await request.post('/api/portal/courses/2/invitar', { data: { correo: 'ana@gsslatam.com' } })).status()).toBe(401);
   });
 
-  test('«Vista formador»: al entrar solo se ve el nombre del curso y el progreso; «Editar» muestra todo el menú de edición', async ({ page }) => {
+  test('Vista formador: al entrar solo se ve el nombre del curso y el progreso; Editar muestra todo el menú de edición', async ({ page }) => {
     await page.setViewportSize({ width: 1366, height: 900 });
     await simularFormador(page);
     await abrirCursoFormador(page);
@@ -88,7 +88,7 @@ test.describe('Portal TH · Formación · «Editar» e «Invitar al Curso»', ()
     await expect(page.getByLabel('Título del curso')).toHaveCount(0);
   });
 
-  test('«Invitar al Curso»: pide el correo, avisa los errores arriba y en rojo, y al enviar confirma en verde y suma a la persona', async ({ page }) => {
+  test('Invitar al Curso: pide el correo, avisa los errores arriba y en rojo, y al enviar confirma en verde y suma a la persona', async ({ page }) => {
     await page.setViewportSize({ width: 1366, height: 900 });
     const estado = await simularFormador(page);
     await abrirCursoFormador(page);
@@ -138,7 +138,7 @@ test.describe('Portal TH · Formación · «Editar» e «Invitar al Curso»', ()
     await expect(page.getByTestId('invitar-form')).toHaveCount(0);
   });
 
-  test('celular: «Invitar al Curso» cabe en la pantalla', async ({ page }) => {
+  test('celular: Invitar al Curso cabe en la pantalla', async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await simularFormador(page);
     await abrirCursoFormador(page);

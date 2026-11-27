@@ -90,7 +90,7 @@ export const HERRAMIENTAS_WEB = [
       type: 'object',
       properties: {
         metodo: { type: 'string', enum: ['GET', 'POST'], description: 'GET (por defecto) o POST.' },
-        ruta: { type: 'string', description: 'Ruta relativa que empieza por «/», por ejemplo /api/companies o /process.' },
+        ruta: { type: 'string', description: 'Ruta relativa que empieza por /, por ejemplo /api/companies o /process.' },
         json: { description: 'Cuerpo JSON para un POST (opcional).' },
         form: { type: 'object', description: 'Cuerpo de formulario { campo: valor } para un POST (opcional).' },
         sin_sesion: { type: 'boolean', description: 'true para pedir la ruta como visitante sin sesión.' },
@@ -106,7 +106,7 @@ export const HERRAMIENTAS_WEB = [
     inputSchema: {
       type: 'object',
       properties: {
-        ruta: { type: 'string', description: 'Ruta relativa que empieza por «/», por ejemplo /login o /process.' },
+        ruta: { type: 'string', description: 'Ruta relativa que empieza por /, por ejemplo /login o /process.' },
         nombre: { type: 'string', description: 'Nombre del archivo (sin extensión). Opcional.' },
         ancho: { type: 'integer', minimum: 320, maximum: 2560, description: 'Ancho de la ventana en píxeles (por defecto 1440; 390 para celular).' },
         alto: { type: 'integer', minimum: 320, maximum: 4000, description: 'Alto de la ventana en píxeles (por defecto 900).' },
@@ -137,7 +137,7 @@ export function leerSecretos(ruta, { leer = (r) => readFileSync(r, 'utf8'), modo
   if (modo(ruta) !== 0o600) throw new Error('el archivo de secretos debe tener permisos 600');
   const j = JSON.parse(leer(ruta));
   const s = j?.[LLAVE_SECRETOS];
-  if (!s || typeof s !== 'object') throw new Error(`el archivo de secretos no trae «${LLAVE_SECRETOS}»`);
+  if (!s || typeof s !== 'object') throw new Error(`el archivo de secretos no trae ${LLAVE_SECRETOS}`);
   return s;
 }
 

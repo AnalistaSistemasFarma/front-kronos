@@ -54,11 +54,11 @@ export function validarMapeo(raw: unknown, nombre: string): FilaMapeo[] {
     const campo = String(f.campo ?? '').trim();
     const origen = f.origen === 'campo_sap' ? 'campo_sap' : f.origen === 'fijo' ? 'fijo' : null;
     const valor = String(f.valor ?? '').trim();
-    if (!CAMPO_RE.test(campo)) throw new Error(`Fila ${i + 1} de ${nombre}: el campo Nabuco «${campo}» no es válido.`);
-    if (vistos.has(campo)) throw new Error(`Fila ${i + 1} de ${nombre}: el campo «${campo}» está repetido.`);
+    if (!CAMPO_RE.test(campo)) throw new Error(`Fila ${i + 1} de ${nombre}: el campo Nabuco ${campo} no es válido.`);
+    if (vistos.has(campo)) throw new Error(`Fila ${i + 1} de ${nombre}: el campo ${campo} está repetido.`);
     vistos.add(campo);
-    if (!origen) throw new Error(`Fila ${i + 1} de ${nombre}: el origen debe ser «fijo» o «campo_sap».`);
-    if (origen === 'campo_sap' && !rutaSapValida(valor)) throw new Error(`Fila ${i + 1} de ${nombre}: el campo SAP «${valor}» no es válido.`);
+    if (!origen) throw new Error(`Fila ${i + 1} de ${nombre}: el origen debe ser fijo o campo_sap.`);
+    if (origen === 'campo_sap' && !rutaSapValida(valor)) throw new Error(`Fila ${i + 1} de ${nombre}: el campo SAP ${valor} no es válido.`);
     if (valor.length > 500) throw new Error(`Fila ${i + 1} de ${nombre}: el valor supera 500 caracteres.`);
     return { campo, origen, valor };
   });
@@ -131,14 +131,14 @@ export function problemasArmado(doc: Record<string, unknown>, entidad: string, e
   const coleccion = coleccionLineas(entidad);
   const docLineas = Array.isArray(doc[coleccion]) ? (doc[coleccion] as unknown[]) : [];
   for (const f of encabezado) {
-    if (f.origen === 'campo_sap' && !(f.valor.split('.')[0] in doc)) out.push(`El campo SAP «${f.valor}» (→ ${f.campo}) no existe en el documento.`);
+    if (f.origen === 'campo_sap' && !(f.valor.split('.')[0] in doc)) out.push(`El campo SAP ${f.valor} (→ ${f.campo}) no existe en el documento.`);
   }
   if (!docLineas.length) {
     out.push(`El documento no tiene líneas (${coleccion}).`);
   } else {
     const primera = (docLineas[0] ?? {}) as Record<string, unknown>;
     for (const f of lineas) {
-      if (f.origen === 'campo_sap' && !(f.valor.split('.')[0] in primera)) out.push(`El campo SAP de línea «${f.valor}» (→ ${f.campo}) no existe en las líneas.`);
+      if (f.origen === 'campo_sap' && !(f.valor.split('.')[0] in primera)) out.push(`El campo SAP de línea ${f.valor} (→ ${f.campo}) no existe en las líneas.`);
     }
   }
   return out;

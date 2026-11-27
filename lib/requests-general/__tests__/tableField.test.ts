@@ -22,7 +22,7 @@ describe('constantes', () => {
   it('TABLE_FIELD_TYPE es "table"', () => {
     expect(TABLE_FIELD_TYPE).toBe('table');
   });
-  it('expone los 9 tipos de columna', () => {
+  it('expone los 10 tipos de columna (2026-11-26: + Persona)', () => {
     expect(TABLE_COLUMN_TYPES.map((t) => t.value)).toEqual([
       'text',
       'number',
@@ -31,6 +31,7 @@ describe('constantes', () => {
       'select',
       'yesno',
       'url',
+      'user',
       'sap_items',
       'sap_business_partners',
     ]);

@@ -267,7 +267,7 @@ export default function PortalAdminModal({
 
             {vista.usuarios.length === 0 && !nuevo && (
               <Alert variant='light' icon={<IconAlertTriangle size={18} />}>
-                Este proveedor todavía no tiene usuarios en el portal. Crea el primero con «Nuevo usuario».
+                Este proveedor todavía no tiene usuarios en el portal. Crea el primero con Nuevo usuario.
               </Alert>
             )}
 

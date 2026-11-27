@@ -39,7 +39,7 @@ export function decidir(entrada) {
     hookSpecificOutput: {
       hookEventName: 'PreToolUse',
       permissionDecision: 'deny',
-      permissionDecisionReason: `Subagente ${entrada.agent_type ?? ''}: solo git de lectura con «git -C codigo/<repo> log|show|diff|ls-files|ls-tree|grep|blame|status…». Lo demás lo hace el asistente principal.`,
+      permissionDecisionReason: `Subagente ${entrada.agent_type ?? ''}: solo git de lectura con git -C codigo/<repo> log|show|diff|ls-files|ls-tree|grep|blame|status…. Lo demás lo hace el asistente principal.`,
     },
   };
 }

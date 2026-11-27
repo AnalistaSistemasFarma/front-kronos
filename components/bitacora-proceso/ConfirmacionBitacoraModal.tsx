@@ -182,7 +182,7 @@ export default function ConfirmacionBitacoraModal({
               <Text fw={600} size='md'>2. Su PIN de bitácora</Text>
             </Group>
             <Text size='xs' c='dimmed' mb={6}>
-              Esta tablet tiene abierta otra cuenta. Escriba su PIN personal de {OT_PIN_LONGITUD} dígitos (se configura en «Configurar PIN de bitácora»).
+              Esta tablet tiene abierta otra cuenta. Escriba su PIN personal de {OT_PIN_LONGITUD} dígitos (se configura en Configurar PIN de bitácora).
             </Text>
             <PinInput
               length={OT_PIN_LONGITUD}

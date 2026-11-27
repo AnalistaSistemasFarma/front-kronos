@@ -16,6 +16,7 @@ import {
   Stack,
   Text,
   ThemeIcon,
+  Tooltip,
   UnstyledButton,
 } from '@mantine/core';
 import { useMediaQuery } from '@mantine/hooks';
@@ -23,6 +24,7 @@ import {
   IconCertificate,
   IconCheck,
   IconDeviceFloppy,
+  IconDownload,
   IconEye,
   IconFileText,
   IconSend,
@@ -52,7 +54,11 @@ import OrionSignerAssignment from './OrionSignerAssignment';
 import OrionSignersList from './OrionSignersList';
 import PdfInlineViewer from './PdfInlineViewer';
 import SignaturePlacementCanvas, { type PlacementSeal } from './SignaturePlacementCanvas';
-import { openAnnotatedPdfPreview } from './annotatedPdfPreview';
+import {
+  downloadDraftPdfWithValidators,
+  draftPdfFileName,
+  openAnnotatedPdfPreview,
+} from './annotatedPdfPreview';
 import { removeSealBackground } from './sealBackground';
 import { usePdfBlobPreview } from './usePdfBlobPreview';
 import { showEmailSentNotification } from '../../lib/notifications/showEmailSentNotification';
@@ -744,6 +750,56 @@ export default function OrionDocumentEditor({
     }
   }, [assignSigners, persistFields, persistSeals]);
 
+  /**
+   * Guarda lo ubicado (el documento queda como borrador, sin enviar a firma) y descarga el PDF
+   * con el visto bueno de los validadores en sus cajas, también los que validaron en el Word.
+   */
+  const [draftDownloading, setDraftDownloading] = useState(false);
+  const handleDownloadDraft = useCallback(async () => {
+    if (!sharedPdfSrc) return;
+    setDraftDownloading(true);
+    setError(null);
+    try {
+      if (assignmentsEditable) {
+        await assignSigners();
+        await persistFields();
+        await persistSeals();
+      }
+      await downloadDraftPdfWithValidators({
+        pdfUrl: sharedPdfSrc,
+        annotations: [
+          ...(state.annotations ?? []).filter((a) => a.kind !== 'seal'),
+          ...seals.map((s) => ({ ...s, kind: 'seal' as const })),
+        ],
+        sealImageSrc,
+        viewerName: currentUserName || currentUserEmail || 'Usted',
+        // Las cajas que se ven en pantalla, aunque no se hayan guardado.
+        validatorState: {
+          ...state,
+          validatorFields: validatorFields as unknown as OrionSignatureState['validatorFields'],
+        },
+        fileName: draftPdfFileName(fileName),
+      });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'No se pudo descargar el borrador');
+    } finally {
+      setDraftDownloading(false);
+    }
+  }, [
+    assignSigners,
+    assignmentsEditable,
+    currentUserEmail,
+    currentUserName,
+    fileName,
+    persistFields,
+    persistSeals,
+    sealImageSrc,
+    seals,
+    sharedPdfSrc,
+    state,
+    validatorFields,
+  ]);
+
   const handleSend = useCallback(async () => {
     if (!allPlaced) {
       setError(
@@ -1364,6 +1420,23 @@ export default function OrionDocumentEditor({
               >
                 Vista previa (PDF)
               </Button>
+              <Tooltip
+                label='Guarda las ubicaciones (queda como borrador, sin enviar a firma) y descarga el PDF con el visto bueno de los validadores que aprobaron, donde los ubicó.'
+                withArrow
+                multiline
+                w={300}
+              >
+                <Button
+                  variant='default'
+                  radius='md'
+                  leftSection={<IconDownload size={16} />}
+                  loading={draftDownloading}
+                  onClick={() => void handleDownloadDraft()}
+                  disabled={saving || !sharedPdfSrc}
+                >
+                  Descargar borrador
+                </Button>
+              </Tooltip>
               <Button
                 variant='default'
                 radius='md'

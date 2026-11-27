@@ -69,6 +69,9 @@ BEGIN TRY
   IF OBJECT_ID(N'dbo.ot_operador', N'U') IS NOT NULL DROP TABLE [dbo].[ot_operador];
   IF OBJECT_ID(N'dbo.ot_area', N'U') IS NOT NULL DROP TABLE [dbo].[ot_area];
 
+  /* Notas de corrección (2026-11-26): referencian ot_registro y ot_orden_trabajo, van primero. */
+  IF OBJECT_ID(N'dbo.TR_ot_registro_nota_inmutable', N'TR') IS NOT NULL DROP TRIGGER [dbo].[TR_ot_registro_nota_inmutable];
+  IF OBJECT_ID(N'dbo.ot_registro_nota', N'U') IS NOT NULL DROP TABLE [dbo].[ot_registro_nota];
   IF OBJECT_ID(N'dbo.TR_ot_firma_inmutable', N'TR') IS NOT NULL DROP TRIGGER [dbo].[TR_ot_firma_inmutable];
   IF OBJECT_ID(N'dbo.TR_ot_registro_inmutable', N'TR') IS NOT NULL DROP TRIGGER [dbo].[TR_ot_registro_inmutable];
   IF OBJECT_ID(N'dbo.TR_ot_orden_operario_inmutable', N'TR') IS NOT NULL DROP TRIGGER [dbo].[TR_ot_orden_operario_inmutable];

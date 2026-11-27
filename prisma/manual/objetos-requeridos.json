@@ -1,5 +1,5 @@
 {
-  "_doc": "Objetos de KRONOSDB que el codigo usa por SQL directo y que NO estan en schema.prisma (verificar-esquema.ps1 no los ve). scripts/bluegreen/verificar-objetos-sql.cjs los comprueba en SOLO LECTURA antes del cambio de color: si falta alguno, el deploy se detiene y la version activa sigue atendiendo. Agregue aqui cada tabla o columna nueva que se cree con un SQL manual y que el codigo use sin Prisma. Pase completo 2026-11-09: + ventas-config-empresa, errores de IA y analisis de seguridad. 2026-11-18: + ANS de solicitudes (process_category.sla_*, request_sla_pause).",
+  "_doc": "Objetos de KRONOSDB que el codigo usa por SQL directo y que NO estan en schema.prisma (verificar-esquema.ps1 no los ve). scripts/bluegreen/verificar-objetos-sql.cjs los comprueba en SOLO LECTURA antes del cambio de color: si falta alguno, el deploy se detiene y la version activa sigue atendiendo. Agregue aqui cada tabla o columna nueva que se cree con un SQL manual y que el codigo use sin Prisma. Pase completo 2026-11-09: + ventas-config-empresa, errores de IA y analisis de seguridad. 2026-11-18: + ANS de solicitudes (process_category.sla_*, request_sla_pause). 2026-11-24: + reglas por opción de flujos (consecutivo, ANS y responsable por opción). 2026-11-24: + acceso restringido de flujos (process_category.restricted_access/sgc_templates_only, process_category_editor, process_category_change_log). 2026-11-26: + task_process_category.linked_multiple. 2026-11-26: + fechas comprometidas y tareas diferidas (process_date_tracking, task_deferred, task_process_category.start_delay_days). 2026-11-26: + cronograma anual (process_category.calendar_field/calendar_group_field). 2026-11-26: + task_doc_template.append_images. 2026-11-27: + mapeo aprendido de ventas (sales_item_mapping_learned, sales_item_mapping_learned_log).",
   "columnas": [
     [
       "task_process_category",
@@ -52,6 +52,50 @@
     [
       "process_category",
       "sla_updated_by"
+    ],
+    [
+      "process_category",
+      "consecutive_prefix"
+    ],
+    [
+      "requests_general",
+      "consecutive"
+    ],
+    [
+      "requests_general",
+      "sla_value"
+    ],
+    [
+      "requests_general",
+      "sla_unit"
+    ],
+    [
+      "process_category",
+      "restricted_access"
+    ],
+    [
+      "process_category",
+      "sgc_templates_only"
+    ],
+    [
+      "task_process_category",
+      "linked_multiple"
+    ],
+    [
+      "task_process_category",
+      "start_delay_days"
+    ],
+    [
+      "process_category",
+      "calendar_field"
+    ],
+    [
+      "process_category",
+      "calendar_group_field"
+    ],
+    [
+      "task_doc_template",
+      "append_images"
     ]
   ],
   "tablas": [
@@ -70,6 +114,15 @@
     "agent_security_finding",
     "task_doc_template",
     "request_generated_document",
-    "request_sla_pause"
+    "request_sla_pause",
+    "process_option_rule",
+    "task_option_assignee",
+    "request_consecutive_counter",
+    "process_category_editor",
+    "process_category_change_log",
+    "process_date_tracking",
+    "task_deferred",
+    "sales_item_mapping_learned",
+    "sales_item_mapping_learned_log"
   ]
 }

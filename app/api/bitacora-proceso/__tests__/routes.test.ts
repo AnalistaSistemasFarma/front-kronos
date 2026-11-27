@@ -9,7 +9,7 @@ const m = vi.hoisted(() => {
     'crearRegistro', 'confirmarVistoBueno', 'prepararConfirmante', 'listActividades', 'crearActividad', 'cambiarActividad', 'listUsuariosEmpresa', 'buscarOps',
     'datosAviso', 'createAndSendNotifications', 'listOperadores', 'crearOperador', 'cambiarOperador', 'agregarOperadores', 'listAreas', 'crearArea', 'cambiarArea',
     'listSupervisoresEmpresa', 'listResponsables', 'listResponsablesEmpresa', 'listCandidatosResponsable', 'asignarResponsable', 'cambiarResponsable', 'importarOperadores', 'estadoPin', 'configurarPin', 'listPinsEmpresa', 'restablecerPin', 'verificarPassword',
-    'empresasComoJefe', 'puedeAbrirComoJefe', 'getOtConfig', 'setOtMargenSuperior',
+    'empresasComoJefe', 'puedeAbrirComoJefe', 'getOtConfig', 'setOtMargenSuperior', 'cambiarPlanta',
   ] as const;
   return Object.fromEntries(names.map((n) => [n, vi.fn()])) as Record<(typeof names)[number], ReturnType<typeof vi.fn>>;
 });
@@ -27,7 +27,7 @@ vi.mock('../../../../lib/bitacora-proceso/db', () => ({
   listResponsables: m.listResponsables, listResponsablesEmpresa: m.listResponsablesEmpresa, listCandidatosResponsable: m.listCandidatosResponsable,
   asignarResponsable: m.asignarResponsable, cambiarResponsable: m.cambiarResponsable,
   empresasComoJefe: m.empresasComoJefe, puedeAbrirComoJefe: m.puedeAbrirComoJefe,
-  getOtConfig: m.getOtConfig, setOtMargenSuperior: m.setOtMargenSuperior,
+  getOtConfig: m.getOtConfig, setOtMargenSuperior: m.setOtMargenSuperior, cambiarPlanta: m.cambiarPlanta,
 }));
 // El notificador compartido (campana + push): se simula para ver QUÉ se avisa y a QUIÉN.
 vi.mock('../../../../lib/notifications.js', () => ({ createAndSendNotifications: m.createAndSendNotifications }));
@@ -38,6 +38,7 @@ vi.mock('../../../../lib/auth/verifyPassword', () => ({ synerlinkPasswordVerifie
 import { OtError } from '../../../../lib/bitacora-proceso/rules';
 import { SapError } from '../../../../lib/sap/serviceLayer';
 import * as lista from '../route';
+import * as plantaRuta from '../[id]/planta/route';
 import * as detalle from '../[id]/route';
 import * as registros from '../[id]/registros/route';
 import * as confirmar from '../[id]/confirmar/route';
@@ -67,7 +68,7 @@ const H = { 'x-forwarded-for': '10.0.0.9', 'user-agent': 'vitest' };
 const get = (q: string) => new Request(`http://x/api${q}`, { headers: H });
 const send = (method: string, body: unknown, q = '') => new Request(`http://x/api${q}`, { method, body: JSON.stringify(body), headers: { ...H, 'content-type': 'application/json' } });
 const params = (id: string) => ({ params: Promise.resolve({ id }) });
-const nueva = { company: FARMA, producto: 'Cefazolina', lote: 'L1', turno: 'TARDE', operadores: [7], idArea: 3, inspector: 'u2', jefeProduccion: 'u3' };
+const nueva = { company: FARMA, producto: 'Cefazolina', lote: 'L1', turno: 'TARDE', operadores: [7], idArea: 3, inspector: 'u2', jefeProduccion: 'u3', planta: 1 };
 const confirma = { rol: 'SUPERVISOR', persona: 'u-sup', confirmo: true, pin: '4821' };
 
 const avisoBase = { idOrden: 9, idCompany: FARMA, consecutivo: 1, producto: 'Cefazolina', lote: 'L1', inspectorEmail: 'inspector@farmalogica.com', jefeEmail: 'jefe@farmalogica.com', actorNombre: 'Supervisor', actorEmail: 'op@farmalogica.com' };
@@ -92,7 +93,7 @@ describe('Bitácora de Proceso · rutas', () => {
   });
 
   it('no existen rutas de edición ni de borrado de órdenes ni registros', () => {
-    for (const mod of [lista, detalle, registros, confirmar, operadoresOrden, importar, pinRestablecer]) {
+    for (const mod of [lista, detalle, registros, confirmar, operadoresOrden, importar, pinRestablecer, plantaRuta]) {
       expect(mod).not.toHaveProperty('PUT');
       expect(mod).not.toHaveProperty('DELETE');
       expect(mod).not.toHaveProperty('PATCH');
@@ -276,7 +277,7 @@ describe('Bitácora de Proceso · rutas', () => {
     expect(m.asignarResponsable.mock.calls[0][1]).toEqual({ idCompany: FARMA, idUser: 'u-karen', rol: 'JEFE_PROD' });
     expect((await responsables.POST(send('POST', { company: 3, id_user: 'u-karen', rol: 'JEFE_PROD' }))).status).toBe(403);
     expect((await responsables.POST(send('POST', { company: FARMA, id_user: 'u-karen', rol: 'OPERARIO' }))).status).toBe(400);
-    m.asignarResponsable.mockRejectedValueOnce(new OtError('Judy no tiene el permiso «Bitácora de Proceso: Gestión»: sin él no puede ser supervisor.', 400));
+    m.asignarResponsable.mockRejectedValueOnce(new OtError('Judy no tiene el permiso Bitácora de Proceso: Gestión: sin él no puede ser supervisor.', 400));
     const sinGestion = await responsables.POST(send('POST', { company: FARMA, id_user: 'u-judy', rol: 'SUPERVISOR' }));
     expect(sinGestion.status).toBe(400);
     expect((await sinGestion.json()).error).toContain('Gestión');
@@ -301,7 +302,8 @@ describe('Bitácora de Proceso · rutas', () => {
     const res = await lista.POST(send('POST', nueva));
     expect(res.status).toBe(201);
     expect(await res.json()).toEqual({ orden: { id: 9, consecutivo: 1 } });
-    expect(m.crearOrden.mock.calls[0][1]).toMatchObject({ sapOp: null, turno: 'TARDE', inspector: null, jefeProduccion: 'u3', operadores: [7], idArea: 3 });
+    expect(m.crearOrden.mock.calls[0][1]).toMatchObject({ sapOp: null, turno: 'TARDE', inspector: null, jefeProduccion: 'u3', operadores: [7], idArea: 3, planta: 1 });
+    expect((await lista.POST(send('POST', { ...nueva, planta: null }))).status).toBe(400);
     expect((await lista.POST(send('POST', { ...nueva, jefeProduccion: '' }))).status).toBe(400);
     expect(m.crearOrden.mock.calls[0][2]).toEqual({ idUser: 'u1', email: 'op@farmalogica.com', ip: '10.0.0.9' });
     expect(m.crearOrden.mock.calls[0][3]).toBe('GESTION');
@@ -338,6 +340,20 @@ describe('Bitácora de Proceso · rutas', () => {
     const { ahoraServidor } = (await ok.json()) as { ahoraServidor: string };
     expect(Math.abs(Date.parse(ahoraServidor) - Date.now())).toBeLessThan(5_000);
     expect((await detalle.GET(get('?company=1'), params('0'))).status).toBe(400);
+  });
+
+  it('POST planta (2026-11-26): valida 1|2 y pasa empresa, bitácora y actor a la capa de datos', async () => {
+    asUser([supervisor]);
+    m.cambiarPlanta.mockResolvedValue({ planta: 2, anterior: null });
+    const ok = await plantaRuta.POST(send('POST', { planta: 2 }, '?company=1'), params('7'));
+    expect(ok.status).toBe(200);
+    expect(await ok.json()).toEqual({ planta: { planta: 2, anterior: null } });
+    expect(m.cambiarPlanta.mock.calls[0][1]).toBe(7);
+    expect(m.cambiarPlanta.mock.calls[0][2]).toMatchObject({ idCompany: 1 });
+    expect(m.cambiarPlanta.mock.calls[0][3]).toBe(2);
+    expect((await plantaRuta.POST(send('POST', { planta: 3 }, '?company=1'), params('7'))).status).toBe(400);
+    m.cambiarPlanta.mockRejectedValue(new OtError('La bitácora ya está cerrada: la planta no se puede cambiar.', 409));
+    expect((await plantaRuta.POST(send('POST', { planta: 1 }, '?company=1'), params('7'))).status).toBe(409);
   });
 
   it('AVISOS: al abrir, al inspector y al jefe; tras cada visto bueno, a quien le toca el siguiente', async () => {
@@ -450,23 +466,23 @@ describe('Bitácora de Proceso · rutas', () => {
 
   it('2026-10-17: el 403 dice EXACTAMENTE qué falta (permiso, Gestión o rol) y en qué empresa', async () => {
     asUser([]);
-    expect((await (await lista.GET(get(''))).json()).error).toMatch(/le falta el permiso «Bitácora de Proceso».*Administración → Usuarios/);
+    expect((await (await lista.GET(get(''))).json()).error).toMatch(/le falta el permiso Bitácora de Proceso.*Administración → Usuarios/);
     asUser([operario], null);
     expect((await (await lista.GET(get(''))).json()).error).toMatch(/inactivo/);
     asUser([operario]);
-    expect((await (await lista.GET(get('?company=3'))).json()).error).toMatch(/permiso «Bitácora de Proceso» en la empresa seleccionada \(id 3\)/);
-    expect((await (await operadores.GET(get('?company=1&todas=1'))).json()).error).toMatch(/«Bitácora de Proceso: Gestión» en FARMALOGICA S\.A\./);
+    expect((await (await lista.GET(get('?company=3'))).json()).error).toMatch(/permiso Bitácora de Proceso en la empresa seleccionada \(id 3\)/);
+    expect((await (await operadores.GET(get('?company=1&todas=1'))).json()).error).toMatch(/Bitácora de Proceso: Gestión en FARMALOGICA S\.A\./);
     const abrir = await (await lista.POST(send('POST', nueva))).json();
-    expect(abrir.error).toMatch(/Para abrir una bitácora en FARMALOGICA S\.A\. le falta el permiso «Bitácora de Proceso: Gestión» \(supervisor\) o estar asignado como jefe de producción/);
+    expect(abrir.error).toMatch(/Para abrir una bitácora en FARMALOGICA S\.A\. le falta el permiso Bitácora de Proceso: Gestión \(supervisor\) o estar asignado como jefe de producción/);
   });
 
-  it('TEXTO LIBRE (2026-10-17): el texto llega SANEADO a la capa de datos y el 400 de «obligatorio» pasa tal cual', async () => {
+  it('TEXTO LIBRE (2026-10-17): el texto llega SANEADO a la capa de datos y el 400 de obligatorio pasa tal cual', async () => {
     asUser([operario]);
     m.crearRegistro.mockResolvedValue({ id: '1', registradoEn: '2026-10-17T20:00:00.000Z', actividad: 'Novedad', operador: 'Ana' });
     const ok = await registros.POST(send('POST', { id_actividad: 9, id_operador: 7, texto: '  Se cayó\u202E un frasco\u0000  ' }, '?company=1'), params('5'));
     expect(ok.status).toBe(201);
     expect(m.crearRegistro.mock.calls[0][3]).toEqual({ idActividad: 9, idOperador: 7, observacion: null, texto: 'Se cayó un frasco' });
-    m.crearRegistro.mockRejectedValue(new OtError('«Novedad» es de texto libre: escriba qué pasó (mínimo 3 caracteres).', 400));
+    m.crearRegistro.mockRejectedValue(new OtError('Novedad es de texto libre: escriba qué pasó (mínimo 3 caracteres).', 400));
     const falta = await registros.POST(send('POST', { id_actividad: 9, id_operador: 7 }, '?company=1'), params('5'));
     expect(falta.status).toBe(400);
     expect((await falta.json()).error).toMatch(/texto libre/);

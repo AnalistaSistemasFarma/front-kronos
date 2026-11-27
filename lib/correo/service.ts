@@ -550,7 +550,7 @@ export async function enviarNuevo(
     idUser: acceso.idUser,
     mailbox: buzon(acceso),
     accion: 'ENVIAR_NUEVO',
-    detalle: `Asunto: «${asunto || '(sin asunto)'}» · Para: ${lista(r.para)} · CC: ${lista(r.cc)} · CCO: ${lista(r.cco)} · ${p.adjuntos.length} adjunto(s)`,
+    detalle: `Asunto: ${asunto || '(sin asunto)'} · Para: ${lista(r.para)} · CC: ${lista(r.cc)} · CCO: ${lista(r.cco)} · ${p.adjuntos.length} adjunto(s)`,
     ip: p.ip,
   });
   // Las nuevas direcciones pasan a los recientes de la persona sin esperar a la caché.

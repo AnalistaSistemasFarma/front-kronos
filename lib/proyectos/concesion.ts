@@ -48,7 +48,7 @@ function fechaProsa(d: Date): string {
 
 /** Texto del mensaje con el que la persona le da el acceso al agente (va a SU chat directo). */
 export function mensajeConcesion(p: { proyecto: { name: string } | null; token: string; venceEn: Date; pedido?: string | null }): string {
-  const alcance = p.proyecto ? `el proyecto **«${p.proyecto.name.replace(/[*_`]/g, '')}»**` : '**mis proyectos**';
+  const alcance = p.proyecto ? `el proyecto **${p.proyecto.name.replace(/[*_`]/g, '')}**` : '**mis proyectos**';
   const pedido = String(p.pedido ?? '').replace(/\s+/g, ' ').trim().slice(0, 500);
   return [
     '📁 **Le doy acceso a mis proyectos de SynerLink**',

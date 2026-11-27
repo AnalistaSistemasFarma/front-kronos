@@ -321,7 +321,8 @@ export function resolveDraftPermissions(params: {
   return {
     // En validación, la versión corregida se sube solo en la fase de corrección (todos respondieron
     // y alguno pidió cambios); tras el cliente, la versión limpia.
-    canUpload: prepares && (elaborating || correcting || clientApproved),
+    // Ya validado también: la versión nueva conserva la validación.
+    canUpload: prepares && (elaborating || correcting || clientApproved || state.status === 'VALIDADO_INTERNO'),
     canSubmitInternal: elaborating && prepares,
     canDecideInternal: pendingValidator && !prepares,
     canViewBoard,
@@ -355,8 +356,8 @@ export function assertDraftBaseVersion(state: OrionDraftState, baseVersion?: str
 /**
  * Registra una versión subida por el elaborador. Tras una devolución, subir la corrección
  * vuelve el documento a "En elaboración". En validación solo se sube en la fase de corrección
- * y la versión queda guardada SIN avisar a los validadores: la preparadora puede subir varias
- * hasta que quede bien y luego la envía con `applyDraftResendInternal`.
+ * y, sin doble validación, esa versión deja el Word validado (cuenta como el "lo valido" de
+ * quien pidió la corrección). Ya validado, cada versión nueva conserva la validación.
  */
 export function applyDraftNewVersion(
   state: OrionDraftState,
@@ -392,14 +393,46 @@ export function applyDraftNewVersion(
         409
       );
     }
-    if (draftReviewPhase(state) !== 'correccion') {
+    if (draftReviewPhase(state) !== 'correccion' || !state.internalReview) {
       throw draftError('Nadie pidió corrección: no hace falta subir otra versión.', 409);
     }
-    // Solo se guarda la versión: los validadores siguen con lo que revisaron hasta que se envíe.
+    // Sin doble validación: subir la versión corregida cuenta como el "lo valido" de quien pidió
+    // la corrección. Quien ya aprobó conserva su aprobación y el Word queda validado.
+    const review = state.internalReview;
+    return {
+      ...state,
+      status: 'VALIDADO_INTERNO',
+      versionLabel: label,
+      versions: [...state.versions, { ...params.version, label, kind: 'elaboracion' }],
+      internalReview: {
+        ...review,
+        status: 'APROBADO',
+        versionLabel: label,
+        approvedAt: now,
+        approvals: review.approvals.map((a) =>
+          a.decision === 'DEVUELTO'
+            ? {
+                ...a,
+                decision: 'APROBADO' as const,
+                decidedAt: now,
+                approvedVersion: label,
+                correctedIn: label,
+                autoApprovedIn: label,
+              }
+            : a
+        ),
+      },
+      updatedAt: now,
+    };
+  }
+
+  if (state.status === 'VALIDADO_INTERNO') {
+    // Ya validado: una versión nueva arrastra la validación (nadie vuelve a revisar).
     return {
       ...state,
       versionLabel: label,
       versions: [...state.versions, { ...params.version, label, kind: 'elaboracion' }],
+      internalReview: state.internalReview ? { ...state.internalReview, versionLabel: label } : null,
       updatedAt: now,
     };
   }
@@ -510,13 +543,51 @@ export function applyDraftSubmitInternal(
   if (params.validators.length === 0) {
     throw draftError('Elija al menos un validador. Todos revisan el documento al mismo tiempo.', 400);
   }
+  // Si el Word ya estuvo validado (p. ej. volvió por el cliente), quien lo aprobó no vuelve a
+  // validar: su aprobación se arrastra. Solo revisan los validadores nuevos.
+  const previous = state.internalReview?.status === 'APROBADO' ? state.internalReview.approvals : [];
+  const approvals = buildPendingApprovals(params.validators).map((a) => {
+    const kept = previous.find(
+      (p) => p.decision === 'APROBADO' && isSameValidator(p, a.email, a.userId)
+    );
+    return kept
+      ? {
+          ...a,
+          decision: 'APROBADO' as const,
+          decidedAt: kept.decidedAt ?? now,
+          comment: kept.comment ?? null,
+          approvedVersion: kept.approvedVersion ?? null,
+          autoApprovedIn: state.versionLabel,
+        }
+      : a;
+  });
+  if (approvals.every((a) => a.decision === 'APROBADO')) {
+    return {
+      ...state,
+      status: 'VALIDADO_INTERNO',
+      lock: null,
+      internalReview: {
+        status: 'APROBADO',
+        approvals,
+        versionLabel: state.versionLabel,
+        submittedAt: now,
+        submittedBy: normalizeEmail(params.actor.email),
+        approvedAt: now,
+        returnReason: null,
+        returnedBy: null,
+        returnedAt: null,
+        round: (state.internalReview?.round ?? 0) + 1,
+      },
+      updatedAt: now,
+    };
+  }
   return {
     ...state,
     status: 'EN_VALIDACION_INTERNA',
     lock: null,
     internalReview: {
       status: 'EN_VALIDACION',
-      approvals: buildPendingApprovals(params.validators),
+      approvals,
       versionLabel: state.versionLabel,
       submittedAt: now,
       submittedBy: normalizeEmail(params.actor.email),

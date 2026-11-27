@@ -92,7 +92,7 @@ test.describe('Portal TH · HEINSOHN NÓMINA', () => {
     await expect(ventana).toBeHidden();
   });
 
-  test('un error de carga sale arriba en rojo con «Reintentar»; vacía y con enlaces inválidos también avisan', async ({ page }) => {
+  test('un error de carga sale arriba en rojo con Reintentar; vacía y con enlaces inválidos también avisan', async ({ page }) => {
     await simular(page, { falla: true });
     await page.goto('/portal');
     await panel(page).getByRole('button', { name: 'Heinsohn Nómina' }).click();

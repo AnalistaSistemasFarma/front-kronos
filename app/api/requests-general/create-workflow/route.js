@@ -1,4 +1,5 @@
 import sql from "mssql";
+import { logFlowChange, requireFlowManager } from '../../../../lib/workflow/flowAccess';
 import sqlConfig from "../../../../dbconfig.js";
 
 export async function POST(req) {
@@ -39,6 +40,10 @@ export async function POST(req) {
       );
     }
 
+
+    // 2026-11-24: designing flows requires the workflow-administration permission.
+    const guard = await requireFlowManager();
+    if (guard instanceof Response) return guard;
 
     const pool = await sql.connect(sqlConfig);
     const transaction = new sql.Transaction(pool);
@@ -342,6 +347,7 @@ export async function POST(req) {
       ========================= */
 
       await transaction.commit();
+      await logFlowChange(processId, guard.email, 'creación', `Flujo ${process} creado (inactivo).`);
 
 
       return new Response(

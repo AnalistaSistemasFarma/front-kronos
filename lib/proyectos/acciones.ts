@@ -87,7 +87,8 @@ export async function crearConversacionProyecto(
 
 /**
  * Invita personas al proyecto (solo el dueño). Deben tener el permiso del
- * módulo en la empresa del proyecto, o nunca podrían entrar.
+ * módulo «Proyectos» en ALGUNA empresa (2026-11-27, proyectos multiempresa), o
+ * nunca podrían entrar. Hablarle a un asistente sigue exigiendo tenerlo asignado.
  */
 export async function invitarMiembros(user: ProjectUser, project: ProjectAccess, ids: string[], role: unknown): Promise<{ added: number }> {
   if (!capabilitiesFor(project.role).manageMembers) throw new ProyectoError('Solo el dueño del proyecto puede invitar.', 403);
@@ -95,10 +96,10 @@ export async function invitarMiembros(user: ProjectUser, project: ProjectAccess,
   const rol = role === undefined ? 'editor' : role;
   if (!isAssignableRole(rol)) throw new ProyectoError('El rol debe ser editor o lector.', 400);
 
-  const elegibles = new Set((await eligibleProjectUsers(project.idCompany, ids, project.idProject)).map((u) => u.id));
+  const elegibles = new Set((await eligibleProjectUsers({ ids })).map((u) => u.id));
   if (ids.some((x) => !elegibles.has(x))) {
     throw new ProyectoError(
-      'Hay personas que no podrían entrar: necesitan el permiso «Proyectos» en la empresa del proyecto, o «Proyectos» en otra empresa y uno de los asistentes del proyecto asignado. Pida primero el permiso.',
+      'Hay personas que no podrían entrar: necesitan estar activas y tener el permiso Proyectos en alguna empresa. Pida primero el permiso.',
       409
     );
   }

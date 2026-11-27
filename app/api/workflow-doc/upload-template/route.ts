@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { flowEditDecision } from '../../../../lib/workflow/flowAccess';
 import { useGetMicrosoftToken as getMicrosoftToken } from '@/components/microsoft-365/useGetMicrosoftToken';
 import { oneDriveRoot } from '@/lib/onedrive/root';
 import { ensureFolderAndUploadFile } from '@/lib/onedrive/graphFolderUpload';
@@ -27,6 +28,10 @@ export async function POST(req: Request) {
     const form = await req.formData();
     const task = await taskProcessOf(Number(form.get('id_task')));
     if (!task) return NextResponse.json({ error: 'Tarea no encontrada' }, { status: 404 });
+    // 2026-11-24: restricted flows only by their editors; «solo plantillas del SGC» does not accept an uploaded Word.
+    const d = await flowEditDecision(email, task.id_process_category);
+    if (!d.canEdit) return NextResponse.json({ error: d.reason }, { status: 403 });
+    if (d.flags?.sgcOnly) return NextResponse.json({ error: 'Este flujo solo admite plantillas tomadas de un documento vigente del SGC.' }, { status: 409 });
     const engine = form.get('engine') === 'word' ? 'word' : 'editor';
     const file = form.get('file');
     if (!(file instanceof Blob)) throw new DocTemplateError('Adjunte el Word de la plantilla.');

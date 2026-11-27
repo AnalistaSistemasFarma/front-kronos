@@ -4873,6 +4873,11 @@ model OtOrdenTrabajo {
   observacion_cierre String?   @db.NVarChar(1000)
   // Área del catálogo (A5, 2026-10-14); `area` guarda la copia del nombre.
   id_area            Int?
+  // Planta 1 o 2 (2026-11-26), elegida al abrir; NULL en las bitácoras anteriores. CHECK (1, 2).
+  planta             Int?      @db.TinyInt
+  // Quién y cuándo asignó o corrigió la planta con la bitácora ABIERTA (2026-11-26); NULL si se eligió al abrir.
+  planta_asignada_por String?  @db.NVarChar(50)
+  planta_asignada_en  DateTime? @db.DateTime2
 
   company    Company           @relation(fields: [id_company], references: [id_company], onDelete: NoAction, onUpdate: NoAction)
   areaRef    OtArea?           @relation(fields: [id_area], references: [id_area], onDelete: NoAction, onUpdate: NoAction)
@@ -4882,6 +4887,7 @@ model OtOrdenTrabajo {
   operadores OtOrdenOperador[]
   registros  OtRegistro[]
   firmas     OtFirma[]
+  notas      OtRegistroNota[]
 
   @@unique([id_company, consecutivo], map: "UQ_ot_orden_trabajo_consecutivo")
   @@index([id_company, estado], map: "IX_ot_orden_trabajo_estado")
@@ -4922,9 +4928,30 @@ model OtRegistro {
   orden     OtOrdenTrabajo @relation(fields: [id_orden_trabajo], references: [id_orden_trabajo], onDelete: NoAction, onUpdate: NoAction)
   actividad OtActividad    @relation(fields: [id_actividad], references: [id_actividad], onDelete: NoAction, onUpdate: NoAction)
   operador  OtOperador?    @relation(fields: [id_operador], references: [id_operador], onDelete: NoAction, onUpdate: NoAction)
+  notas     OtRegistroNota[]
 
   @@index([id_orden_trabajo, registrado_en], map: "IX_ot_registro_orden")
   @@map("ot_registro")
+  @@schema("dbo")
+}
+
+/// Nota de corrección sobre un registro (2026-11-26: «toqué la actividad equivocada»). El registro no se
+/// edita ni se borra; la nota tampoco (trigger TR_ot_registro_nota_inmutable, solo UPDATE/DELETE).
+model OtRegistroNota {
+  id_nota          Int      @id @default(autoincrement())
+  id_registro      BigInt
+  id_orden_trabajo Int
+  texto            String   @db.NVarChar(500)
+  id_user          String   @db.NVarChar(50)
+  // Hora del SERVIDOR de base de datos: el cliente nunca la envía.
+  creada_en        DateTime @default(dbgenerated("sysutcdatetime()")) @db.DateTime2
+  ip               String?  @db.NVarChar(64)
+
+  registro OtRegistro     @relation(fields: [id_registro], references: [id_registro], onDelete: NoAction, onUpdate: NoAction, map: "ot_registro_nota_id_registro_fkey")
+  orden    OtOrdenTrabajo @relation(fields: [id_orden_trabajo], references: [id_orden_trabajo], onDelete: NoAction, onUpdate: NoAction, map: "ot_registro_nota_id_orden_trabajo_fkey")
+
+  @@index([id_orden_trabajo, creada_en], map: "IX_ot_registro_nota_orden")
+  @@map("ot_registro_nota")
   @@schema("dbo")
 }
 
@@ -4934,6 +4961,8 @@ model OtOperador {
   id_company  Int
   nombre      String    @db.NVarChar(120)
   documento   String?   @db.NVarChar(30)
+  // OPERARIO | MANTENIMIENTO | INSPECTOR (2026-11-26): personal del turno agrupado por tipo. CHECK en la base.
+  tipo        String    @default("OPERARIO") @db.NVarChar(20)
   activo      Boolean   @default(true)
   created_by  String    @db.NVarChar(50)
   created_at  DateTime  @default(dbgenerated("sysutcdatetime()")) @db.DateTime2
@@ -6052,6 +6081,52 @@ model BiomedMantenimiento {
   @@index([id_biomed_equipo, fecha])
   @@index([id_company, proximo])
   @@map("biomed_mantenimiento")
+  @@schema("dbo")
+}
+
+/// INGENIERÍA BIOMÉDICA · REPUESTOS E INSUMOS (2026-11-26): inventario aparte del de equipos, con existencias.
+model BiomedRepuesto {
+  id_biomed_repuesto Int       @id @default(autoincrement())
+  id_company         Int
+  /// repuesto | insumo
+  tipo               String    @db.NVarChar(20)
+  codigo             String?   @db.NVarChar(50)
+  nombre             String    @db.NVarChar(200)
+  unidad             String    @default("unidad") @db.NVarChar(30)
+  modelo_compatible  String?   @db.NVarChar(150)
+  ubicacion          String?   @db.NVarChar(100)
+  stock              Decimal   @default(0) @db.Decimal(18, 2)
+  stock_minimo       Decimal?  @db.Decimal(18, 2)
+  item_code_sap      String?   @db.NVarChar(50)
+  activo             Boolean   @default(true)
+  created_by         String    @db.NVarChar(255)
+  created_at         DateTime  @default(now())
+  updated_by         String?   @db.NVarChar(255)
+  updated_at         DateTime?
+
+  @@index([id_company, tipo])
+  @@map("biomed_repuesto")
+  @@schema("dbo")
+}
+
+/// Movimientos de repuestos e insumos (entrada, salida, ajuste): solo inserción (disparador en la base).
+model BiomedRepuestoMov {
+  id_biomed_repuesto_mov Int      @id @default(autoincrement())
+  id_company             Int
+  id_biomed_repuesto     Int
+  /// entrada | salida | ajuste
+  tipo                   String   @db.NVarChar(20)
+  cantidad               Decimal  @db.Decimal(18, 2)
+  stock_resultante       Decimal  @db.Decimal(18, 2)
+  id_biomed_equipo       Int?
+  referencia             String?  @db.NVarChar(100)
+  observacion            String?  @db.NVarChar(1000)
+  actor_email            String   @db.NVarChar(255)
+  created_at             DateTime @default(now())
+
+  @@index([id_biomed_repuesto, created_at], map: "biomed_repuesto_mov_repuesto_idx")
+  @@index([id_biomed_equipo], map: "biomed_repuesto_mov_equipo_idx")
+  @@map("biomed_repuesto_mov")
   @@schema("dbo")
 }
 

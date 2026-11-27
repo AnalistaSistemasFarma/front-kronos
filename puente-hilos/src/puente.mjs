@@ -57,6 +57,7 @@ import { crearClienteSynerLink } from './synerlink.mjs';
 import { crearMedidorCuota } from './cuota.mjs';
 import { carpetaAgenteOpenclaw, crearLectorCredencialOpenclaw } from './openclaw/credencial.mjs';
 import { crearArchivador, textoArchivarProyecto } from './archivar-proyecto.mjs';
+import { prepareVaultTurn, saveProjectToEngram, updateProjectNote, vaultHeaderText } from './vault-proyectos.mjs';
 import { prepararAdjuntos } from './adjuntos-salida.mjs';
 import { archivosDelTurno, archivosModificadosDesde, crearSupervisor, duracionLegible, errorSinReintento, PROMPT_CONTINUACION, PROMPT_REINTENTO_ERROR, textoAvisoProgreso, textoCorte, TEXTO_ERROR_FINAL, textoTiempoTurno } from './progreso.mjs';
 import { convertirHtmlAPdf, convertirMarcasPdf, recursosDePlugins, resolverChrome, textoPdf } from './pdf.mjs';
@@ -280,7 +281,7 @@ export function crearPuente({ cfg, synerlink, estado, correr = correrTurno, conv
         // Perfil que este puente no conoce: no se improvisa ningún conector.
         await synerlink.responder(
           idConversation,
-          `No puedo atender este proyecto: su perfil de conectores («${contexto.project.profile.label}») no está configurado en el puente. Avísele a Tecnología.`
+          `No puedo atender este proyecto: su perfil de conectores (${contexto.project.profile.label}) no está configurado en el puente. Avísele a Tecnología.`
         );
         return;
       }
@@ -335,7 +336,7 @@ export function crearPuente({ cfg, synerlink, estado, correr = correrTurno, conv
         await synerlink.responder(
           idConversation,
           o
-            ? `🎯 **Objetivo activo** de esta conversación (/goal): «${o.condicion}»\n\nLo fijó ${o.autor ?? 'una persona del proyecto'} el ${String(o.fijado).slice(0, 10)}. El asistente sigue trabajando hacia él en cada mensaje hasta que un evaluador confirme que se cumplió. Para quitarlo: \`/goal clear\`.`
+            ? `🎯 **Objetivo activo** de esta conversación (/goal): ${o.condicion}\n\nLo fijó ${o.autor ?? 'una persona del proyecto'} el ${String(o.fijado).slice(0, 10)}. El asistente sigue trabajando hacia él en cada mensaje hasta que un evaluador confirme que se cumplió. Para quitarlo: \`/goal clear\`.`
             : 'Esta conversación no tiene un objetivo activo. Para fijar uno: `/goal <condición>` (por ejemplo, `/goal el informe queda en PDF con las cifras de septiembre`).'
         );
         return;
@@ -387,7 +388,7 @@ export function crearPuente({ cfg, synerlink, estado, correr = correrTurno, conv
       if (!completo && cfg.conectoresAgente) {
         try {
           delAgente = prepararConectoresAgente({ cfg, idConversation, perfilServidores: perfil.mcpServers });
-          if (delAgente?.servidores.length) log(`conversación ${idConversation}: conectores del agente: ${delAgente.servidores.join(', ')}${delAgente.engramProyecto ? ` (engram → ${delAgente.engramProyecto})` : ''}${delAgente.faltan.length ? `; variables sin valor: ${delAgente.faltan.join(', ')}` : ''}.`);
+          if (delAgente?.servidores.length) log(`conversación ${idConversation}: conectores del agente: ${delAgente.servidores.join(', ')}${delAgente.engramProyecto ? ` (engram → ${delAgente.engramProyecto})` : ''}${delAgente.prohibidas?.length ? `; negadas como en su chat: ${delAgente.prohibidas.join(', ')}` : ''}${delAgente.faltan.length ? `; variables sin valor: ${delAgente.faltan.join(', ')}` : ''}.`);
         } catch (e) {
           delAgente = null;
           log(`conversación ${idConversation}: no se pudieron leer los conectores del agente, el turno va sin ellos:`, e.message);
@@ -498,6 +499,8 @@ export function crearPuente({ cfg, synerlink, estado, correr = correrTurno, conv
         if (g.error) log(`conversación ${idConversation}: la guía del flujo de desarrollo no se cargó: ${g.error}`);
         bloqueGuia = g.bloque;
       }
+      // Project note in the agent's vault (vault-proyectos.mjs): current «Estado» to ./contexto.
+      const vault = prepareVaultTurn({ dir: cfg.vaultProyectos?.dir, rutas, contexto });
       escribirContexto({
         rutas,
         agente: agenteNombre,
@@ -513,12 +516,12 @@ export function crearPuente({ cfg, synerlink, estado, correr = correrTurno, conv
           textoGrafos(grafosTurno, { conBash: Boolean(codigo || completo) }) +
           (completo ? `\n${textoOrusCompleto({ autores: completo.autores, servidores: completo.servidores })}` : ''),
         bloqueMemoria: memoria.bloque,
-        bloqueConectores: (conectores?.bloque ?? '') + (delAgente?.servidores.length ? textoConectoresAgente({ agente: agenteNombre, servidores: delAgente.servidores, origen: delAgente.origen, engramProyecto: delAgente.engramProyecto }) : '') + skillScriptsText(scripts),
+        bloqueConectores: (conectores?.bloque ?? '') + (delAgente?.servidores.length ? textoConectoresAgente({ agente: agenteNombre, servidores: delAgente.servidores, origen: delAgente.origen, engramProyecto: delAgente.engramProyecto, denegadas: delAgente.prohibidas }) : '') + skillScriptsText(scripts),
         bloquePruebas: pruebas.bloque,
         bloquePdf: textoPdf({ disponible: Boolean(chromePdf), recursos }),
         bloqueTiempo: textoTiempoTurno({ topeMs: cfg.timeoutTurnoMs, avisoMs: cfg.avisoProgresoMs ?? 0 }),
         bloqueObjetivo: textoObjetivo(objetivo),
-        bloqueArchivar: archivador ? textoArchivarProyecto() : '',
+        bloqueArchivar: (archivador ? textoArchivarProyecto() : '') + (vault.ok ? vaultHeaderText({ file: vault.file }) : ''),
         // Con worktree (o con el índice de repos bajo demanda), las reglas del código ya dicen todo; sin él, el bloque de la política (lectura o «ninguno»).
         politicaTurno: codigo || indiceRepos ? { ...politicaTurno, bloque: '' } : politicaTurno,
       });
@@ -549,6 +552,7 @@ export function crearPuente({ cfg, synerlink, estado, correr = correrTurno, conv
               rutaSistema: rutas.sistema,
               dirArchivos: rutas.archivos,
               modelo: cfg.modelo,
+              esfuerzo: cfg.esfuerzo,
               presupuestoUsd: cfg.presupuestoUsd,
               codigo,
               plugins: pluginsTurno,
@@ -563,6 +567,7 @@ export function crearPuente({ cfg, synerlink, estado, correr = correrTurno, conv
           rutaSistema: rutas.sistema,
           dirArchivos: rutas.archivos,
           modelo: cfg.modelo,
+          esfuerzo: cfg.esfuerzo,
           // Con equipo, el tope de gasto POR PEDIDO es obligatorio.
           presupuestoUsd: equipo ? topes.presupuestoUsd : cfg.presupuestoUsd,
           equipo: equipo ? argumentosEquipo({ equipo, rutaAgentes: rutas.agentes }) : null,
@@ -729,7 +734,7 @@ export function crearPuente({ cfg, synerlink, estado, correr = correrTurno, conv
         const o = estado.objetivoDe(idConversation);
         cuerpo =
           `${ultimoTexto ? `${ultimoTexto}\n\n` : ''}🎯 El objetivo (/goal) **sigue sin cumplirse** después de ${cfg.objetivoMaxRevisiones ?? MAX_REVISIONES_OBJETIVO} revisiones en este mensaje, así que paré aquí para no dar vueltas` +
-          `${o ? `: «${o.condicion}»` : ''}. Sigue activo: en su próximo mensaje continúo hacia él (por ejemplo, si falta una confirmación o un dato, escríbalo). Para quitarlo: \`/goal clear\`.`;
+          `${o ? `: ${o.condicion}` : ''}. Sigue activo: en su próximo mensaje continúo hacia él (por ejemplo, si falta una confirmación o un dato, escríbalo). Para quitarlo: \`/goal clear\`.`;
         log(`conversación ${idConversation}: turno parado (${r.abortado}).`);
       } else if (r.abortado) {
         cuerpo = r.abortado.startsWith('arranque inseguro')
@@ -762,14 +767,14 @@ export function crearPuente({ cfg, synerlink, estado, correr = correrTurno, conv
         const est = estadoObjetivoSesion(rutaTranscripcion(cfg.configClaudeDir, rutas.cwd, sesion.id));
         if (est?.met) {
           estado.quitarObjetivo(idConversation);
-          notaObjetivo = `\n\n✅ **Objetivo cumplido** (/goal): «${objetivo.condicion}». Ya no sigue activo.`;
+          notaObjetivo = `\n\n✅ **Objetivo cumplido** (/goal): ${objetivo.condicion}. Ya no sigue activo.`;
           log(`conversación ${idConversation}: objetivo cumplido.`);
         } else if (est?.fallido) {
           estado.quitarObjetivo(idConversation);
-          notaObjetivo = `\n\n⚠️ **Objetivo cerrado sin cumplir** (/goal): «${objetivo.condicion}». El evaluador concluyó que no se puede cumplir así${est.motivo ? `: ${String(est.motivo).slice(0, 400)}` : '.'} Si quiere, fije otro con \`/goal <condición>\`.`;
+          notaObjetivo = `\n\n⚠️ **Objetivo cerrado sin cumplir** (/goal): ${objetivo.condicion}. El evaluador concluyó que no se puede cumplir así${est.motivo ? `: ${String(est.motivo).slice(0, 400)}` : '.'} Si quiere, fije otro con \`/goal <condición>\`.`;
           log(`conversación ${idConversation}: objetivo imposible, se quita.`);
         } else if (nativo?.objetivo?.fijar) {
-          notaObjetivo = `\n\n🎯 **Objetivo activo** (/goal): «${objetivo.condicion}». Sigue vigente en los próximos mensajes hasta que se cumpla; \`/goal clear\` lo quita.`;
+          notaObjetivo = `\n\n🎯 **Objetivo activo** (/goal): ${objetivo.condicion}. Sigue vigente en los próximos mensajes hasta que se cumpla; \`/goal clear\` lo quita.`;
         }
       }
       // Adjuntos salientes: líneas «MEDIA:trabajo/…» de la respuesta (adjuntos-salida.mjs).
@@ -867,6 +872,16 @@ export function crearPuente({ cfg, synerlink, estado, correr = correrTurno, conv
         }
       } else {
         await synerlink.responder(idConversation, cuerpo);
+      }
+
+      // The project note in the agent's vault is updated after the reply; it never blocks it.
+      if (vault.ok && r.resultado?.ok) {
+        const nota = updateProjectNote({ dir: cfg.vaultProyectos.dir, rutas, contexto, agent: agenteNombre, idConversation, lote, reply: cuerpo, secret: codigo?.token ?? null });
+        if (!nota.ok || nota.reason) log(`conversación ${idConversation}: project note in the vault: ${nota.ok ? 'updated' : 'NOT updated'}${nota.reason ? ` (${nota.reason})` : ''}.`);
+        if (nota.ok && cfg.vaultProyectos.engram) {
+          const mem = await saveProjectToEngram({ engram: cfg.vaultProyectos.engram, file: nota.file });
+          if (!mem.ok) log(`conversación ${idConversation}: project memory in engram NOT saved (${mem.reason}).`);
+        }
       }
 
       const fin = new Date();
@@ -1064,7 +1079,7 @@ export function conectoresAgenteListo(cfg) {
   if (!cfg.conectoresAgente?.configDir) return 'apagados';
   try {
     const a = servidoresAgente(cfg.conectoresAgente);
-    return `${a.nombres.length ? a.nombres.join(', ') : 'ninguno'} (de ${cfg.conectoresAgente.configDir})${a.engramProyecto ? `; engram fijado a su memoria «${a.engramProyecto}»` : ''}${a.faltan.length ? `; variables sin valor: ${a.faltan.join(', ')}` : ''}`;
+    return `${a.nombres.length ? a.nombres.join(', ') : 'ninguno'} (de ${cfg.conectoresAgente.configDir})${a.engramProyecto ? `; engram fijado a su memoria ${a.engramProyecto}` : ''}${a.denegadas?.length ? `; negadas como en su chat: ${a.denegadas.join(', ')}` : ''}${a.faltan.length ? `; variables sin valor: ${a.faltan.join(', ')}` : ''}`;
   } catch (e) {
     return `NO se pudieron leer (${e.message.slice(0, 120)}): los turnos irán sin ellos`;
   }
@@ -1117,9 +1132,9 @@ async function principal() {
   if (!lectorOc) log(medidor ? `medidor de consumo: stream de cada turno${cfg.cuota.intervaloMs > 0 && cfg.credencial.tipo === 'oauth-token' ? ` + consulta mínima cada ${Math.round(cfg.cuota.intervaloMs / 1000)} s sin turnos` : ''}.` : `medidor de consumo apagado (${cfg.runner === 'openclaw' ? 'HILOS_OPENCLAW_CUOTA' : 'HILOS_CUOTA'}=no).`);
   if (cfg.runner === 'openclaw') {
     const oc = cfg.openclaw;
-    log(`listo: agente ${cfg.agente} (${cfg.agenteNombre}), entorno ${cfg.entorno}, RUNNER OPENCLAW: agente «${oc.agente}»${oc.perfil ? `, perfil ${oc.perfil}` : ''}${oc.local ? ', --local' : ', por el Gateway'}; sesiones «${oc.prefijo}c<conv>-<gen>»; área ${cfg.areaDir}; outbox ${oc.outbox ?? 'no'}; indicador fino ${oc.actividad && !oc.local ? 'sí' : 'no'}; tope ${cfg.maxConcurrencia} hilos; tope por turno ${duracionLegible(cfg.timeoutTurnoMs)}; avisos ${cfg.avisoProgresoMs ? `cada ${duracionLegible(cfg.avisoProgresoMs)}` : 'apagados'}; perfil: ${perfilListo(cfg)}; PDF del puente ${cfg.pdf?.habilitado ? `sí${oc.recursos?.length ? ` (recursos: ${oc.recursos.join(', ')})` : ''}` : 'no'}; ${esNegocio(cfg) ? 'sin capacidades del puente (conectores, PRUEBAS, código, equipo, plugins): el agente usa SOLO las suyas' : `CÓDIGO con guardia de git/gh (${cfg.rutaReposPorProyecto ?? 'sin archivo de repos'}; token ${cfg.githubTokenArchivo ? 'en archivo' : 'NO'}); PR solo a la rama de pruebas, sin pases; sin conectores, PRUEBAS, equipo ni plugins del puente`}.`);
+    log(`listo: agente ${cfg.agente} (${cfg.agenteNombre}), entorno ${cfg.entorno}, RUNNER OPENCLAW: agente ${oc.agente}${oc.perfil ? `, perfil ${oc.perfil}` : ''}${oc.local ? ', --local' : ', por el Gateway'}; sesiones ${oc.prefijo}c<conv>-<gen>; área ${cfg.areaDir}; outbox ${oc.outbox ?? 'no'}; indicador fino ${oc.actividad && !oc.local ? 'sí' : 'no'}; tope ${cfg.maxConcurrencia} hilos; tope por turno ${duracionLegible(cfg.timeoutTurnoMs)}; avisos ${cfg.avisoProgresoMs ? `cada ${duracionLegible(cfg.avisoProgresoMs)}` : 'apagados'}; perfil: ${perfilListo(cfg)}; PDF del puente ${cfg.pdf?.habilitado ? `sí${oc.recursos?.length ? ` (recursos: ${oc.recursos.join(', ')})` : ''}` : 'no'}; ${esNegocio(cfg) ? 'sin capacidades del puente (conectores, PRUEBAS, código, equipo, plugins): el agente usa SOLO las suyas' : `CÓDIGO con guardia de git/gh (${cfg.rutaReposPorProyecto ?? 'sin archivo de repos'}; token ${cfg.githubTokenArchivo ? 'en archivo' : 'NO'}); PR solo a la rama de pruebas, sin pases; sin conectores, PRUEBAS, equipo ni plugins del puente`}.`);
   } else
-  log(`listo: agente ${cfg.agente} (${cfg.agenteNombre}), entorno ${cfg.entorno}, tope ${cfg.maxConcurrencia} hilos, credencial: ${cfg.origenCredencial}, modelo del hilo principal: ${cfg.modelo ?? 'el predeterminado de la cuenta (sin HILOS_MODELO)'}; tope por turno ${duracionLegible(cfg.timeoutTurnoMs)}; gasto ${cfg.sinTopeGasto ? 'SIN TOPE' : cfg.presupuestoUsd ? `tope ${cfg.presupuestoUsd} USD` : `sin tope general (equipo ${cfg.subagentesPresupuestoUsd} USD)`}; avisos de progreso ${cfg.avisoProgresoMs ? `cada ${duracionLegible(cfg.avisoProgresoMs)}` : 'apagados'}; continuación automática ${cfg.continuarAlAgotar ? 'sí' : 'no'}; perfil: ${perfilListo(cfg)}; PRUEBAS para todos los hilos: ${pruebasListo(cfg)}; conectores del agente: ${conectoresAgenteListo(cfg)}.`);
+  log(`listo: agente ${cfg.agente} (${cfg.agenteNombre}), entorno ${cfg.entorno}, tope ${cfg.maxConcurrencia} hilos, credencial: ${cfg.origenCredencial}, modelo del hilo principal: ${cfg.modelo ?? 'el predeterminado de la cuenta (sin HILOS_MODELO)'}, esfuerzo ${cfg.esfuerzo ?? 'el predeterminado (sin HILOS_EFFORT)'}; tope por turno ${duracionLegible(cfg.timeoutTurnoMs)}; gasto ${cfg.sinTopeGasto ? 'SIN TOPE' : cfg.presupuestoUsd ? `tope ${cfg.presupuestoUsd} USD` : `sin tope general (equipo ${cfg.subagentesPresupuestoUsd} USD)`}; avisos de progreso ${cfg.avisoProgresoMs ? `cada ${duracionLegible(cfg.avisoProgresoMs)}` : 'apagados'}; continuación automática ${cfg.continuarAlAgotar ? 'sí' : 'no'}; perfil: ${perfilListo(cfg)}; PRUEBAS para todos los hilos: ${pruebasListo(cfg)}; conectores del agente: ${conectoresAgenteListo(cfg)}.`);
 
   let parar = false;
   for (const senal of ['SIGTERM', 'SIGINT']) {
@@ -1147,7 +1162,7 @@ async function principal() {
         if (err?.status === 404) {
           // SynerLink todavía no trae el equipo de subagentes: no se insiste.
           equipoDisponible = false;
-          log('SynerLink no trae «Sugerir equipo» (404): no se revisa más en esta ejecución.');
+          log('SynerLink no trae Sugerir equipo (404): no se revisa más en esta ejecución.');
         } else log('pedidos de equipo:', err?.message ?? err);
       }
     }

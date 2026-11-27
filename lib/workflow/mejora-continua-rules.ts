@@ -394,9 +394,9 @@ function sugerir(d: Diagnostico, tareas: TareaDef[], erroresSap: ErroresSap[], c
       clave: `paralelizar:${t.idTarea}`,
       tipo: 'paralelizar',
       idTarea: t.idTarea,
-      titulo: `«${t.nombre}» podría hacerse al mismo tiempo que «${prev.nombre}»`,
-      explicacion: `Hoy «${t.nombre}» espera a que termine «${prev.nombre}». Si no necesita lo que sale de esa tarea, las dos pueden avanzar a la vez. Revise que no dependa de ella antes de aplicarlo.`,
-      evidencia: `«${prev.nombre}» tarda ${textoDias(prev.medianaDias)} y «${t.nombre}» ${textoDias(t.medianaDias)} (lo normal, en ${t.casos} solicitudes).`,
+      titulo: `${t.nombre} podría hacerse al mismo tiempo que ${prev.nombre}`,
+      explicacion: `Hoy ${t.nombre} espera a que termine ${prev.nombre}. Si no necesita lo que sale de esa tarea, las dos pueden avanzar a la vez. Revise que no dependa de ella antes de aplicarlo.`,
+      evidencia: `${prev.nombre} tarda ${textoDias(prev.medianaDias)} y ${t.nombre} ${textoDias(t.medianaDias)} (lo normal, en ${t.casos} solicitudes).`,
       impacto: `Hasta ${textoDias(ahorro)} menos por solicitud.`,
       accion: { tipo: 'quitar_secuencial', idTarea: t.idTarea },
     });
@@ -414,7 +414,7 @@ function sugerir(d: Diagnostico, tareas: TareaDef[], erroresSap: ErroresSap[], c
         clave: `suplente:${t.idTarea}`,
         tipo: 'suplente',
         idTarea: t.idTarea,
-        titulo: `Agregar un suplente en «${t.nombre}»`,
+        titulo: `Agregar un suplente en ${t.nombre}`,
         explicacion: `Esta tarea depende de una sola persona y concentra buena parte de la espera del flujo. Con una segunda persona asignada, la tarea no se detiene por vacaciones, incapacidades o picos de trabajo.`,
         evidencia: `Se lleva el ${pct(t.participacion)} del tiempo del flujo; lo normal son ${textoDias(t.medianaDias)} y el 10 % más lento pasa de ${textoDias(t.p90Dias)}.${t.pendientes > 0 ? ` Hoy tiene ${t.pendientes} pendientes.` : ''}`,
         impacto: null,
@@ -429,7 +429,7 @@ function sugerir(d: Diagnostico, tareas: TareaDef[], erroresSap: ErroresSap[], c
         clave: `repartir:${t.idTarea}`,
         tipo: 'repartir',
         idTarea: t.idTarea,
-        titulo: `Repartir la carga de «${t.nombre}»`,
+        titulo: `Repartir la carga de ${t.nombre}`,
         explicacion: `Hay ${dt.asignados} personas asignadas, pero casi todo lo resuelve ${quien}. Conviene acordar cómo se reparten los casos o revisar si las demás personas siguen en el proceso.`,
         evidencia: `${quien} resolvió el ${pct(t.principal.parte)} de los ${t.casos} casos.`,
         impacto: null,
@@ -443,7 +443,7 @@ function sugerir(d: Diagnostico, tareas: TareaDef[], erroresSap: ErroresSap[], c
         clave: `autorizacion:${t.idTarea}`,
         tipo: 'autorizacion',
         idTarea: t.idTarea,
-        titulo: `Revisar si «${t.nombre}» sigue siendo necesaria`,
+        titulo: `Revisar si ${t.nombre} sigue siendo necesaria`,
         explicacion: `Esta autorización se aprobó en todos los casos de los últimos meses, pero cada vez hace esperar. Se puede dejar solo para los casos que de verdad lo requieren (por ejemplo, por monto o por tipo) o quitarla.`,
         evidencia: `${t.casos} autorizaciones, ninguna rechazada; tardan ${textoDias(t.medianaDias)} en lo normal.`,
         impacto: `Hasta ${textoDias(t.medianaDias)} menos por solicitud.`,
@@ -474,7 +474,7 @@ function sugerir(d: Diagnostico, tareas: TareaDef[], erroresSap: ErroresSap[], c
       clave: `sap:${e.idTarea}`,
       tipo: 'sap',
       idTarea: e.idTarea,
-      titulo: `La tarea automática «${dt.nombre}» falla seguido`,
+      titulo: `La tarea automática ${dt.nombre} falla seguido`,
       explicacion: 'Cuando la tarea que ejecuta SAP falla, la solicitud se detiene hasta que alguien la reintenta. Conviene revisarla con Tecnología.',
       evidencia: `${e.errores} errores en ${e.total} ejecuciones (${pct(e.errores / e.total)}).`,
       impacto: null,
@@ -490,7 +490,7 @@ function sugerir(d: Diagnostico, tareas: TareaDef[], erroresSap: ErroresSap[], c
           clave: `sin_uso:${t.idTarea}`,
           tipo: 'sin_uso',
           idTarea: t.idTarea,
-          titulo: `«${t.nombre}» no se usó en los últimos meses`,
+          titulo: `${t.nombre} no se usó en los últimos meses`,
           explicacion: 'Ninguna solicitud pasó por esta tarea. Puede ser una tarea condicional que casi nunca aplica, o una que ya sobra.',
           evidencia: `0 de ${d.solicitudes} solicitudes desde el ${d.desde}.`,
           impacto: null,
@@ -554,10 +554,10 @@ export function calificarFlujo(d: Diagnostico, pendientes: number): Calificacion
   const pocosCasos = d.resueltas < MIN_CASOS;
   const graves: string[] = [];
   const leves: string[] = [];
-  for (const t of rojas) graves.push(`«${t.nombre}» es un cuello de botella (lo normal: ${textoDias(t.medianaDias)}).`);
+  for (const t of rojas) graves.push(`${t.nombre} es un cuello de botella (lo normal: ${textoDias(t.medianaDias)}).`);
   if (m !== null && m >= DIAS_CRITICO) graves.push(`Una solicitud tarda normalmente ${textoDias(m)} (${DIAS_CRITICO} días o más).`);
   if (d.tendencia.veredicto === 'mas_lento') graves.push(`Se volvió ${textoTendencia(d.tendencia).replace(' más lento', '')} más lento que antes.`);
-  for (const t of amarillas) leves.push(`«${t.nombre}» se demora (lo normal: ${textoDias(t.medianaDias)}).`);
+  for (const t of amarillas) leves.push(`${t.nombre} se demora (lo normal: ${textoDias(t.medianaDias)}).`);
   if (m !== null && m >= DIAS_REVISAR && m < DIAS_CRITICO) leves.push(`Una solicitud tarda normalmente ${textoDias(m)} (${DIAS_REVISAR} días o más).`);
   if (pendientes > 0) leves.push(`${pendientes} ${pendientes === 1 ? 'sugerencia sin revisar' : 'sugerencias sin revisar'}.`);
   const nota = pocosCasos ? [`Con pocos casos: ${d.resueltas} ${d.resueltas === 1 ? 'solicitud resuelta' : 'solicitudes resueltas'} en 6 meses.`] : [];

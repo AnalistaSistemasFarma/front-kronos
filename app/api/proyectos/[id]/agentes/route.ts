@@ -128,7 +128,7 @@ export async function POST(request: NextRequest, { params }: Ctx) {
       await tx.chatProjectAgent.createMany({ data: filas });
       return true;
     });
-    if (!hecho) return jsonNoStore({ error: 'El proyecto cambió mientras tanto. Vuelva a abrir «Agregar asistente».' }, { status: 409 });
+    if (!hecho) return jsonNoStore({ error: 'El proyecto cambió mientras tanto. Vuelva a abrir Agregar asistente.' }, { status: 409 });
     return jsonNoStore({ added: filas.length, profile: perfil, avisos }, { status: 201 });
   } catch (error) {
     return serverError('POST /api/proyectos/[id]/agentes', error);

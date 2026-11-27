@@ -28,7 +28,7 @@ const TILES: { state: InboxSlaState; label: string; tone: StatusTone | 'violet';
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 
 const HELP =
-  'ANS de los trámites pendientes (las mismas solicitudes y tareas de «Pendientes»). Tiempo hábil: lunes a viernes, 8:00 a 17:00, sin festivos. ' +
+  'ANS de los trámites pendientes (las mismas solicitudes y tareas de Pendientes). Tiempo hábil: lunes a viernes, 8:00 a 17:00, sin festivos. ' +
   'Próximos a vencer: les queda el 20 % o menos del ANS. Sin ANS: el subproceso no tiene ANS configurado. ' +
   'En pausa: la solicitud está devuelta o cerrada y su reloj está detenido. Toque una tarjeta para filtrar la lista.';
 

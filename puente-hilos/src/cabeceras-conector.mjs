@@ -15,7 +15,7 @@ try {
   if (!ruta || !/^[a-z0-9][a-z0-9-]{0,39}$/.test(llave ?? '')) throw new Error('uso inválido');
   if ((statSync(ruta).mode & 0o777) !== 0o600) throw new Error('el archivo de secretos debe ser 600');
   const valor = JSON.parse(readFileSync(ruta, 'utf8'))?.[llave];
-  if (typeof valor !== 'string' || valor.length < 16) throw new Error(`no hay llave «${llave}»`);
+  if (typeof valor !== 'string' || valor.length < 16) throw new Error(`no hay llave ${llave}`);
   process.stdout.write(JSON.stringify({ Authorization: `Bearer ${valor.replace(/^Bearer\s+/i, '')}` }));
 } catch (e) {
   // Sin la llave, el conector simplemente no conecta (falla cerrado). Nunca se imprime el contenido.

@@ -136,7 +136,7 @@ export function validateConfig(c: ConfigInput): string[] {
   if (!Number.isInteger(c.intervalo_min) || c.intervalo_min < 5 || c.intervalo_min > 1440) e.push('El intervalo debe estar entre 5 y 1440 minutos.');
   if (c.user_signs.some((u) => !Number.isInteger(u) || u <= 0)) e.push('Los usuarios SAP de la integración deben ser números separados por coma.');
   if (c.user_signs.length > 10) e.push('Indique como máximo 10 usuarios SAP.');
-  if (c.desde_fecha != null && !/^\d{4}-\d{2}-\d{2}$/.test(c.desde_fecha)) e.push('La fecha «desde» no es válida.');
+  if (c.desde_fecha != null && !/^\d{4}-\d{2}-\d{2}$/.test(c.desde_fecha)) e.push('La fecha desde no es válida.');
   if (c.activo && !c.user_signs.length) e.push('Para activarla, indique el usuario SAP que crea los borradores (UserSign).');
   if (c.activo && !c.id_user_solicitante) e.push('Para activarla, indique el solicitante en SynerLink.');
   return e;
@@ -286,7 +286,7 @@ async function sendToFlow(sap: SapSession, cfg: AutomationConfig, c: Candidate, 
     `SELECT TOP 1 id_process_category_oferta AS id_proceso FROM dbo.sales_company_config WHERE id_company = @c AND activo = 1;`
   );
   const processId = Number(conf.recordset[0]?.id_proceso ?? 0);
-  if (!processId) throw new Error('La empresa no tiene configurado el flujo «Oferta de venta» (sales_company_config).');
+  if (!processId) throw new Error('La empresa no tiene configurado el flujo Oferta de venta (sales_company_config).');
   if (!cfg.id_user_solicitante) throw new Error('Falta el solicitante en SynerLink en la configuración.');
 
   // Releer el borrador justo antes: debe seguir en B y sin enlace vivo.

@@ -588,7 +588,7 @@ export default function CorreoPage() {
       // Parcial (error, «Detener» o tope): se trae el estado real.
       void cargarMensajes(filtros, { refresco: true });
       toast(
-        `Se marcaron ${hechos.toLocaleString('es-CO')} correo(s); quedan ${restantes.toLocaleString('es-CO')}.${error ? ` (${error})` : ' Use otra vez «Marcar todo» para continuar.'}`
+        `Se marcaron ${hechos.toLocaleString('es-CO')} correo(s); quedan ${restantes.toLocaleString('es-CO')}.${error ? ` (${error})` : ' Use otra vez Marcar todo para continuar.'}`
       );
     } else {
       toast.success(`${hechos.toLocaleString('es-CO')} correo(s) marcados como ${leido ? 'leídos' : 'no leídos'}`);
@@ -847,7 +847,7 @@ export default function CorreoPage() {
   );
 
   const chipsActivos: Array<{ k: string; texto: string; quitar: Partial<Filtros> }> = [];
-  if (filtros.buscar.trim()) chipsActivos.push({ k: 'buscar', texto: `«${filtros.buscar.trim()}»`, quitar: { buscar: '' } });
+  if (filtros.buscar.trim()) chipsActivos.push({ k: 'buscar', texto: `${filtros.buscar.trim()}`, quitar: { buscar: '' } });
   if (filtros.de.trim()) chipsActivos.push({ k: 'de', texto: `De: ${filtros.de.trim()}`, quitar: { de: '' } });
   if (filtros.desde) chipsActivos.push({ k: 'desde', texto: `Desde ${filtros.desde}`, quitar: { desde: '' } });
   if (filtros.hasta) chipsActivos.push({ k: 'hasta', texto: `Hasta ${filtros.hasta}`, quitar: { hasta: '' } });
@@ -1249,7 +1249,7 @@ export default function CorreoPage() {
     </Alert>
   ) : null;
   const alEnviar = ({ destinatarios, asunto }: { destinatarios: number; asunto: string }) => {
-    setAvisoEnvio(`Correo ${asunto ? `«${asunto}» ` : ''}enviado desde su buzón a ${destinatarios === 1 ? '1 destinatario' : `${destinatarios} destinatarios`}. Quedó en Enviados.`);
+    setAvisoEnvio(`Correo ${asunto ? `${asunto} ` : ''}enviado desde su buzón a ${destinatarios === 1 ? '1 destinatario' : `${destinatarios} destinatarios`}. Quedó en Enviados.`);
     // Los contadores (y la lista, si está en Enviados) se refrescan sin desmontar el aviso.
     cargarCarpetas();
     if (carpetaActual?.tipo === 'enviados') void cargarMensajes(filtrosRef.current, { refresco: true });
@@ -1384,7 +1384,7 @@ export default function CorreoPage() {
               <Stack gap={2} data-testid='correo-confirmar-eliminar-vinculos'>
                 {[...new Map(confirmarEliminar.vinculos.map((v) => [v.conversationId, v])).values()].map((v) => (
                   <Text size='sm' key={v.conversationId}>
-                    {[v.idRequest ? `Solicitud #${v.idRequest}` : null, ...v.proyectos.map((p) => `Proyecto «${p}»`)].filter(Boolean).join(' · ')}
+                    {[v.idRequest ? `Solicitud #${v.idRequest}` : null, ...v.proyectos.map((p) => `Proyecto ${p}`)].filter(Boolean).join(' · ')}
                   </Text>
                 ))}
               </Stack>

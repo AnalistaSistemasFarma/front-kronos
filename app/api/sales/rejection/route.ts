@@ -38,7 +38,7 @@ export async function POST(request: NextRequest) {
     if (!link) return NextResponse.json({ error: 'La solicitud no es de una oferta de venta.' }, { status: 404 });
     const write = await salesEndpointForUser(email, link.id_company, 'write');
     if (!write?.endpoint || !(await canReadLinkedSale(email, requestId, link.id_company))) {
-      return NextResponse.json({ error: 'No tiene permiso para gestionar esta oferta («Ventas · Gestionar ofertas»).' }, { status: 403 });
+      return NextResponse.json({ error: 'No tiene permiso para gestionar esta oferta (Ventas · Gestionar ofertas).' }, { status: 403 });
     }
     const user = await prisma.user.findUnique({ where: { email }, select: { id: true, name: true } });
     if (!user) return NextResponse.json({ error: 'Usuario no encontrado.' }, { status: 401 });

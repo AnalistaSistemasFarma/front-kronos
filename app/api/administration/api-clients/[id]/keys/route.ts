@@ -38,13 +38,13 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     }
     if (result.status === 'no_api_access') {
       return NextResponse.json(
-        { error: 'Un proveedor o cliente no lleva llave de API: se administra desde «Administrar portal»' },
+        { error: 'Un proveedor o cliente no lleva llave de API: se administra desde Administrar portal' },
         { status: 409, headers: NO_STORE }
       );
     }
     if (result.status === 'too_many') {
       return NextResponse.json(
-        { error: `El cliente ya tiene ${MAX_ACTIVE_KEYS_PER_CLIENT} llaves activas: revoque una o use «Rotar»` },
+        { error: `El cliente ya tiene ${MAX_ACTIVE_KEYS_PER_CLIENT} llaves activas: revoque una o use Rotar` },
         { status: 409, headers: NO_STORE }
       );
     }

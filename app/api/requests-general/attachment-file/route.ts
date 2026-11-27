@@ -1,4 +1,6 @@
 import { oneDriveRoot } from '@/lib/onedrive/root';
+import { VIEW_ONLY_MESSAGE, requestViewOnly, viewableInline } from '../../../../lib/workflow/requestProtection';
+import { canReadRequestDocuments } from '../../../../lib/workflow-doc/access';
 import { getServerSession } from 'next-auth';
 import { NextResponse } from 'next/server';
 import { authOptions } from '../../auth/[...nextauth]/route';
@@ -160,6 +162,14 @@ export async function GET(req: Request) {
       return NextResponse.json({ error: 'Documento no encontrado' }, { status: 404 });
     }
 
+    // «Ver sin descargar» (2026-11-24): flujo restringido → solo participantes, solo en línea, solo PDF o imagen.
+    const viewOnly = entityType === 'Request' && (await requestViewOnly(requestId));
+    if (viewOnly) {
+      if (!(await canReadRequestDocuments(String(session.user.email ?? ''), requestId))) return NextResponse.json({ error: 'Solo los participantes de la solicitud ven sus adjuntos.' }, { status: 403 });
+      if (forceDownload) return NextResponse.json({ error: VIEW_ONLY_MESSAGE }, { status: 403 });
+      if (!viewableInline(meta.name, meta.mimeType)) return NextResponse.json({ error: `${VIEW_ONLY_MESSAGE} Este tipo de archivo no se puede ver en línea; cárguelo en PDF.` }, { status: 415 });
+    }
+
     // Word en preparación: solo su preparadora lo descarga (los validadores revisan en el tablero).
     // Se decide por pertenencia al borrador (Word o copia de versión), sin importar storagePath.
     // Solo .docx: los PDF e imágenes no pagan esta consulta.
@@ -174,6 +184,7 @@ export async function GET(req: Request) {
       headers.set('Content-Type', safeContentType(contentType));
       headers.set('Content-Disposition', contentDisposition(fileName, forceDownload));
       headers.set('Cache-Control', 'private, no-store');
+      if (viewOnly) headers.set('X-SynerLink-Solo-Consulta', '1');
       return new NextResponse(body as unknown as BodyInit, { status: 200, headers });
     };
 

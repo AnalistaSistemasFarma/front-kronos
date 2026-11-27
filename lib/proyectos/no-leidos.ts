@@ -20,7 +20,8 @@
  * -------------------------------------------------------------------------
  * Solo entran conversaciones 'project', no archivadas, de proyectos NO
  * archivados, donde la persona es MIEMBRO (dueño, editor o lector) y conserva el
- * permiso del módulo «Proyectos» en la empresa del proyecto. Un lector ve sus no
+ * permiso del módulo «Proyectos» en ALGUNA empresa (2026-11-27, multiempresa: la
+ * pertenencia da la visibilidad, sea cual sea la empresa del proyecto). Un lector ve sus no
  * leídos (leer es lo que su rol permite); quien no es miembro no ve nada — ni el
  * número, ni el nombre, ni el fragmento. lib/proyectos/__tests__/no-leidos.test.ts
  * fija que el filtro no se afloje.
@@ -40,14 +41,18 @@ export const FRAGMENTO_CHARS = 120;
 /** Roles que cuentan como mensaje nuevo: personas y agentes (no los de sistema). */
 export const ROLES_QUE_CUENTAN = ['user', 'agent'] as const;
 
-/** Filtro Prisma de las conversaciones de proyecto que ESTA persona puede leer hoy. */
+/**
+ * Filtro Prisma de las conversaciones de proyecto que ESTA persona puede leer hoy.
+ * `empresas`: donde tiene el módulo «Proyectos». Sin ninguna, nada; con alguna,
+ * todo proyecto donde es miembro, de cualquier empresa (2026-11-27).
+ */
 export function whereConversacionesVisibles(userId: string, empresas: number[]) {
   return {
     kind: 'project',
     archived: false,
+    ...(empresas.length === 0 ? { id: { in: [] as number[] } } : {}),
     project: {
       archived: false,
-      id_company: { in: empresas },
       members: { some: { id_user: userId } },
     },
   };
