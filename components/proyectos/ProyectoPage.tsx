@@ -4,6 +4,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useState } from 'reac
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useSession } from 'next-auth/react';
+import { handlePersona } from '../../lib/proyectos/menciones-personas-handle';
 import { ActionIcon, Anchor, Badge, Box, Card, Group, Menu, NavLink, Skeleton, Stack, Tabs, Text, ThemeIcon, Title } from '@mantine/core';
 import { useMediaQuery } from '@mantine/hooks';
 import {
@@ -178,12 +179,20 @@ export default function ProyectoPage({ idProject }: { idProject: number }) {
 
   // Multiagente (2026-10-29): OTROS asistentes del proyecto a los que la persona
   // les puede escribir; se mencionan con @ en el hilo (el servidor revalida).
+  // @persona (2026-11-26): también los MIEMBROS (menos uno mismo), por el usuario del
+  // correo. Si el mensaje menciona solo personas, ningún asistente lo atiende.
   const mencionables = useMemo(() => {
     if (!proyecto || !conversacion || conversacion.soloLectura) return [];
-    return proyecto.agents
+    const agentes = proyecto.agents
       .filter((a) => a.puedoEscribir && a.idAgent !== conversacion.agent.idAgent)
       .map((a) => ({ valor: a.code, nombre: a.displayName, avatarUrl: a.avatarUrl }));
-  }, [proyecto, conversacion]);
+    const tomados = new Set([conversacion.agent.code, ...agentes.map((a) => a.valor)].map((v) => v.toLowerCase()));
+    const personas = proyecto.members
+      .filter((m) => m.id !== miId)
+      .map((m) => ({ valor: handlePersona(m.email), nombre: m.name, avatarUrl: m.avatarUrl }))
+      .filter((m): m is { valor: string; nombre: string; avatarUrl: string | null } => m.valor !== null && !tomados.has(m.valor));
+    return [...agentes, ...personas];
+  }, [proyecto, conversacion, miId]);
 
   // CELULAR con una conversación abierta: pantalla completa como el chat. La
   // marca se quita SIEMPRE al salir, o la aplicación quedaría sin navegación.

@@ -123,6 +123,14 @@
  *   HILOS_CONECTORES_AGENTE_ENGRAM_PROYECTO  Proyecto de engram de su chat (por defecto: el repo git de
  *                                    HILOS_CONECTORES_AGENTE_PROYECTO). Así el hilo lee y guarda en su misma memoria.
  *
+ *   Nota del proyecto en el vault de Obsidian del agente (2026-11-26; ver vault-proyectos.mjs):
+ *   HILOS_VAULT_PROYECTOS_DIR        Carpeta absoluta del vault donde va una nota por proyecto y el
+ *                                    índice «Proyectos SynerLink.md», o 'no'. Por defecto:
+ *                                    <HILOS_CONECTORES_AGENTE_PROYECTO>/proyectos/synerlink; sin vault conocido, apagado.
+ *   HILOS_VAULT_ENGRAM               'si' (por defecto) o 'no': el mismo resumen en el engram del agente
+ *                                    (tema synerlink/proyecto-<id>). HILOS_VAULT_ENGRAM_BIN, _DATA_DIR y
+ *                                    _PROYECTO; si no, los de HILOS_CONECTORES_AGENTE_ENGRAM_*. openclaw: _DATA_DIR obligatorio.
+ *
  *   Medidor del consumo de Anthropic (2026-10-22; ver cuota.mjs). Opcional:
  *   HILOS_CUOTA                      'si' (por defecto) o 'no'. Publica en SynerLink el cupo semanal
  *                                    y la ventana de 5 h del token (lo que trae el stream del turno).
@@ -132,6 +140,7 @@
 import { existsSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
+import { proyectoEngram } from './conectores-agente.mjs';
 import { MAX_ENFOQUE, PERFILES_AGENTE, PERFIL_POR_DEFECTO, VARIABLES_SOLO_DESARROLLO } from './perfil-agente.mjs';
 
 export const MAX_CONCURRENCIA_F1 = 2;
@@ -678,6 +687,38 @@ export function cargarConfig(env = process.env) {
     }
   }
 
+  // Project note in the agent's Obsidian vault (vault-proyectos.mjs, 2026-11-26, rule of Nicolás Rivera
+  // for every agent and project). HILOS_VAULT_PROYECTOS_DIR: absolute folder, or 'no' to turn it off.
+  // Default: <HILOS_CONECTORES_AGENTE_PROYECTO>/proyectos/synerlink when the agent's vault is known.
+  let vaultProyectos = null;
+  const vpRaw = (env.HILOS_VAULT_PROYECTOS_DIR ?? '').trim();
+  if (vpRaw.toLowerCase() !== 'no') {
+    const vpDir = vpRaw || (conectoresAgente?.proyectoDir ? path.join(conectoresAgente.proyectoDir, 'proyectos', 'synerlink') : '');
+    if (vpDir) {
+      if (!path.isAbsolute(vpDir)) throw new ErrorConfig('HILOS_VAULT_PROYECTOS_DIR debe ser una ruta absoluta (carpeta del vault del agente) o «no».');
+      if (path.resolve(vpDir).startsWith(path.resolve(hilosDir) + path.sep)) throw new ErrorConfig('HILOS_VAULT_PROYECTOS_DIR no puede quedar dentro de HILOS_DIR.');
+      vaultProyectos = { dir: path.resolve(vpDir), origen: vpRaw ? 'HILOS_VAULT_PROYECTOS_DIR' : 'HILOS_CONECTORES_AGENTE_PROYECTO', engram: null };
+      // The same summary in the agent's engram (2026-11-26). HILOS_VAULT_ENGRAM: 'si' (default) or 'no'.
+      // HILOS_VAULT_ENGRAM_BIN / _DATA_DIR / _PROYECTO, else the HILOS_CONECTORES_AGENTE_ENGRAM_* values,
+      // else the engram project of the vault's git repo. openclaw: the data dir must be explicit.
+      const veRaw = (env.HILOS_VAULT_ENGRAM ?? 'si').trim().toLowerCase() || 'si';
+      if (!['si', 'no'].includes(veRaw)) throw new ErrorConfig('HILOS_VAULT_ENGRAM debe ser «si» o «no».');
+      if (veRaw === 'si') {
+        const absOpt = (nombre) => {
+          const v = (env[nombre] ?? '').trim() || null;
+          if (v && !path.isAbsolute(v)) throw new ErrorConfig(`${nombre} debe ser una ruta absoluta.`);
+          return v;
+        };
+        const bin = absOpt('HILOS_VAULT_ENGRAM_BIN') ?? conectoresAgente?.engramBin ?? ['/opt/homebrew/bin/engram', '/usr/local/bin/engram'].find((b) => existsSync(b)) ?? null;
+        const dataDir = absOpt('HILOS_VAULT_ENGRAM_DATA_DIR') ?? conectoresAgente?.engramDataDir ?? null;
+        const explicito = (env.HILOS_VAULT_ENGRAM_PROYECTO ?? '').trim() || conectoresAgente?.engramProyecto || null;
+        const proyecto = proyectoEngram({ proyectoDir: conectoresAgente?.proyectoDir ?? path.resolve(vpDir), explicito });
+        if (explicito && !proyecto) throw new ErrorConfig('HILOS_VAULT_ENGRAM_PROYECTO solo admite letras, números, punto, guion y guion bajo.');
+        if (bin && proyecto && (runner !== 'openclaw' || dataDir)) vaultProyectos.engram = { bin, dataDir, project: proyecto };
+      }
+    }
+  }
+
   // Chat parity (chat-parity.mjs, 2026-11-19): the agent's chat skills synced at turn start and its
   // skill scripts runnable. ON by default for the Claude Code runner when the agent's chat config is
   // known (HILOS_CONECTORES_AGENTE_CONFIG_DIR) or explicit sources are given.
@@ -782,6 +823,7 @@ export function cargarConfig(env = process.env) {
     pruebasKronos: { habilitado: pruebasModo === 'si' && runner === 'claude', base: new URL(pruebasWeb).origin },
     orusCompleto,
     conectoresAgente,
+    vaultProyectos,
     skillsAgente,
     skillScripts,
     // Para el entorno del hijo: solo lo indispensable del entorno propio.

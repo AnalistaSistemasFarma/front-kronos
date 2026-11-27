@@ -18,6 +18,7 @@ import { prepararCodigoOpenclaw } from './openclaw/codigo.mjs';
 import { copiarABandeja, dirBandeja, podarBandeja } from './openclaw/bandeja.mjs';
 import { jsonParaCodigo } from './politica.mjs';
 import { esNegocio } from './perfil-agente.mjs';
+import { prepareVaultTurn, saveProjectToEngram, updateProjectNote, vaultHeaderText } from './vault-proyectos.mjs';
 import { analizarComando, AYUDA, LIMPIAR } from './comandos.mjs';
 import {
   asegurarCarpetas,
@@ -151,6 +152,8 @@ export function crearAtenderOpenclaw({
       // Multiagente (2026-10-29): historial del hilo (también lo de otros asistentes).
       escribirHilo(rutas, contexto, 0o600);
       limpiarPropuestas(rutas);
+      // Project note in the agent's vault (vault-proyectos.mjs): current «Estado» to ./contexto.
+      const vault = prepareVaultTurn({ dir: cfg.vaultProyectos?.dir, rutas, contexto });
 
       // Código (2026-11-06): solo perfil «desarrollo» y proyecto con nivel desarrollo (politica.mjs).
       // Cualquier falla deja el turno SIN código (y se dice), nunca con más permisos.
@@ -190,7 +193,8 @@ export function crearAtenderOpenclaw({
         bloquePdf: cfg.pdf?.habilitado ? textoPdfOpenclaw({ disponible: Boolean(chromePdf), recursos, trabajo: rutas.trabajo }) : '',        bloqueCodigo,
       });
       const avisoDescargas = textoFallosDescarga(fallosDescarga).trim();
-      const encabezadoTurno = avisoDescargas ? `${encabezado}\n\n${avisoDescargas}` : encabezado;
+      const bloqueVault = vault.ok ? vaultHeaderText({ file: vault.file, trabajo: rutas.trabajo, contexto: rutas.contexto }).trim() : '';
+      const encabezadoTurno = [encabezado, bloqueVault, avisoDescargas].filter(Boolean).join('\n\n');
       mkdirSync(rutas.puente, { recursive: true, mode: 0o700 });
       archivoMensaje = path.join(rutas.puente, `mensaje-${process.pid}-${idConversation}.txt`);
       // Recuperación al reiniciar: sesión NUEVA de un hilo que ya tenía mensajes (no tras /clear).
@@ -369,6 +373,16 @@ export function crearAtenderOpenclaw({
         }
       } else {
         await synerlink.responder(idConversation, cuerpo);
+      }
+
+      // The project note in the agent's vault is updated after the reply; it never blocks it.
+      if (vault.ok && s.ok && !abortado) {
+        const nota = updateProjectNote({ dir: cfg.vaultProyectos.dir, rutas, contexto, agent: cfg.agenteNombre ?? cfg.agente, idConversation, lote, reply: cuerpo });
+        if (!nota.ok || nota.reason) log(`conversación ${idConversation}: project note in the vault: ${nota.ok ? 'updated' : 'NOT updated'}${nota.reason ? ` (${nota.reason})` : ''}.`);
+        if (nota.ok && cfg.vaultProyectos.engram) {
+          const mem = await saveProjectToEngram({ engram: cfg.vaultProyectos.engram, file: nota.file });
+          if (!mem.ok) log(`conversación ${idConversation}: project memory in engram NOT saved (${mem.reason}).`);
+        }
       }
 
       if (s.tokens) {
