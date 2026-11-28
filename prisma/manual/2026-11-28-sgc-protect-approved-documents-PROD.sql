@@ -1,20 +1,20 @@
 /*
-  PASE MANUAL — SGC documental: PROTECCIÓN DE DOCUMENTOS Y VERSIONES APROBADOS (brecha F1, URS-FLU-03 y URS-RET-01).
-  Base: KRONOSDB (la guarda DB_NAME() lo exige).
+  MANUAL PASS - SGC documents: PROTECTION OF APPROVED DOCUMENTS AND VERSIONS (gap F1, URS-FLU-03, URS-RET-01).
+  Database: production database (the DB_NAME() guard enforces it).
 
-  QUÉ HACE (idempotente: si los triggers ya existen, no hace nada; sin cambios de datos):
-    1. sgc.document_version: prohíbe borrar versiones y, en versiones ya aprobadas (estado distinto
-       de borrador), cambiar archivo, huellas, manifiesto, número, documento, autor o solicitud.
-       El estado solo avanza: vigente -> obsoleto | anulado; obsoleto -> anulado.
-    2. sgc.document: prohíbe borrar documentos y, en documentos vigentes u obsoletos, cambiar
-       empresa, código, título, autor o fecha de creación.
-  La app ya cumple estas reglas (lib/sgc/db/vigencia.ts, documents.ts); los triggers las vuelven
-  obligatorias también para cualquier SQL directo. Cambia la estructura del esquema sgc con
-  sesión declarada (queda en sgc.ddl_event_log).
+  WHAT IT DOES (idempotent: does nothing if the triggers already exist; no data changes):
+    1. sgc.document_version: versions cannot be deleted; once approved (status other than
+       borrador) their file, hashes, manifest, number, document, author and request cannot
+       change, and the status only moves forward: vigente -> obsoleto | anulado; obsoleto -> anulado.
+    2. sgc.document: documents cannot be deleted; vigente or obsoleto documents keep their
+       company, code, title, author and creation date.
+  The app already follows these rules (lib/sgc/db/vigencia.ts, documents.ts); the triggers make
+  them mandatory for any direct SQL too. Structure change of the sgc schema with a declared
+  session (logged in sgc.ddl_event_log).
 
-  CÓMO CORRERLO: scripts/sgc/pase-produccion/aplicar-sql.mjs (verifica DB_NAME()).
-  Primero en PRUEBAS; en producción solo con la autorización del pase (script -PROD).
-  REVERSA: prisma/manual/2026-11-28-sgc-proteger-documentos-aprobados-reversa.sql
+  HOW TO RUN: scripts/sgc/pase-produccion/aplicar-sql.mjs (checks DB_NAME()).
+  Test database first; production only with the pass authorization (-PROD script).
+  ROLLBACK: prisma/manual/2026-11-28-sgc-protect-approved-documents-reversa.sql
 */
 
 SET XACT_ABORT ON;
@@ -26,18 +26,17 @@ IF DB_NAME() <> N'KRONOSDB'
 IF OBJECT_ID(N'[sgc].[document_version]', N'U') IS NULL OR OBJECT_ID(N'[sgc].[document]', N'U') IS NULL
   THROW 51301, N'No existe el esquema sgc en esta base.', 1;
 
--- Cambio controlado del esquema sgc (queda en sgc.ddl_event_log).
+-- Controlled change of the sgc schema (logged in sgc.ddl_event_log).
 EXEC sp_set_session_context N'sgc_ddl_autorizado', 1;
-EXEC sp_set_session_context N'sgc_ddl_motivo', N'SGC validación F1/URS-FLU-03 (2026-11-28): protección de documentos y versiones aprobados.';
+EXEC sp_set_session_context N'sgc_ddl_motivo', N'SGC validation F1/URS-FLU-03 (2026-11-28): protection of approved documents and versions.';
 
-DECLARE @antes INT = (SELECT COUNT(*) FROM sys.triggers WHERE name IN (N'document_version_proteger_aprobada', N'document_proteger_aprobado'));
-PRINT N'Antes: ' + CAST(@antes AS NVARCHAR(10)) + N' de 2 triggers.';
+DECLARE @before INT = (SELECT COUNT(*) FROM sys.triggers WHERE name IN (N'document_version_protect_approved', N'document_protect_approved'));
+PRINT N'Before: ' + CAST(@before AS NVARCHAR(10)) + N' of 2 triggers.';
 
-/* 1. Versiones: nunca se borran; una vez aprobadas (estado distinto de borrador) su archivo,
-      huellas, manifiesto e identidad no cambian, y el estado solo avanza:
-      vigente -> obsoleto | anulado; obsoleto -> anulado. */
-IF OBJECT_ID(N'[sgc].[document_version_proteger_aprobada]', N'TR') IS NULL
-  EXEC sp_executesql N'CREATE TRIGGER [sgc].[document_version_proteger_aprobada]
+/* 1. Versions: never deleted; once approved their file, hashes, manifest and identity are fixed,
+      and the status only moves forward. */
+IF OBJECT_ID(N'[sgc].[document_version_protect_approved]', N'TR') IS NULL
+  EXEC sp_executesql N'CREATE TRIGGER [sgc].[document_version_protect_approved]
 ON [sgc].[document_version]
 AFTER UPDATE, DELETE
 AS
@@ -78,10 +77,10 @@ BEGIN
     THROW 51312, N''Cambio de estado no permitido para una versión aprobada (vigente → obsoleto o anulado; obsoleto → anulado).'', 1;
 END;';
 
-/* 2. Documentos: nunca se borran; una vez aprobados (vigente u obsoleto) no cambian su empresa,
-      código ni título (el título solo cambia con una nueva versión). */
-IF OBJECT_ID(N'[sgc].[document_proteger_aprobado]', N'TR') IS NULL
-  EXEC sp_executesql N'CREATE TRIGGER [sgc].[document_proteger_aprobado]
+/* 2. Documents: never deleted; approved ones keep company, code and title (title changes
+      with a new version). */
+IF OBJECT_ID(N'[sgc].[document_protect_approved]', N'TR') IS NULL
+  EXEC sp_executesql N'CREATE TRIGGER [sgc].[document_protect_approved]
 ON [sgc].[document]
 AFTER UPDATE, DELETE
 AS
@@ -103,5 +102,5 @@ END;';
 EXEC sp_set_session_context N'sgc_ddl_autorizado', NULL;
 EXEC sp_set_session_context N'sgc_ddl_motivo', NULL;
 
-DECLARE @despues INT = (SELECT COUNT(*) FROM sys.triggers WHERE name IN (N'document_version_proteger_aprobada', N'document_proteger_aprobado') AND is_disabled = 0);
-PRINT N'Después: ' + CAST(@despues AS NVARCHAR(10)) + N' de 2 triggers activos.';
+DECLARE @after INT = (SELECT COUNT(*) FROM sys.triggers WHERE name IN (N'document_version_protect_approved', N'document_protect_approved') AND is_disabled = 0);
+PRINT N'After: ' + CAST(@after AS NVARCHAR(10)) + N' of 2 triggers enabled.';

@@ -24,7 +24,7 @@ export const LOGIN_LOCKOUT_MAX_FAILURES = positiveNumber(process.env.LOGIN_LOCKO
 export const LOGIN_LOCKOUT_WINDOW_MINUTES = positiveNumber(process.env.LOGIN_LOCKOUT_WINDOW_MINUTES, 15);
 
 /** Error code shown on the login page when the account is temporarily locked. */
-export const LOCKED_OUT_ERROR = 'CUENTA_BLOQUEADA';
+export const LOCKED_OUT_ERROR = 'ACCOUNT_LOCKED';
 /** Query value used when the session is closed for inactivity or because it expired. */
 export const SESSION_CLOSED_REASON = { idle: 'inactividad', expired: 'vencida' } as const;
 

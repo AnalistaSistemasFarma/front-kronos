@@ -66,7 +66,7 @@ export const authOptions: AuthOptions = {
         const emailInput = credentials.email.trim();
         // URS-ACC-04: too many recent failures for this identifier -> temporary lockout.
         if (await isLoginLockedOut(emailInput)) {
-          noteLoginAttempt({ identifier: emailInput, success: false, reason: 'CUENTA_BLOQUEADA' });
+          noteLoginAttempt({ identifier: emailInput, success: false, reason: 'ACCOUNT_LOCKED' });
           throw new Error(LOCKED_OUT_ERROR);
         }
         // Búsqueda case-insensitive (SQL Server): evita fallos por mayúsculas en el correo.
@@ -132,7 +132,7 @@ export const authOptions: AuthOptions = {
           return null;
         }
         if (await isLoginLockedOut(nit)) {
-          noteLoginAttempt({ identifier: nit, success: false, reason: 'CUENTA_BLOQUEADA' });
+          noteLoginAttempt({ identifier: nit, success: false, reason: 'ACCOUNT_LOCKED' });
           throw new Error(LOCKED_OUT_ERROR);
         }
         // La columna nit tiene índice único filtrado: a lo sumo un proveedor por NIT.
