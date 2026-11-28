@@ -14,7 +14,7 @@
 
   HOW TO RUN: scripts/sgc/pase-produccion/aplicar-sql.mjs (checks DB_NAME()).
   Test database first; production only with the pass authorization (-PROD script).
-  ROLLBACK: prisma/manual/2026-11-28-sgc-protect-approved-documents-reversa.sql
+  ROLLBACK: prisma/manual/2026-11-28-sgc-protect-approved-documents-rollback.sql
 */
 
 SET XACT_ABORT ON;
