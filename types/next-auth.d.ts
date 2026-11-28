@@ -25,5 +25,7 @@ declare module 'next-auth/jwt' {
     nit?: string;
     themePalette?: string;
     colorScheme?: string;
+    /** Sign-in time (epoch ms) for the absolute session lifetime (lib/auth/sessionPolicy). */
+    loginAt?: number;
   }
 }

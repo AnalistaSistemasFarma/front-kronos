@@ -259,17 +259,21 @@ describe.skipIf(!url)('SGC · Sprint 1 · integración con SQL Server', () => {
     await expect(updateDocumentMetadata(prisma, [calidad], d.id_document, { confidentiality: 'secreta', reason: 'Corrección del título' }, actor)).rejects.toThrow('Confidencialidad');
     await expect(updateDocumentMetadata(prisma, [calidad], d.id_document, { idOwnerDepartment: 999999, reason: 'Corrección del dueño' }, actor)).rejects.toThrow('no existe');
     await expect(updateDocumentMetadata(prisma, [calidad], d.id_document, { confidentiality: 'departamento', idOwnerDepartment: null, reason: 'Corrección del dueño' }, actor)).rejects.toThrow('dueño');
+    // URS-FLU-03: an approved (vigente) document keeps its title; a new title needs a new version.
+    await expect(
+      updateDocumentMetadata(prisma, [calidad], d.id_document, { title: 'Desviaciones y CAPA', reason: 'Ajuste pedido por Calidad' }, actor)
+    ).rejects.toMatchObject({ status: 409 });
     const saved = await updateDocumentMetadata(
       prisma,
       [calidad],
       d.id_document,
-      { title: 'Desviaciones y CAPA', confidentiality: 'departamento', idOwnerDepartment: deptCalidad, reason: 'Ajuste pedido por Calidad' },
+      { title: 'Desviaciones', confidentiality: 'departamento', idOwnerDepartment: deptCalidad, reason: 'Ajuste pedido por Calidad' },
       actor
     );
-    expect(saved).toMatchObject({ title: 'Desviaciones y CAPA', confidentiality: 'departamento' });
+    expect(saved).toMatchObject({ title: 'Desviaciones', confidentiality: 'departamento' });
     const edit = await prisma.sgcAuditLog.findFirstOrThrow({ where: { action: 'documento.edicion', entity_id: String(d.id_document) } });
-    expect(JSON.parse(edit.before_json!)).toMatchObject({ title: 'Desviaciones' });
-    expect(JSON.parse(edit.after_json!)).toMatchObject({ title: 'Desviaciones y CAPA' });
+    expect(JSON.parse(edit.before_json!)).toMatchObject({ confidentiality: 'publica' });
+    expect(JSON.parse(edit.after_json!)).toMatchObject({ title: 'Desviaciones', confidentiality: 'departamento' });
 
     const pub = await prisma.sgcDocument.findFirstOrThrow({ where: { id_company: OLP, code: 'OLP-LO-MA-001' } });
     const subject = await getAccessSubject(prisma, LECTOR);

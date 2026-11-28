@@ -533,6 +533,10 @@ export async function updateDocumentMetadata(
   if (patch.title !== undefined) {
     const title = typeof patch.title === 'string' ? patch.title.trim() : '';
     if (title.length < 3 || title.length > 300) throw new SgcError('El título es obligatorio (3 a 300 caracteres).');
+    // URS-FLU-03: an approved document keeps its title; a new title needs a new version.
+    if (title !== doc.title && (doc.status === 'vigente' || doc.status === 'obsoleto')) {
+      throw new SgcError('El título de un documento aprobado solo cambia con una nueva versión (solicitud de cambio).', 409);
+    }
     data.title = title;
   }
   if (patch.confidentiality !== undefined) {

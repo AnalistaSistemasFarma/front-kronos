@@ -1,6 +1,6 @@
 'use client';
 
-import { Suspense, useState } from 'react';
+import { Suspense, useEffect, useState } from 'react';
 import { signIn } from 'next-auth/react';
 import { useRouter } from 'next/navigation';
 import toast from 'react-hot-toast';
@@ -21,12 +21,18 @@ import {
   IconArrowRight,
   IconAlertCircle,
 } from '@tabler/icons-react';
+import { LOCKED_OUT_ERROR, LOGIN_LOCKOUT_WINDOW_MINUTES } from '../../../lib/auth/sessionPolicy';
+import { clearLastActivity } from '../../../components/auth/IdleSessionGuard';
 
 function SupplierLoginForm() {
   const [nit, setNit] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [visible, setVisible] = useState(false);
+
+  useEffect(() => {
+    clearLastActivity();
+  }, []);
   const [error, setError] = useState<string | null>(null);
   const router = useRouter();
 
@@ -42,7 +48,10 @@ function SupplierLoginForm() {
         redirect: false,
       });
 
-      if (result?.error) {
+      if (result?.error === LOCKED_OUT_ERROR) {
+        setError(`Por seguridad, la cuenta quedó bloqueada por varios intentos fallidos. Intente de nuevo en ${LOGIN_LOCKOUT_WINDOW_MINUTES} minutos.`);
+        toast.error('Cuenta bloqueada temporalmente.');
+      } else if (result?.error) {
         setError('NIT o contraseña incorrectos. Por favor, verifique e intente de nuevo.');
         toast.error('NIT o contraseña incorrectos.');
       } else {
