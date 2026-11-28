@@ -1,4 +1,5 @@
 import type { Prisma } from '../../../app/generated/prisma';
+import { courseProgress } from './trainingCourse';
 import { SGC_AUDIT_ACTIONS, writeSgcAudit } from '../audit';
 import { SgcError } from '../errors';
 import type { SgcCompanyAccess } from '../permissions';
@@ -28,7 +29,7 @@ function lower(email: string | null | undefined): string {
 /** Sprint 10: pasos de la capacitación (preparación del material antes de la divulgación, y resultados). */
 const TRAINING_ROLES = ['material', 'capacitacion'];
 
-async function openTrainingTask(db: Db, idRequest: number) {
+export async function openTrainingTask(db: Db, idRequest: number) {
   const request = await db.sgcRequest.findUnique({ where: { id_request: idRequest }, include: { tasks: { include: { taskDef: true, assignees: true }, orderBy: { id_task: 'asc' } } } });
   if (!request) throw new SgcError('Solicitud no encontrada.', 404);
   const task = request.tasks.filter((t) => TRAINING_ROLES.includes(t.taskDef.role)).at(-1) ?? null;
@@ -47,7 +48,7 @@ export function isTrainingCreator(task: { taskDef: { assignment: string }; assig
   return task.assignees.some((a) => a.user_email && lower(a.user_email) === me && a.status !== 'reemplazado' && a.status !== 'anulado');
 }
 
-function assertTrainingManager(access: SgcCompanyAccess, task: Parameters<typeof isTrainingCreator>[0], email: string, what: string): void {
+export function assertTrainingManager(access: SgcCompanyAccess, task: Parameters<typeof isTrainingCreator>[0], email: string, what: string): void {
   if (access.canQuality || isTrainingCreator(task, email)) return;
   throw new SgcError(`Solo Aseguramiento de Calidad${task?.taskDef.assignment === 'creador' ? ' o el creador del documento' : ''} ${what}.`, 403);
 }
@@ -257,6 +258,8 @@ export interface SgcTrainingView {
   open: boolean;
   /** Sprint 10: «material» = preparación antes de la divulgación; «resultados» = carga y cierre. */
   phase: 'material' | 'resultados';
+  /** 2026-11-26: curso de Formación ligado a la capacitación. */
+  course?: { id: number; title: string } | null;
   canManage: boolean;
   /** Sprint 10: Calidad puede cargar resultados (solo en la tarea de capacitación abierta). */
   canUpload: boolean;
@@ -304,6 +307,9 @@ export interface SgcTrainingView {
     attemptNumber: number | null;
     extraAttempts: number;
     retrainings: { mode: string; sessionDate: string | null; result: string; notes: string | null; registeredBy: string | null; registeredAt: string }[];
+    /** 2026-11-26: avance (%) y certificado en el curso de Formación ligado (null sin curso). */
+    coursePct?: number | null;
+    courseCertified?: boolean | null;
   }[];
   outOfScope: { email: string; name: string | null; score: number; percent: number }[];
 }
@@ -331,10 +337,15 @@ export async function getTrainingView(
     (training?.retrainings ?? [])
       .filter((x) => lower(x.user_email) === email)
       .map((x) => ({ mode: x.mode, sessionDate: formatCalendarDate(x.session_date), result: x.result, notes: x.notes, registeredBy: names(x.registered_by), registeredAt: x.registered_at.toISOString() }));
+  // 2026-11-26: curso de Formación ligado (avance y certificado por persona).
+  const link = training ? await db.sgcTrainingCourse.findUnique({ where: { id_training: training.id_training } }) : null;
+  const linkedCourse = link ? await db.portalCourse.findUnique({ where: { id: link.course_id }, select: { id: true, title: true } }) : null;
+  const progress = linkedCourse ? await courseProgress(db, linkedCourse.id, scope) : new Map<string, { pct: number; certified: boolean }>();
   return {
     idTask: task.id_task,
     open,
     phase,
+    course: linkedCourse,
     canManage: open && manager,
     canUpload: open && manager && phase === 'resultados',
     canRetrain: (viewer.isQuality || (creator && open)) && Boolean(up),
@@ -374,6 +385,8 @@ export async function getTrainingView(
         attemptNumber: r?.attempt_number ?? null,
         extraAttempts: r?.extra_attempts ?? 0,
         retrainings: retrainingsOf(email),
+        coursePct: progress.get(email)?.pct ?? null,
+        courseCertified: progress.get(email)?.certified ?? null,
       };
     }),
     outOfScope: (up?.results ?? []).filter((r) => !r.in_scope).map((r) => ({ email: r.user_email, name: r.full_name, score: Number(r.score), percent: Number(r.percent) })),

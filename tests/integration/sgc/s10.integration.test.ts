@@ -16,6 +16,7 @@ import { getMyPendings } from '../../../lib/sgc/db/pendings';
 import { confirmSuggestions, createRequest, decideTask, getRequestDetail, setSigners, setTrainingFlag, uploadAttachment } from '../../../lib/sgc/db/requests';
 import { signTask, type SgcSignatureDeps } from '../../../lib/sgc/db/signatures';
 import { recordRetraining, saveTraining, uploadTrainingResults } from '../../../lib/sgc/db/training';
+import { availableCourses, courseProgress, enrollInLinkedCourse, linkedCourseOfRequest, setTrainingCourse } from '../../../lib/sgc/db/trainingCourse';
 import type { SgcNotifier } from '../../../lib/sgc/notifications';
 import { synerlinkPasswordVerifier } from '../../../lib/sgc/signature/reauth';
 
@@ -204,7 +205,22 @@ describe.skipIf(!url)('SGC · Sprint 10 con SQL Server', () => {
     const prep = await taskOf(r, 'preparacion_capacitacion');
     await expect(decideTask(prisma, notifier, prep.id_task, { decision: 'aprobar' }, actor(E.cal))).rejects.toThrow(/Registre primero el material/);
     await expect(saveTraining(prisma, await accessOf(E.cal), r, { ...training, formsUrl: 'https://kahoot.it/s10' }, actor(E.cal))).rejects.toThrow(/Microsoft Forms o en Google Forms/);
+    await expect(setTrainingCourse(prisma, await accessOf(E.cal), r, null, actor(E.cal))).rejects.toThrow(/Registre primero la capacitación/);
     await saveTraining(prisma, await accessOf(E.cal), r, training, actor(E.cal));
+    // 2026-11-26: la capacitación puede usar un curso de FORMACIÓN (activo, de la empresa o de GSS).
+    const curso = await prisma.portalCourse.create({ data: { title: 'S10 · Curso de Formación', created_by: E.cal } });
+    const inactivo = await prisma.portalCourse.create({ data: { title: 'S10 · Curso inactivo', created_by: E.cal, active: false } });
+    const calA = await accessOf(E.cal);
+    const opciones = (await availableCourses(prisma, calA.idCompany)).map((c) => c.id);
+    expect(opciones).toContain(curso.id);
+    expect(opciones).not.toContain(inactivo.id);
+    await expect(setTrainingCourse(prisma, await accessOf(E.sol), r, curso.id, actor(E.sol))).rejects.toMatchObject({ status: 403 });
+    await expect(setTrainingCourse(prisma, calA, r, inactivo.id, actor(E.cal))).rejects.toMatchObject({ status: 400 });
+    expect(await setTrainingCourse(prisma, calA, r, curso.id, actor(E.cal))).toEqual({ courseId: curso.id, enrolled: 0 });
+    expect(await setTrainingCourse(prisma, calA, r, null, actor(E.cal))).toEqual({ courseId: null, enrolled: 0 });
+    expect(await linkedCourseOfRequest(prisma, r)).toBeNull();
+    await setTrainingCourse(prisma, calA, r, curso.id, actor(E.cal));
+    expect((await linkedCourseOfRequest(prisma, r))?.course).toEqual({ id: curso.id, title: 'S10 · Curso de Formación' });
     const view = (await getRequestDetail(prisma, r, await viewer(E.cal))).training!;
     expect(view).toMatchObject({ phase: 'material', canManage: true, canUpload: false, training: { evaluationProvider: 'google', evaluationProviderLabel: 'Google Forms', maxAttempts: 2 } });
     await expect(uploadTrainingResults(prisma, upload, await accessOf(E.cal), r, { fileName: 'r.csv', bytes: new TextEncoder().encode('x') }, actor(E.cal))).rejects.toMatchObject({ status: 409 });
@@ -212,8 +228,19 @@ describe.skipIf(!url)('SGC · Sprint 10 con SQL Server', () => {
     // La lectura muestra el video y la evaluación.
     const div = await taskOf(r, 'divulgacion');
     expect((await getMyReading(prisma, div.id_task, E.l1))!.training).toMatchObject({ videoUrl: training.videoUrl, formsUrl: training.formsUrl, evaluationProvider: 'google', maxAttempts: 2 });
+    // La divulgación inscribe a los lectores en el curso ligado (sin repetir).
+    expect((await prisma.portalCourseEnrollment.findMany({ where: { course_id: curso.id }, orderBy: { student_email: 'asc' } })).map((e) => e.student_email)).toEqual([E.l1, E.l2].sort());
+    expect(await enrollInLinkedCourse(prisma, r, [E.l1])).toBe(0);
     await read(r, E.l1);
     expect(await read(r, E.l2)).toMatchObject({ next: 'capacitacion' });
+    expect((await courseProgress(prisma, curso.id, [E.l1, E.l2])).get(E.l1)).toEqual({ pct: 0, certified: false });
+    // L1 completa el curso en Formación (material visto y certificado).
+    const material = await prisma.portalCourseMaterial.create({ data: { course_id: curso.id, type: 'video', title: 'Video del procedimiento' } });
+    await prisma.portalMaterialProgress.create({ data: { material_id: material.id, student_email: E.l1 } });
+    await prisma.portalCertificate.create({ data: { code: `S10-${curso.id}`, course_id: curso.id, student_email: E.l1, student_name: 'L1', course_title: curso.title } });
+    const avance = await courseProgress(prisma, curso.id, [E.l1, E.l2]);
+    expect(avance.get(E.l1)).toEqual({ pct: 100, certified: true });
+    expect(avance.get(E.l2)).toEqual({ pct: 0, certified: false });
     // Resultados de Google Forms (CSV): L1 aprueba al segundo intento; L2 reprueba dos veces y su tercer intento no cuenta.
     const csv = [
       'Marca temporal,Dirección de correo electrónico,Puntuación',
@@ -231,7 +258,8 @@ describe.skipIf(!url)('SGC · Sprint 10 con SQL Server', () => {
       [E.l2, 7, 3, 2, 1, true],
     ]);
     let tv = (await getRequestDetail(prisma, r, await viewer(E.cal))).training!;
-    expect(tv).toMatchObject({ phase: 'resultados', canUpload: true, canRetrain: true });
+    expect(tv).toMatchObject({ phase: 'resultados', canUpload: true, canRetrain: true, course: { id: curso.id } });
+    expect(Object.fromEntries(tv.people.map((p) => [p.email, [p.coursePct, p.courseCertified]]))).toEqual({ [E.l1]: [100, true], [E.l2]: [0, false] });
     expect(Object.fromEntries(tv.people.map((p) => [p.email, p.status]))).toEqual({ [E.l1]: 'aprobo', [E.l2]: 'recapacitacion' });
     // Recapacitación (solo Calidad, solo de quien está en recapacitación).
     const cal = await accessOf(E.cal);
@@ -251,6 +279,8 @@ describe.skipIf(!url)('SGC · Sprint 10 con SQL Server', () => {
     const cap = await taskOf(r, 'capacitacion');
     const res = await signTask(prisma, deps, cap.id_task, firma('capacito', { comment: 'L2 recapacitado el 2026-10-20; cobertura suficiente.' }), actor(E.cal));
     expect(res).toMatchObject({ outcome: 'resuelta', next: 'completada', published: { versionNumber: 1 } });
+    // Cerrada la capacitación, el curso ya no se cambia.
+    await expect(setTrainingCourse(prisma, cal, r, curso.id, actor(E.cal))).rejects.toMatchObject({ status: 409 });
     // Después del cierre se sigue pudiendo registrar recapacitaciones.
     await recordRetraining(prisma, cal, r, { email: E.l2, mode: 'virtual', sessionDate: '2026-11-03', result: 'asistio' }, actor(E.cal));
     expect(await prisma.sgcRetraining.count({ where: { id_request: r } })).toBe(2);
