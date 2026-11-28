@@ -18,7 +18,9 @@ import {
 } from '@tabler/icons-react';
 import { useTheme } from '../../components/providers';
 import LoginPharmacyBackground from '../../components/login/LoginPharmacyBackground';
+import { clearLastActivity } from '../../components/auth/IdleSessionGuard';
 import { getSafeCallbackUrl } from '../../lib/auth/logout';
+import { LOCKED_OUT_ERROR, LOGIN_LOCKOUT_WINDOW_MINUTES, SESSION_CLOSED_REASON, SESSION_IDLE_MINUTES } from '../../lib/auth/sessionPolicy';
 
 function LoginForm() {
   const { theme, toggleTheme } = useTheme();
@@ -35,7 +37,18 @@ function LoginForm() {
 
   useEffect(() => {
     setPasskeySupported(browserSupportsWebAuthn());
+    clearLastActivity();
   }, []);
+
+  // Why the previous session was closed (URS-ACC-04).
+  useEffect(() => {
+    const reason = searchParams.get('motivo');
+    if (reason === SESSION_CLOSED_REASON.idle) {
+      toast(`Su sesión se cerró por ${SESSION_IDLE_MINUTES} minutos de inactividad. Vuelva a ingresar.`, { id: 'session-closed' });
+    } else if (reason === SESSION_CLOSED_REASON.expired) {
+      toast('Su sesión venció. Vuelva a ingresar.', { id: 'session-closed' });
+    }
+  }, [searchParams]);
 
   const goAfterLogin = () => {
     const callbackUrl = getSafeCallbackUrl(
@@ -86,7 +99,9 @@ function LoginForm() {
         redirect: false,
       });
 
-      if (result?.error) {
+      if (result?.error === LOCKED_OUT_ERROR) {
+        toast.error(`Por seguridad, la cuenta quedó bloqueada por varios intentos fallidos. Intente de nuevo en ${LOGIN_LOCKOUT_WINDOW_MINUTES} minutos.`);
+      } else if (result?.error) {
         toast.error('Credenciales inválidas. Por favor, inténtalo de nuevo.');
       } else {
         goAfterLogin();

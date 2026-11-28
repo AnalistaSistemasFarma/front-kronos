@@ -62,6 +62,7 @@ export const LOGIN_FAILURE_REASONS = {
   PASSKEY_NO_REGISTRADA: 'Biométrico: la llave del dispositivo no está registrada o fue eliminada',
   PASSKEY_RETO_VENCIDO: 'Biométrico: el reto venció o ya se usó (vuelva a intentarlo)',
   PASSKEY_INVALIDA: 'Biométrico: la firma del dispositivo no es válida',
+  CUENTA_BLOQUEADA: 'Cuenta bloqueada temporalmente por intentos fallidos',
 } as const;
 
 export type LoginFailureReason = keyof typeof LOGIN_FAILURE_REASONS;

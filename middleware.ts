@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { withAuth } from 'next-auth/middleware';
 import { isInternalApiPath, isSupplierProtectedPath, SUPPLIER_ROLE } from './lib/proveedor/isolation';
 import { isRetiredApiPath } from './lib/security/retiredRoutes';
+import { isSessionExpired } from './lib/auth/sessionPolicy';
 
 const INTERNAL_PAGES = ['/home', '/dashboard', '/process', '/profile'];
 
@@ -57,6 +58,8 @@ export default withAuth(
     callbacks: {
       authorized: ({ token, req }) => {
         const { pathname } = req.nextUrl;
+        // URS-ACC-04: a session past its absolute lifetime counts as no session.
+        if (token && isSessionExpired(token.loginAt)) token = null;
 
         // Área EXCLUSIVA de proveedores: exige sesión tipo Proveedor.
         if (isSupplierProtectedPath(pathname)) {

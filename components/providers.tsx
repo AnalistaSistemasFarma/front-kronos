@@ -34,6 +34,7 @@ import { mantineTupleFromHex } from '../lib/theme/customPalette';
 import { UserProvider } from '../lib/user-context';
 import { SapProvider } from '../lib/sap-context';
 import VoiceCallBar from './chat/VoiceCallBar';
+import IdleSessionGuard from './auth/IdleSessionGuard';
 import {
   appCssVariablesResolver,
   buildDarkTheme,
@@ -224,6 +225,8 @@ export function Providers({
             {children}
             {/* App-level voice call controls: survive navigation (2026-11-25). */}
             <VoiceCallBar />
+            {/* Closes the session after the configured inactivity (URS-ACC-04). */}
+            <IdleSessionGuard />
           </SapProvider>
         </UserProvider>
       </ThemeProvider>

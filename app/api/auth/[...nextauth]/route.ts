@@ -11,6 +11,8 @@ import { resolveAuthRedirect } from '../../../../lib/auth/safe-redirect';
 import { sessionUserCache, type SessionUserRow } from '../../../../lib/auth/sessionUserCache';
 import { PASSKEY_CHALLENGE_COOKIE, consumeChallenge, readCookie } from '../../../../lib/auth/passkeys/challenge';
 import { PasskeysUnavailableError, verifyLogin } from '../../../../lib/auth/passkeys/service';
+import { isLoginLockedOut } from '../../../../lib/auth/loginLockout';
+import { LOCKED_OUT_ERROR, SESSION_MAX_AGE_SECONDS, isSessionExpired } from '../../../../lib/auth/sessionPolicy';
 
 const azureConfigured =
   Boolean(process.env.AZURE_AD_CLIENT_ID) &&
@@ -62,6 +64,11 @@ export const authOptions: AuthOptions = {
           return null;
         }
         const emailInput = credentials.email.trim();
+        // URS-ACC-04: too many recent failures for this identifier -> temporary lockout.
+        if (await isLoginLockedOut(emailInput)) {
+          noteLoginAttempt({ identifier: emailInput, success: false, reason: 'CUENTA_BLOQUEADA' });
+          throw new Error(LOCKED_OUT_ERROR);
+        }
         // Búsqueda case-insensitive (SQL Server): evita fallos por mayúsculas en el correo.
         const rows = await prisma.$queryRaw<
           Array<{
@@ -123,6 +130,10 @@ export const authOptions: AuthOptions = {
         if (!nit || !credentials?.password) {
           noteLoginAttempt({ identifier: nit || credentials?.nit || null, success: false, reason: 'DATOS_INCOMPLETOS' });
           return null;
+        }
+        if (await isLoginLockedOut(nit)) {
+          noteLoginAttempt({ identifier: nit, success: false, reason: 'CUENTA_BLOQUEADA' });
+          throw new Error(LOCKED_OUT_ERROR);
         }
         // La columna nit tiene índice único filtrado: a lo sumo un proveedor por NIT.
         const user = await prisma.user.findFirst({
@@ -207,9 +218,20 @@ export const authOptions: AuthOptions = {
   ],
   session: {
     strategy: 'jwt' as const,
+    // URS-ACC-04: the cookie never outlives the absolute session lifetime (12 h by default).
+    maxAge: SESSION_MAX_AGE_SECONDS,
   },
   callbacks: {
     async jwt({ token, user, trigger }: { token: JWT; user?: User; trigger?: string }) {
+      // URS-ACC-04: absolute lifetime counted from sign-in. Throwing here makes NextAuth
+      // clear the session cookie, so polling or open tabs cannot keep a session alive.
+      if (user) {
+        token.loginAt = Date.now();
+      } else if (typeof token.loginAt !== 'number') {
+        token.loginAt = Date.now(); // sessions issued before this rule: the count starts now
+      } else if (isSessionExpired(token.loginAt)) {
+        throw new Error('SESSION_MAX_AGE_EXCEEDED');
+      }
       const email = (user?.email ?? token.email) as string | undefined;
 
       if (email) {
